@@ -1,0 +1,114 @@
+{
+  "scope": "public_read_only_smoke",
+  "origin": "https://wmgj-ops.web.app",
+  "expectedVersion": "1.5.4",
+  "checkedAt": "2026-09-25T09:40:31.015693+00:00",
+  "cases": [
+    {
+      "id": "homepage",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 200,
+      "status": 200,
+      "cacheControl": "private, no-store, max-age=0",
+      "contentType": "text/html; charset=utf-8",
+      "bytes": 13505,
+      "responseSha256": "e319dcd42ad22afb639fc8b718be9e2a8f5cf7d2abba2005f12df1fe7301ac7e",
+      "checks": {
+        "status": true,
+        "boundedResponse": true,
+        "noStore": true,
+        "html": true,
+        "brand": true,
+        "version": true
+      },
+      "passed": true
+    },
+    {
+      "id": "institutional_portal",
+      "method": "GET",
+      "path": "/portal",
+      "expectedStatus": 200,
+      "status": 200,
+      "cacheControl": "private, no-store, max-age=0",
+      "contentType": "text/html; charset=utf-8",
+      "bytes": 13511,
+      "responseSha256": "2c958f23f9001b308381ce3e06a237e8de7d91505f4d64f2f5e6ab86e284155b",
+      "checks": {
+        "status": true,
+        "boundedResponse": true,
+        "noStore": true,
+        "html": true,
+        "brand": true,
+        "version": true
+      },
+      "passed": true
+    },
+    {
+      "id": "anonymous_session_denied",
+      "method": "GET",
+      "path": "/api/portal/session",
+      "expectedStatus": 401,
+      "status": 401,
+      "cacheControl": "no-store, private",
+      "contentType": "application/json",
+      "bytes": 24,
+      "responseSha256": "ec8e920abb1082cb60a2caf40f0a0e7c1e4a0eba5e08429802c41b0bbfa50871",
+      "checks": {
+        "status": true,
+        "boundedResponse": true,
+        "noStore": true,
+        "json": true,
+        "noReceipts": true
+      },
+      "passed": true
+    },
+    {
+      "id": "anonymous_batches_denied",
+      "method": "GET",
+      "path": "/api/portal/batches",
+      "expectedStatus": 401,
+      "status": 401,
+      "cacheControl": "no-store, private",
+      "contentType": "application/json",
+      "bytes": 24,
+      "responseSha256": "ec8e920abb1082cb60a2caf40f0a0e7c1e4a0eba5e08429802c41b0bbfa50871",
+      "checks": {
+        "status": true,
+        "boundedResponse": true,
+        "noStore": true,
+        "json": true,
+        "noReceipts": true
+      },
+      "passed": true
+    },
+    {
+      "id": "foreign_origin_denied",
+      "method": "GET",
+      "path": "/api/portal/session",
+      "expectedStatus": 403,
+      "status": 403,
+      "cacheControl": "no-store, private",
+      "contentType": "application/json",
+      "bytes": 33,
+      "responseSha256": "2490eb3347a7700ba7abf2e5c32cb7c881cc11db1d39ccd3216e6e2a9d5adc21",
+      "checks": {
+        "status": true,
+        "boundedResponse": true,
+        "noStore": true,
+        "json": true,
+        "noReceipts": true
+      },
+      "passed": true
+    }
+  ],
+  "passed": 5,
+  "total": 5,
+  "fullHomologation": false,
+  "limitations": [
+    "No authenticated session",
+    "No MFA test",
+    "No ingestion or tenant-isolation test",
+    "No source-to-deployment equivalence established"
+  ]
+}
