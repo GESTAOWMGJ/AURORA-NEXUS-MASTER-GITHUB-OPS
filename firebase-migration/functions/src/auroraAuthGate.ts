@@ -73,41 +73,55 @@ function setSecurityHeaders(res: { set(name: string, value: string): unknown }):
   );
 }
 
+// Shared presentation only. Authentication, authorization, cookies and routing stay unchanged.
+const AURORA_VISUAL_CSS = `
+  :root { color-scheme:dark; --bg:#080c16; --panel:#101827; --line:#2a3850; --accent:#30d7ff; --action:#c0fa65; --text:#f4f7fc; --muted:#a7b5cb; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; background:var(--bg); color:var(--text); font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  body:not(.private-shell) { display:grid; place-items:center; padding:24px 16px; }
+  main { width:min(480px,100%); padding:36px; border:1px solid var(--line); border-top:3px solid var(--accent); border-radius:20px; background:var(--panel); box-shadow:0 24px 70px #0005; }
+  .eyebrow,.brand { margin:0 0 20px; color:var(--accent); letter-spacing:.15em; text-transform:uppercase; font-size:13px; font-weight:850; }
+  h1 { margin:0 0 14px; font-size:clamp(28px,6vw,38px); letter-spacing:-.04em; line-height:1.1; }
+  p { margin:0 0 24px; color:var(--muted); line-height:1.6; overflow-wrap:anywhere; }
+  label { display:block; margin:18px 0 8px; color:var(--muted); font-size:12px; font-weight:750; }
+  input { width:100%; min-height:48px; padding:14px; border:1px solid #43536c; border-radius:10px; background:var(--bg); color:var(--text); font-size:16px; }
+  input:focus { outline:3px solid var(--accent); outline-offset:3px; }
+  button { width:100%; min-height:48px; margin-top:24px; padding:14px 16px; border:0; border-radius:10px; background:var(--action); color:#111c08; font-size:15px; font-weight:850; cursor:pointer; }
+  button:focus-visible { outline:3px solid var(--accent); outline-offset:4px; }
+  button:disabled { opacity:.62; cursor:wait; }
+  .status { min-height:22px; margin-top:14px; color:#ffcb57; font-size:13px; }
+  .fineprint { margin-top:24px; padding-top:18px; border-top:1px solid var(--line); font-size:12px; line-height:1.6; color:var(--muted); }
+  .private-shell header { display:flex; justify-content:space-between; align-items:center; gap:20px; padding:24px 32px; border-bottom:1px solid var(--line); }
+  .private-shell .brand { margin:0; }
+  .private-shell header button { width:auto; margin:0; min-width:76px; }
+  .private-shell main { width:min(960px,calc(100% - 32px)); margin:32px auto; padding:0; border:0; background:transparent; box-shadow:none; }
+  .panel { padding:32px; border:1px solid var(--line); border-left:4px solid var(--accent); border-radius:18px; background:var(--panel); }
+  .panel p:last-child { margin-bottom:0; }
+  @media(max-width:480px) { main { padding:26px; } .private-shell header { padding:20px 16px; } .panel { padding:24px; } }
+  @media(prefers-reduced-motion:reduce) { * { animation:none!important; transition:none!important; } }
+`;
+
 function loginPage(message = "Acesso privado. Entre com usuário autorizado."): string {
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080c16">
   <title>Aurora Nexus | Login</title>
-  <style>
-    :root { color-scheme: dark; --bg:#071f25; --panel:#0d2d34; --line:#1d4a53; --gold:#c6a45d; --text:#f7f1e7; --muted:#b9c7c6; }
-    * { box-sizing: border-box; }
-    body { margin:0; min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at 20% 0%, #123b43 0, var(--bg) 38%, #041316 100%); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--text); }
-    main { width:min(440px, calc(100vw - 32px)); padding:32px; border:1px solid var(--line); border-radius:24px; background:linear-gradient(180deg, rgba(13,45,52,.96), rgba(7,31,37,.96)); box-shadow:0 30px 80px rgba(0,0,0,.35); }
-    .eyebrow { margin:0 0 10px; color:var(--gold); letter-spacing:.18em; text-transform:uppercase; font-size:12px; font-weight:700; }
-    h1 { margin:0 0 8px; font-size:30px; line-height:1.08; }
-    p { margin:0 0 22px; color:var(--muted); line-height:1.55; }
-    label { display:block; margin:14px 0 6px; color:#e6eeee; font-size:13px; font-weight:650; }
-    input { width:100%; padding:14px 14px; border-radius:14px; border:1px solid #2e5f68; background:#061a1f; color:var(--text); outline:none; font-size:15px; }
-    input:focus { border-color:var(--gold); box-shadow:0 0 0 3px rgba(198,164,93,.18); }
-    button { width:100%; margin-top:18px; border:0; border-radius:14px; padding:14px 16px; background:var(--gold); color:#08191d; font-weight:800; cursor:pointer; font-size:15px; }
-    button:disabled { opacity:.62; cursor:wait; }
-    .status { min-height:22px; margin-top:14px; color:#f0d99c; font-size:13px; }
-    .fineprint { margin-top:22px; font-size:12px; color:#91a7a6; }
-  </style>
+  <style>${AURORA_VISUAL_CSS}</style>
 </head>
 <body>
   <main>
     <p class="eyebrow">Aurora Nexus</p>
-    <h1>Ambiente privado</h1>
+    <h1>Seu centro de comando começa aqui.</h1>
     <p>${escapeHtml(message)}</p>
     <form id="login-form" autocomplete="on">
       <label for="email">E-mail</label>
       <input id="email" name="email" type="email" autocomplete="username" required>
       <label for="password">Senha</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required>
-      <button id="submit" type="submit">Entrar</button>
+      <button id="submit" type="submit">Entrar no Aurora Nexus</button>
       <div id="status" class="status" aria-live="polite"></div>
     </form>
     <div class="fineprint">Sem demonstração pública. Acesso restrito a usuários previamente autorizados.</div>
@@ -154,20 +168,11 @@ function protectedShell(decoded: DecodedIdToken): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080c16">
   <title>Aurora Nexus | Privado</title>
-  <style>
-    :root { color-scheme: dark; --bg:#071f25; --panel:#0d2d34; --line:#1d4a53; --gold:#c6a45d; --text:#f7f1e7; --muted:#b9c7c6; }
-    body { margin:0; min-height:100vh; background:#071f25; color:var(--text); font-family:Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    header { display:flex; justify-content:space-between; align-items:center; padding:24px 32px; border-bottom:1px solid var(--line); background:rgba(7,31,37,.92); }
-    main { padding:32px; }
-    .brand { color:var(--gold); letter-spacing:.14em; text-transform:uppercase; font-weight:800; font-size:13px; }
-    .panel { max-width:880px; border:1px solid var(--line); border-radius:22px; background:var(--panel); padding:28px; }
-    h1 { margin:0 0 8px; }
-    p { color:var(--muted); line-height:1.55; }
-    button { border:1px solid var(--gold); border-radius:12px; background:transparent; color:var(--gold); padding:10px 14px; cursor:pointer; font-weight:700; }
-  </style>
+  <style>${AURORA_VISUAL_CSS}</style>
 </head>
-<body>
+<body class="private-shell">
   <header>
     <div class="brand">Aurora Nexus</div>
     <button onclick="logout()">Sair</button>
