@@ -1,42 +1,53 @@
 {
-  "schemaVersion": "1.0.0",
+  "schemaVersion": "1.1.0",
   "updatedAt": "2026-09-26",
   "product": "AURORA NEXUS",
   "domain": "auroranexus.com.br",
+  "interfacePolicy": {
+    "mode": "LOGIN_FIRST_PRIVATE",
+    "publicLandingAllowed": false,
+    "publicDemoAllowed": false,
+    "publicDashboardAllowed": false,
+    "firstPage": "LOGIN",
+    "identityProvider": "Firebase Authentication",
+    "sessionModel": "HttpOnly __session cookie created from verified Firebase ID token",
+    "authorizationSecret": "AURORA_NEXUS_ALLOWED_EMAILS",
+    "failClosedWhenAccessListMissing": true
+  },
   "firebase": {
     "currentFallbackProjectId": "wmgj-ops",
     "currentFallbackUrl": "https://wmgj-ops.web.app/portal",
     "productionProjectId": "PENDING_FIREBASE_PROJECT_SELECTION",
-    "hostingConfigurationInFirebaseJson": "PENDING_APP_BUILD_TARGET",
-    "customDomainStatus": "NOT_APPLIED_FROM_REPOSITORY"
+    "hostingConfigurationInFirebaseJson": "firebase-migration/firebase.json",
+    "customDomainStatus": "PENDING_PROVIDER_DNS_SSL_AND_AUTH_SMOKE_TEST"
   },
   "domains": [
     {
       "name": "auroranexus.com.br",
-      "role": "institutional-landing",
-      "target": "Firebase Hosting or equivalent landing deployment",
-      "initialTraffic": "PUBLIC_STATIC_ONLY_NO_SENSITIVE_DATA",
+      "role": "private-product-entry",
+      "target": "Firebase Hosting rewrite to auroraNexusAuthGate",
+      "initialTraffic": "LOGIN_REQUIRED_NO_PUBLIC_DEMO",
       "status": "PENDING_DOMAIN_OWNERSHIP_AND_SSL"
     },
     {
       "name": "www.auroranexus.com.br",
-      "role": "redirect-to-apex",
-      "target": "hosting-provider-redirect",
-      "initialTraffic": "REDIRECT_ONLY",
+      "role": "redirect-or-private-entry-equivalent",
+      "target": "Firebase Hosting rewrite to auroraNexusAuthGate or provider redirect to apex",
+      "initialTraffic": "LOGIN_REQUIRED_NO_PUBLIC_DEMO",
       "status": "PENDING_DOMAIN_OWNERSHIP_AND_SSL"
     },
     {
       "name": "app.auroranexus.com.br",
       "role": "authenticated-application",
-      "target": "Firebase Hosting",
-      "initialTraffic": "HOMOLOGATION_CONTROLLED",
+      "target": "Firebase Hosting rewrite to auroraNexusAuthGate",
+      "initialTraffic": "LOGIN_REQUIRED_NO_PUBLIC_DEMO",
       "status": "PENDING_FIREBASE_CUSTOM_DOMAIN_SETUP"
     },
     {
       "name": "wmgj.auroranexus.com.br",
       "role": "pilot-tenant-wmgj",
-      "target": "Firebase Hosting tenant route or app subdomain",
-      "initialTraffic": "WMGJ_PILOT_ONLY",
+      "target": "Firebase Hosting rewrite to auroraNexusAuthGate with tenant routing after session validation",
+      "initialTraffic": "LOGIN_REQUIRED_WMGJ_PILOT_ONLY",
       "status": "PENDING_FIREBASE_CUSTOM_DOMAIN_SETUP"
     },
     {
@@ -84,7 +95,13 @@
     "customDomainsAddedInProviderConsole": false,
     "dnsVerificationPublished": false,
     "sslIssued": false,
+    "firebaseAuthUsersCreated": false,
+    "allowedEmailsSecretConfigured": false,
+    "publicLandingDisabled": true,
+    "publicDemoDisabled": true,
+    "loginFirstEnforcedInFirebaseJson": true,
     "authSmokeTestPassed": false,
+    "unauthenticatedSmokeTestShowsOnlyLogin": false,
     "tenantIsolationSmokeTestPassed": false,
     "appCheckOrEquivalentPassed": false,
     "auditLogsValidated": false,
