@@ -1,0 +1,99 @@
+{
+  "schemaVersion": "1.0.0",
+  "updatedAt": "2026-09-26",
+  "product": "AURORA NEXUS",
+  "domain": "auroranexus.com.br",
+  "firebase": {
+    "currentFallbackProjectId": "wmgj-ops",
+    "currentFallbackUrl": "https://wmgj-ops.web.app/portal",
+    "productionProjectId": "PENDING_FIREBASE_PROJECT_SELECTION",
+    "hostingConfigurationInFirebaseJson": "PENDING_APP_BUILD_TARGET",
+    "customDomainStatus": "NOT_APPLIED_FROM_REPOSITORY"
+  },
+  "domains": [
+    {
+      "name": "auroranexus.com.br",
+      "role": "institutional-landing",
+      "target": "Firebase Hosting or equivalent landing deployment",
+      "initialTraffic": "PUBLIC_STATIC_ONLY_NO_SENSITIVE_DATA",
+      "status": "PENDING_DOMAIN_OWNERSHIP_AND_SSL"
+    },
+    {
+      "name": "www.auroranexus.com.br",
+      "role": "redirect-to-apex",
+      "target": "hosting-provider-redirect",
+      "initialTraffic": "REDIRECT_ONLY",
+      "status": "PENDING_DOMAIN_OWNERSHIP_AND_SSL"
+    },
+    {
+      "name": "app.auroranexus.com.br",
+      "role": "authenticated-application",
+      "target": "Firebase Hosting",
+      "initialTraffic": "HOMOLOGATION_CONTROLLED",
+      "status": "PENDING_FIREBASE_CUSTOM_DOMAIN_SETUP"
+    },
+    {
+      "name": "wmgj.auroranexus.com.br",
+      "role": "pilot-tenant-wmgj",
+      "target": "Firebase Hosting tenant route or app subdomain",
+      "initialTraffic": "WMGJ_PILOT_ONLY",
+      "status": "PENDING_FIREBASE_CUSTOM_DOMAIN_SETUP"
+    },
+    {
+      "name": "api.auroranexus.com.br",
+      "role": "api-bff-control-plane",
+      "target": "FastAPI Cloud, Cloud Run or Firebase Functions HTTPS endpoint",
+      "initialTraffic": "SERVER_ONLY_WITH_AUTH_AND_AUDIT_LOGS",
+      "status": "PENDING_API_PROVIDER_SELECTION"
+    }
+  ],
+  "dnsRecordsToRequestFromProviders": [
+    {
+      "host": "@",
+      "type": "TXT",
+      "value": "PENDING_HOSTING_PROVIDER_DOMAIN_VERIFICATION_TOKEN",
+      "commitRealTokenToGit": false
+    },
+    {
+      "host": "app",
+      "type": "TXT",
+      "value": "PENDING_FIREBASE_DOMAIN_VERIFICATION_TOKEN",
+      "commitRealTokenToGit": false
+    },
+    {
+      "host": "wmgj",
+      "type": "TXT",
+      "value": "PENDING_FIREBASE_DOMAIN_VERIFICATION_TOKEN",
+      "commitRealTokenToGit": false
+    },
+    {
+      "host": "api",
+      "type": "TXT",
+      "value": "PENDING_API_PROVIDER_DOMAIN_VERIFICATION_TOKEN",
+      "commitRealTokenToGit": false
+    },
+    {
+      "host": "@|www|app|wmgj|api",
+      "type": "A_OR_CNAME",
+      "value": "COPY_ONLY_VALUES_EMITTED_BY_THE_SELECTED_PROVIDER",
+      "commitProviderSecretsToGit": false
+    }
+  ],
+  "deploymentGates": {
+    "domainOwnershipConfirmed": false,
+    "customDomainsAddedInProviderConsole": false,
+    "dnsVerificationPublished": false,
+    "sslIssued": false,
+    "authSmokeTestPassed": false,
+    "tenantIsolationSmokeTestPassed": false,
+    "appCheckOrEquivalentPassed": false,
+    "auditLogsValidated": false,
+    "rollbackDocumented": true,
+    "fallbackPreserved": true
+  },
+  "rollback": {
+    "preserveFallbackUrl": "https://wmgj-ops.web.app/portal",
+    "doNotRemovePreviousHostingUntil": "custom-domain-ssl-auth-and-tenant-tests-pass",
+    "rollbackAction": "remove DNS records for custom domains or point users back to fallback URL"
+  }
+}
