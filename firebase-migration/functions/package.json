@@ -1,7 +1,7 @@
 {
   "name": "wmgj-firestore-functions",
   "private": true,
-  "main": "lib/index.js",
+  "main": "lib/entry.js",
   "engines": {
     "node": "22"
   },
@@ -9,8 +9,10 @@
     "build": "tsc",
     "lint": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
-    "serve": "npm run build && firebase emulators:start --only functions,firestore,auth",
-    "deploy": "firebase deploy --only functions",
+    "serve": "npm run build && firebase emulators:start --only functions,firestore,auth,hosting",
+    "deploy": "firebase deploy --only functions,hosting",
+    "deploy:functions": "firebase deploy --only functions",
+    "deploy:hosting": "firebase deploy --only hosting",
     "logs": "firebase functions:log"
   },
   "dependencies": {

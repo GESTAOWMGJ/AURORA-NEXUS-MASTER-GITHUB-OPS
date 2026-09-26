@@ -1,4 +1,48 @@
 {
+  "hosting": {
+    "public": "hosting/aurora-nexus",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0" },
+          { "key": "Pragma", "value": "no-cache" },
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "X-Frame-Options", "value": "DENY" },
+          { "key": "Referrer-Policy", "value": "no-referrer" },
+          { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), payment=()" }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "/__sessionLogin",
+        "function": {
+          "functionId": "auroraNexusSessionLogin",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/__sessionLogout",
+        "function": {
+          "functionId": "auroraNexusSessionLogout",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "**",
+        "function": {
+          "functionId": "auroraNexusAuthGate",
+          "region": "southamerica-east1"
+        }
+      }
+    ]
+  },
   "firestore": {
     "rules": "firestore/firestore.rules",
     "indexes": "firestore/firestore.indexes.json"
@@ -11,6 +55,7 @@
     "auth": { "port": 9099 },
     "functions": { "port": 5001 },
     "firestore": { "port": 8080 },
+    "hosting": { "port": 5000 },
     "ui": { "enabled": true, "port": 4000 },
     "singleProjectMode": true
   }
