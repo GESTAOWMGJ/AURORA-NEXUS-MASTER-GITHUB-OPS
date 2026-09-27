@@ -6,6 +6,12 @@ const path = require('path');
 const root = process.cwd();
 const srcDir = path.join(root, 'src');
 const workflowPath = path.join(root, '.github', 'workflows', 'deploy-appscript.yml');
+const automationPath = path.join(srcDir, '06_AUTOMACAO_APPSCRIPT_WMGJ.gs');
+const legacyTriggerPath = path.join(srcDir, '02_AUTOMACAO_GATILHOS_WMGJ.gs');
+const forbiddenStarterWorkflows = [
+  path.join(root, '.github', 'workflows', 'docker-image.yml'),
+  path.join(root, '.github', 'workflows', 'ios.yml')
+];
 
 const errors = [];
 const warnings = [];
@@ -167,6 +173,14 @@ function auditApiSecurity(srcGsFiles) {
     errors.push('API sem retorno padronizado para token ausente ou invalido.');
   }
 
+  if (!core.includes('function executarComandoMutavelComTravaWMGJ_')) {
+    errors.push('API sem wrapper de trava compartilhada para comandos mutaveis.');
+  }
+
+  if (!core.includes('compararSegredoTempoConstanteWMGJ_')) {
+    errors.push('API sem comparacao de token por digest em tempo constante.');
+  }
+
   mutableCommands.forEach(command => {
     if (!core.includes(command)) warnings.push('Comando mutavel esperado nao encontrado na API: ' + command);
   });
@@ -185,6 +199,58 @@ function auditApiSecurity(srcGsFiles) {
   if (allSrc.includes('doPost(e)') && !core.includes('validarAutorizacaoApiWMGJ_')) {
     errors.push('doPost encontrado sem camada de autorizacao no core.');
   }
+}
+
+function formatOwners(owners) {
+  const counts = new Map();
+  owners.forEach(owner => counts.set(owner, (counts.get(owner) || 0) + 1));
+  return Array.from(counts.entries()).map(([owner, count]) => owner + (count > 1 ? ' (' + count + 'x)' : '')).join(', ');
+}
+
+function auditConcurrencyAndTriggerSafety() {
+  const automation = fs.existsSync(automationPath) ? fs.readFileSync(automationPath, 'utf8') : '';
+  const legacyTriggers = fs.existsSync(legacyTriggerPath) ? fs.readFileSync(legacyTriggerPath, 'utf8') : '';
+  const allSource = srcGsFiles.map(file => fs.readFileSync(file, 'utf8')).join('\n');
+
+  if (!automation.includes('function executarAutomacaoOperacionalWMGJSemTrava_')) {
+    errors.push('Automacao principal sem separacao explicita entre entrypoint travado e implementacao interna.');
+  }
+  if (!automation.includes('return executarComTravaConcorrenciaWMGJ_(')) {
+    errors.push('Automacao principal nao usa a trava de concorrencia compartilhada.');
+  }
+  [
+    'rodarCicloCompletoGmailFiscalFinanceiroWMGJ',
+    'rodarCicloCompletoGmailFiscalFinanceiroWMGJ_Teste20',
+    'rodarRotinaDiariaIngestaoAuditoriaNfWMGJ',
+    'executarAutomacaoWMGJBlindada',
+    'executarAutomacaoWMGJBlindada_Teste20'
+  ].forEach(name => {
+    if (!automation.includes(name + ': true')) {
+      errors.push('Gatilho paralelo antigo nao esta no inventario de remocao: ' + name);
+    }
+  });
+  if (!legacyTriggers.includes("executarAutomacaoOperacionalWMGJ_Legado_('jobRelatorioMensalWMGJ')")) {
+    errors.push('Relatorio mensal legado ainda pode executar logica paralela fora do entrypoint canonico.');
+  }
+
+  const allowedTriggerArguments = new Set(["WMGJ_FUNCAO_AUTOMACAO_PRINCIPAL", "'rodarWatchdogWMGJ'"]);
+  const triggerCallPattern = /ScriptApp\.newTrigger\(\s*([^\r\n)]+)\s*\)/g;
+  let match;
+  while ((match = triggerCallPattern.exec(allSource)) !== null) {
+    const argument = match[1].trim();
+    if (!allowedTriggerArguments.has(argument)) {
+      errors.push('Criacao de gatilho fora da allowlist canonica: ScriptApp.newTrigger(' + argument + ')');
+    }
+  }
+  if (!allSource.includes('INSTALADOR_OPERACIONAL_LEGADO_DESATIVADO')) {
+    errors.push('Instaladores operacionais legados nao possuem bloqueio fail-closed.');
+  }
+
+  forbiddenStarterWorkflows.forEach(file => {
+    if (fs.existsSync(file)) {
+      errors.push('Workflow starter sem artefato correspondente precisa ser removido: ' + rel(file));
+    }
+  });
 }
 
 if (!fs.existsSync(srcDir)) errors.push('Diretorio src/ nao encontrado.');
@@ -222,13 +288,11 @@ for (const file of srcGsFiles) {
 }
 
 for (const [name, owners] of functionOwners.entries()) {
-  const uniqueOwners = Array.from(new Set(owners));
-  if (uniqueOwners.length > 1) errors.push('Funcao duplicada em src/: ' + name + ' aparece em ' + uniqueOwners.join(', '));
+  if (owners.length > 1) errors.push('Funcao duplicada em src/: ' + name + ' aparece em ' + formatOwners(owners));
 }
 
 for (const [name, owners] of globalVarOwners.entries()) {
-  const uniqueOwners = Array.from(new Set(owners));
-  if (uniqueOwners.length > 1) errors.push('Variavel global duplicada em src/: ' + name + ' aparece em ' + uniqueOwners.join(', '));
+  if (owners.length > 1) errors.push('Variavel global duplicada em src/: ' + name + ' aparece em ' + formatOwners(owners));
 }
 
 const uniqueSpreadsheetOwners = Array.from(new Set(spreadsheetIdOccurrences));
@@ -237,6 +301,7 @@ if (uniqueSpreadsheetOwners.length > 1) {
 }
 
 auditApiSecurity(srcGsFiles);
+auditConcurrencyAndTriggerSafety();
 
 if (fs.existsSync(workflowPath)) {
   const workflow = fs.readFileSync(workflowPath, 'utf8');
@@ -246,6 +311,18 @@ if (fs.existsSync(workflowPath)) {
     errors.push('Workflow tenta copiar apps-script/appsscript. Essas pastas sao legado.');
   }
   if (!workflow.includes('node tools/audit-appscript.js')) errors.push('Workflow nao executa tools/audit-appscript.js antes do deploy.');
+  if (!workflow.includes('group: deploy-appscript-wmgj') || !workflow.includes('cancel-in-progress: false')) {
+    errors.push('Workflow de deploy nao serializa publicacoes concorrentes.');
+  }
+  if (!workflow.includes('run_runtime_diagnostics:') || !workflow.includes('inputs.run_runtime_diagnostics')) {
+    errors.push('Diagnosticos de runtime do deploy nao possuem gate manual explicito.');
+  }
+  if (workflow.includes('rodarCicloCompletoGmailFiscalFinanceiroWMGJ') || workflow.includes('rodarRoboGmailDashboardWMGJ_Teste20')) {
+    errors.push('Workflow de deploy executa ciclo operacional; deploy de codigo nao deve ingerir ou reprocessar dados.');
+  }
+  if (workflow.includes('run: clasp run instalarGatilhoAutomacaoWMGJ') && !workflow.includes("github.event_name == 'workflow_dispatch'")) {
+    errors.push('Workflow reinstala gatilho sem gate manual explicito.');
+  }
 }
 
 console.log('AUDITORIA_APPSCRIPT_WMGJ');

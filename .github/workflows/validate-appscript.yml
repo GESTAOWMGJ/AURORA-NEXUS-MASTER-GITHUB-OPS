@@ -1,0 +1,49 @@
+name: Validate Apps Script WMGJ
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**/*.gs'
+      - 'tools/**/*.js'
+      - 'appsscript.json'
+      - '.github/workflows/deploy-appscript.yml'
+      - '.github/workflows/validate-appscript.yml'
+      - '.github/workflows/docker-image.yml'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    paths:
+      - 'src/**/*.gs'
+      - 'tools/**/*.js'
+      - 'appsscript.json'
+      - '.github/workflows/deploy-appscript.yml'
+      - '.github/workflows/validate-appscript.yml'
+      - '.github/workflows/docker-image.yml'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-appscript-wmgj-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-source-boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Audit canonical source, concurrency and workflow safety
+        run: node tools/audit-appscript.js
+      - name: Parse every deployed Apps Script file
+        run: |
+          for file in src/*.gs; do
+            node --check < "$file"
+          done

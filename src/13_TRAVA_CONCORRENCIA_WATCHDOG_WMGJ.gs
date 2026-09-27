@@ -71,50 +71,37 @@ function diagnosticarTravaWatchdogWMGJ() {
 }
 
 function instalarAutomacaoBlindadaWMGJModoSeguro() {
-  removerAutomacaoBlindadaWMGJ();
-
   var ss = getPlanilhaWMGJ_Watchdog_();
   var aba = garantirAbaWatchdogWMGJ_(ss);
-  var triggers = [];
-
-  triggers.push(criarTriggerDiarioWatchdogWMGJ_('executarAutomacaoWMGJBlindada_Teste20', 8, 10));
-  triggers.push(criarTriggerWatchdogHorarioWMGJ_());
-
   var resultado = {
-    ok: true,
+    ok: false,
     versao: WMGJ_TRAVA_WATCHDOG_VERSAO,
     modo: 'SEGURO',
-    gatilhos: triggers,
-    funcaoCiclo: 'executarAutomacaoWMGJBlindada_Teste20',
-    funcaoWatchdog: 'rodarWatchdogWMGJ'
+    codigo: 'INSTALADOR_OPERACIONAL_LEGADO_DESATIVADO',
+    gatilhos: [],
+    funcaoCanonica: 'instalarGatilhoAutomacaoWMGJ',
+    mensagem: 'Instalacao recusada para impedir gatilhos paralelos.'
   };
 
-  registrarWatchdogWMGJ_(aba, 'INSTALAR_MODO_SEGURO', 'OK', JSON.stringify(resultado));
+  registrarWatchdogWMGJ_(aba, 'INSTALAR_MODO_SEGURO_BLOQUEADO', 'ALERTA', JSON.stringify(resultado));
   Logger.log(JSON.stringify(resultado, null, 2));
   return resultado;
 }
 
 function instalarAutomacaoBlindadaWMGJProducao() {
-  removerAutomacaoBlindadaWMGJ();
-
   var ss = getPlanilhaWMGJ_Watchdog_();
   var aba = garantirAbaWatchdogWMGJ_(ss);
-  var triggers = [];
-
-  triggers.push(criarTriggerDiarioWatchdogWMGJ_('executarAutomacaoWMGJBlindada', 7, 35));
-  triggers.push(criarTriggerDiarioWatchdogWMGJ_('executarAutomacaoWMGJBlindada', 18, 35));
-  triggers.push(criarTriggerWatchdogHorarioWMGJ_());
-
   var resultado = {
-    ok: true,
+    ok: false,
     versao: WMGJ_TRAVA_WATCHDOG_VERSAO,
     modo: 'PRODUCAO',
-    gatilhos: triggers,
-    funcaoCiclo: 'executarAutomacaoWMGJBlindada',
-    funcaoWatchdog: 'rodarWatchdogWMGJ'
+    codigo: 'INSTALADOR_OPERACIONAL_LEGADO_DESATIVADO',
+    gatilhos: [],
+    funcaoCanonica: 'instalarGatilhoAutomacaoWMGJ',
+    mensagem: 'Instalacao recusada para impedir gatilhos paralelos.'
   };
 
-  registrarWatchdogWMGJ_(aba, 'INSTALAR_PRODUCAO', 'OK', JSON.stringify(resultado));
+  registrarWatchdogWMGJ_(aba, 'INSTALAR_PRODUCAO_BLOQUEADO', 'ALERTA', JSON.stringify(resultado));
   Logger.log(JSON.stringify(resultado, null, 2));
   return resultado;
 }
@@ -178,8 +165,6 @@ function rodarWatchdogWMGJ() {
 }
 
 function executarComTravaConcorrenciaWMGJ_(nomeCiclo, fn, maxMinutos) {
-  var ss = getPlanilhaWMGJ_Watchdog_();
-  var aba = garantirAbaWatchdogWMGJ_(ss);
   var lock = LockService.getScriptLock();
   var execucaoId = montarIdExecucaoWatchdogWMGJ_(nomeCiclo);
 
@@ -194,12 +179,14 @@ function executarComTravaConcorrenciaWMGJ_(nomeCiclo, fn, maxMinutos) {
       estadoAtual: obterEstadoExecucaoWMGJ_()
     };
 
-    registrarWatchdogWMGJ_(aba, 'BLOQUEADO_CONCORRENCIA', 'ALERTA', JSON.stringify(bloqueado));
     Logger.log(JSON.stringify(bloqueado, null, 2));
     return bloqueado;
   }
 
+  var aba = null;
   try {
+    var ss = getPlanilhaWMGJ_Watchdog_();
+    aba = garantirAbaWatchdogWMGJ_(ss);
     marcarInicioExecucaoWMGJ_(execucaoId, nomeCiclo, maxMinutos || WMGJ_EXECUCAO_MAX_MINUTOS_PADRAO);
     registrarWatchdogWMGJ_(aba, 'INICIO_EXECUCAO_BLINDADA', 'OK', JSON.stringify(obterEstadoExecucaoWMGJ_()));
 
@@ -231,7 +218,7 @@ function executarComTravaConcorrenciaWMGJ_(nomeCiclo, fn, maxMinutos) {
       erro: erro && erro.message ? erro.message : String(erro)
     };
 
-    registrarWatchdogWMGJ_(aba, 'ERRO_EXECUCAO_BLINDADA', 'ERRO', JSON.stringify(falha));
+    if (aba) registrarWatchdogWMGJ_(aba, 'ERRO_EXECUCAO_BLINDADA', 'ERRO', JSON.stringify(falha));
     Logger.log(JSON.stringify(falha, null, 2));
     return falha;
   } finally {
@@ -301,20 +288,8 @@ function obterEstadoExecucaoWMGJ_() {
   };
 }
 
-function criarTriggerDiarioWatchdogWMGJ_(funcao, hora, minuto) {
-  var builder = ScriptApp.newTrigger(funcao).timeBased().everyDays(1).atHour(Number(hora || 8));
-  if (typeof builder.nearMinute === 'function') builder = builder.nearMinute(Number(minuto || 0));
-  var trigger = builder.create();
-  return {
-    funcao: funcao,
-    tipo: 'DIARIO',
-    hora: hora,
-    minuto: minuto,
-    triggerId: trigger.getUniqueId ? trigger.getUniqueId() : ''
-  };
-}
-
 function criarTriggerWatchdogHorarioWMGJ_() {
+  removerTriggersWatchdogWMGJ_(['rodarWatchdogWMGJ']);
   var trigger = ScriptApp.newTrigger('rodarWatchdogWMGJ').timeBased().everyHours(1).create();
   return {
     funcao: 'rodarWatchdogWMGJ',

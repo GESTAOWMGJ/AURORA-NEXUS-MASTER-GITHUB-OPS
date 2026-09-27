@@ -10,6 +10,26 @@ on:
       - 'appsscript.json'
       - '.github/workflows/deploy-appscript.yml'
   workflow_dispatch:
+    inputs:
+      repair_triggers:
+        description: 'Remover gatilhos operacionais legados ou duplicados'
+        required: false
+        default: false
+        type: boolean
+      reinstall_trigger:
+        description: 'Reinstalar o unico gatilho operacional de 15 minutos'
+        required: false
+        default: false
+        type: boolean
+      run_runtime_diagnostics:
+        description: 'Executar diagnosticos que escrevem registros de controle na planilha'
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: deploy-appscript-wmgj
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -62,7 +82,7 @@ jobs:
 
       - name: Create Apps Script version
         working-directory: build-appscript
-        run: clasp version "GitHub Actions deploy $GITHUB_SHA" || true
+        run: clasp version "GitHub Actions deploy $GITHUB_SHA"
 
       - name: Verify deployed source
         run: |
@@ -79,49 +99,46 @@ jobs:
           grep -R "diagnosticarSincronizacaoRepositorioWMGJ" .
 
       - name: Validate API security gate
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_runtime_diagnostics }}
         working-directory: build-appscript
         run: clasp run auditarSegurancaApiWMGJ
 
       - name: Validate status sheet write
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_runtime_diagnostics }}
         working-directory: build-appscript
         run: clasp run validarRegistroStatusAutomacaoWMGJ
 
       - name: Audit and organize Apps Script
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.repair_triggers }}
         working-directory: build-appscript
-        run: clasp run auditarOrganizarAppsScriptWMGJ || true
+        run: clasp run auditarOrganizarAppsScriptWMGJ
 
       - name: Diagnose Apps Script automation
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_runtime_diagnostics }}
         working-directory: build-appscript
-        run: clasp run diagnosticarAutomacaoAppsScriptWMGJ || true
+        run: clasp run diagnosticarAutomacaoAppsScriptWMGJ
 
       - name: Diagnose financial dashboard
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_runtime_diagnostics }}
         working-directory: build-appscript
         run: clasp run diagnosticarDashboardFinanceiroWMGJ
 
-      - name: Update financial dashboard
-        working-directory: build-appscript
-        run: clasp run atualizarDashboardFinanceiro
-
       - name: Diagnose Gmail fiscal financial orchestrator
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_runtime_diagnostics }}
         working-directory: build-appscript
         run: clasp run diagnosticarOrquestradorGmailFiscalFinanceiroWMGJ
 
-      - name: Run Gmail based fiscal financial extraction cycle
-        working-directory: build-appscript
-        run: clasp run rodarCicloCompletoGmailFiscalFinanceiroWMGJ_Teste20
-
       - name: Diagnose Gmail dashboard robot
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_runtime_diagnostics }}
         working-directory: build-appscript
         run: clasp run diagnosticarRoboGmailDashboardWMGJ
 
-      - name: Run Gmail dashboard robot controlled test
-        working-directory: build-appscript
-        run: clasp run rodarRoboGmailDashboardWMGJ_Teste20
-
       - name: Install Apps Script automation trigger
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.reinstall_trigger }}
         working-directory: build-appscript
         run: clasp run instalarGatilhoAutomacaoWMGJ
 
       - name: Final Apps Script automation diagnosis
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.run_runtime_diagnostics || inputs.reinstall_trigger || inputs.repair_triggers) }}
         working-directory: build-appscript
-        run: clasp run diagnosticarAutomacaoAppsScriptWMGJ || true
+        run: clasp run diagnosticarAutomacaoAppsScriptWMGJ

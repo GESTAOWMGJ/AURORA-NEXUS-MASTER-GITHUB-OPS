@@ -5,15 +5,42 @@
 
 var WMGJ_AUTOMACAO_APPSCRIPT_VERSAO = 'v1.0.9-robo-gmail-dashboard';
 var WMGJ_FUNCAO_AUTOMACAO_PRINCIPAL = 'executarAutomacaoOperacionalWMGJ';
+var WMGJ_CICLO_AUTOMACAO_PRINCIPAL = 'AUTOMACAO_OPERACIONAL_15_MINUTOS';
 
 var WMGJ_GATILHOS_OPERACIONAIS_OBSOLETOS = {
   jobPrepararPipelineWMGJ: true,
   jobProcessarFilaWMGJ: true,
   jobTesteSaudeWMGJ: true,
-  jobRelatorioMensalWMGJ: true
+  jobRelatorioMensalWMGJ: true,
+  rodarCicloCompletoGmailFiscalFinanceiroWMGJ: true,
+  rodarCicloCompletoGmailFiscalFinanceiroWMGJ_Teste20: true,
+  rodarRotinaDiariaIngestaoAuditoriaNfWMGJ: true,
+  executarAutomacaoWMGJBlindada: true,
+  executarAutomacaoWMGJBlindada_Teste20: true
 };
 
 function executarAutomacaoOperacionalWMGJ() {
+  if (typeof executarComTravaConcorrenciaWMGJ_ !== 'function') {
+    var falhaTrava = {
+      ok: false,
+      versao: WMGJ_AUTOMACAO_APPSCRIPT_VERSAO,
+      etapa: 'executarAutomacaoOperacionalWMGJ',
+      codigo: 'TRAVA_CONCORRENCIA_OBRIGATORIA_AUSENTE',
+      erro: 'Execucao recusada: modulo de concorrencia nao carregado.'
+    };
+    registrarStatusAutomacaoWMGJ_(falhaTrava);
+    registrarLogAutomacaoWMGJ_('ERRO', 'executarAutomacaoOperacionalWMGJ', falhaTrava);
+    return falhaTrava;
+  }
+
+  return executarComTravaConcorrenciaWMGJ_(
+    WMGJ_CICLO_AUTOMACAO_PRINCIPAL,
+    executarAutomacaoOperacionalWMGJSemTrava_,
+    WMGJ_EXECUCAO_MAX_MINUTOS_PADRAO
+  );
+}
+
+function executarAutomacaoOperacionalWMGJSemTrava_() {
   var inicio = new Date();
 
   try {

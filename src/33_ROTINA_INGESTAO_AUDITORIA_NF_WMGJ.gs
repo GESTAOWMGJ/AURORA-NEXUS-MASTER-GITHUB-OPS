@@ -85,23 +85,16 @@ function rodarRotinaDiariaIngestaoAuditoriaNfWMGJ() {
 }
 
 function instalarGatilhoDiarioIngestaoAuditoriaNfWMGJ() {
-  removerGatilhosPorFuncaoIngestaoWMGJ_('rodarRotinaDiariaIngestaoAuditoriaNfWMGJ');
-  ScriptApp.newTrigger('rodarRotinaDiariaIngestaoAuditoriaNfWMGJ')
-    .timeBased()
-    .everyDays(1)
-    .atHour(7)
-    .create();
-
   var resultado = {
-    ok: true,
+    ok: false,
     versao: WMGJ_ROTINA_INGESTAO_NF_VERSAO,
     etapa: 'instalarGatilhoDiarioIngestaoAuditoriaNfWMGJ',
-    funcao: 'rodarRotinaDiariaIngestaoAuditoriaNfWMGJ',
-    frequencia: 'DIARIA_07H',
-    instaladoEm: new Date().toISOString()
+    codigo: 'INSTALADOR_OPERACIONAL_LEGADO_DESATIVADO',
+    funcaoCanonica: 'instalarGatilhoAutomacaoWMGJ',
+    mensagem: 'Instalacao recusada para impedir ingestao paralela ao ciclo canonico.',
+    bloqueadoEm: new Date().toISOString()
   };
-  registrarStatusIngestaoAuditoriaNfWMGJ_(resultado);
-  registrarLogIngestaoAuditoriaNfWMGJ_('OK', 'instalarGatilhoDiarioIngestaoAuditoriaNfWMGJ', resultado);
+  registrarLogIngestaoAuditoriaNfWMGJ_('ALERTA', 'instalarGatilhoDiarioIngestaoAuditoriaNfWMGJ', resultado);
   return resultado;
 }
 

@@ -130,71 +130,19 @@ function configurarAutomacaoWMGJ(config) {
   config = config || {};
   var ss = getPlanilhaWMGJ_Automacao_();
   var aba = garantirAbaAutomacaoWMGJ_(ss);
-
-  if (!config.ciclos || !config.ciclos.length) {
-    throw new Error('CONFIG_SEM_CICLOS');
-  }
-
-  if (config.limparAntes !== false) {
-    removerTriggersWMGJ_(config.ciclos.map(function(c) { return c.funcao; }));
-  }
-
-  var instalados = [];
-  var erros = [];
-
-  config.ciclos.forEach(function(ciclo) {
-    try {
-      if (typeof this[ciclo.funcao] !== 'function') {
-        throw new Error('FUNCAO_NAO_EXISTE: ' + ciclo.funcao);
-      }
-
-      var trigger = criarTriggerDiarioWMGJ_(ciclo.funcao, ciclo.hora, ciclo.minuto);
-      var item = {
-        nome: ciclo.nome,
-        funcao: ciclo.funcao,
-        hora: ciclo.hora,
-        minuto: ciclo.minuto,
-        tipo: ciclo.tipo || 'DIARIO',
-        triggerId: trigger.getUniqueId ? trigger.getUniqueId() : ''
-      };
-
-      instalados.push(item);
-      registrarAutomacaoWMGJ_(aba, 'INSTALAR_TRIGGER', 'OK', JSON.stringify(item));
-    } catch (erro) {
-      var falha = {
-        ciclo: ciclo,
-        erro: erro && erro.message ? erro.message : String(erro)
-      };
-      erros.push(falha);
-      registrarAutomacaoWMGJ_(aba, 'INSTALAR_TRIGGER', 'ERRO', JSON.stringify(falha));
-    }
-  });
-
-  aplicarFormatacaoAutomacaoWMGJ_(aba);
-
   var resultado = {
-    ok: erros.length === 0,
+    ok: false,
     versao: WMGJ_AUTOMACAO_SEM_HUMANO_VERSAO,
-    instalados: instalados,
-    erros: erros,
-    proximaChecagem: 'diagnosticarAutomacaoWMGJSemExecucaoHumana'
+    codigo: 'INSTALADOR_OPERACIONAL_LEGADO_DESATIVADO',
+    instalados: [],
+    configuracaoSolicitada: config,
+    funcaoCanonica: 'instalarGatilhoAutomacaoWMGJ',
+    mensagem: 'Instalacao recusada para impedir gatilhos paralelos. Use somente o instalador canonico.'
   };
 
-  registrarAutomacaoWMGJ_(aba, 'CONFIGURAR_AUTOMACAO', resultado.ok ? 'OK' : 'ERRO', JSON.stringify(resultado));
+  registrarAutomacaoWMGJ_(aba, 'CONFIGURAR_AUTOMACAO_LEGADA_BLOQUEADA', 'ALERTA', JSON.stringify(resultado));
   Logger.log(JSON.stringify(resultado, null, 2));
   return resultado;
-}
-
-function criarTriggerDiarioWMGJ_(funcao, hora, minuto) {
-  var builder = ScriptApp.newTrigger(funcao).timeBased().everyDays(1).atHour(Number(hora || 8));
-
-  // Apps Script não garante minuto exato em todos os ambientes.
-  // nearMinute orienta a janela de execução e reduz variação, quando aceito.
-  if (typeof builder.nearMinute === 'function') {
-    builder = builder.nearMinute(Number(minuto || 0));
-  }
-
-  return builder.create();
 }
 
 function removerTriggersWMGJ_(funcoes) {

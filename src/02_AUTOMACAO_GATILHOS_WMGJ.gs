@@ -61,27 +61,7 @@ function jobTesteSaudeWMGJ() {
 }
 
 function jobRelatorioMensalWMGJ() {
-  try {
-    if (typeof runWMGJ === 'function') {
-      runWMGJ();
-    }
-
-    registrarLogWMGJ_Legado_('OK', 'jobRelatorioMensalWMGJ', {
-      ok: true,
-      versao: WMGJ_AUTOMACAO_GATILHOS_LEGADO_VERSAO,
-      mensagem: 'Rotina mensal legada executada'
-    });
-
-    return {
-      ok: true,
-      versao: WMGJ_AUTOMACAO_GATILHOS_LEGADO_VERSAO,
-      mensagem: 'Rotina mensal executada'
-    };
-  } catch (erro) {
-    var falha = { ok: false, erro: erro && erro.message ? erro.message : String(erro) };
-    registrarLogWMGJ_Legado_('ERRO', 'jobRelatorioMensalWMGJ', falha);
-    return falha;
-  }
+  return executarAutomacaoOperacionalWMGJ_Legado_('jobRelatorioMensalWMGJ');
 }
 
 function executarAutomacaoOperacionalWMGJ_Legado_(origem) {

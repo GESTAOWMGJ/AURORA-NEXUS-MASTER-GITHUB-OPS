@@ -84,11 +84,21 @@ function executarComandoWMGJ(payload) {
     }
   }
 
-  if (comando === "run" || comando === "runWMGJ" || comando === "operacao_total") return runWMGJ();
-  if (comando === "gmail" || comando === "gmail_bancario") return importarGmailWMGJ();
-  if (comando === "organizar") return organizarPastasWMGJ();
-  if (comando === "dashboard") return atualizarDashboardWMGJ();
-  if (comando === "conciliar" && typeof conciliacaoCompletaWMGJ === "function") return conciliacaoCompletaWMGJ();
+  if (comando === "run" || comando === "runWMGJ" || comando === "operacao_total") {
+    return executarComandoMutavelComTravaWMGJ_("runWMGJ", function() { return runWMGJ(); });
+  }
+  if (comando === "gmail" || comando === "gmail_bancario") {
+    return executarComandoMutavelComTravaWMGJ_("importarGmailWMGJ", function() { return importarGmailWMGJ(); });
+  }
+  if (comando === "organizar") {
+    return executarComandoMutavelComTravaWMGJ_("organizarPastasWMGJ", function() { return organizarPastasWMGJ(); });
+  }
+  if (comando === "dashboard") {
+    return executarComandoMutavelComTravaWMGJ_("atualizarDashboardWMGJ", function() { return atualizarDashboardWMGJ(); });
+  }
+  if (comando === "conciliar" && typeof conciliacaoCompletaWMGJ === "function") {
+    return executarComandoMutavelComTravaWMGJ_("conciliacaoCompletaWMGJ", function() { return conciliacaoCompletaWMGJ(); });
+  }
 
   registrarLogWMGJ_("ERRO", comando || "SEM_COMANDO", payload.origem || "", "Comando não reconhecido");
   return {
@@ -96,6 +106,23 @@ function executarComandoWMGJ(payload) {
     erro: "Comando não reconhecido",
     comando: comando
   };
+}
+
+function executarComandoMutavelComTravaWMGJ_(nomeCiclo, fn) {
+  if (typeof executarComTravaConcorrenciaWMGJ_ !== "function") {
+    return {
+      ok: false,
+      codigo: "TRAVA_CONCORRENCIA_OBRIGATORIA_AUSENTE",
+      comando: nomeCiclo,
+      erro: "Execucao mutavel recusada: modulo de concorrencia nao carregado."
+    };
+  }
+
+  return executarComTravaConcorrenciaWMGJ_(
+    "API_" + String(nomeCiclo || "COMANDO_MUTAVEL"),
+    fn,
+    WMGJ_EXECUCAO_MAX_MINUTOS_PADRAO
+  );
 }
 
 function comandoRequerAutorizacaoApiWMGJ_(comando) {
@@ -124,7 +151,7 @@ function validarAutorizacaoApiWMGJ_(payload) {
   }
 
   var recebido = String(payload.token || payload.apiToken || payload.api_token || "").trim();
-  if (!recebido || recebido !== esperado) {
+  if (!recebido || !compararSegredoTempoConstanteWMGJ_(recebido, esperado)) {
     return {
       ok: false,
       motivo: "Token de API ausente ou inválido"
@@ -135,6 +162,24 @@ function validarAutorizacaoApiWMGJ_(payload) {
     ok: true,
     motivo: "Token de API validado"
   };
+}
+
+function compararSegredoTempoConstanteWMGJ_(recebido, esperado) {
+  var digestRecebido = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    String(recebido || ""),
+    Utilities.Charset.UTF_8
+  );
+  var digestEsperado = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    String(esperado || ""),
+    Utilities.Charset.UTF_8
+  );
+  var diferenca = 0;
+  for (var i = 0; i < digestRecebido.length; i++) {
+    diferenca |= digestRecebido[i] ^ digestEsperado[i];
+  }
+  return diferenca === 0;
 }
 
 function auditarSegurancaApiWMGJ() {

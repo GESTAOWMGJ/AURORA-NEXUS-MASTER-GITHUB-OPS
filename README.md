@@ -75,3 +75,19 @@ Gemini/OCR -> relatórios financeiros automáticos -> painel executivo -> concil
 ```
 
 Nada de alimentar zoológico de função duplicada. A civilização já sofre o bastante.
+
+## Segurança contra redundância
+
+- existe um único handler operacional agendável: `executarAutomacaoOperacionalWMGJ`;
+- o handler e os comandos mutáveis da API usam o mesmo `ScriptLock` antes de qualquer escrita operacional;
+- instaladores antigos de ciclos diários/produção falham fechados e apontam para `instalarGatilhoAutomacaoWMGJ`;
+- a auditoria remove handlers legados e duplicatas do handler principal, sem apagar gatilhos alheios ao inventário WMGJ;
+- deploys são serializados e não executam ingestão, dashboard ou diagnóstico com escrita por padrão;
+- reparo de gatilhos, reinstalação e diagnósticos de runtime exigem `workflow_dispatch` e inputs explícitos.
+
+Validação local:
+
+```text
+node tools/audit-appscript.js
+for file in src/*.gs; do node --check < "$file"; done
+```
