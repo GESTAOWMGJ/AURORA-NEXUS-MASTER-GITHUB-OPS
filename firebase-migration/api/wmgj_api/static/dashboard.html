@@ -1,208 +1,57 @@
 <!doctype html>
 <html lang="pt-BR">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#0b4d4a">
-    <meta
-      name="wmgj-dashboard-endpoint"
-      content="/v1/organizations/{orgId}/dashboards/operational"
-    >
-    <title>WMGJ · Painel de homologação</title>
-    <link rel="stylesheet" href="/assets/dashboard.css">
-    <script src="/assets/dashboard.js" defer></script>
-  </head>
-  <body>
-    <a class="skip-link" href="#conteudo-principal">Ir para o conteúdo principal</a>
-
-    <header class="command-bar" aria-labelledby="page-title">
-      <div class="brand-lockup">
-        <span class="brand-mark" aria-hidden="true">W</span>
-        <div>
-          <p class="eyebrow">Centro de controle · homologação</p>
-          <h1 id="page-title">Operação WMGJ sob evidência</h1>
-        </div>
-      </div>
-
-      <div class="environment-cluster" aria-label="Estado do ambiente">
-        <span class="environment-badge" id="environment-badge">Homologação</span>
-        <span class="auth-badge" id="auth-badge">Autenticação pendente</span>
-      </div>
-
-      <form class="scope-form" id="scope-form" aria-label="Escopo do painel">
-        <label>
-          <span>Organização</span>
-          <input
-            id="org-input"
-            name="org"
-            pattern="[a-z0-9][a-z0-9_-]{1,63}"
-            maxlength="64"
-            autocomplete="off"
-            spellcheck="false"
-            inputmode="text"
-            required
-          >
-        </label>
-        <label>
-          <span>Competência</span>
-          <input id="competence-input" name="competence" type="month" required>
-        </label>
-        <button class="button button-primary" type="submit">Aplicar escopo</button>
-        <button class="button button-secondary" id="refresh-button" type="button">Atualizar leitura</button>
-      </form>
-
-      <p class="command-status" id="command-status" role="status" aria-live="polite">
-        Aguardando uma leitura autorizada.
-      </p>
-    </header>
-
-    <main id="conteudo-principal" tabindex="-1">
-      <section class="demo-banner" id="demo-banner" aria-labelledby="demo-title" hidden>
-        <strong id="demo-title">Modo demonstração — dados integralmente sintéticos</strong>
-        <span>Nenhum valor desta tela representa a operação real, paciente, profissional ou instituição.</span>
-      </section>
-
-      <section class="trust-strip" aria-labelledby="trust-title">
-        <div class="section-intro trust-intro">
-          <p class="eyebrow">Confiabilidade da leitura</p>
-          <h2 id="trust-title">Estado composto, sem ocultar limitações</h2>
-          <p id="scope-summary">Organização e competência ainda não carregadas.</p>
-        </div>
-
-        <article class="status-card" id="transport-card" data-tone="neutral">
-          <span>Transporte</span>
-          <strong id="transport-value">Aguardando</strong>
-          <small id="transport-note">Sem conexão iniciada</small>
-        </article>
-        <article class="status-card" id="freshness-card" data-tone="neutral">
-          <span>Frescor</span>
-          <strong id="freshness-value">Desconhecido</strong>
-          <small id="freshness-note">Sem snapshot</small>
-        </article>
-        <article class="status-card" id="completeness-card" data-tone="neutral">
-          <span>Completude</span>
-          <strong id="completeness-value">Desconhecida</strong>
-          <small id="completeness-note">Sem dados validados</small>
-        </article>
-        <article class="status-card" id="severity-card" data-tone="neutral">
-          <span>Severidade operacional</span>
-          <strong id="severity-value">Desconhecida</strong>
-          <small id="severity-note">Sem inferência local</small>
-        </article>
-      </section>
-
-      <section class="gate-panel" id="gate-panel" aria-labelledby="gate-title">
-        <span class="gate-icon" aria-hidden="true">⌁</span>
-        <div>
-          <p class="eyebrow">Acesso protegido</p>
-          <h2 id="gate-title">Autenticação ainda não fornecida</h2>
-          <p id="gate-detail">
-            A futura camada de login deverá fornecer Firebase ID Token e App Check apenas em
-            memória. Nenhum dado operacional será solicitado enquanto um deles estiver ausente.
-          </p>
-        </div>
-      </section>
-
-      <div id="dashboard-content" hidden>
-        <section class="panel alerts-panel" id="alerts-section" aria-labelledby="alerts-title">
-          <div class="section-intro">
-            <p class="eyebrow">Prioridade de leitura</p>
-            <h2 id="alerts-title">Alertas que exigem atenção</h2>
-            <p>Ordenados por risco; nenhuma ação mutável está disponível nesta homologação.</p>
-          </div>
-          <ol class="alerts-list" id="alerts-list"></ol>
-          <p class="empty-message" id="alerts-empty" role="status" hidden>
-            Nenhum alerta no escopo atual.
-          </p>
-        </section>
-
-        <div class="dashboard-grid">
-          <section class="panel pipeline-panel" aria-labelledby="pipeline-title">
-            <div class="section-intro panel-heading">
-              <div>
-                <p class="eyebrow">Fluxo operacional</p>
-                <h2 id="pipeline-title">Pipeline da competência</h2>
-                <p>Valores absolutos permanecem visíveis; barras são apenas apoio visual.</p>
-              </div>
-              <div class="headline-metric">
-                <span>Total no escopo</span>
-                <strong id="pipeline-total">—</strong>
-              </div>
-            </div>
-            <div class="metric-bars" id="pipeline-bars" aria-label="Distribuição do pipeline"></div>
-            <p class="panel-note" id="pipeline-note"></p>
-          </section>
-
-          <section class="panel financial-panel" aria-labelledby="financial-title">
-            <div class="section-intro">
-              <p class="eyebrow">Financeiro agregado</p>
-              <h2 id="financial-title">Posição da competência</h2>
-              <p>Resumo para conferência; não constitui fechamento ou reconhecimento definitivo.</p>
-            </div>
-            <dl class="metric-list" id="financial-metrics">
-              <div>
-                <dt>Faturado</dt>
-                <dd id="billed-amount">—</dd>
-              </div>
-              <div>
-                <dt>Recebido</dt>
-                <dd id="received-amount">—</dd>
-              </div>
-              <div>
-                <dt>Pendente</dt>
-                <dd id="pending-amount">—</dd>
-              </div>
-              <div id="reconciliation-row">
-                <dt>Diferença de conciliação</dt>
-                <dd id="reconciliation-difference">—</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section class="panel audit-panel" aria-labelledby="audit-title">
-            <div class="section-intro">
-              <p class="eyebrow">Auditoria e governança</p>
-              <h2 id="audit-title">Pendências por evidência</h2>
-              <p>Contagens agregadas, sem conteúdo clínico ou documento-fonte.</p>
-            </div>
-            <dl class="audit-grid" id="audit-metrics">
-              <div>
-                <dt>Achados abertos</dt>
-                <dd id="open-findings">—</dd>
-              </div>
-              <div data-tone="danger">
-                <dt>Achados críticos</dt>
-                <dd id="critical-findings">—</dd>
-              </div>
-              <div data-tone="warning">
-                <dt>Ações vencidas</dt>
-                <dd id="overdue-actions">—</dd>
-              </div>
-              <div>
-                <dt>Lacunas de evidência</dt>
-                <dd id="evidence-gaps">—</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section class="panel sources-panel" aria-labelledby="sources-title">
-            <div class="section-intro">
-              <p class="eyebrow">Cobertura das fontes</p>
-              <h2 id="sources-title">Origem e última leitura válida</h2>
-              <p>A ausência de uma fonte é exibida como parcial ou inválida, nunca como zero.</p>
-            </div>
-            <ul class="sources-list" id="sources-list"></ul>
-            <p class="empty-message" id="sources-empty" role="status" hidden>
-              Nenhuma fonte declarada pelo snapshot.
-            </p>
-          </section>
-        </div>
-      </div>
-    </main>
-
-    <footer class="page-footer">
-      <span>WMGJ · Dashboard somente leitura</span>
-      <span id="footer-state">Sem dados carregados · sem cache persistente</span>
-    </footer>
-  </body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#090e17">
+<meta name="wmgj-dashboard-endpoint" content="/v1/organizations/{orgId}/dashboards/operational">
+<title>Aurora Nexus · Visão financeira</title>
+<link rel="stylesheet" href="/assets/aurora-visual.css">
+<script src="/assets/dashboard.js" defer></script>
+<script src="/assets/aurora-visual.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#conteudo-principal">Ir para o conteúdo principal</a>
+<aside class="sidebar" aria-label="Navegação principal">
+  <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">A<span>∕</span>N</span><span class="brand-words"><strong>AURORA <span>NEXUS</span></strong><small>GESTÃO SOB EVIDÊNCIA</small></span></div>
+  <div class="workspace-identity"><span class="workspace-avatar">W</span><div><strong>WMGJ</strong><small>Operação piloto</small></div><span class="workspace-tag">PRIVADO</span></div>
+  <p class="nav-caption">CENTRO DE COMANDO</p>
+  <nav class="section-nav" aria-label="Seções do painel"><a href="#financial-title" aria-current="location"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.4"/><rect x="14" y="3" width="7" height="7" rx="1.4"/><rect x="3" y="14" width="7" height="7" rx="1.4"/><rect x="14" y="14" width="7" height="7" rx="1.4"/></svg><span>Visão financeira</span></a><a href="#alerts-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5M12 17v.1"/></svg><span>Central de alertas</span><span id="nav-alert-count" class="nav-count">—</span></a><a href="#pipeline-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h5l3-8 4 16 3-8h5"/></svg><span>Operação</span></a><a href="#audit-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg><span>Auditoria</span></a><a href="#sources-title"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 5-10 5L2 8l10-5Zm-10 9 10 5 10-5M2 16l10 5 10-5"/></svg><span>Fontes e evidências</span></a></nav>
+  <div class="sidebar-bottom"><span class="secure-label"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg> Acesso restrito</span><p>Rastreabilidade em cada decisão.</p><span class="sidebar-version">AURORA NEXUS / FINANCE</span></div>
+</aside>
+<div class="workspace">
+<header class="command-bar">
+  <div class="mobile-brand"><span class="brand-mark" aria-hidden="true">A<span>∕</span>N</span><span class="brand-words"><strong>AURORA <span>NEXUS</span></strong><small>GESTÃO SOB EVIDÊNCIA</small></span></div>
+  <div class="topline"><div class="breadcrumb">Centro de comando <span>/</span> <strong>Financeiro</strong></div><div class="environment-cluster" aria-label="Estado do ambiente"><span class="environment-badge" id="environment-badge">Homologação</span><span class="auth-badge" id="auth-badge">Autenticação pendente</span></div><button class="button button-quiet focus-control" id="focus-toggle" type="button" aria-pressed="false"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/></svg><span>Modo foco</span></button></div>
+</header>
+<main id="conteudo-principal" tabindex="-1">
+  <section class="demo-banner" id="demo-banner" aria-labelledby="demo-title" hidden><span class="demo-dot" aria-hidden="true"></span><div><strong id="demo-title">Prévia de design · dados sintéticos</strong><span>Nenhum valor representa a operação real.</span></div></section>
+  <div class="page-heading"><div><p class="eyebrow">WMGJ / CONTROLE FINANCEIRO</p><h1 id="page-title">Visão financeira<span>.</span></h1><p>O dinheiro em foco. A decisão com evidência.</p></div><div class="heading-actions"><button type="button" class="button button-secondary" id="filters-toggle" aria-expanded="false" aria-controls="scope-controls"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h18M3 17h18"/><circle cx="8" cy="7" r="2.5"/><circle cx="16" cy="17" r="2.5"/></svg><span>Filtros</span></button><button class="button button-primary" id="refresh-button" type="button"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5M19 10A7 7 0 0 0 6 6M5 14a7 7 0 0 0 13 4"/></svg><span>Atualizar leitura</span></button></div></div>
+  <details class="scope-controls" id="scope-controls"><summary>Organização e competência <span id="active-scope">Aguardando escopo</span></summary><form class="scope-form" id="scope-form" aria-label="Escopo do painel"><label><span>Organização</span><input id="org-input" name="org" pattern="[a-z0-9][a-z0-9_-]{1,63}" maxlength="64" autocomplete="off" spellcheck="false" inputmode="text" required></label><label><span>Competência</span><input id="competence-input" name="competence" type="month" required></label><button class="button button-primary" type="submit">Aplicar escopo <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg></button></form></details>
+  <p class="command-status" id="command-status" role="status" aria-live="polite">Aguardando uma leitura autorizada.</p>
+  <section class="gate-panel" id="gate-panel" aria-labelledby="gate-title"><span class="gate-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg></span><div><p class="eyebrow">ACESSO PROTEGIDO</p><h2 id="gate-title">Autenticação ainda não fornecida</h2><p id="gate-detail">A camada de autenticação deve fornecer Firebase ID Token e App Check apenas em memória. Nenhum dado operacional será solicitado enquanto um deles estiver ausente.</p></div></section>
+  <div id="dashboard-content" hidden>
+    <section class="financial-panel" aria-labelledby="financial-title"><div class="section-heading"><h2 id="financial-title">Posição da competência</h2><span class="financial-context"><span class="state-pill" id="reading-state" data-tone="neutral">Leitura não aferida</span><span class="section-meta">Leitura agregada · não é fechamento</span></span></div>
+      <dl class="metric-list" id="financial-metrics">
+        <div class="money-card money-hero" data-finance="billed"><dt><span>Faturamento</span><span class="money-symbol"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg></span></dt><dd id="billed-amount">—</dd><dd class="metric-note">Emitido no escopo</dd><dd class="metric-foot">Faturado ≠ recebido</dd></div>
+        <div class="money-card" data-finance="received"><dt><span>Recebido</span><span class="money-symbol"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 8H5a2 2 0 0 1 0-4h13v4M3 6v13a1 1 0 0 0 1 1h16V8M20 12h-5v4h5"/></svg></span></dt><dd id="received-amount">—</dd><dd class="metric-note">Entradas registradas</dd><dd class="metric-foot">Recebido ≠ lucro</dd></div>
+        <div class="money-card" data-finance="pending"><dt><span>A receber</span><span class="money-symbol"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span></dt><dd id="pending-amount">—</dd><dd class="metric-note">Pendente no escopo</dd><dd class="metric-foot">Não implica atraso ou perda</dd></div>
+        <div class="money-card" id="reconciliation-row" data-finance="reconciliation" data-tone="neutral"><dt><span>Conciliação</span><span class="money-symbol"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 17h16M8 3 4 7l4 4M16 13l4 4-4 4"/></svg></span></dt><dd id="reconciliation-difference">—</dd><dd class="metric-note">Diferença a conferir</dd><dd class="metric-foot">Divergência ≠ prejuízo</dd></div>
+      </dl>
+    </section>
+    <div class="insight-grid">
+      <section class="panel comparison-panel" aria-labelledby="comparison-title"><div class="panel-heading"><div><p class="eyebrow">EMISSÃO E RECEBIMENTOS</p><h2 id="comparison-title">A dimensão de cada valor.</h2></div><span class="panel-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12h5l3-8 4 16 3-8h5"/></svg></span></div><p class="section-description">Comparação na mesma escala, com valores à vista.</p><div id="finance-comparison" class="finance-comparison" aria-label="Comparativo financeiro"><p class="empty-message">Sem valores aferidos para comparar.</p></div><div class="chart-foot"><span>Base zero · métricas não aditivas</span><span id="comparison-unit">Valores em reais</span></div><div class="result-disclosure"><span class="result-symbol" aria-hidden="true">±</span><div><strong>Lucro / prejuízo líquido</strong><p>Exige receitas, despesas e tributos conciliados.</p></div><span class="state-pill" data-tone="neutral">Não aferido</span></div></section>
+      <section class="panel alerts-panel" id="alerts-section" aria-labelledby="alerts-title"><div class="panel-heading"><div><p class="eyebrow">ATENÇÃO DIRIGIDA</p><h2 id="alerts-title">Prioridades agora.</h2></div><span class="alert-count" id="alert-count">—</span></div><p class="section-description">Risco declarado. Evidência para conferir.</p><ol class="alerts-list" id="alerts-list"></ol><p class="empty-message" id="alerts-empty" role="status" hidden>Nenhum alerta no escopo atual.</p><p class="panel-foot"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg> Somente leitura. Sem ações financeiras automáticas.</p></section>
+    </div>
+    <div class="dashboard-grid">
+      <section class="panel pipeline-panel" aria-labelledby="pipeline-title"><div class="panel-heading"><div><p class="eyebrow">OPERAÇÃO</p><h2 id="pipeline-title">Entrada à validação.</h2></div><div class="headline-metric"><span>No escopo</span><strong id="pipeline-total">—</strong></div></div><div class="metric-bars" id="pipeline-bars" aria-label="Distribuição do pipeline"></div><p class="panel-note" id="pipeline-note"></p></section>
+      <section class="panel audit-panel" aria-labelledby="audit-title"><div class="panel-heading"><div><p class="eyebrow">AUDITORIA E GOVERNANÇA</p><h2 id="audit-title">O risco, sem ruído.</h2></div><span class="panel-icon"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg></span></div><dl class="audit-grid" id="audit-metrics"><div><dt>Achados abertos</dt><dd id="open-findings">—</dd></div><div data-tone="danger"><dt>Achados críticos</dt><dd id="critical-findings">—</dd></div><div data-tone="warning"><dt>Ações vencidas</dt><dd id="overdue-actions">—</dd></div><div><dt>Lacunas de evidência</dt><dd id="evidence-gaps">—</dd></div></dl><p class="panel-note">Contagens agregadas. Sem conteúdo clínico.</p></section>
+    </div>
+    <section class="panel sources-panel" aria-labelledby="sources-title"><div class="panel-heading"><div><p class="eyebrow">RASTREABILIDADE</p><h2 id="sources-title">A evidência por trás da decisão.</h2></div><span class="section-meta">Origem e última leitura válida</span></div><ul class="sources-list" id="sources-list"></ul><p class="empty-message" id="sources-empty" role="status" hidden>Nenhuma fonte declarada pelo snapshot.</p></section>
+  </div>
+  <section class="trust-strip" aria-labelledby="trust-title"><div class="trust-intro"><h2 id="trust-title">Qualidade da leitura</h2><span class="section-meta">Ausência não é zero.</span></div><div class="status-grid"><article class="status-card" id="transport-card" data-tone="neutral"><span>Conexão</span><strong id="transport-value">Aguardando</strong><small id="transport-note">Sem conexão iniciada</small></article><article class="status-card" id="freshness-card" data-tone="neutral"><span>Atualização</span><strong id="freshness-value">Desconhecida</strong><small id="freshness-note">Sem snapshot</small></article><article class="status-card" id="completeness-card" data-tone="neutral"><span>Cobertura</span><strong id="completeness-value">Desconhecida</strong><small id="completeness-note">Sem dados validados</small></article><article class="status-card" id="severity-card" data-tone="neutral"><span>Risco operacional</span><strong id="severity-value">Desconhecido</strong><small id="severity-note">Sem inferência local</small></article></div><p id="scope-summary">Organização e competência ainda não carregadas.</p></section>
+</main>
+<footer class="page-footer"><span><strong>AURORA NEXUS</strong> · WMGJ</span><span id="footer-state">Sem dados carregados · sem cache persistente</span></footer>
+</div>
+</body>
 </html>
