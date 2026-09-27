@@ -57,9 +57,9 @@ FastAPI Control Plane (homologação)
 
 ## Aplicação Full Firebase
 
-O pacote inclui agora um shell operacional privado no Firebase Hosting, APIs autenticadas em Cloud Functions e um motor de projeções sanitizadas. O motor roda a cada 15 minutos e cobre o mapa M01–M10, mas permanece em `SHADOW`: lê a réplica canônica, calcula indicadores e abre trilha de auditoria sem escrever na fonte atual.
+O pacote inclui um shell operacional privado no Firebase Hosting, APIs autenticadas em Cloud Functions e um motor de projeções sanitizadas. O agendamento roda a cada 15 minutos, mas o motor nasce desabilitado e só publica quando a organização define `projectionEnabled=true`, `projectionMode=SHADOW` e uma competência `YYYY-MM`. Ele cobre o mapa M01–M10, lê a réplica canônica, calcula indicadores e grava snapshot+auditoria atomicamente sem escrever na fonte atual.
 
-O back-end exige simultaneamente allowlist de e-mail, sessão Firebase revogável e membership ativa em `organizations/wmgj/members/{uid}`. Mutações humanas usam CSRF, RBAC, idempotência e controle de revisão. Ações irreversíveis, dados clínicos sensíveis e mutação da fonte continuam bloqueados.
+O back-end exige simultaneamente allowlist de e-mail, sessão Firebase revogável e membership ativa em `organizations/wmgj/members/{uid}`. Mutações humanas usam CSRF HMAC vinculado à sessão/rota, RBAC, idempotência e controle de revisão. Ações irreversíveis, dados clínicos sensíveis e mutação da fonte continuam bloqueados.
 
 Arquitetura, gates, implantação e rollback: `docs/16-full-firebase-shadow-mode.md`.
 

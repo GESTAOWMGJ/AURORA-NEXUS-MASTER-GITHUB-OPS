@@ -5,18 +5,41 @@
  */
 
 var WMGJ_FIRESTORE_MIGRATION_VERSION = 'v1.0.0-backfill-checkpoint';
+var WMGJ_FIRESTORE_MONEY_NORMALIZATION_VERSION = 'brl-cents-v1';
 
 function wmgjFirestoreMigrationMap_() {
   return {
     '01_CADASTRO_ARQUIVOS': { entityType: 'sourceDocument', sensitivity: 'RESTRICTED' },
     '02_PRODUTIVIDADE_MENSAL': { entityType: 'productivityRecord', sensitivity: 'RESTRICTED' },
     '03_PRODUTIVIDADE_MEDICO': { entityType: 'productivityRecord', sensitivity: 'RESTRICTED' },
-    '04_CENTRO_CUSTOS': { entityType: 'financialEntry', sensitivity: 'RESTRICTED' },
-    '05_FINANCEIRO_MENSAL': { entityType: 'financialEntry', sensitivity: 'RESTRICTED' },
-    '06_NFS_E': { entityType: 'invoice', sensitivity: 'RESTRICTED' },
+    '04_CENTRO_CUSTOS': {
+      entityType: 'financialEntry', sensitivity: 'RESTRICTED',
+      moneyFields: { amountCents: ['valor', 'valor_total', 'custo', 'despesa'] }
+    },
+    '05_FINANCEIRO_MENSAL': {
+      entityType: 'financialEntry', sensitivity: 'RESTRICTED',
+      moneyFields: {
+        grossRevenueCents: ['receita_bruta'], receivedAmountCents: ['recebido', 'valor_recebido'],
+        outstandingAmountCents: ['em_aberto', 'valor_em_aberto'], expenseAmountCents: ['despesa', 'despesas'],
+        resultAmountCents: ['resultado']
+      }
+    },
+    '06_NFS_E': {
+      entityType: 'invoice', sensitivity: 'RESTRICTED',
+      moneyFields: { totalCents: ['valor_total', 'valor_nf', 'valor_nota', 'valor_nfs_e', 'valor_nfse', 'valor'] }
+    },
     '07_ESCALA': { entityType: 'shift', sensitivity: 'RESTRICTED' },
-    '07_IMPOSTOS': { entityType: 'taxObligation', sensitivity: 'RESTRICTED' },
-    '08_EXTRATOS_BRADESCO': { entityType: 'bankTransaction', sensitivity: 'RESTRICTED' },
+    '07_IMPOSTOS': {
+      entityType: 'taxObligation', sensitivity: 'RESTRICTED',
+      moneyFields: { amountCents: ['valor', 'valor_total', 'valor_imposto'] }
+    },
+    '08_EXTRATOS_BRADESCO': {
+      entityType: 'bankTransaction', sensitivity: 'RESTRICTED',
+      moneyFields: {
+        amountCents: ['valor', 'valor_lancamento', 'valor_transacao'],
+        liquidatedAmountCents: ['valor_liquidado', 'valor_conciliado']
+      }
+    },
     '08_CONTRATOS_E_ATAS': { entityType: 'contract', sensitivity: 'RESTRICTED' },
     '13_CONTROLE_PIPELINE': { entityType: 'runtimeCheckpoint', sensitivity: 'INTERNAL' },
     '14_MEMORIA_BASE_DOCUMENTOS': { entityType: 'sourceDocument', sensitivity: 'RESTRICTED' },
@@ -87,64 +110,69 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
     wmgjFirestoreLog_('MIGRATION_QUARANTINE', 'ERRO', quarantine);
     return quarantine;
   }
-  var values = sheet.getRange(startRow, 1, rowsToRead, width).getDisplayValues();
+  var dataRange = sheet.getRange(startRow, 1, rowsToRead, width);
+  var displayValues = dataRange.getDisplayValues();
+  var rawValues = dataRange.getValues();
   var sent = 0;
   var duplicates = 0;
   var errors = 0;
   var planned = 0;
   var lastAcceptedRow = startRow - 1;
 
-  values.forEach(function(row, offset) {
+  displayValues.forEach(function(row, offset) {
     var rowNumber = startRow + offset;
     if (row.join('').trim() === '') return;
 
-    var record = wmgjFirestoreRowObject_(headers, row);
-    var rowHash = wmgjFirestoreHashString_(JSON.stringify(record));
-    var entityKey = wmgjFirestoreEntityKey_(sheetName, record, rowNumber);
-    var legacyStatus = String(record.status || record.status_processamento || record.status_auditoria || '');
-    var workflow = wmgjFirestoreWorkflowFromLegacy_(legacyStatus);
-    var occurredAt = new Date();
-    var event = {
-      schemaVersion: 1,
-      eventId: Utilities.getUuid(),
-      eventType: 'ENTITY_UPSERT',
-      orgId: bridgeConfig.orgId,
-      occurredAt: occurredAt.toISOString(),
-      // O primeiro backfill trata a linha legada como versão congelada 1.
-      // Mudanças posteriores falham fechadas até existir versionador durável.
-      sourceVersion: 1,
-      idempotencyKey: [bridgeConfig.orgId, 'SHEETS', ss.getId(), sheetName, rowNumber, rowHash].join(':'),
-      entityType: config.entityType,
-      entityKey: entityKey,
-      actor: {
-        type: 'SYSTEM',
-        id: wmgjFirestoreActorId_(),
-        source: 'WMGJ_SHEETS_BACKFILL'
-      },
-      source: {
-        system: 'SHEETS',
-        sourceId: [ss.getId(), sheetName, rowNumber].join(':'),
-        parentId: ss.getId(),
-        fileName: sheetName + '!A' + rowNumber,
-        contentHash: rowHash,
-        hashMethod: 'row_sha256'
-      },
-      workflowState: workflow.state,
-      reviewState: workflow.review,
-      riskLevel: workflow.risk,
-      sensitivity: config.sensitivity,
-      competence: wmgjFirestoreFindCompetence_(record),
-      documentType: sheetName,
-      record: record,
-      metadata: {
-        migrationVersion: WMGJ_FIRESTORE_MIGRATION_VERSION,
-        sourceSheet: sheetName,
-        sourceRow: rowNumber,
-        nonDestructive: true
-      }
-    };
-
     try {
+      // O hash representa exatamente os valores exibidos na fonte. Campos
+      // canônicos em centavos são derivados separadamente, sem alterar a Sheet.
+      var sourceRecord = wmgjFirestoreRowObject_(headers, row);
+      var rowHash = wmgjFirestoreHashString_(JSON.stringify(sourceRecord));
+      var record = wmgjFirestoreAddCanonicalMoney_(headers, rawValues[offset], row, sourceRecord, config.moneyFields || {});
+      var entityKey = wmgjFirestoreEntityKey_(sheetName, record, rowNumber);
+      var legacyStatus = String(record.status || record.status_processamento || record.status_auditoria || '');
+      var workflow = wmgjFirestoreWorkflowFromLegacy_(legacyStatus);
+      var occurredAt = new Date();
+      var event = {
+        schemaVersion: 1,
+        eventId: Utilities.getUuid(),
+        eventType: 'ENTITY_UPSERT',
+        orgId: bridgeConfig.orgId,
+        occurredAt: occurredAt.toISOString(),
+        // O primeiro backfill trata a linha legada como versão congelada 1.
+        // Mudanças posteriores falham fechadas até existir versionador durável.
+        sourceVersion: 1,
+        idempotencyKey: [bridgeConfig.orgId, 'SHEETS', ss.getId(), sheetName, rowNumber, rowHash].join(':'),
+        entityType: config.entityType,
+        entityKey: entityKey,
+        actor: {
+          type: 'SYSTEM',
+          id: wmgjFirestoreActorId_(),
+          source: 'WMGJ_SHEETS_BACKFILL'
+        },
+        source: {
+          system: 'SHEETS',
+          sourceId: [ss.getId(), sheetName, rowNumber].join(':'),
+          parentId: ss.getId(),
+          fileName: sheetName + '!A' + rowNumber,
+          contentHash: rowHash,
+          hashMethod: 'row_sha256'
+        },
+        workflowState: workflow.state,
+        reviewState: workflow.review,
+        riskLevel: workflow.risk,
+        sensitivity: config.sensitivity,
+        competence: wmgjFirestoreFindCompetence_(record),
+        documentType: sheetName,
+        record: record,
+        metadata: {
+          migrationVersion: WMGJ_FIRESTORE_MIGRATION_VERSION,
+          moneyNormalizationVersion: WMGJ_FIRESTORE_MONEY_NORMALIZATION_VERSION,
+          sourceSheet: sheetName,
+          sourceRow: rowNumber,
+          nonDestructive: true
+        }
+      };
       var response = wmgjFirestoreEnviarEvento_(event);
       planned++;
       if (bridgeConfig.dryRun) return;
@@ -169,7 +197,7 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
     ok: errors === 0,
     dryRun: bridgeConfig.dryRun,
     startRow: startRow,
-    rowsRead: values.length,
+    rowsRead: displayValues.length,
     planned: planned,
     sent: sent,
     duplicates: duplicates,
@@ -184,6 +212,55 @@ function wmgjFirestoreRowObject_(headers, row) {
     var key = wmgjFirestoreNormalizeHeader_(header, index);
     var value = row[index];
     if (value !== '') output[key] = String(value).slice(0, 10000);
+  });
+  return output;
+}
+
+function wmgjFirestoreBrlToCents_(rawValue, displayValue) {
+  if ((rawValue === '' || rawValue === null || rawValue === undefined) && String(displayValue || '').trim() === '') return null;
+  var numeric;
+  if (typeof rawValue === 'number') {
+    if (!isFinite(rawValue)) throw new Error('MONEY_VALUE_INVALID');
+    numeric = rawValue;
+  } else {
+    var text = String(displayValue !== undefined ? displayValue : rawValue).trim();
+    if (!text) return null;
+    if (/[eE]/.test(text) || /^[-+]?\d{1,3}(,\d{3})+\.\d{2}$/.test(text)) throw new Error('MONEY_FORMAT_AMBIGUOUS');
+    var negativeParentheses = /^\(.*\)$/.test(text);
+    text = text.replace(/^\(|\)$/g, '').replace(/R\$/gi, '').replace(/\s/g, '');
+    if (/^-?\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(text) || /^-?\d+(,\d{1,2})$/.test(text)) {
+      text = text.replace(/\./g, '').replace(',', '.');
+    } else if (!/^-?\d+(\.\d{1,2})?$/.test(text)) {
+      throw new Error('MONEY_FORMAT_INVALID');
+    }
+    numeric = Number(text);
+    if (negativeParentheses) numeric = -Math.abs(numeric);
+  }
+  if (!isFinite(numeric)) throw new Error('MONEY_VALUE_INVALID');
+  var scaled = numeric * 100;
+  var cents = Math.round(scaled);
+  if (Math.abs(scaled - cents) > 0.000001 || !Number.isSafeInteger(cents)) throw new Error('MONEY_PRECISION_OR_RANGE_INVALID');
+  return cents;
+}
+
+function wmgjFirestoreAddCanonicalMoney_(headers, rawRow, displayRow, sourceRecord, moneyFields) {
+  var output = {};
+  Object.keys(sourceRecord || {}).forEach(function(key) { output[key] = sourceRecord[key]; });
+  var normalizedHeaders = (headers || []).map(function(header, index) { return wmgjFirestoreNormalizeHeader_(header, index); });
+  Object.keys(moneyFields || {}).forEach(function(canonicalField) {
+    var candidates = moneyFields[canonicalField] || [];
+    var parsed = [];
+    candidates.forEach(function(candidate) {
+      var index = normalizedHeaders.indexOf(candidate);
+      if (index < 0) return;
+      var cents = wmgjFirestoreBrlToCents_(rawRow[index], displayRow[index]);
+      if (cents !== null) parsed.push(cents);
+    });
+    if (parsed.length === 0) return;
+    for (var i = 1; i < parsed.length; i++) {
+      if (parsed[i] !== parsed[0]) throw new Error('MONEY_FIELD_CONFLICT:' + canonicalField);
+    }
+    output[canonicalField] = parsed[0];
   });
   return output;
 }

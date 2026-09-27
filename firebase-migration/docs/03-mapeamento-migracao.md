@@ -21,6 +21,18 @@
 | `25_TRAVA_WATCHDOG` | `runtimeLocks` | Lease e heartbeat no servidor |
 | `42_CHECKPOINT_OPERACIONAL` | `runtimeCheckpoints` | Evidência, bloqueio e próxima ação |
 
+## Normalização financeira do piloto
+
+O backfill mantém o valor exibido na Sheet para proveniência e cria centavos inteiros somente por allowlist explícita:
+
+| Aba | Campo canônico | Cabeçalhos aceitos no piloto |
+|---|---|---|
+| `06_NFS_E` | `totalCents` | `valor_total`, `valor_nf`, `valor_nota`, `valor_nfs_e`, `valor_nfse`, `valor` |
+| `08_EXTRATOS_BRADESCO` | `amountCents` | `valor`, `valor_lancamento`, `valor_transacao` |
+| `08_EXTRATOS_BRADESCO` | `liquidatedAmountCents` | `valor_liquidado`, `valor_conciliado` |
+
+Formato monetário ausente permanece ausente. Formato ambíguo, fração de centavo, overflow ou conflito entre dois cabeçalhos interrompe a linha e impede avanço do checkpoint. `05_FINANCEIRO_MENSAL` permanece evidência resumida e não é somado aos lançamentos detalhados, evitando dupla contagem. Os cabeçalhos reais devem ser conferidos no `DRY_RUN` antes do primeiro envio.
+
 ## Estados canônicos
 
 ```text

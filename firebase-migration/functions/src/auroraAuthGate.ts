@@ -2,10 +2,10 @@ import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import {
-  CSRF_COOKIE_NAME,
+  CSRF_PURPOSES,
   SESSION_COOKIE_NAME,
+  csrfTokenForSession,
   isEmailAllowed,
-  newCsrfToken,
   parseAllowedEmails,
   resolveMember,
   validCsrf,
@@ -15,6 +15,7 @@ import { auroraProtectedShell } from "./auroraFrontend.js";
 import { auroraAuth } from "./firebase.js";
 
 const AURORA_NEXUS_ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
+const AURORA_NEXUS_CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const SESSION_TTL_SECONDS = SESSION_TTL_MS / 1000;
 
@@ -126,7 +127,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
 }
 
 export const auroraNexusAuthGate = onRequest(
-  { cors: false, secrets: [AURORA_NEXUS_ALLOWED_EMAILS] },
+  { cors: false, secrets: [AURORA_NEXUS_ALLOWED_EMAILS, AURORA_NEXUS_CSRF_HMAC_KEY] },
   async (req, res) => {
     setSecurityHeaders(res);
     if (!["GET", "HEAD"].includes(req.method)) {
@@ -145,9 +146,18 @@ export const auroraNexusAuthGate = onRequest(
       res.status(403).type("html").send(loginPage("Conta válida, mas o acesso à organização ainda não foi provisionado."));
       return;
     }
-    const csrfToken = newCsrfToken();
-    res.setHeader("Set-Cookie", `${CSRF_COOKIE_NAME}=${csrfToken}; Max-Age=${SESSION_TTL_SECONDS}; HttpOnly; Secure; SameSite=Strict; Path=/`);
-    res.status(200).type("html").send(auroraProtectedShell(member, csrfToken));
+    const csrfSecret = AURORA_NEXUS_CSRF_HMAC_KEY.value();
+    const csrfTokens = {
+      action: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.action),
+      refresh: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.refresh),
+      logout: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.logout)
+    };
+    if (!csrfTokens.action || !csrfTokens.refresh || !csrfTokens.logout) {
+      logger.error("Aurora Nexus CSRF key is not configured");
+      res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança."));
+      return;
+    }
+    res.status(200).type("html").send(auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; logout: string }));
   }
 );
 
@@ -208,7 +218,7 @@ export const auroraNexusSessionLogin = onRequest(
 );
 
 export const auroraNexusSessionLogout = onRequest(
-  { cors: false },
+  { cors: false, secrets: [AURORA_NEXUS_CSRF_HMAC_KEY] },
   async (req, res) => {
     setSecurityHeaders(res);
     if (req.method !== "POST") {
@@ -216,14 +226,11 @@ export const auroraNexusSessionLogout = onRequest(
       res.status(405).json({ ok: false, code: "METHOD_NOT_ALLOWED" });
       return;
     }
-    if (!validCsrf(req.get("cookie"), req.get("x-aurora-csrf"))) {
+    if (!validCsrf(req.get("cookie"), req.get("x-aurora-csrf"), AURORA_NEXUS_CSRF_HMAC_KEY.value(), CSRF_PURPOSES.logout)) {
       res.status(403).json({ ok: false, code: "CSRF_REJECTED" });
       return;
     }
-    res.setHeader(
-      "Set-Cookie",
-      [`${SESSION_COOKIE_NAME}=; Max-Age=0; HttpOnly; Secure; SameSite=Strict; Path=/`, `${CSRF_COOKIE_NAME}=; Max-Age=0; HttpOnly; Secure; SameSite=Strict; Path=/`]
-    );
+    res.setHeader("Set-Cookie", `${SESSION_COOKIE_NAME}=; Max-Age=0; HttpOnly; Secure; SameSite=Strict; Path=/`);
     res.status(204).send("");
   }
 );

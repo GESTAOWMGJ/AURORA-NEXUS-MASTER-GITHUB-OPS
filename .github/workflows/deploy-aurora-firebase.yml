@@ -15,7 +15,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: aurora-firebase-homologation
@@ -23,19 +22,44 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate immutable candidate
+    name: Validate exact main candidate
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: firebase-migration/functions/package-lock.json
-      - name: Build and test Functions
-        working-directory: firebase-migration/functions
-        run: npm ci && npm test && npm run build && npm audit --omit=dev --audit-level=high
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.33"
+          enable-cache: true
+          cache-dependency-glob: firebase-migration/api/uv.lock
+      - name: Validate full Firebase and API contract suite
+        env:
+          WMGJ_FIREBASE_TEST_PROJECT_ID: wmgj-firestore-rules-test
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          bash firebase-migration/scripts/bootstrap-homologacao.sh
+          npm --prefix firebase-migration/functions audit --omit=dev --audit-level=high
+          cd firebase-migration/api
+          uv sync --locked --dev
+          uv run pytest
+          uv run python scripts/run_evals.py
+          node --check wmgj_api/static/dashboard.js
+          node --test tests/static/dashboard_static.test.mjs
       - name: Validate target and deployment scope
         env:
           REQUESTED_PROJECT: ${{ inputs.project_id }}
@@ -43,7 +67,8 @@ jobs:
         run: |
           test -n "$APPROVED_PROJECT"
           test "$REQUESTED_PROJECT" = "$APPROVED_PROJECT"
-          test "$REQUESTED_PROJECT" != "wmgj-prod"
+          case "$REQUESTED_PROJECT" in wmgj-hml-jfn-*) ;; *) exit 41 ;; esac
+          case "$REQUESTED_PROJECT" in *prod*|*production*|*live*|*principal*) exit 42 ;; esac
           node -e 'JSON.parse(require("fs").readFileSync("firebase-migration/firebase.json","utf8"))'
 
   deploy:
@@ -53,6 +78,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: firebase-homologation
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,6 +94,18 @@ jobs:
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      - name: Preflight protected homologation resources
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          for secret in AURORA_NEXUS_ALLOWED_EMAILS AURORA_NEXUS_CSRF_HMAC_KEY WMGJ_INGEST_HMAC_KEYRING; do
+            gcloud secrets describe "$secret" --project "$PROJECT_ID" --format='value(name)' >/dev/null
+          done
+          db_json="$(gcloud firestore databases describe --database='(default)' --project "$PROJECT_ID" --format=json)"
+          test "$(jq -r '.locationId // empty' <<<"$db_json")" = "southamerica-east1"
+          test "$(jq -r '.deleteProtectionState // empty' <<<"$db_json")" = "DELETE_PROTECTION_ENABLED"
       - name: Build exact commit
         working-directory: firebase-migration/functions
         run: npm ci && npm test && npm run build && npm audit --omit=dev --audit-level=high
@@ -77,3 +117,18 @@ jobs:
         run: |
           test "$PROJECT_ID" = "$APPROVED_PROJECT"
           npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions,hosting,firestore:rules,firestore:indexes --non-interactive
+      - name: Smoke test private shell and deployed functions
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+        run: |
+          set -euo pipefail
+          functions="$(npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json)"
+          for fn in auroraNexusAuthGate auroraNexusSessionLogin auroraNexusSessionLogout auroraNexusBootstrap auroraNexusAction auroraNexusRefresh auroraNexusProjectionEngine; do
+            grep -Fq "$fn" <<<"$functions"
+          done
+          shell="$(curl --fail --silent --show-error --max-time 30 "https://${PROJECT_ID}.web.app/")"
+          grep -Fq "Ambiente privado" <<<"$shell"
+          if grep -Fq "Operação WMGJ" <<<"$shell"; then
+            echo "Protected shell was exposed without login" >&2
+            exit 90
+          fi

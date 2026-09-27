@@ -1,5 +1,8 @@
 {
-  "policyVersion": "aurora-nexus-firebase-shadow-v1",
+  "policyVersion": "aurora-nexus-2.3.0-firebase-shadow-v2",
+  "sourceSkill": "aurora-nexus",
+  "sourceSkillVersion": "2.3.0",
+  "governance": "JFN-AUD-GOV-001",
   "organizationId": "wmgj",
   "environment": "HOMOLOGATION",
   "mode": "SHADOW",
@@ -17,10 +20,23 @@
   },
   "automation": {
     "projectionIntervalMinutes": 15,
+    "projectionEnabledByDefault": false,
+    "projectionCompetenceRequired": true,
     "writesRestrictedToBackend": true,
     "idempotencyRequired": true,
     "irreversibleActionsEnabled": false
   },
-  "modules": ["M01", "M02", "M03", "M04", "M05", "M06", "M07", "M08", "M09", "M10"],
+  "modules": {
+    "M01": "Ingestão e Proveniência Documental",
+    "M02": "Contratos, Regras e Evidências",
+    "M03": "Ciclo de Receita e Conciliação",
+    "M04": "Glosas, Recursos e Divergências",
+    "M05": "SLA e Workflow",
+    "M06": "Governança e Planos de Ação",
+    "M07": "Indicadores e Relatórios",
+    "M08": "Integrações e Conectores",
+    "M09": "Segurança, LGPD e Segregação",
+    "M10": "Trilha de Auditoria e Integridade"
+  },
   "cutoverGate": "TWO_PARALLEL_CLOSES_WITHOUT_MATERIAL_DIVERGENCE"
 }
