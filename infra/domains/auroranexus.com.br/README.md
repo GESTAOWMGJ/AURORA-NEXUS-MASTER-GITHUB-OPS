@@ -35,6 +35,24 @@ Conteúdo operacional só pode ser entregue após autenticação validada.
 | `wmgj.auroranexus.com.br` | Piloto WMGJ como primeiro tenant operacional | login obrigatório |
 | `api.auroranexus.com.br` | API/BFF/control plane | servidor-only; sem interface pública |
 
+## Runbooks oficiais
+
+```text
+infra/domains/auroranexus.com.br/auth-gate.runbook.md
+infra/domains/auroranexus.com.br/domain-values-intake.runbook.md
+```
+
+- `auth-gate.runbook.md`: proteção da interface, login obrigatório, sessão e smoke test.
+- `domain-values-intake.runbook.md`: recebimento sanitizado dos valores oficiais de DNS, SSL e deploy.
+
+## Issue operacional
+
+```text
+#32 — Aurora Nexus — receber valores oficiais DNS, SSL e deploy
+```
+
+O issue é o local de tracking. Não colar senha, token real, TXT sensível, chave privada, DKIM real ou código de recuperação.
+
 ## Fallback atual preservado
 
 ```text
@@ -52,6 +70,7 @@ O fallback não deve ser removido enquanto o domínio customizado, o SSL e os te
 5. Toda mudança de domínio deve passar por pull request, revisão humana e checklist de rollback.
 6. Usuário e senha devem existir no provedor de identidade, nunca em arquivo versionado.
 7. Usuário autenticado deve estar explicitamente autorizado no secret `AURORA_NEXUS_ALLOWED_EMAILS`.
+8. Nenhum domínio Aurora Nexus deve exibir demonstração pública antes de autenticação.
 
 ## Runbook resumido
 
@@ -61,5 +80,6 @@ O fallback não deve ser removido enquanto o domínio customizado, o SSL e os te
 4. Adicionar os domínios customizados no provedor de hospedagem escolhido.
 5. Copiar os TXT de verificação emitidos pelo provedor para o DNS.
 6. Aguardar propagação e emissão de SSL.
-7. Executar smoke test de `https`, tela de login, sessão, logout, permissões por tenant e logs.
-8. Atualizar estes arquivos de estado desejado com o status real após validação.
+7. Executar deploy controlado de Functions e Hosting.
+8. Executar smoke test de `https`, tela de login, sessão, logout, permissões por tenant e logs.
+9. Atualizar estes arquivos de estado desejado com o status real após validação.
