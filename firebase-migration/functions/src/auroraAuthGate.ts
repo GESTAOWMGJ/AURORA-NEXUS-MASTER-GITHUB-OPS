@@ -68,7 +68,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
     h1 { margin:0 0 8px; font-size:30px; line-height:1.08; }
     p { margin:0 0 22px; color:var(--muted); line-height:1.55; }
     label { display:block; margin:14px 0 6px; color:#e6eeee; font-size:13px; font-weight:650; }
-    input { width:100%; padding:14px 14px; border-radius:14px; border:1px solid #2e5f68; background:#061a1f; color:var(--text); outline:none; font-size:15px; }
+    input, select { width:100%; padding:14px 14px; border-radius:14px; border:1px solid #2e5f68; background:#061a1f; color:var(--text); outline:none; font-size:15px; }
     input:focus { border-color:var(--gold); box-shadow:0 0 0 3px rgba(198,164,93,.18); }
     button { width:100%; margin-top:18px; border:0; border-radius:14px; padding:14px 16px; background:var(--gold); color:#08191d; font-weight:800; cursor:pointer; font-size:15px; }
     button:disabled { opacity:.62; cursor:wait; }
@@ -89,6 +89,15 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
       <button id="submit" type="submit">Entrar</button>
       <div id="status" class="status" aria-live="polite"></div>
     </form>
+    <section id="mfa-panel" hidden>
+      <p>Esta conta exige um segundo fator TOTP. Confirme o fator cadastrado antes de criar a sessão privada.</p>
+      <label for="mfa-factor">Fator</label>
+      <select id="mfa-factor"></select>
+      <label for="mfa-code">Código temporário</label>
+      <input id="mfa-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,8}" maxlength="8">
+      <button id="mfa-submit" type="button">Confirmar segundo fator</button>
+      <div id="mfa-status" class="status" aria-live="polite"></div>
+    </section>
     <div class="fineprint">Sem demonstração pública. Acesso restrito a usuários previamente autorizados.</div>
   </main>
   <script src="/__/firebase/10.12.5/firebase-app-compat.js"></script>
@@ -98,6 +107,46 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
     const form = document.getElementById('login-form');
     const statusEl = document.getElementById('status');
     const submit = document.getElementById('submit');
+    const mfaPanel = document.getElementById('mfa-panel');
+    const mfaFactor = document.getElementById('mfa-factor');
+    const mfaCode = document.getElementById('mfa-code');
+    const mfaSubmit = document.getElementById('mfa-submit');
+    const mfaStatus = document.getElementById('mfa-status');
+    let mfaResolver = null;
+
+    async function createPrivateSession(credential) {
+      const idToken = await credential.user.getIdToken(true);
+      const response = await fetch('/__sessionLogin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken })
+      });
+      await firebase.auth().signOut();
+      if (!response.ok) throw new Error('LOGIN_REJECTED');
+      window.location.replace('/');
+    }
+
+    function requestTotpChallenge(error) {
+      const totp = firebase.auth.TotpMultiFactorGenerator;
+      const resolver = error && error.resolver;
+      const hints = resolver && Array.isArray(resolver.hints)
+        ? resolver.hints.filter((hint) => totp && hint.factorId === totp.FACTOR_ID)
+        : [];
+      if (!resolver || hints.length === 0) throw new Error('UNSUPPORTED_MFA_FACTOR');
+      mfaResolver = resolver;
+      mfaFactor.replaceChildren();
+      for (const hint of hints) {
+        const option = document.createElement('option');
+        option.value = hint.uid;
+        option.textContent = hint.displayName || 'Aplicativo autenticador';
+        mfaFactor.appendChild(option);
+      }
+      form.hidden = true;
+      mfaPanel.hidden = false;
+      mfaStatus.textContent = 'Digite o código do aplicativo autenticador.';
+      mfaCode.focus();
+    }
+
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       submit.disabled = true;
@@ -107,18 +156,36 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
         const email = document.getElementById('email').value.trim();
         const password = document.getElementById('password').value;
         const credential = await firebase.auth().signInWithEmailAndPassword(email, password);
-        const idToken = await credential.user.getIdToken();
-        const response = await fetch('/__sessionLogin', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ idToken })
-        });
-        await firebase.auth().signOut();
-        if (!response.ok) throw new Error('LOGIN_REJECTED');
-        window.location.replace('/');
+        await createPrivateSession(credential);
       } catch (error) {
-        statusEl.textContent = 'Acesso não autorizado.';
+        if (error && error.code === 'auth/multi-factor-auth-required') {
+          try {
+            requestTotpChallenge(error);
+            return;
+          } catch (_) {
+            statusEl.textContent = 'O segundo fator cadastrado não é suportado neste ambiente.';
+          }
+        } else {
+          statusEl.textContent = 'Acesso não autorizado.';
+        }
         submit.disabled = false;
+      }
+    });
+    mfaSubmit.addEventListener('click', async () => {
+      mfaSubmit.disabled = true;
+      mfaStatus.textContent = 'Validando segundo fator...';
+      try {
+        if (!mfaResolver) throw new Error('MFA_RESOLVER_MISSING');
+        const code = mfaCode.value.trim();
+        if (!/^[0-9]{6,8}$/.test(code)) throw new Error('MFA_CODE_INVALID');
+        const hint = mfaResolver.hints.find((item) => item.uid === mfaFactor.value);
+        if (!hint) throw new Error('MFA_HINT_INVALID');
+        const assertion = firebase.auth.TotpMultiFactorGenerator.assertionForSignIn(hint.uid, code);
+        const credential = await mfaResolver.resolveSignIn(assertion);
+        await createPrivateSession(credential);
+      } catch (_) {
+        mfaStatus.textContent = 'Segundo fator inválido ou expirado.';
+        mfaSubmit.disabled = false;
       }
     });
   </script>

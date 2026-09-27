@@ -6,6 +6,15 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function organizationPath(orgId) {
+      return /databases/$(database)/documents/organizations/$(orgId);
+    }
+
+    function activeOrganization(orgId) {
+      return exists(organizationPath(orgId))
+        && get(organizationPath(orgId)).data.active == true;
+    }
+
     function memberPath(orgId) {
       return /databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid);
     }
@@ -18,6 +27,7 @@ service cloud.firestore {
 
     function activeMember(orgId) {
       return signedIn()
+        && activeOrganization(orgId)
         && exists(memberPath(orgId))
         && member(orgId).active == true;
     }
@@ -104,20 +114,6 @@ service cloud.firestore {
         || hasPermission(orgId, 'actions.read');
     }
 
-    function sanitizedDashboard(data) {
-      return data.keys().hasAll(['sanitized'])
-        && data.sanitized == true
-        && (
-          !('sensitivity' in data)
-          || data.sensitivity in ['PUBLIC', 'INTERNAL']
-        )
-        && !data.keys().hasAny([
-          'raw', 'rawText', 'record', 'normalized', 'sourceSnapshot',
-          'clinicalEvidence', 'patientId', 'cpf', 'cns',
-          'diagnosis', 'diagnostico'
-        ]);
-    }
-
     function sourceDocument(orgId, documentId) {
       return get(
         /databases/$(database)/documents/organizations/$(orgId)/sourceDocuments/$(documentId)
@@ -202,12 +198,10 @@ service cloud.firestore {
         allow write: if false;
       }
 
-      // Somente projeções explicitamente sanitizadas são legíveis pelo app.
+      // Projeções são servidas exclusivamente pelo BFF/Functions após RBAC e
+      // sanitização. O SDK cliente não acessa snapshots diretamente.
       match /dashboardSnapshots/{snapshotId} {
-        allow read: if activeMember(orgId)
-          && sanitizedDashboard(resource.data)
-          && facilityAllowed(orgId, resource.data);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       // Comandos humanos passam pelo FastAPI/Admin SDK. O cliente apenas lê.

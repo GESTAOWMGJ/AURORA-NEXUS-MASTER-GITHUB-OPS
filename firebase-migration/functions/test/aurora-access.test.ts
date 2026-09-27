@@ -1,8 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CSRF_PURPOSES, csrfTokenForSession, validCsrf } from "../src/auroraAccess.ts";
+import {
+  CSRF_PURPOSES,
+  csrfTokenForSession,
+  isActiveOrganization,
+  validCsrf
+} from "../src/auroraAccess.ts";
 
 const secret = "ab".repeat(32);
+
+test("organização só é ativa quando active é estritamente true", () => {
+  assert.equal(isActiveOrganization({ active: true }), true);
+  assert.equal(isActiveOrganization({ active: false }), false);
+  assert.equal(isActiveOrganization({}), false);
+  assert.equal(isActiveOrganization({ active: "true" }), false);
+  assert.equal(isActiveOrganization(undefined), false);
+});
 
 test("CSRF funciona quando o Hosting encaminha somente __session", () => {
   const cookie = "__session=session-cookie-from-firebase-hosting";

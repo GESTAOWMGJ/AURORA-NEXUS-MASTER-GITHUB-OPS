@@ -231,7 +231,7 @@
       throw new Error("CONTRACT_INVALID_ROOT");
     }
     const snapshot = payload.snapshot;
-    if (snapshot.schemaVersion !== 1) throw new Error("CONTRACT_SCHEMA_VERSION_UNSUPPORTED");
+    if (snapshot.schemaVersion !== 2) throw new Error("CONTRACT_SCHEMA_VERSION_UNSUPPORTED");
     if (snapshot.orgId !== expectedScope.org) throw new Error("CONTRACT_ORG_SCOPE_MISMATCH");
     if (snapshot.competence !== expectedScope.competence) {
       throw new Error("CONTRACT_COMPETENCE_SCOPE_MISMATCH");
@@ -283,7 +283,7 @@
     const iso = (offsetSeconds) => new Date(now - offsetSeconds * 1000).toISOString();
     return {
       snapshot: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         orgId: scope.org,
         facilityId: null,
         competence: scope.competence,
@@ -385,6 +385,48 @@
             createdAt: iso(1800),
           },
         ],
+        sanitized: true,
+        sensitivity: "INTERNAL",
+        state: "SHADOW",
+        financialCents: {
+          invoicedCents: 48630000,
+          receivedCents: 41285000,
+          glossCents: null,
+          outstandingCents: 7345000,
+        },
+        operations: { openActions: 14, overdueActions: 3, openFindings: 14 },
+        coverage: { evidencePercent: 98.8, reconciliationPercent: 84.9 },
+        sampleSizes: {
+          invoices: 420,
+          bankTransactions: 382,
+          glosses: 5,
+          actionItems: 14,
+          sourceDocuments: 405,
+          reconciliations: 377,
+          auditFindings: 14,
+        },
+        dataQuality: {
+          complete: true,
+          sourcePresent: true,
+          invalidFinancialRecords: 0,
+          validFinancialRecords: 807,
+        },
+        modules: [
+          ["M01", "Ingestão e Proveniência Documental"],
+          ["M02", "Contratos, Regras e Evidências"],
+          ["M03", "Ciclo de Receita e Conciliação"],
+          ["M04", "Glosas, Recursos e Divergências"],
+          ["M05", "SLA e Workflow"],
+          ["M06", "Governança e Planos de Ação"],
+          ["M07", "Indicadores e Relatórios"],
+          ["M08", "Integrações e Conectores"],
+          ["M09", "Segurança, LGPD e Segregação"],
+          ["M10", "Trilha de Auditoria e Integridade"],
+        ].map(([id, name]) => ({ id, name, status: "LEARNING" })),
+        engine: { name: "aurora-projection", version: 2, mode: "SHADOW" },
+        sourceLimit: 1000,
+        sourceHash: "d".repeat(64),
+        snapshotId: "123e4567-e89b-42d3-a456-426614174000",
       },
       freshness: {
         state: "FRESH",

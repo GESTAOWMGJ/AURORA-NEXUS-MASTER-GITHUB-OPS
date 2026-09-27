@@ -130,8 +130,16 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
       var rowHash = wmgjFirestoreHashString_(JSON.stringify(sourceRecord));
       var record = wmgjFirestoreAddCanonicalMoney_(headers, rawValues[offset], row, sourceRecord, config.moneyFields || {});
       var entityKey = wmgjFirestoreEntityKey_(sheetName, record, rowNumber);
-      var legacyStatus = String(record.status || record.status_processamento || record.status_auditoria || '');
-      var workflow = wmgjFirestoreWorkflowFromLegacy_(legacyStatus);
+      var legacyStatus = String(
+        record.status ||
+        record.status_conciliacao ||
+        record.reconciliation_status ||
+        record.status_processamento ||
+        record.status_auditoria ||
+        record.workflow_state ||
+        ''
+      );
+      var workflow = wmgjFirestoreWorkflowFromLegacy_(legacyStatus, config.entityType);
       var occurredAt = new Date();
       var event = {
         schemaVersion: 1,
@@ -343,11 +351,23 @@ function wmgjFirestoreFindCompetence_(record) {
   return '';
 }
 
-function wmgjFirestoreWorkflowFromLegacy_(status) {
-  var s = String(status || '').toUpperCase();
+function wmgjFirestoreWorkflowFromLegacy_(status, entityType) {
+  var s = String(status || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .trim().toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
   if (s.indexOf('BLOQUE') >= 0) return { state: 'BLOCKED', review: 'PENDING', risk: 'CRITICAL' };
   if (s.indexOf('ERRO') >= 0 || s.indexOf('REJEIT') >= 0) return { state: 'FAILED', review: 'PENDING', risk: 'HIGH' };
   if (s.indexOf('PENDENTE') >= 0 || s.indexOf('REVIS') >= 0 || s.indexOf('HUMAN') >= 0) return { state: 'PENDING_HUMAN_REVIEW', review: 'PENDING', risk: 'MEDIUM' };
+  var isFinancialSettlement = entityType === 'bankTransaction' || entityType === 'reconciliation';
+  if (isFinancialSettlement && (
+    s === 'LIQUIDADO' || s === 'LIQUIDATED' ||
+    s === 'CONCILIADO' || s === 'RECONCILED' ||
+    s === 'MATCHED'
+  )) {
+    return { state: 'VALIDATED', review: 'NOT_REQUIRED', risk: 'LOW' };
+  }
   if (s.indexOf('VALID') >= 0 || s.indexOf('PROCESSADO') >= 0 || s.indexOf('CONCLUID') >= 0 || s === 'OK') return { state: 'VALIDATED', review: 'NOT_REQUIRED', risk: 'LOW' };
   return { state: 'RECEIVED', review: 'PENDING', risk: 'MEDIUM' };
 }

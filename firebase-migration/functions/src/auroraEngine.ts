@@ -1,3 +1,5 @@
+import { validEvidenceRef } from "./auroraEvidence.js";
+
 export const AURORA_MODULES = [
   ["M01", "Ingestão e Proveniência Documental"],
   ["M02", "Contratos, Regras e Evidências"],
@@ -28,6 +30,7 @@ export type ProjectionContext = {
 
 type CentsMetric = { value: number | null; valid: number; invalid: number };
 const VALIDATED_STATES = new Set(["VALIDATED", "CLOSED"]);
+const TEST_RECORD_MARKERS = new Set(["TEST", "TESTE"]);
 
 function normalized(value: unknown): string {
   return String(value ?? "")
@@ -38,11 +41,33 @@ function normalized(value: unknown): string {
 }
 
 function isTestRecord(record: Record<string, unknown>): boolean {
-  return record.isTest === true || normalized(record.environment) === "TEST" || normalized(record.recordType) === "TEST";
+  if (record.isTest === true || record.is_test === true) return true;
+  return [
+    record.environment,
+    record.ambiente,
+    record.recordType,
+    record.record_type,
+    record.tipo_registro
+  ].some((value) => TEST_RECORD_MARKERS.has(normalized(value)));
 }
 
 function isValidated(record: Record<string, unknown>): boolean {
-  return VALIDATED_STATES.has(normalized(record.workflowState));
+  return [record.workflowState, record.workflow_state]
+    .some((value) => VALIDATED_STATES.has(normalized(value)));
+}
+
+function financialStatus(record: Record<string, unknown>): string {
+  for (const value of [record.status, record.status_conciliacao, record.reconciliationStatus, record.reconciliation_status]) {
+    const status = normalized(value);
+    if (status) return status;
+  }
+  return "";
+}
+
+function withoutTestRecords(source: ProjectionSource): ProjectionSource {
+  return Object.fromEntries(
+    Object.entries(source).map(([name, records]) => [name, records.filter((record) => !isTestRecord(record))])
+  ) as ProjectionSource;
 }
 
 function inCompetence(record: Record<string, unknown>, competence?: string): boolean {
@@ -69,7 +94,7 @@ function sumCents(
   let invalid = 0;
   for (const record of records) {
     if (isTestRecord(record) || !isValidated(record) || !inCompetence(record, options.competence)) continue;
-    if (options.status && !options.status.has(normalized(record.status))) continue;
+    if (options.status && !options.status.has(financialStatus(record))) continue;
     const cents = firstCanonicalCents(record, fields);
     if (cents === undefined || (!options.allowNegative && cents < 0)) {
       invalid++;
@@ -131,29 +156,30 @@ function sourceStates(source: ProjectionSource): Array<Record<string, unknown>> 
 }
 
 export function buildProjection(source: ProjectionSource, now = new Date(), context: ProjectionContext = {}): Record<string, unknown> {
-  const invoiced = sumCents(source.invoices, ["totalCents", "amountCents", "grossAmountCents", "valorCentavos"], { competence: context.competence });
-  const received = sumCents(source.bankTransactions, ["liquidatedAmountCents", "amountCents", "valorCentavos"], {
+  const operationalSource = withoutTestRecords(source);
+  const invoiced = sumCents(operationalSource.invoices, ["totalCents", "amountCents", "grossAmountCents", "valorCentavos"], { competence: context.competence });
+  const received = sumCents(operationalSource.bankTransactions, ["liquidatedAmountCents", "amountCents", "valorCentavos"], {
     competence: context.competence,
     status: new Set(["LIQUIDATED", "RECONCILED", "MATCHED", "LIQUIDADO", "CONCILIADO"])
   });
-  const gloss = sumCents(source.glosses, ["glossAmountCents", "amountCents", "valorCentavos"], { competence: context.competence });
-  const actionScope = source.actionItems.filter((item) => !isTestRecord(item) && inCompetence(item, context.competence));
+  const gloss = sumCents(operationalSource.glosses, ["glossAmountCents", "amountCents", "valorCentavos"], { competence: context.competence });
+  const actionScope = operationalSource.actionItems.filter((item) => inCompetence(item, context.competence));
   const openActions = countWhere(actionScope, (item) => !["RESOLVED", "CANCELLED"].includes(normalized(item.status || "OPEN")));
   const overdueActions = countWhere(actionScope, (item) => {
     if (["RESOLVED", "CANCELLED"].includes(normalized(item.status || "OPEN"))) return false;
     const dueAt = epochMillis(item.dueAt);
     return Number.isFinite(dueAt) && dueAt < now.getTime();
   });
-  const validatedSources = countWhere(source.sourceDocuments, (item) => isValidated(item));
-  const reconciled = countWhere(source.reconciliations, (item) =>
+  const validatedSources = countWhere(operationalSource.sourceDocuments, (item) => isValidated(item));
+  const reconciled = countWhere(operationalSource.reconciliations, (item) =>
     ["MATCHED", "RECONCILED", "CLOSED", "CONCILIADO"].includes(normalized(item.status ?? item.workflowState))
   );
-  const openFindings = countWhere(source.auditFindings, (item) => !["RESOLVED", "CLOSED"].includes(normalized(item.status || "OPEN")));
-  const criticalFindings = countWhere(source.auditFindings, (item) =>
+  const openFindings = countWhere(operationalSource.auditFindings, (item) => !["RESOLVED", "CLOSED"].includes(normalized(item.status || "OPEN")));
+  const criticalFindings = countWhere(operationalSource.auditFindings, (item) =>
     !["RESOLVED", "CLOSED"].includes(normalized(item.status || "OPEN")) && normalized(item.riskLevel) === "CRITICAL"
   );
   const invalidFinancialRecords = invoiced.invalid + received.invalid + gloss.invalid;
-  const sampleSizes = Object.fromEntries(Object.entries(source).map(([key, value]) => [key, value.length]));
+  const sampleSizes = Object.fromEntries(Object.entries(operationalSource).map(([key, value]) => [key, value.length]));
   const totalRecords = Object.values(sampleSizes).reduce((sum, count) => sum + count, 0);
   const dataState = totalRecords === 0 ? "NO_SOURCE" : invalidFinancialRecords > 0 ? "BLOCKED_DATA_QUALITY" : "SHADOW";
   const ratio = (part: number, total: number): number | null => total === 0 ? null : Math.round((part / total) * 1000) / 10;
@@ -165,7 +191,7 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
   if (overdueActions > 0) alerts.push({ alertId: "overdue-actions", severity: "HIGH", title: "SLA vencido", detail: `${overdueActions} ação(ões) aguardam tratamento`, evidenceRefs: [], createdAt: now.toISOString() });
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     orgId: context.orgId ?? "wmgj",
     competence: context.competence ?? now.toISOString().slice(0, 7),
     generatedAt: now.toISOString(),
@@ -173,7 +199,7 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
     policyVersion: "aurora-nexus-2.3.0-firebase-shadow-v2",
     completeness,
     severity,
-    pipeline: pipelineMetrics(source),
+    pipeline: pipelineMetrics(operationalSource),
     financial: {
       billedAmount: invoiced.value === null ? null : invoiced.value / 100,
       receivedAmount: received.value === null ? null : received.value / 100,
@@ -181,8 +207,8 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
       reconciliationDifference: outstanding === null ? null : Math.min(0, outstanding) / 100,
       currency: "BRL"
     },
-    audit: { openFindings, criticalFindings, overdueActions, evidenceGaps: source.sourceDocuments.length - validatedSources },
-    sources: sourceStates(source),
+    audit: { openFindings, criticalFindings, overdueActions, evidenceGaps: operationalSource.sourceDocuments.length - validatedSources },
+    sources: sourceStates(operationalSource),
     alerts,
     sanitized: true,
     sensitivity: "INTERNAL",
@@ -190,8 +216,8 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
     financialCents: { invoicedCents: invoiced.value, receivedCents: received.value, glossCents: gloss.value, outstandingCents: outstanding },
     operations: { openActions, overdueActions, openFindings },
     coverage: {
-      evidencePercent: ratio(validatedSources, source.sourceDocuments.length),
-      reconciliationPercent: ratio(reconciled, source.reconciliations.length)
+      evidencePercent: ratio(validatedSources, operationalSource.sourceDocuments.length),
+      reconciliationPercent: ratio(reconciled, operationalSource.reconciliations.length)
     },
     sampleSizes,
     dataQuality: {
@@ -216,7 +242,7 @@ export type ActionCommand =
 function safeEvidenceRefs(value: unknown): string[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > 20) return null;
   const refs = value.map((item) => typeof item === "string" ? item.trim() : "");
-  return refs.every((item) => item.length > 0 && item.length <= 256) ? refs : null;
+  return refs.every(validEvidenceRef) && new Set(refs).size === refs.length ? refs : null;
 }
 
 export function parseActionCommand(value: unknown): ActionCommand | null {
@@ -235,7 +261,7 @@ export function parseActionCommand(value: unknown): ActionCommand | null {
   }
   const actionId = typeof body.actionId === "string" ? body.actionId.trim() : "";
   const expectedRevision = body.expectedRevision;
-  if (!actionId || actionId.length > 160 || !Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 1) return null;
+  if (!validEvidenceRef(actionId) || !Number.isSafeInteger(expectedRevision) || Number(expectedRevision) < 1) return null;
   if (body.type === "ACKNOWLEDGE") return { type: "ACKNOWLEDGE", actionId, expectedRevision: Number(expectedRevision) };
   if (body.type === "RESOLVE" && typeof body.resolutionCode === "string" && RESOLUTION_CODES.has(body.resolutionCode)) {
     const evidenceRefs = safeEvidenceRefs(body.evidenceRefs);

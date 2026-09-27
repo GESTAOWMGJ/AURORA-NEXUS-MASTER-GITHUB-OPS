@@ -60,6 +60,16 @@ async function seed() {
         allFacilities: true,
         facilityIds: []
       })),
+      setDoc(doc(db, 'organizations/inactive-org'), { name: 'Inactive', active: false }),
+      setDoc(doc(db, 'organizations/inactive-org/members/org-disabled'), member('org_admin', {
+        allFacilities: true,
+        facilityIds: []
+      })),
+      setDoc(doc(db, 'organizations/legacy-org'), { name: 'Missing active flag' }),
+      setDoc(doc(db, 'organizations/legacy-org/members/org-active-missing'), member('org_admin', {
+        allFacilities: true,
+        facilityIds: []
+      })),
       setDoc(doc(db, 'organizations/other'), { name: 'Other', active: true }),
       setDoc(doc(db, 'organizations/other/members/other-user'), member('viewer'))
     ]);
@@ -114,6 +124,16 @@ async function seed() {
         orgId: 'wmgj',
         facilityId: 'facility-beta',
         status: 'OPEN'
+      }),
+      setDoc(doc(db, 'organizations/inactive-org/productivityRecords/op-disabled'), {
+        orgId: 'inactive-org',
+        facilityId: 'facility-alpha',
+        total: 10
+      }),
+      setDoc(doc(db, 'organizations/legacy-org/productivityRecords/op-missing-active'), {
+        orgId: 'legacy-org',
+        facilityId: 'facility-alpha',
+        total: 10
       })
     ]);
 
@@ -189,20 +209,23 @@ test('nega toda leitura sem autenticação', async () => {
   );
 });
 
-test('viewer lê apenas dashboard explicitamente sanitizado', async () => {
-  const db = env.authenticatedContext('viewer').firestore();
+test('dashboardSnapshots são invisíveis ao SDK cliente; leitura passa pelo BFF', async () => {
+  const viewerDb = env.authenticatedContext('viewer').firestore();
   const adminDb = env.authenticatedContext('admin').firestore();
-  await assertSucceeds(
-    getDoc(doc(db, 'organizations/wmgj/dashboardSnapshots/dash-alpha'))
-  );
+
+  for (const [db, snapshotId] of [
+    [viewerDb, 'dash-alpha'],
+    [adminDb, 'dash-alpha'],
+    [adminDb, 'dash-org'],
+    [adminDb, 'dash-unsafe']
+  ]) {
+    await assertFails(
+      getDoc(doc(db, `organizations/wmgj/dashboardSnapshots/${snapshotId}`))
+    );
+  }
+
   await assertFails(
-    getDoc(doc(db, 'organizations/wmgj/dashboardSnapshots/dash-org'))
-  );
-  await assertSucceeds(
-    getDoc(doc(adminDb, 'organizations/wmgj/dashboardSnapshots/dash-org'))
-  );
-  await assertFails(
-    getDoc(doc(db, 'organizations/wmgj/dashboardSnapshots/dash-unsafe'))
+    getDocs(collection(adminDb, 'organizations/wmgj/dashboardSnapshots'))
   );
 });
 
@@ -330,7 +353,7 @@ test('actionItems são legíveis, mas toda escrita do cliente é negada', async 
   await assertFails(deleteDoc(existing));
 });
 
-test('dashboardSnapshots também são somente leitura no cliente', async () => {
+test('dashboardSnapshots também negam toda escrita do cliente', async () => {
   const db = env.authenticatedContext('admin').firestore();
   await assertFails(
     setDoc(doc(db, 'organizations/wmgj/dashboardSnapshots/client-write'), {
@@ -366,6 +389,21 @@ test('nega leitura cruzada entre organizações', async () => {
   await assertFails(
     getDoc(doc(db, 'organizations/other/sourceDocuments/source-other'))
   );
+});
+
+test('organização inativa ou sem active=true bloqueia membros e dados', async () => {
+  const disabledDb = env.authenticatedContext('org-disabled').firestore();
+  const missingFlagDb = env.authenticatedContext('org-active-missing').firestore();
+
+  for (const [db, orgId, recordId] of [
+    [disabledDb, 'inactive-org', 'op-disabled'],
+    [missingFlagDb, 'legacy-org', 'op-missing-active']
+  ]) {
+    await assertFails(getDoc(doc(db, `organizations/${orgId}`)));
+    await assertFails(
+      getDoc(doc(db, `organizations/${orgId}/productivityRecords/${recordId}`))
+    );
+  }
 });
 
 test('nega membro inativo e coleção desconhecida', async () => {

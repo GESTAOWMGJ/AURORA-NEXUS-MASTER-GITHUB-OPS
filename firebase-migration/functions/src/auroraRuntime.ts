@@ -8,10 +8,12 @@ import {
   can,
   CSRF_PURPOSES,
   DEFAULT_ORG_ID,
+  isActiveOrganization,
   validCsrf,
   verifyAuroraAccess,
   type AuroraMember
 } from "./auroraAccess.js";
+import { validateResolutionEvidence } from "./auroraEvidence.js";
 import { buildProjection, parseActionCommand, type ProjectionSource } from "./auroraEngine.js";
 import { auroraDb } from "./firebase.js";
 
@@ -100,7 +102,7 @@ function deterministicSnapshotId(competence: string): string {
 
 async function projectionSettings(orgId: string): Promise<{ competence: string; enabled: boolean }> {
   const organization = await auroraDb.doc(`organizations/${orgId}`).get();
-  if (!organization.exists || organization.data()?.active === false) throw new Error("ORGANIZATION_DISABLED");
+  if (!organization.exists || !isActiveOrganization(organization.data())) throw new Error("ORGANIZATION_DISABLED");
   const data = organization.data() ?? {};
   const competence = safeString(data.projectionCompetence, 7) ?? "";
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(competence)) throw new Error("PROJECTION_COMPETENCE_REQUIRED");
@@ -269,6 +271,16 @@ export const auroraNexusAction = onRequest(
           if (command.type === "RESOLVE") {
             if (currentStatus !== "ACKNOWLEDGED") throw new Error("INVALID_TRANSITION");
             if (["HIGH", "CRITICAL"].includes(String(currentData.riskLevel)) && !member.mfaVerified) throw new Error("MFA_REQUIRED");
+            const evidence = await validateResolutionEvidence({
+              orgId: member.orgId,
+              actionId: actionRef.id,
+              action: currentData,
+              evidenceRefs: command.evidenceRefs
+            }, async (path) => {
+              const snapshot = await tx.get(auroraDb.doc(path));
+              return snapshot.exists ? snapshot.data() ?? {} : null;
+            });
+            if (!evidence.ok) throw new Error(evidence.code);
           }
           tx.update(actionRef, {
             status: command.type === "ACKNOWLEDGE" ? "ACKNOWLEDGED" : "RESOLVED",
@@ -299,7 +311,8 @@ export const auroraNexusAction = onRequest(
       const code = error instanceof Error ? error.message : "ACTION_FAILED";
       const status = code === "ACTION_NOT_FOUND" ? 404
         : code === "MFA_REQUIRED" ? 403
-          : ["IDEMPOTENCY_CONFLICT", "REVISION_CONFLICT", "INVALID_TRANSITION"].includes(code) ? 409 : 500;
+          : ["ACTION_SCOPE_VIOLATION", "TARGET_SCOPE_VIOLATION", "EVIDENCE_SCOPE_VIOLATION"].includes(code) ? 403
+            : ["IDEMPOTENCY_CONFLICT", "REVISION_CONFLICT", "INVALID_TRANSITION", "TARGET_NOT_FOUND", "EVIDENCE_NOT_FOUND", "EVIDENCE_NOT_LINKED"].includes(code) ? 409 : 500;
       if (status === 500) logger.error("Aurora action failed", { code });
       res.status(status).json({ ok: false, code: status === 500 ? "ACTION_FAILED" : code });
     }

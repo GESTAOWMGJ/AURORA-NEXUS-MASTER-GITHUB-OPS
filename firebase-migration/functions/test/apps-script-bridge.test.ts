@@ -76,6 +76,18 @@ test("adaptador por aba mantém o texto-fonte e adiciona campo canônico", () =>
   assert.equal(raw[1], 1234.56);
 });
 
+test("status de liquidação valida somente entidades financeiras compatíveis", () => {
+  const context = appsScriptContext() as any;
+  for (const status of ["LIQUIDADO", "LIQUIDATED", " conciliado ", "RECONCILED", "MATCHED"]) {
+    assert.deepEqual(
+      { ...context.wmgjFirestoreWorkflowFromLegacy_(status, "bankTransaction") },
+      { state: "VALIDATED", review: "NOT_REQUIRED", risk: "LOW" }
+    );
+  }
+  assert.equal(context.wmgjFirestoreWorkflowFromLegacy_("PENDENTE_CONCILIADO", "bankTransaction").state, "PENDING_HUMAN_REVIEW");
+  assert.equal(context.wmgjFirestoreWorkflowFromLegacy_("LIQUIDADO", "invoice").state, "RECEIVED");
+});
+
 test("bridge usa a revisão temporal da fonte antes do horário de envio", () => {
   const context = appsScriptContext() as any;
   const source = vm.runInContext('new Date("2026-08-25T10:00:00.123Z")', context);

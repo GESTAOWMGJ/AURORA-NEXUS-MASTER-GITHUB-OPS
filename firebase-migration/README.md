@@ -2,7 +2,7 @@
 
 **Data da fundação:** 26/08/2026  
 **Escopo:** WMGJ Operação, gestão hospitalar replicável e auditoria runtime  
-**Estado:** arquitetura e código-base preparados; **nenhuma escrita foi feita em Firestore de produção**.
+**Estado:** projeto Firebase isolado de homologação inicializado e código-base preparado; **nenhum deploy, dado real ou escrita em Firestore de produção foi executado**. Estado verificável: `docs/17-estado-homologacao-2026-09-27.md`.
 
 ## Decisão arquitetural
 

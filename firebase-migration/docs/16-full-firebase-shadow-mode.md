@@ -46,11 +46,14 @@ O workflow `Deploy Aurora Firebase Homologation` sempre valida o commit. Ele só
 
 O escopo implantado é limitado a Functions, Hosting, Firestore Rules e índices. O preflight exige os três secrets técnicos, região e delete protection, e o smoke público confirma que apenas a tela de login está exposta. Dados reais, DNS, valores de segredos, criação de usuários e migração operacional não são feitos pelo workflow.
 
+O preflight também exige secrets na versão `latest`, usuário sintético vinculado à organização, `projectionEnabled=false` e prova recente de backup `READY` com restore concluído em banco separado. O marcador dessa prova usa uma geração imutável do Cloud Storage. Depois do deploy, o smoke valida a lista exata de Functions, resposta `401` anônima do bootstrap, carregamento do secret de ingestão e sessão autenticada. O estado remoto observado e os gates ainda pendentes estão registrados em `docs/17-estado-homologacao-2026-09-27.md`.
+
 ## Contrato de operação
 
 - `06_NFS_E` fornece `totalCents`; `08_EXTRATOS_BRADESCO` fornece `amountCents`/`liquidatedAmountCents` por adaptadores explícitos.
 - O texto exibido na Sheet permanece preservado e o campo canônico em centavos é derivado sem escrever na fonte.
 - Registros financeiros entram na soma somente em `VALIDATED`/`CLOSED`, na competência escolhida e fora de dados de teste.
+- O snapshot persistido usa o contrato fechado `dashboard-snapshot.schema.json` v2; campos desconhecidos ou documentos v1 são rejeitados no projeto HML vazio até que uma projeção v2 válida seja produzida.
 - Viewer/operator não recebem valores financeiros; resolução exige evidência, papel autorizado e MFA para risco alto/crítico.
 - O pacote de política registra Aurora Nexus `2.3.0`, o mapa M01–M10 e hashes de origem/exportação em `policy/manifest.json`.
 

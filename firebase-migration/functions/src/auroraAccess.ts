@@ -32,6 +32,10 @@ export function isEmailAllowed(email: unknown, raw: string): boolean {
   return typeof email === "string" && parseAllowedEmails(raw).has(email.trim().toLowerCase());
 }
 
+export function isActiveOrganization(data: Record<string, unknown> | undefined): boolean {
+  return data?.active === true;
+}
+
 export function parseCookie(header: string | undefined, name: string): string | null {
   if (!header) return null;
   let found: string | null = null;
@@ -62,7 +66,7 @@ export async function resolveMember(decoded: DecodedIdToken, orgId = DEFAULT_ORG
     auroraDb.doc(`organizations/${orgId}`).get()
   ]);
   const data = snapshot.data();
-  if (!organization.exists || organization.data()?.active === false) return null;
+  if (!organization.exists || !isActiveOrganization(organization.data())) return null;
   if (!snapshot.exists || data?.active !== true || typeof data.role !== "string") return null;
   return {
     uid: decoded.uid,
