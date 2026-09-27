@@ -2,12 +2,13 @@
 """Aurora Coletor installer.
 
 Standard library only. The installer refuses an existing target and writes only
-inside the target directory. The collector itself reads the configured input
-folder and writes state only to the local state directory under the target.
+inside the target directory. The collector reads the configured input folder and
+writes state only to the local state directory under the target.
 """
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -16,17 +17,22 @@ import re
 import shutil
 import stat
 import sys
-from datetime import datetime, timezone
 
 ORG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 FACILITY_RE = re.compile(r"^[A-Z0-9][A-Z0-9_-]{1,63}$")
+IDENTITY_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{2,127}$")
 PLACEHOLDER_MARKERS = {
     "ENDERECO-AUTORIZADO",
+    "ENDPOINT-OFICIAL",
     "ID-INSTITUICAO",
     "UNIDADE",
     "example.com",
     "localhost",
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
 }
+SERVICE_USER = "aurora-collector"
 
 
 def is_windows_absolute(path: str) -> bool:
@@ -48,8 +54,10 @@ def validate_endpoint(endpoint: str) -> str:
         fail("--endpoint deve ser uma URL HTTPS absoluta")
     if parsed.username or parsed.password:
         fail("--endpoint não deve conter usuário ou senha")
+    if parsed.fragment:
+        fail("--endpoint não deve conter fragmento")
     if any(marker.lower() in value.lower() for marker in PLACEHOLDER_MARKERS):
-        fail("--endpoint contém marcador/placeholder e deve ser substituído")
+        fail("--endpoint contém marcador/placeholder ou segredo aparente")
     return value.rstrip("/")
 
 
@@ -65,6 +73,32 @@ def validate_facility(facility: str) -> str:
     if value != value.upper() or not FACILITY_RE.fullmatch(value):
         fail("--facility deve usar referência em MAIÚSCULAS; exemplo: WMGJ")
     return value
+
+
+def validate_identity(identity: str) -> str:
+    value = identity.strip()
+    if not IDENTITY_RE.fullmatch(value):
+        fail("--identity inválido")
+    if any(marker.lower() in value.lower() for marker in PLACEHOLDER_MARKERS):
+        fail("--identity contém marcador/placeholder")
+    return value
+
+
+def validate_expiration(expires_at: str) -> str:
+    value = expires_at.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        fail("--credential-expires-at deve ser ISO-8601")
+    if dt.tzinfo is None:
+        fail("--credential-expires-at deve incluir fuso horário ou Z")
+    if dt <= datetime.now(timezone.utc):
+        fail("--credential-expires-at deve estar no futuro")
+    return expires_at.strip()
+
+
+def default_expiration() -> str:
+    return (datetime.now(timezone.utc) + timedelta(days=90)).replace(microsecond=0).isoformat()
 
 
 def validate_target(target: str) -> Path:
@@ -85,7 +119,7 @@ def validate_watch_dir(watch_dir: str) -> Path:
     return path
 
 
-def write_text(path: Path, content: str, mode: int = 0o640) -> None:
+def write_text(path: Path, content: str, mode: int = 0o600) -> None:
     path.write_text(content, encoding="utf-8")
     try:
         path.chmod(mode)
@@ -96,17 +130,28 @@ def write_text(path: Path, content: str, mode: int = 0o640) -> None:
 def make_executable(path: Path) -> None:
     try:
         current = path.stat().st_mode
-        path.chmod(current | stat.S_IXUSR | stat.S_IXGRP)
+        path.chmod(current | stat.S_IXUSR)
     except OSError:
         pass
 
 
+def default_identity(org: str, facility: str) -> str:
+    return f"aurora-collector-{org}-{facility.lower()}-hml-001"
+
+
 def build_config(args: argparse.Namespace, target: Path, watch_dir: Path) -> dict[str, object]:
+    org = validate_org(args.org)
+    facility = validate_facility(args.facility)
+    identity = validate_identity(args.identity or default_identity(org, facility))
+    expires_at = validate_expiration(args.credential_expires_at or default_expiration())
     return {
-        "schemaVersion": "aurora.collector.config.v1",
-        "installedAt": datetime.now(timezone.utc).isoformat(),
-        "org": validate_org(args.org),
-        "facility": validate_facility(args.facility),
+        "schemaVersion": "aurora.collector.config.v2",
+        "installedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "environment": args.environment,
+        "org": org,
+        "facility": facility,
+        "technicalIdentityId": identity,
+        "credentialExpiresAt": expires_at,
         "endpoint": validate_endpoint(args.endpoint),
         "watchDir": str(watch_dir),
         "stateDir": str(target / "state"),
@@ -120,52 +165,55 @@ def build_config(args: argparse.Namespace, target: Path, watch_dir: Path) -> dic
 
 def install(args: argparse.Namespace) -> None:
     source_dir = Path(__file__).resolve().parent
-    collector_src = source_dir / "collector.py"
+    collector_src = source_dir / "aurora_collector.py"
     if not collector_src.exists():
-        fail("collector.py não encontrado ao lado do install.py")
+        fail("aurora_collector.py não encontrado ao lado do install.py")
 
     target = validate_target(args.target)
     watch_dir = validate_watch_dir(args.watch_dir)
     config = build_config(args, target, watch_dir)
+    identity = str(config["technicalIdentityId"])
 
-    target.mkdir(mode=0o750, parents=True, exist_ok=False)
-    (target / "bin").mkdir(mode=0o750)
-    (target / "state").mkdir(mode=0o750)
-    (target / "log").mkdir(mode=0o750)
+    target.mkdir(mode=0o700, parents=True, exist_ok=False)
+    (target / "bin").mkdir(mode=0o700)
+    (target / "state").mkdir(mode=0o700)
+    (target / "log").mkdir(mode=0o700)
 
-    shutil.copy2(collector_src, target / "bin" / "collector.py")
+    shutil.copy2(collector_src, target / "bin" / "aurora_collector.py")
     try:
-        (target / "bin" / "collector.py").chmod(0o750)
+        (target / "bin" / "aurora_collector.py").chmod(0o700)
     except OSError:
         pass
 
-    write_text(target / "config.json", json.dumps(config, ensure_ascii=False, indent=2) + "\n")
+    write_text(target / "collector-config.json", json.dumps(config, ensure_ascii=False, indent=2) + "\n", 0o600)
 
     run_sh = f"""#!/bin/sh
 set -eu
-exec python3 {target / 'bin' / 'collector.py'} --config {target / 'config.json'} "$@"
+exec python3 {target / 'bin' / 'aurora_collector.py'} --config {target / 'collector-config.json'} "$@"
 """
-    write_text(target / "run.sh", run_sh, 0o750)
+    write_text(target / "run.sh", run_sh, 0o700)
     make_executable(target / "run.sh")
 
     run_ps1 = f"""$ErrorActionPreference = 'Stop'
-python "{target / 'bin' / 'collector.py'}" --config "{target / 'config.json'}" @args
+python "{target / 'bin' / 'aurora_collector.py'}" --config "{target / 'collector-config.json'}" @args
 """
-    write_text(target / "run.ps1", run_ps1, 0o640)
+    write_text(target / "run.ps1", run_ps1, 0o600)
 
     service_example = f"""[Unit]
-Description=Aurora Nexus Coletor
+Description=Aurora Nexus Collector ({identity})
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=aurora-coletor
-Group=aurora-coletor
+User={SERVICE_USER}
+Group={SERVICE_USER}
 WorkingDirectory={target}
-ExecStart={target / 'run.sh'}
+EnvironmentFile=/etc/aurora-coletor/{identity}.env
+ExecStart={target / 'run.sh'} --watch
 Restart=on-failure
-RestartSec=10
+RestartSec=30
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -176,13 +224,49 @@ ReadOnlyPaths={watch_dir}
 [Install]
 WantedBy=multi-user.target
 """
-    write_text(target / "aurora-coletor.service.example", service_example)
+    write_text(target / "aurora-coletor.service.example", service_example, 0o600)
+
+    env_example = """# Modelo sem token. O arquivo real deve pertencer ao usuário do serviço e usar chmod 600.
+# NUNCA versionar nem enviar este valor em prompt, print, log ou linha de comando.
+AURORA_COLLECTOR_TOKEN=
+"""
+    write_text(target / "aurora-coletor.env.example", env_example, 0o600)
+
+    launchd_example = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>br.com.auroranexus.collector.{identity}</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/bin/python3</string>
+      <string>{target / 'bin' / 'aurora_collector.py'}</string>
+      <string>--config</string>
+      <string>{target / 'collector-config.json'}</string>
+      <string>--watch</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{target / 'log' / 'collector.out.log'}</string>
+    <key>StandardErrorPath</key>
+    <string>{target / 'log' / 'collector.err.log'}</string>
+  </dict>
+</plist>
+"""
+    write_text(target / "aurora-coletor.launchd.plist.example", launchd_example, 0o600)
 
     print("INSTALAÇÃO PREPARADA")
     print(f"Target: {target}")
     print(f"Entrada: {watch_dir}")
     print(f"Estado local: {target / 'state'}")
-    print(f"Execução: {target / 'run.sh'} --once")
+    print(f"Identidade técnica: {identity}")
+    print(f"Execução de validação: {target / 'run.sh'}")
+    print(f"Execução autorizada única: {target / 'run.sh'} --once")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -192,10 +276,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--endpoint", required=True, help="Endpoint HTTPS autorizado de ingestão.")
     parser.add_argument("--org", required=True, help="ID da instituição em minúsculas. Ex.: wmgj")
     parser.add_argument("--facility", required=True, help="Referência da unidade em MAIÚSCULAS. Ex.: WMGJ")
+    parser.add_argument("--identity", default=None, help="Identidade técnica. Padrão: aurora-collector-<org>-<facility>-hml-001")
+    parser.add_argument("--credential-expires-at", default=None, help="Expiração ISO-8601. Padrão: agora + 90 dias.")
+    parser.add_argument("--environment", default="homologation", choices=["homologation"], help="Ambiente permitido nesta versão.")
     parser.add_argument("--poll-seconds", type=int, default=30, help="Intervalo de varredura.")
     parser.add_argument("--max-file-bytes", type=int, default=10 * 1024 * 1024, help="Tamanho máximo por arquivo.")
     parser.add_argument("--recursive", action="store_true", help="Varre subpastas da entrada.")
-    parser.add_argument("--auth-env", default="AURORA_COLLECTOR_TOKEN", help="Nome da variável de ambiente do bearer token opcional.")
+    parser.add_argument("--auth-env", default="AURORA_COLLECTOR_TOKEN", help="Nome da variável de ambiente do bearer token.")
     args = parser.parse_args(argv)
     if args.poll_seconds < 5:
         fail("--poll-seconds deve ser >= 5")
@@ -210,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except SystemExit:
         raise
-    except Exception as exc:  # pragma: no cover - safety net for installer UX
+    except Exception as exc:  # pragma: no cover
         fail(str(exc))
 
 
