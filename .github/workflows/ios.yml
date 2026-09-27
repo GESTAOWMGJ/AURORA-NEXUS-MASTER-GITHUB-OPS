@@ -1,44 +1,135 @@
-name: iOS starter workflow
+name: iOS CI
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+    paths:
+      - "**/*.swift"
+      - "**/*.xcodeproj/**"
+      - "**/*.xcworkspace/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - ".github/workflows/ios.yml"
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
+    paths:
+      - "**/*.swift"
+      - "**/*.xcodeproj/**"
+      - "**/*.xcworkspace/**"
+      - "Package.swift"
+      - "Package.resolved"
+      - ".github/workflows/ios.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build and Test default scheme using any available iPhone simulator
-    runs-on: macos-latest
+  detect-project:
+    name: Detect Xcode project
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.detect.outputs.ready }}
+      kind: ${{ steps.detect.outputs.kind }}
+      file: ${{ steps.detect.outputs.file }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set Default Scheme
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Locate Xcode workspace or project
+        id: detect
+        shell: bash
         run: |
-          scheme_list=$(xcodebuild -list -json | tr -d "\n")
-          default=$(echo $scheme_list | ruby -e "require 'json'; puts JSON.parse(STDIN.gets)['project']['targets'][0]")
-          echo $default | cat >default
-          echo Using default scheme: $default
-      - name: Build
+          set -euo pipefail
+          workspace="$(find . -type d -name '*.xcworkspace' -not -path '*/Pods/*' -print -quit)"
+          project="$(find . -type d -name '*.xcodeproj' -not -path '*/Pods/*' -print -quit)"
+
+          if [[ -n "$workspace" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "kind=workspace" >> "$GITHUB_OUTPUT"
+            echo "file=${workspace#./}" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$project" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "kind=project" >> "$GITHUB_OUTPUT"
+            echo "file=${project#./}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "kind=" >> "$GITHUB_OUTPUT"
+            echo "file=" >> "$GITHUB_OUTPUT"
+            echo "::notice::iOS CI skipped: no Xcode workspace or project exists in this repository."
+          fi
+
+  build-and-test:
+    name: Build and test iOS project
+    needs: detect-project
+    if: needs.detect-project.outputs.ready == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      CONTAINER_KIND: ${{ needs.detect-project.outputs.kind }}
+      CONTAINER_FILE: ${{ needs.detect-project.outputs.file }}
+
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Select shared scheme
+        id: scheme
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -list -json "-$CONTAINER_KIND" "$CONTAINER_FILE" > /tmp/xcode-list.json
+          selected="$(python3 -c 'import json; data=json.load(open("/tmp/xcode-list.json", encoding="utf-8")); container=data.get("workspace") or data.get("project") or {}; schemes=container.get("schemes") or []; print(schemes[0] if schemes else "")')"
+          if [[ -z "$selected" ]]; then
+            echo "Nenhum scheme compartilhado foi identificado." >&2
+            exit 1
+          fi
+          echo "name=$selected" >> "$GITHUB_OUTPUT"
+          echo "Using scheme: $selected"
+
+      - name: Select available iPhone simulator
+        id: simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun simctl list devices available -j > /tmp/simulators.json
+          udid="$(python3 -c 'import json; data=json.load(open("/tmp/simulators.json", encoding="utf-8")); devices=[d for values in data.get("devices", {}).values() for d in values if d.get("isAvailable", True) and str(d.get("name", "")).startswith("iPhone")]; print(devices[0].get("udid", "") if devices else "")')"
+          if [[ -z "$udid" ]]; then
+            echo "Nenhum simulador iPhone disponível." >&2
+            exit 1
+          fi
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
+      - name: Build for testing
+        shell: bash
         env:
-          scheme: ${{ 'default' }}
-          platform: ${{ 'iOS Simulator' }}
+          SCHEME: ${{ steps.scheme.outputs.name }}
+          SIMULATOR_UDID: ${{ steps.simulator.outputs.udid }}
         run: |
-          # xcrun xctrace returns via stderr, not the expected stdout (see https://developer.apple.com/forums/thread/663959)
-          device=`xcrun xctrace list devices 2>&1 | grep -oE 'iPhone.*?[^\(]+' | head -1 | awk '{$1=$1;print}' | sed -e "s/ Simulator$//"`
-          if [ $scheme = default ]; then scheme=$(cat default); fi
-          if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then filetype_parameter="workspace" && file_to_build="`ls -A | grep -i \\.xcworkspace\$`"; else filetype_parameter="project" && file_to_build="`ls -A | grep -i \\.xcodeproj\$`"; fi
-          file_to_build=`echo $file_to_build | awk '{$1=$1;print}'`
-          xcodebuild build-for-testing -scheme "$scheme" -"$filetype_parameter" "$file_to_build" -destination "platform=$platform,name=$device"
-      - name: Test
+          set -euo pipefail
+          xcodebuild build-for-testing \
+            -scheme "$SCHEME" \
+            "-$CONTAINER_KIND" "$CONTAINER_FILE" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID"
+
+      - name: Run tests without rebuilding
+        shell: bash
         env:
-          scheme: ${{ 'default' }}
-          platform: ${{ 'iOS Simulator' }}
+          SCHEME: ${{ steps.scheme.outputs.name }}
+          SIMULATOR_UDID: ${{ steps.simulator.outputs.udid }}
         run: |
-          # xcrun xctrace returns via stderr, not the expected stdout (see https://developer.apple.com/forums/thread/663959)
-          device=`xcrun xctrace list devices 2>&1 | grep -oE 'iPhone.*?[^\(]+' | head -1 | awk '{$1=$1;print}' | sed -e "s/ Simulator$//"`
-          if [ $scheme = default ]; then scheme=$(cat default); fi
-          if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then filetype_parameter="workspace" && file_to_build="`ls -A | grep -i \\.xcworkspace\$`"; else filetype_parameter="project" && file_to_build="`ls -A | grep -i \\.xcodeproj\$`"; fi
-          file_to_build=`echo $file_to_build | awk '{$1=$1;print}'`
-          xcodebuild test-without-building -scheme "$scheme" -"$filetype_parameter" "$file_to_build" -destination "platform=$platform,name=$device"
+          set -euo pipefail
+          xcodebuild test-without-building \
+            -scheme "$SCHEME" \
+            "-$CONTAINER_KIND" "$CONTAINER_FILE" \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID"

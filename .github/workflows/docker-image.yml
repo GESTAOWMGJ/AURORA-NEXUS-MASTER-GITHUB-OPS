@@ -1,18 +1,55 @@
 name: Docker Image CI
 
 on:
+  workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "docker/**"
+      - ".github/workflows/docker-image.yml"
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "docker/**"
+      - ".github/workflows/docker-image.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Detect root Dockerfile
+        id: docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f Dockerfile ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Docker CI skipped: no root Dockerfile exists in this repository."
+          fi
+
+      - name: Build the Docker image
+        if: steps.docker.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build . --file Dockerfile --tag "wmgj-ci:${GITHUB_SHA}"

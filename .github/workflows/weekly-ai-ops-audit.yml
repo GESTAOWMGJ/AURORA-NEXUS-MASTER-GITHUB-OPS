@@ -1,0 +1,95 @@
+name: JFN Weekly AI Ops Audit
+
+on:
+  schedule:
+    # 15:45 em America/Sao_Paulo; o relatório fica pronto antes do bloco das 16:00.
+    - cron: "45 18 * * 5"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".agents/skills/jfn-ai-ops-weekly/**"
+      - ".github/workflows/weekly-ai-ops-audit.yml"
+      - "scripts/weekly_ai_ops_audit.py"
+      - "scripts/install_jfn_ai_ops_skill_mac.sh"
+      - "scripts/jfn_ai_weekly_review.sh"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: jfn-ai-ops-weekly-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Deterministic repository audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      TZ: America/Sao_Paulo
+
+    steps:
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 100
+          persist-credentials: false
+
+      - name: Confirm local runtimes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 --version
+          node --version
+          git --version
+          gh --version | head -n 1
+
+      - name: Run offline audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          python3 scripts/weekly_ai_ops_audit.py \
+            --repo . \
+            --output reports/weekly-ai-ops.md \
+            --days 7
+
+      - name: Publish job summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -s reports/weekly-ai-ops.md ]]; then
+            cat reports/weekly-ai-ops.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '# JFN Weekly AI Ops Audit\n\nRelatório não foi gerado.\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Create or update the weekly review issue
+        if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          report="reports/weekly-ai-ops.md"
+          if [[ ! -s "$report" ]]; then
+            printf '# Revisão semanal JFN AI Ops\n\nA auditoria não produziu relatório; revisar o workflow run.\n' > "$report"
+          fi
+
+          export TITLE="Revisão semanal IA — $(date +%F)"
+          existing_number="$({
+            gh issue list \
+              --state all \
+              --limit 100 \
+              --search "$TITLE in:title" \
+              --json number,title
+          } | python3 -c 'import json, os, sys; title=os.environ["TITLE"]; items=json.load(sys.stdin); print(next((str(item["number"]) for item in items if item.get("title")==title), ""))')"
+
+          if [[ -n "$existing_number" ]]; then
+            gh issue edit "$existing_number" --title "$TITLE" --body-file "$report"
+            echo "Issue semanal atualizada: #$existing_number" >> "$GITHUB_STEP_SUMMARY"
+          else
+            issue_url="$(gh issue create --title "$TITLE" --body-file "$report")"
+            echo "Issue semanal criada: $issue_url" >> "$GITHUB_STEP_SUMMARY"
+          fi
