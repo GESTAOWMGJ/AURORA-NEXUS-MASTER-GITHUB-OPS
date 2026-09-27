@@ -5,6 +5,7 @@ on:
     paths:
       - "firebase-migration/**"
       - ".github/workflows/validate-firestore-migration.yml"
+      - ".github/workflows/deploy-aurora-firebase.yml"
   push:
     branches:
       - main
@@ -12,6 +13,7 @@ on:
     paths:
       - "firebase-migration/**"
       - ".github/workflows/validate-firestore-migration.yml"
+      - ".github/workflows/deploy-aurora-firebase.yml"
   workflow_dispatch:
 
 permissions:
@@ -102,6 +104,10 @@ jobs:
         env:
           WMGJ_FIREBASE_TEST_PROJECT_ID: wmgj-firestore-rules-test
         run: bash firebase-migration/scripts/bootstrap-homologacao.sh
+
+      - name: Block high or critical production dependency advisories
+        working-directory: firebase-migration/functions
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Validate FastAPI, OpenAI contracts and dashboard
         working-directory: firebase-migration/api

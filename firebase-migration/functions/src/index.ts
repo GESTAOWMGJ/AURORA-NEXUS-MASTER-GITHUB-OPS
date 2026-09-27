@@ -1,5 +1,4 @@
-import { initializeApp } from "firebase-admin/app";
-import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { onRequest } from "firebase-functions/v2/https";
@@ -17,8 +16,8 @@ import {
   type HmacV2Headers
 } from "./security.js";
 import { validateEvent } from "./validation.js";
+import { auroraDb as db } from "./firebase.js";
 
-initializeApp();
 setGlobalOptions({
   region: "southamerica-east1",
   maxInstances: 10,
@@ -26,7 +25,6 @@ setGlobalOptions({
   memory: "512MiB"
 });
 
-const db = getFirestore();
 const HMAC_KEYRING = defineSecret("WMGJ_INGEST_HMAC_KEYRING");
 const NONCE_TTL_MILLISECONDS = 15 * 60 * 1000;
 

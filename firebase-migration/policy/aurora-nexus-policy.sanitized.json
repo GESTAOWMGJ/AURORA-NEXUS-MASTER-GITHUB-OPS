@@ -1,0 +1,26 @@
+{
+  "policyVersion": "aurora-nexus-firebase-shadow-v1",
+  "organizationId": "wmgj",
+  "environment": "HOMOLOGATION",
+  "mode": "SHADOW",
+  "clinicalSensitiveEnabled": false,
+  "productionMutation": false,
+  "sourceMutation": false,
+  "humanReviewRequired": true,
+  "financialValues": "INTEGER_CENTS",
+  "missingDataTreatment": "NO_SOURCE_NOT_ZERO",
+  "authentication": {
+    "loginFirst": true,
+    "individualUsers": true,
+    "allowlistRequired": true,
+    "organizationMembershipRequired": true
+  },
+  "automation": {
+    "projectionIntervalMinutes": 15,
+    "writesRestrictedToBackend": true,
+    "idempotencyRequired": true,
+    "irreversibleActionsEnabled": false
+  },
+  "modules": ["M01", "M02", "M03", "M04", "M05", "M06", "M07", "M08", "M09", "M10"],
+  "cutoverGate": "TWO_PARALLEL_CLOSES_WITHOUT_MATERIAL_DIVERGENCE"
+}

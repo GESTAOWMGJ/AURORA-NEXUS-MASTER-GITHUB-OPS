@@ -53,6 +53,15 @@ FastAPI Control Plane (homologação)
 - `tests/`: testes mínimos das Security Rules.
 - `api/evals/`: casos sintéticos de regressão; live eval é opt-in.
 - `skills/`: habilidade operacional aprendida para continuidade.
+- `policy/`: política sanitizada e versionada do aplicativo.
+
+## Aplicação Full Firebase
+
+O pacote inclui agora um shell operacional privado no Firebase Hosting, APIs autenticadas em Cloud Functions e um motor de projeções sanitizadas. O motor roda a cada 15 minutos e cobre o mapa M01–M10, mas permanece em `SHADOW`: lê a réplica canônica, calcula indicadores e abre trilha de auditoria sem escrever na fonte atual.
+
+O back-end exige simultaneamente allowlist de e-mail, sessão Firebase revogável e membership ativa em `organizations/wmgj/members/{uid}`. Mutações humanas usam CSRF, RBAC, idempotência e controle de revisão. Ações irreversíveis, dados clínicos sensíveis e mutação da fonte continuam bloqueados.
+
+Arquitetura, gates, implantação e rollback: `docs/16-full-firebase-shadow-mode.md`.
 
 ## Validação controlada
 

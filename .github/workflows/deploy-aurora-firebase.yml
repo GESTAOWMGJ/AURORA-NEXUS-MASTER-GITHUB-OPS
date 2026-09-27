@@ -1,0 +1,79 @@
+name: Deploy Aurora Firebase Homologation
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Firebase homologation project ID (must equal repository variable)"
+        required: true
+        type: string
+      deploy_confirmation:
+        description: "Type DEPLOY_HOMOLOGATION to deploy; any other value validates only"
+        required: true
+        default: "VALIDATE_ONLY"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aurora-firebase-homologation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate immutable candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: firebase-migration/functions/package-lock.json
+      - name: Build and test Functions
+        working-directory: firebase-migration/functions
+        run: npm ci && npm test && npm run build && npm audit --omit=dev --audit-level=high
+      - name: Validate target and deployment scope
+        env:
+          REQUESTED_PROJECT: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          test -n "$APPROVED_PROJECT"
+          test "$REQUESTED_PROJECT" = "$APPROVED_PROJECT"
+          test "$REQUESTED_PROJECT" != "wmgj-prod"
+          node -e 'JSON.parse(require("fs").readFileSync("firebase-migration/firebase.json","utf8"))'
+
+  deploy:
+    name: Deploy with protected environment
+    if: ${{ inputs.deploy_confirmation == 'DEPLOY_HOMOLOGATION' }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: firebase-homologation
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: firebase-migration/functions/package-lock.json
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      - name: Build exact commit
+        working-directory: firebase-migration/functions
+        run: npm ci && npm test && npm run build && npm audit --omit=dev --audit-level=high
+      - name: Deploy Functions, Hosting, Rules and indexes
+        working-directory: firebase-migration
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          test "$PROJECT_ID" = "$APPROVED_PROJECT"
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions,hosting,firestore:rules,firestore:indexes --non-interactive

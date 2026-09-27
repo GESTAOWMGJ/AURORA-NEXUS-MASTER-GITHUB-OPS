@@ -35,6 +35,27 @@
         }
       },
       {
+        "source": "/api/bootstrap",
+        "function": {
+          "functionId": "auroraNexusBootstrap",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/actions",
+        "function": {
+          "functionId": "auroraNexusAction",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/refresh",
+        "function": {
+          "functionId": "auroraNexusRefresh",
+          "region": "southamerica-east1"
+        }
+      },
+      {
         "source": "**",
         "function": {
           "functionId": "auroraNexusAuthGate",

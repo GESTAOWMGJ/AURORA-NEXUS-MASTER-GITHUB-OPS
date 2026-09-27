@@ -1,44 +1,22 @@
-import { getAuth, type DecodedIdToken } from "firebase-admin/auth";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
+import {
+  CSRF_COOKIE_NAME,
+  SESSION_COOKIE_NAME,
+  isEmailAllowed,
+  newCsrfToken,
+  parseAllowedEmails,
+  resolveMember,
+  validCsrf,
+  verifySession
+} from "./auroraAccess.js";
+import { auroraProtectedShell } from "./auroraFrontend.js";
+import { auroraAuth } from "./firebase.js";
 
 const AURORA_NEXUS_ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
-const SESSION_COOKIE_NAME = "__session";
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const SESSION_TTL_SECONDS = SESSION_TTL_MS / 1000;
-
-function parseAllowedEmails(raw: string): Set<string> {
-  return new Set(
-    raw
-      .split(/[\s,;]+/)
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean)
-  );
-}
-
-function isEmailAllowed(email: unknown, rawAllowedEmails: string): boolean {
-  if (typeof email !== "string" || !email.trim()) return false;
-  const allowed = parseAllowedEmails(rawAllowedEmails);
-  if (allowed.size === 0) return false;
-  return allowed.has(email.trim().toLowerCase());
-}
-
-function parseCookie(cookieHeader: string | undefined, name: string): string | null {
-  if (!cookieHeader) return null;
-  for (const part of cookieHeader.split(";")) {
-    const [rawName, ...rawValue] = part.trim().split("=");
-    if (rawName === name) {
-      const value = rawValue.join("=");
-      try {
-        return decodeURIComponent(value);
-      } catch {
-        return value;
-      }
-    }
-  }
-  return null;
-}
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -147,61 +125,6 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
 </html>`;
 }
 
-function protectedShell(decoded: DecodedIdToken): string {
-  const email = escapeHtml(decoded.email || "usuário autorizado");
-  return `<!doctype html>
-<html lang="pt-BR">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Aurora Nexus | Privado</title>
-  <style>
-    :root { color-scheme: dark; --bg:#071f25; --panel:#0d2d34; --line:#1d4a53; --gold:#c6a45d; --text:#f7f1e7; --muted:#b9c7c6; }
-    body { margin:0; min-height:100vh; background:#071f25; color:var(--text); font-family:Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    header { display:flex; justify-content:space-between; align-items:center; padding:24px 32px; border-bottom:1px solid var(--line); background:rgba(7,31,37,.92); }
-    main { padding:32px; }
-    .brand { color:var(--gold); letter-spacing:.14em; text-transform:uppercase; font-weight:800; font-size:13px; }
-    .panel { max-width:880px; border:1px solid var(--line); border-radius:22px; background:var(--panel); padding:28px; }
-    h1 { margin:0 0 8px; }
-    p { color:var(--muted); line-height:1.55; }
-    button { border:1px solid var(--gold); border-radius:12px; background:transparent; color:var(--gold); padding:10px 14px; cursor:pointer; font-weight:700; }
-  </style>
-</head>
-<body>
-  <header>
-    <div class="brand">Aurora Nexus</div>
-    <button onclick="logout()">Sair</button>
-  </header>
-  <main>
-    <section class="panel">
-      <h1>Acesso autenticado</h1>
-      <p>Sessão validada para <strong>${email}</strong>.</p>
-      <p>Interface operacional privada. Nenhum dashboard, demonstração ou dado interno é entregue sem sessão autenticada.</p>
-    </section>
-  </main>
-  <script>
-    async function logout() {
-      await fetch('/__sessionLogout', { method: 'POST' });
-      window.location.replace('/');
-    }
-  </script>
-</body>
-</html>`;
-}
-
-async function verifySession(cookieHeader: string | undefined, allowedEmailsRaw: string): Promise<DecodedIdToken | null> {
-  const cookie = parseCookie(cookieHeader, SESSION_COOKIE_NAME);
-  if (!cookie) return null;
-  try {
-    const decoded = await getAuth().verifySessionCookie(cookie, true);
-    if (!isEmailAllowed(decoded.email, allowedEmailsRaw)) return null;
-    return decoded;
-  } catch (error) {
-    logger.warn("Aurora Nexus session rejected", { error: error instanceof Error ? error.message : String(error) });
-    return null;
-  }
-}
-
 export const auroraNexusAuthGate = onRequest(
   { cors: false, secrets: [AURORA_NEXUS_ALLOWED_EMAILS] },
   async (req, res) => {
@@ -217,7 +140,14 @@ export const auroraNexusAuthGate = onRequest(
       return;
     }
 
-    res.status(200).type("html").send(protectedShell(decoded));
+    const member = await resolveMember(decoded);
+    if (!member) {
+      res.status(403).type("html").send(loginPage("Conta válida, mas o acesso à organização ainda não foi provisionado."));
+      return;
+    }
+    const csrfToken = newCsrfToken();
+    res.setHeader("Set-Cookie", `${CSRF_COOKIE_NAME}=${csrfToken}; Max-Age=${SESSION_TTL_SECONDS}; HttpOnly; Secure; SameSite=Strict; Path=/`);
+    res.status(200).type("html").send(auroraProtectedShell(member, csrfToken));
   }
 );
 
@@ -228,6 +158,14 @@ export const auroraNexusSessionLogin = onRequest(
     if (req.method !== "POST") {
       res.set("Allow", "POST");
       res.status(405).json({ ok: false, code: "METHOD_NOT_ALLOWED" });
+      return;
+    }
+    if (req.get("sec-fetch-site") && req.get("sec-fetch-site") !== "same-origin") {
+      res.status(403).json({ ok: false, code: "CROSS_SITE_LOGIN_REJECTED" });
+      return;
+    }
+    if (!String(req.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
+      res.status(415).json({ ok: false, code: "UNSUPPORTED_MEDIA_TYPE" });
       return;
     }
 
@@ -245,13 +183,18 @@ export const auroraNexusSessionLogin = onRequest(
     }
 
     try {
-      const decoded = await getAuth().verifyIdToken(idToken, true);
+      const decoded = await auroraAuth.verifyIdToken(idToken, true);
       if (!isEmailAllowed(decoded.email, allowedEmailsRaw)) {
         logger.warn("Aurora Nexus login denied", { uid: decoded.uid, email: decoded.email || null });
         res.status(403).json({ ok: false, code: "EMAIL_NOT_ALLOWED" });
         return;
       }
-      const sessionCookie = await getAuth().createSessionCookie(idToken, { expiresIn: SESSION_TTL_MS });
+      const member = await resolveMember(decoded);
+      if (!member) {
+        res.status(403).json({ ok: false, code: "MEMBERSHIP_NOT_PROVISIONED" });
+        return;
+      }
+      const sessionCookie = await auroraAuth.createSessionCookie(idToken, { expiresIn: SESSION_TTL_MS });
       res.setHeader(
         "Set-Cookie",
         `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionCookie)}; Max-Age=${SESSION_TTL_SECONDS}; HttpOnly; Secure; SameSite=Strict; Path=/`
@@ -273,9 +216,13 @@ export const auroraNexusSessionLogout = onRequest(
       res.status(405).json({ ok: false, code: "METHOD_NOT_ALLOWED" });
       return;
     }
+    if (!validCsrf(req.get("cookie"), req.get("x-aurora-csrf"))) {
+      res.status(403).json({ ok: false, code: "CSRF_REJECTED" });
+      return;
+    }
     res.setHeader(
       "Set-Cookie",
-      `${SESSION_COOKIE_NAME}=; Max-Age=0; HttpOnly; Secure; SameSite=Strict; Path=/`
+      [`${SESSION_COOKIE_NAME}=; Max-Age=0; HttpOnly; Secure; SameSite=Strict; Path=/`, `${CSRF_COOKIE_NAME}=; Max-Age=0; HttpOnly; Secure; SameSite=Strict; Path=/`]
     );
     res.status(204).send("");
   }
