@@ -1,7 +1,7 @@
 ---
 name: aurora-nexus-organic
 description: Evolução orgânica governada do AURORA NEXUS. Usar ao instalar, descobrir documentos, adaptar rotinas, tratar retrabalho e exceções, propor ferramentas ou avaliar resultados. Braço do sistema-mãe JFN-AUD-GOV-001; nunca produto ou banco paralelo.
-version: 1.1.0-draft
+version: 1.1.1-draft
 code: AURORA-ORG-001
 ---
 
@@ -12,6 +12,14 @@ code: AURORA-ORG-001
 Esta habilidade integra o modus operandi do AURORA NEXUS, preservando a baseline desde N 01, os módulos M01–M10, o submódulo M03.1/JFN-AUD-FAT-001 e WMGJ Operação como piloto. Complementa, sem substituir, firebase-migration/policy/aurora-nexus-policy.sanitized.json e aurora-coletor/docs/PLUG_AND_PLAY_ADAPTIVE.md. Não altera retroativamente hashes ou declarações registrais existentes.
 
 Orgânico significa adaptar rotinas a evidências e resultados do serviço, com memória operacional versionada, testes, avaliação humana e reversão. Não significa treinar automaticamente um modelo, criar/executar código irrestrito, conferir permissões a si próprio ou tomar decisões financeiras, clínicas e contratuais sem autorização.
+
+## Baseline funcional do aplicativo instalado
+
+Decisão de 28/09/2026: o Nexus original já instalado e funcionando no Mac, conforme informado pelo titular, é a referência obrigatória de produto e de evolução desktop. Ler AGENTS.md e desktop/README.md antes de qualquer instalador, atualização ou redesenho. Essa referência tem precedência sobre clientes HML e experiências paralelas; não confundir a versão registral com o aplicativo instalado nem presumir que o commit mais recente seja a versão funcional do Mac.
+
+Todas as melhorias devem atualizar o MESMO aplicativo, preservando nome real, ícone/miniatura, identidade de bundle, padrão de interface, destino de acesso validado, configurações e dados. Identificar tecnicamente o original antes de gerar uma candidata. Substituição controlada no mesmo destino, com backup verificável, validação nativa e rollback; sem cópias concorrentes com nomes ou ícones diferentes. Depois do aceite, a descendente funcional aprovada torna-se a próxima baseline, sem congelar a evolução nem apagar sua origem.
+
+O pacote AURORA-NEXUS-Mac-HML.zip não é sucessor nem atualização aprovada do original. Não recomendá-lo como substituto nem alterar silenciosamente o endereço funcional para o HML. A falta de acesso remoto não prova ausência ou defeito do aplicativo informado pelo titular. O nome exato do .app, caminho, versão, ícone e backend precisam de inspeção autorizada; não inventar esses valores. Esta revisão 1.1.1 é documental: não implementa nem executa um atualizador automático.
 
 ## Baseline e evolução de código
 
@@ -52,9 +60,9 @@ Manter login obrigatório, usuários individuais, segregação entre clientes, m
 
 ## Instalação, portal e publicação
 
-O empacotador desktop/build_installers.py cria clientes do portal HML: pacote .app/command para Mac e instalador .exe Windows x64. Não são ERP offline; não contêm credenciais; não criam banco; não iniciam descoberta; não comprovam servidor funcionando. O coletor POSIX/macOS não foi portado para Windows por esta integração.
+O empacotador desktop/build_installers.py cria clientes experimentais do portal HML: pacote .app/command para Mac e instalador .exe Windows x64. Não são a baseline do Mac, nem atualizadores in-place do aplicativo original, nem ERP offline; não contêm credenciais; não criam banco; não iniciam descoberta; não comprovam servidor funcionando. O coletor POSIX/macOS não foi portado para Windows por esta integração.
 
-Pacote HML sem assinatura/notarização não é distribuição comercial. Não desativar Gatekeeper, SmartScreen, quarentena ou proteções. Não sobrescrever aplicativo existente. Distinguir atualização web de atualização binária. Não republicar cliente antigo como nova versão nativa comprovada.
+Pacote HML sem assinatura/notarização não é distribuição comercial. Não desativar Gatekeeper, SmartScreen, quarentena ou proteções. Não sobrescrever o aplicativo original com esse cliente paralelo. A atualização autorizada do produto deve substituir controladamente a versão anterior do MESMO aplicativo, seguindo a identificação, preservação de identidade, testes, backup e rollback de desktop/README.md. Distinguir atualização web de atualização binária. Não republicar cliente antigo como nova versão nativa comprovada.
 
 Manter PR #38 draft até validação. Nenhum merge/deploy/publicação apenas por sucesso de teste de domínio. Não criar banco separado para contornar gates de backup/restore: resolver a incompatibilidade do procedimento com a restrição atual antes do deploy. Mac indisponível não impede build em runner, mas impede afirmar instalação. Trigger sent não é confirmação de execução. Artefato CI restrito não é publicação no portal.
 
@@ -62,6 +70,6 @@ Manter PR #38 draft até validação. Nenhum merge/deploy/publicação apenas po
 
 Declarar separadamente: especificado; implementado; testado localmente; CI; emulador/identidade real; integrado em código; instalado; implantado; publicado. Citar SHA/run/artefato correspondente. Não usar teste de commit antigo como aprovação do novo. Nunca inventar DNS, SSL, login, assinatura, credencial ou confirmação remota.
 
-Antes de ativar: provar sessão e membership, evidências atuais, transação/concorrência no armazenamento existente, coexistência com rescans, painel de revisão, executor limitado, regressões e rollback. Antes de publicar: builds rastreáveis, hashes, testes nativos, revisão, assinatura/notarização aplicáveis e download autorizado.
+Antes de ativar: provar sessão e membership, evidências atuais, transação/concorrência no armazenamento existente, coexistência com rescans, painel de revisão, executor limitado, regressões e rollback. Antes de publicar: baseline desktop identificada quando aplicável, builds rastreáveis, hashes, testes nativos, revisão, assinatura/notarização aplicáveis e download autorizado.
 
-Retome o PR #38 e leia esta habilidade, o documento 18 e as políticas existentes. Preserve a arquitetura consolidada e os trabalhos anteriores. Evolua por evidência → necessidade → proposta limitada → teste → revisão humana → piloto → medição → promoção ou rollback. Não confunda metadados com conteúdo, template com ferramenta geral, integração em código com implantação, instalador com servidor, nem operação orgânica com treinamento irrestrito. Reporte somente mudanças e resultados verificáveis, mantendo explícitas as dependências restantes.
+Retome o PR #38 e leia esta habilidade, AGENTS.md, desktop/README.md, o documento 18 e as políticas existentes. Preserve a arquitetura consolidada e os trabalhos anteriores. Parta do Nexus original instalado e funcional para qualquer evolução desktop, preservando identidade e atualizando o mesmo aplicativo. Evolua por evidência → necessidade → proposta limitada → teste → revisão humana → piloto → medição → promoção ou rollback. Não confunda metadados com conteúdo, template com ferramenta geral, integração em código com implantação, instalador com servidor, nem operação orgânica com treinamento irrestrito. Reporte somente mudanças e resultados verificáveis, mantendo explícitas as dependências restantes.
