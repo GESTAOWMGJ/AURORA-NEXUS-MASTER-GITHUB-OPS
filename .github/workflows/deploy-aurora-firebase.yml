@@ -249,6 +249,9 @@ jobs:
             .fields.environment.stringValue == "HOMOLOGATION" and
             .fields.projectionEnabled.booleanValue == false and
             .fields.projectionMode.stringValue == "SHADOW" and
+            .fields.organicEnabled.booleanValue == true and
+            ([.fields.organicSectors.arrayValue.values[]?.stringValue] | index("AUDIT")) != null and
+            ([.fields.organicSectors.arrayValue.values[]?.stringValue] | index("FINANCE")) != null and
             .fields.clinicalSensitiveEnabled.booleanValue == false and
             .fields.productionMutation.booleanValue == false and
             .fields.sourceMutation.booleanValue == false
@@ -326,7 +329,7 @@ jobs:
           test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
           git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
-          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,hosting,firestore:rules,firestore:indexes --non-interactive
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,hosting,firestore:rules,firestore:indexes --non-interactive
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -342,7 +345,8 @@ jobs:
             "auroraNexusBootstrap",
             "auroraNexusAction",
             "auroraNexusRefresh",
-            "auroraNexusProjectionEngine"
+            "auroraNexusProjectionEngine",
+            "auroraNexusOrganic"
           ]' '
             (.result // .functions // []) as $functions |
             [$functions[] | (.id // .name // "") | split("/")[-1]] | sort == ($expected | sort)
@@ -361,6 +365,13 @@ jobs:
             --write-out '%{http_code}' \
             "https://${PROJECT_ID}.web.app/api/bootstrap")"
           test "$bootstrap_status" = "401"
+          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+          organic_status="$(curl --silent --show-error --max-time 30 \
+            -H 'Accept: application/json' \
+            --output "$negative_response" \
+            --write-out '%{http_code}' \
+            "https://${PROJECT_ID}.web.app/organic?format=json")"
+          test "$organic_status" = "401"
           jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
       - name: Authenticated smoke test without stored password
         env:
@@ -382,6 +393,7 @@ jobs:
           cookie_jar="$smoke_dir/cookies.txt"
           private_shell="$smoke_dir/private-shell.html"
           bootstrap_response="$smoke_dir/bootstrap.json"
+          organic_response="$smoke_dir/organic.json"
           cleanup() {
             find "$smoke_dir" -type f -delete
             rmdir "$smoke_dir"
@@ -461,3 +473,16 @@ jobs:
             .organization.id == "wmgj" and
             .member.email == $email
           ' "$bootstrap_response" >/dev/null
+          curl --fail --silent --show-error --max-time 30 \
+            -H 'Accept: application/json' \
+            --cookie "$cookie_jar" \
+            --output "$organic_response" \
+            "${base_url}/organic?format=json"
+          jq -e '
+            .ok == true and
+            .environment == "HOMOLOGATION" and
+            .mode == "SHADOW" and
+            .enabled == true and
+            (.sectors | index("AUDIT")) != null and
+            (.sectors | index("FINANCE")) != null
+          ' "$organic_response" >/dev/null
