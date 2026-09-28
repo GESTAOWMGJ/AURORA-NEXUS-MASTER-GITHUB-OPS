@@ -13,6 +13,7 @@ import {
 } from "./auroraAccess.js";
 import { auroraProtectedShell } from "./auroraFrontend.js";
 import { auroraAuth } from "./firebase.js";
+import { servePrivateDownloads } from "./auroraDownloads.js";
 
 const AURORA_NEXUS_ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const AURORA_NEXUS_CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -202,8 +203,13 @@ export const auroraNexusAuthGate = onRequest(
       return;
     }
 
+    const isDownload = req.path === "/downloads" || req.path.startsWith("/downloads/");
     const decoded = await verifySession(req.get("cookie"), AURORA_NEXUS_ALLOWED_EMAILS.value());
     if (!decoded) {
+      if (isDownload) {
+        await servePrivateDownloads(req, res, null);
+        return;
+      }
       res.status(200).type("html").send(loginPage());
       return;
     }
@@ -211,6 +217,10 @@ export const auroraNexusAuthGate = onRequest(
     const member = await resolveMember(decoded);
     if (!member) {
       res.status(403).type("html").send(loginPage("Conta válida, mas o acesso à organização ainda não foi provisionado."));
+      return;
+    }
+    if (isDownload) {
+      await servePrivateDownloads(req, res, member);
       return;
     }
     const csrfSecret = AURORA_NEXUS_CSRF_HMAC_KEY.value();
@@ -224,7 +234,11 @@ export const auroraNexusAuthGate = onRequest(
       res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança."));
       return;
     }
-    res.status(200).type("html").send(auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; logout: string }));
+    let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; logout: string });
+    if (["platform_admin", "org_admin", "director"].includes(member.role) || member.permissions.includes("downloads.hml.read")) {
+      shell = shell.replace("</nav>", '<a href="/downloads">Instaladores Mac e Windows</a></nav>');
+    }
+    res.status(200).type("html").send(shell);
   }
 );
 
