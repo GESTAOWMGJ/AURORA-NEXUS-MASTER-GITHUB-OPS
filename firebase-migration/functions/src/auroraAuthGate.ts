@@ -238,6 +238,9 @@ export const auroraNexusAuthGate = onRequest(
     if (["platform_admin", "org_admin", "director"].includes(member.role) || member.permissions.includes("downloads.hml.read")) {
       shell = shell.replace("</nav>", '<a href="/downloads">Instaladores Mac e Windows</a></nav>');
     }
+    if (member.allFacilities && (["platform_admin", "org_admin", "director", "auditor"].includes(member.role) || member.permissions.includes("organic.write"))) {
+      shell = shell.replace("</nav>", '<a href="/organic">Evolução orgânica e modus operandi</a></nav>');
+    }
     res.status(200).type("html").send(shell);
   }
 );

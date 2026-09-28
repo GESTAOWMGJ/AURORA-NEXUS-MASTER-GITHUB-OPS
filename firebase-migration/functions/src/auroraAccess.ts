@@ -9,6 +9,7 @@ const CSRF_CONTEXT = "aurora-csrf\0v1\0";
 export const CSRF_PURPOSES = {
   action: "POST:/api/actions",
   refresh: "POST:/api/refresh",
+  organic: "POST:/organic",
   logout: "POST:/__sessionLogout"
 } as const;
 export type CsrfPurpose = typeof CSRF_PURPOSES[keyof typeof CSRF_PURPOSES];
