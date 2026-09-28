@@ -145,7 +145,6 @@ jobs:
           WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
           DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
           SMOKE_CREDENTIALS_SECRET: ${{ vars.FIREBASE_HML_SMOKE_CREDENTIALS_SECRET }}
-          BACKUP_RESTORE_MARKER_URI: ${{ vars.FIREBASE_HML_BACKUP_RESTORE_MARKER_URI }}
         run: |
           set -euo pipefail
           test -n "$APPROVED_PROJECT"
@@ -155,10 +154,6 @@ jobs:
           test -n "$WIF_PROVIDER"
           test -n "$DEPLOY_SERVICE_ACCOUNT"
           [[ "$SMOKE_CREDENTIALS_SECRET" =~ ^[A-Za-z0-9_-]{1,255}$ ]]
-          case "$BACKUP_RESTORE_MARKER_URI" in gs://*/*#[0-9]*) ;; *) exit 43 ;; esac
-          case "$BACKUP_RESTORE_MARKER_URI" in *'*'*|*'?'*|*'['*) exit 44 ;; esac
-          marker_generation="${BACKUP_RESTORE_MARKER_URI##*#}"
-          [[ "$marker_generation" =~ ^[0-9]+$ ]]
       - uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
@@ -173,7 +168,6 @@ jobs:
           APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
           DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
           SMOKE_CREDENTIALS_SECRET: ${{ vars.FIREBASE_HML_SMOKE_CREDENTIALS_SECRET }}
-          BACKUP_RESTORE_MARKER_URI: ${{ vars.FIREBASE_HML_BACKUP_RESTORE_MARKER_URI }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
@@ -318,49 +312,25 @@ jobs:
             )
           ' <<<"$member_json" >/dev/null
 
-          marker_file="$(mktemp "${RUNNER_TEMP}/aurora-backup-restore.XXXXXX.json")"
-          trap 'rm -f "$marker_file"' EXIT
-          gcloud storage cp "$BACKUP_RESTORE_MARKER_URI" "$marker_file" --quiet
-          marker_generation="${BACKUP_RESTORE_MARKER_URI##*#}"
-          jq -e --arg project "$PROJECT_ID" --arg generation "$marker_generation" '
-            .schemaVersion == "aurora.firebase.backup-restore-evidence.v1" and
-            .projectId == $project and
-            (.objectGeneration | tostring) == $generation and
-            .environment == "HOMOLOGATION" and
-            .backupCompleted == true and
-            .restoreVerified == true and
-            .productionMutation == false and
-            ((.verifiedAt // "") | type == "string" and length > 0) and
-            ((.backupResource // "") | type == "string" and length > 0) and
-            ((.restoreOperation // "") | type == "string" and length > 0) and
-            ((.restoreDatabase // "") | type == "string" and length > 0)
-          ' "$marker_file" >/dev/null
+          # First HML deploy stays recovery-safe without creating a parallel
+          # Firestore database. No operational source data is allowed yet.
+          # Recovery requires PITR plus a recent READY managed backup.
+          # A real restore rehearsal remains mandatory before real ingestion
+          # or promotion of Firebase as an operational source.
+          test "$(jq -r '.pointInTimeRecoveryEnablement // empty' <<<"$db_json")" = "POINT_IN_TIME_RECOVERY_ENABLED"
 
-          backup_resource="$(jq -r '.backupResource' "$marker_file")"
-          restore_operation="$(jq -r '.restoreOperation' "$marker_file")"
-          restore_database="$(jq -r '.restoreDatabase' "$marker_file")"
-          case "$backup_resource" in
-            "projects/${PROJECT_ID}/locations/southamerica-east1/backups/"*) ;;
-            *) exit 45 ;;
-          esac
-          case "$restore_database" in
-            "projects/${PROJECT_ID}/databases/(default)") exit 46 ;;
-            "projects/${PROJECT_ID}/databases/"*) ;;
-            *) exit 47 ;;
-          esac
-          restore_database_id="${restore_database##*/}"
-          [[ "$restore_database_id" =~ ^[a-z][a-z0-9-]{2,61}[a-z0-9]$ ]]
-          case "$restore_operation" in
-            "${restore_database}/operations/"*) ;;
-            *) exit 48 ;;
-          esac
-          node -e '
-            const marker = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-            const verifiedAt = Date.parse(marker.verifiedAt);
-            const age = Date.now() - verifiedAt;
-            process.exit(Number.isFinite(verifiedAt) && age >= -300000 && age <= 86400000 ? 0 : 1);
-          ' "$marker_file"
+          schedules_json="$(gcloud firestore backups schedules list \
+            --database='(default)' --project "$PROJECT_ID" --format=json)"
+          jq -e 'type == "array" and length >= 1' <<<"$schedules_json" >/dev/null
 
+          backups_json="$(gcloud firestore backups list --project "$PROJECT_ID" --format=json)"
+          backup_resource="$(jq -r --arg source "projects/${PROJECT_ID}/databases/(default)" '
+            [.[] | select(.state == "READY" and .database == $source)]
+            | sort_by(.snapshotTime // "")
+            | last
+            | .name // empty
+          ' <<<"$backups_json")"
+          test -n "$backup_resource"
           backup_json="$(curl --fail --silent --show-error --max-time 30 \
             -H "Authorization: Bearer ${access_token}" \
             "https://firestore.googleapis.com/v1/${backup_resource}")"
@@ -371,33 +341,22 @@ jobs:
             ((.snapshotTime // "") | length > 0) and
             ((.expireTime // "") | length > 0)
           ' <<<"$backup_json" >/dev/null
+          node -e '
+            const backup = JSON.parse(process.argv[1]);
+            const snapshot = Date.parse(backup.snapshotTime || "");
+            const age = Date.now() - snapshot;
+            process.exit(Number.isFinite(snapshot) && age >= -300000 && age <= 172800000 ? 0 : 1);
+          ' "$backup_json"
 
-          restore_operation_json="$(curl --fail --silent --show-error --max-time 30 \
+          collections_json="$(curl --fail --silent --show-error --max-time 30 \
+            -X POST \
             -H "Authorization: Bearer ${access_token}" \
-            "https://firestore.googleapis.com/v1/${restore_operation}")"
-          jq -e \
-            --arg name "$restore_operation" \
-            --arg backup "$backup_resource" \
-            --arg database "$restore_database" '
-              .name == $name and
-              .done == true and
-              (has("error") | not) and
-              .metadata."@type" == "type.googleapis.com/google.firestore.admin.v1.RestoreDatabaseMetadata" and
-              .metadata.operationState == "SUCCESSFUL" and
-              .metadata.backup == $backup and
-              .metadata.database == $database and
-              .response.name == $database
-            ' <<<"$restore_operation_json" >/dev/null
-
-          restore_database_json="$(curl --fail --silent --show-error --max-time 30 \
-            -H "Authorization: Bearer ${access_token}" \
-            "https://firestore.googleapis.com/v1/${restore_database}")"
-          jq -e --arg name "$restore_database" --arg backup "$backup_resource" '
-            .name == $name and
-            .locationId == "southamerica-east1" and
-            .type == "FIRESTORE_NATIVE" and
-            .sourceInfo.backup.backup == $backup
-          ' <<<"$restore_database_json" >/dev/null
+            -H 'Content-Type: application/json' \
+            --data '{"pageSize":100}' \
+            "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:listCollectionIds")"
+          jq -e '
+            ([.collectionIds[]? | select(. != "organizations")] | length) == 0
+          ' <<<"$collections_json" >/dev/null
       - name: Deploy Functions, Hosting, Rules and indexes
         working-directory: firebase-migration
         env:
