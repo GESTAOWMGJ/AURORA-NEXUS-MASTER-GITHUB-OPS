@@ -1,0 +1,39 @@
+name: Validate Aurora Installers
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'aurora-coletor/aurora_onboarding.py'
+      - 'firebase-migration/functions/src/auroraDownloads.ts'
+      - 'firebase-migration/functions/src/auroraAuthGate.ts'
+      - 'firebase-migration/functions/test/aurora-downloads.test.ts'
+      - '.github/workflows/validate-aurora-installers.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: aurora-installers-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build-hml:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Installer unit tests and isolated package build
+        run: python3 desktop/build_installers.py --output "${RUNNER_TEMP}/aurora-hml-installers"
+      - name: Private download authorization and integrity tests
+        run: node --experimental-strip-types --test firebase-migration/functions/test/aurora-downloads.test.ts
+      - name: Record scope of validation
+        run: |
+          echo 'HML clients built and synthetic tests passed. No Firebase deployment, user-device installation, signing, notarization or public release performed.' >> "$GITHUB_STEP_SUMMARY"
