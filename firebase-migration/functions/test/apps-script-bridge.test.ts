@@ -44,6 +44,50 @@ test("bridge normaliza risco PT/EN para enum canônico", () => {
   assert.equal(context.wmgjFirestoreRiskLevel_("desconhecido"), "MEDIUM");
 });
 
+test("normalizador BRL preserva zero, sinal e converte para centavos inteiros", () => {
+  const context = appsScriptContext() as any;
+  assert.equal(context.wmgjFirestoreBrlToCents_(1234.56, "R$ 1.234,56"), 123456);
+  assert.equal(context.wmgjFirestoreBrlToCents_("1.234,56", "1.234,56"), 123456);
+  assert.equal(context.wmgjFirestoreBrlToCents_("R$ 1.234,56", "R$ 1.234,56"), 123456);
+  assert.equal(context.wmgjFirestoreBrlToCents_("0,00", "0,00"), 0);
+  assert.equal(context.wmgjFirestoreBrlToCents_("-12,34", "-12,34"), -1234);
+  assert.equal(context.wmgjFirestoreBrlToCents_("", ""), null);
+});
+
+test("normalizador BRL falha fechado em formato ambíguo, precisão ou faixa inválida", () => {
+  const context = appsScriptContext() as any;
+  for (const value of ["1,234.56", "12,345", "1e3", "não é valor"]) {
+    assert.throws(() => context.wmgjFirestoreBrlToCents_(value, value), /MONEY_/);
+  }
+  assert.throws(() => context.wmgjFirestoreBrlToCents_(Number.MAX_SAFE_INTEGER, String(Number.MAX_SAFE_INTEGER)), /MONEY_/);
+});
+
+test("adaptador por aba mantém o texto-fonte e adiciona campo canônico", () => {
+  const context = appsScriptContext() as any;
+  const headers = ["Número NF", "Valor Total"];
+  const sourceRecord = context.wmgjFirestoreRowObject_(headers, ["NF-1", "R$ 1.234,56"]);
+  const raw = ["NF-1", 1234.56];
+  const display = ["NF-1", "R$ 1.234,56"];
+  const normalized = context.wmgjFirestoreAddCanonicalMoney_(headers, raw, display, sourceRecord, {
+    totalCents: ["valor_total"]
+  });
+  assert.equal(normalized.valor_total, "R$ 1.234,56");
+  assert.equal(normalized.totalCents, 123456);
+  assert.equal(raw[1], 1234.56);
+});
+
+test("status de liquidação valida somente entidades financeiras compatíveis", () => {
+  const context = appsScriptContext() as any;
+  for (const status of ["LIQUIDADO", "LIQUIDATED", " conciliado ", "RECONCILED", "MATCHED"]) {
+    assert.deepEqual(
+      { ...context.wmgjFirestoreWorkflowFromLegacy_(status, "bankTransaction") },
+      { state: "VALIDATED", review: "NOT_REQUIRED", risk: "LOW" }
+    );
+  }
+  assert.equal(context.wmgjFirestoreWorkflowFromLegacy_("PENDENTE_CONCILIADO", "bankTransaction").state, "PENDING_HUMAN_REVIEW");
+  assert.equal(context.wmgjFirestoreWorkflowFromLegacy_("LIQUIDADO", "invoice").state, "RECEIVED");
+});
+
 test("bridge usa a revisão temporal da fonte antes do horário de envio", () => {
   const context = appsScriptContext() as any;
   const source = vm.runInContext('new Date("2026-08-25T10:00:00.123Z")', context);

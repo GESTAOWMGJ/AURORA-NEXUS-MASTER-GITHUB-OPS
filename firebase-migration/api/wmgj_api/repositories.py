@@ -127,7 +127,7 @@ class FirestoreRepository:
             if not snapshot.exists:
                 return None
             data = snapshot.to_dict() or {}
-            return DashboardSnapshot.model_validate(model_payload(DashboardSnapshot, data))
+            return DashboardSnapshot.model_validate(data)
 
         return await run_in_threadpool(read)
 

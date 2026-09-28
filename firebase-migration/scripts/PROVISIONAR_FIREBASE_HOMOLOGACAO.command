@@ -113,6 +113,23 @@ choose_billing() {
   rm -f "$f"
 }
 
+choose_app_access() {
+  local raw email
+  raw="${AURORA_NEXUS_ALLOWED_EMAILS:-}"
+  if [ -z "$raw" ]; then
+    printf 'E-mails individuais autorizados no app (separados por vírgula; não use grupo compartilhado): '
+    read -r raw
+  fi
+  ALLOWED_EMAILS="$(printf '%s' "$raw" | tr ';' ',' | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]//g;s/,,*/,/g;s/^,//;s/,$//')"
+  [ -n "$ALLOWED_EMAILS" ] || fail 54 BLOCKED_ALLOWED_EMAILS "Informe ao menos um e-mail individual."
+  OLD_IFS="$IFS"; IFS=','
+  for email in $ALLOWED_EMAILS; do
+    printf '%s' "$email" | grep -Eq '^[A-Za-z0-9.!#$%&'"'"'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' \
+      || { IFS="$OLD_IFS"; fail 55 BLOCKED_ALLOWED_EMAILS "Formato de e-mail inválido."; }
+  done
+  IFS="$OLD_IFS"
+}
+
 configure() {
   set_env WMGJ_FIREBASE_PROJECT_ID "$PROJECT_ID"
   set_env WMGJ_FIREBASE_DISPLAY_NAME '"WMGJ Firestore Homologacao"'
@@ -174,21 +191,57 @@ cost_controls() {
   printf '{"ok":true,"projectId":"%s","budget":"%s","thresholds":[0.5,0.8,1.0],"productionMutation":false}\n' "$PROJECT_ID" "$amount" > "$STATE/firebase-cost-controls.json"
 }
 
+configure_app_secrets() {
+  local name csrf
+  gcloud services enable secretmanager.googleapis.com --project "$PROJECT_ID" --quiet || fail 78 FAILED_SECRET_MANAGER_API "Secret Manager indisponível."
+  for name in AURORA_NEXUS_ALLOWED_EMAILS AURORA_NEXUS_CSRF_HMAC_KEY; do
+    gcloud secrets describe "$name" --project "$PROJECT_ID" >/dev/null 2>&1 \
+      || gcloud secrets create "$name" --project "$PROJECT_ID" --replication-policy=automatic --quiet >/dev/null \
+      || fail 79 FAILED_APP_SECRET_CREATE "Não foi possível criar $name."
+  done
+  printf '%s' "$ALLOWED_EMAILS" | gcloud secrets versions add AURORA_NEXUS_ALLOWED_EMAILS --project "$PROJECT_ID" --data-file=- --quiet >/dev/null \
+    || fail 79 FAILED_APP_SECRET_VERSION "Não foi possível versionar a allowlist."
+  csrf="$(openssl rand -hex 32)"
+  printf '%s' "$csrf" | gcloud secrets versions add AURORA_NEXUS_CSRF_HMAC_KEY --project "$PROJECT_ID" --data-file=- --quiet >/dev/null \
+    || fail 79 FAILED_APP_SECRET_VERSION "Não foi possível versionar a chave CSRF."
+  unset csrf ALLOWED_EMAILS AURORA_NEXUS_ALLOWED_EMAILS
+  printf '{"ok":true,"projectId":"%s","allowedEmailsSecret":true,"csrfHmacSecret":true,"valuesExposed":false}\n' "$PROJECT_ID" > "$STATE/firebase-app-secrets.json"
+}
+
+configure_app_guardrails() {
+  local token payload url
+  token="$(gcloud auth application-default print-access-token 2>/dev/null)" || fail 76 FAILED_ADC_TOKEN "ADC indisponível para configurar a organização."
+  payload='{"fields":{"active":{"booleanValue":true},"environment":{"stringValue":"HOMOLOGATION"},"projectionEnabled":{"booleanValue":false},"projectionMode":{"stringValue":"SHADOW"},"clinicalSensitiveEnabled":{"booleanValue":false},"productionMutation":{"booleanValue":false},"sourceMutation":{"booleanValue":false}}}'
+  url="https://firestore.googleapis.com/v1/projects/$PROJECT_ID/databases/(default)/documents/organizations/$ORG_ID?updateMask.fieldPaths=active&updateMask.fieldPaths=environment&updateMask.fieldPaths=projectionEnabled&updateMask.fieldPaths=projectionMode&updateMask.fieldPaths=clinicalSensitiveEnabled&updateMask.fieldPaths=productionMutation&updateMask.fieldPaths=sourceMutation"
+  curl -fsS -X PATCH -H "Authorization: Bearer $token" -H 'Content-Type: application/json' --data "$payload" "$url" >/dev/null \
+    || fail 77 FAILED_APP_GUARDRAILS "Não foi possível fixar os bloqueios iniciais da organização."
+  printf '{"ok":true,"projectId":"%s","orgId":"%s","projectionEnabled":false,"projectionMode":"SHADOW","clinicalSensitiveEnabled":false,"productionMutation":false,"sourceMutation":false}\n' "$PROJECT_ID" "$ORG_ID" > "$STATE/firebase-app-guardrails.json"
+}
+
 verify() {
-  local billing db functions secret org deploy budget health_url health=false ok=false
+  local billing db functions ingest_secret allowed_secret csrf_secret org org_json token deploy budget health_url health=false ok=false
   billing="$(gcloud billing projects describe "$PROJECT_ID" --format='value(billingEnabled)' 2>/dev/null || true)"
   db=false; firebase firestore:databases:list --project "$PROJECT_ID" --json 2>/dev/null | grep -Fq '(default)' && db=true
   functions="$(firebase functions:list --project "$PROJECT_ID" --json 2>/dev/null | jq -c '[..|objects|.id?//.name?//empty]|unique' 2>/dev/null || printf '[]')"
-  printf '%s' "$functions" | grep -Fq ingestWmgjEvent && printf '%s' "$functions" | grep -Fq runtimeHealth || fail 80 VERIFY_FUNCTIONS "Functions obrigatórias ausentes."
-  secret=false; firebase functions:secrets:get WMGJ_INGEST_HMAC_KEYRING --project "$PROJECT_ID" >/dev/null 2>&1 && secret=true
-  org=false; [ -f "$STATE/firebase-org-wmgj.json" ] && jq -e --arg p "$PROJECT_ID" '.ok==true and .projectId==$p and .orgId=="wmgj"' "$STATE/firebase-org-wmgj.json" >/dev/null 2>&1 && org=true
+  for fn in ingestWmgjEvent runtimeHealth auroraNexusAuthGate auroraNexusSessionLogin auroraNexusSessionLogout auroraNexusBootstrap auroraNexusAction auroraNexusRefresh auroraNexusProjectionEngine; do
+    printf '%s' "$functions" | grep -Fq "$fn" || fail 80 VERIFY_FUNCTIONS "Function obrigatória ausente: $fn"
+  done
+  ingest_secret=false; firebase functions:secrets:get WMGJ_INGEST_HMAC_KEYRING --project "$PROJECT_ID" >/dev/null 2>&1 && ingest_secret=true
+  allowed_secret=false; firebase functions:secrets:get AURORA_NEXUS_ALLOWED_EMAILS --project "$PROJECT_ID" >/dev/null 2>&1 && allowed_secret=true
+  csrf_secret=false; firebase functions:secrets:get AURORA_NEXUS_CSRF_HMAC_KEY --project "$PROJECT_ID" >/dev/null 2>&1 && csrf_secret=true
+  org=false
+  token="$(gcloud auth application-default print-access-token 2>/dev/null || true)"
+  if [ -n "$token" ]; then
+    org_json="$(curl -fsS -H "Authorization: Bearer $token" "https://firestore.googleapis.com/v1/projects/$PROJECT_ID/databases/(default)/documents/organizations/$ORG_ID" 2>/dev/null || true)"
+    printf '%s' "$org_json" | jq -e '.fields.active.booleanValue==true and .fields.environment.stringValue=="HOMOLOGATION" and .fields.projectionEnabled.booleanValue==false and .fields.projectionMode.stringValue=="SHADOW" and .fields.clinicalSensitiveEnabled.booleanValue==false and .fields.productionMutation.booleanValue==false and .fields.sourceMutation.booleanValue==false' >/dev/null 2>&1 && org=true
+  fi
   deploy=false; [ -f "$STATE/firebase-deploy.json" ] && jq -e --arg p "$PROJECT_ID" '.ok==true and .projectId==$p and .productionMutation==false' "$STATE/firebase-deploy.json" >/dev/null 2>&1 && deploy=true
   budget=false; gcloud billing budgets list --billing-account "$BILLING_ID" --filter="displayName='WMGJ HML $PROJECT_ID'" --format='value(name)' 2>/dev/null | grep -q . && budget=true
   health_url="$(gcloud functions describe runtimeHealth --gen2 --region "$REGION" --project "$PROJECT_ID" --format='value(serviceConfig.uri)' 2>/dev/null || true)"
   [ -n "$health_url" ] && curl -fsS "$health_url" | jq -e '.ok==true and .service=="wmgj-firestore-ingestion"' >/dev/null 2>&1 && health=true
-  [ "$billing" = True ] && [ "$db" = true ] && [ "$secret" = true ] && [ "$org" = true ] && [ "$deploy" = true ] && [ "$budget" = true ] && [ "$health" = true ] && ok=true
+  [ "$billing" = True ] && [ "$db" = true ] && [ "$ingest_secret" = true ] && [ "$allowed_secret" = true ] && [ "$csrf_secret" = true ] && [ "$org" = true ] && [ "$deploy" = true ] && [ "$budget" = true ] && [ "$health" = true ] && ok=true
   cat > "$STATE/firebase-homologation-verification.json" <<JSON
-{"ok":$ok,"projectId":"$PROJECT_ID","environment":"HOMOLOGATION","billingEnabled":"$billing","firestore":$db,"hmacSecret":$secret,"organizationWmgj":$org,"deployMarker":$deploy,"budget":$budget,"runtimeHealth":$health,"functions":$functions,"appsScriptDryRunRequired":true,"clinicalSensitiveEnabled":false,"productionMutation":false,"sourceMutation":false}
+{"ok":$ok,"projectId":"$PROJECT_ID","environment":"HOMOLOGATION","billingEnabled":"$billing","firestore":$db,"ingestHmacSecret":$ingest_secret,"allowedEmailsSecret":$allowed_secret,"csrfHmacSecret":$csrf_secret,"organizationWmgj":$org,"projectionEnabled":false,"projectionMode":"SHADOW","deployMarker":$deploy,"budget":$budget,"runtimeHealth":$health,"functions":$functions,"appsScriptDryRunRequired":true,"clinicalSensitiveEnabled":false,"productionMutation":false,"sourceMutation":false}
 JSON
   [ "$ok" = true ] || fail 81 HOMOLOGATION_VERIFICATION_INCOMPLETE "Consulte firebase-homologation-verification.json."
 }
@@ -202,12 +255,15 @@ ensure_auth
 [ -f "$CONFIG" ] && . "$CONFIG"
 choose_project
 choose_billing
+choose_app_access
 configure
 confirm
 write_marker false APPROVED_LOCAL "Produção bloqueada."
 cost_controls
 write_marker false COST_CONTROLS_READY "Projeto HML, billing e orçamento preparados."
+configure_app_secrets
 ROOT="$ROOT" WMGJ_ROOT="$ROOT" "$APPLY" --apply
+configure_app_guardrails
 
 gcloud firestore fields ttls update expiresAt --collection-group=requestNonces --database='(default)' --enable-ttl --project="$PROJECT_ID" --async --quiet || fail 75 FAILED_NONCE_TTL "TTL de nonces não iniciou."
 printf '{"ok":true,"projectId":"%s","collectionGroup":"requestNonces","field":"expiresAt","enableRequested":true,"productionMutation":false}\n' "$PROJECT_ID" > "$STATE/firebase-ttl-policy.json"

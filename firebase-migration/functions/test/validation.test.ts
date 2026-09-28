@@ -48,6 +48,102 @@ test("ingestão genérica bloqueia dado clínico e decisão de revisão", () => 
   }
 });
 
+test("rótulo INTERNAL ou RESTRICTED não contorna bloqueio clínico fail-closed", () => {
+  const candidates = [
+    event({ sensitivity: "INTERNAL", record: { patientName: "Pessoa Teste" } }),
+    event({
+      sensitivity: "RESTRICTED",
+      record: { billing: { "Número do prontuário": "PR-123" } }
+    }),
+    event({
+      sensitivity: "INTERNAL",
+      metadata: { imported: [{ diagnostico: "conteúdo sintético" }] }
+    }),
+    event({
+      sensitivity: "RESTRICTED",
+      source: { system: "SHEETS", sourceId: "sheet:1", cpfPaciente: "00000000000" }
+    })
+  ];
+
+  for (const candidate of candidates) {
+    const result = validateEvent(candidate, 500);
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join(" "), /conteúdo clínico identificável/);
+  }
+});
+
+test("identificadores técnicos e tipo documental não podem carregar referência clínica", () => {
+  for (const candidate of [
+    event({ entityKey: "patient:synthetic-123" }),
+    event({ idempotencyKey: "wmgj:SHEETS:cpf=00000000000" }),
+    event({ documentType: "Prontuário eletrônico" }),
+    event({ record: { externalReference: "CPF: 000.000.000-00" } }),
+    event({ record: { observation: "diagnóstico: conteúdo sintético" } }),
+    event({ record: { nome: "Pessoa Teste" } }),
+    event({ record: { email: "pessoa@example.test" } }),
+    event({ record: { notes: "texto livre sem rótulo clínico" } })
+  ]) {
+    const result = validateEvent(candidate, 500);
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join(" "), /conteúdo clínico identificável/);
+  }
+});
+
+test("política clínica preserva campos operacionais e métricas agregadas", () => {
+  const result = validateEvent(event({
+    record: {
+      amountCents: 123_45,
+      authorizationRef: "authorization:synthetic-1",
+      diagnosisRate: 0.04,
+      hospitalAccountId: "hospital-account:synthetic-1",
+      patientCount: 12,
+      professionalId: "professional:synthetic-1",
+      providerId: "provider:synthetic-1",
+      reconciliationStatus: "PENDING"
+    },
+    metadata: {
+      clinicalSensitiveEnabled: false,
+      fileNameWithheld: true,
+      sourceContext: "pipeline-v3"
+    }
+  }), 500);
+
+  assert.equal(result.ok, true, result.errors.join("; "));
+});
+
+test("contrato positivo bloqueia PHI renomeada para campos genéricos", () => {
+  const result = validateEvent(event({
+    sensitivity: "INTERNAL",
+    record: {
+      titular: "Maria",
+      documento: "00000000000",
+      laudo: "hipertensão"
+    }
+  }), 500);
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join(" "), /campo fora do contrato não clínico/);
+});
+
+test("contrato positivo também rejeita extensões desconhecidas em source e metadata", () => {
+  for (const candidate of [
+    event({ source: { system: "SHEETS", sourceId: "sheet:1", titular: "Maria" } }),
+    event({ metadata: { migrationVersion: "v1", laudo: "texto" } })
+  ]) {
+    const result = validateEvent(candidate, 500);
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join(" "), /campo fora do contrato não clínico/);
+  }
+});
+
+test("entidades clínicas não pertencem à allowlist do endpoint genérico", () => {
+  for (const entityType of ["patient", "clinicalEvidence", "encounter", "medicalRecord"]) {
+    const result = validateEvent(event({ entityType }), 500);
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join(" "), /entityType não permitido/);
+  }
+});
+
 test("ingestão genérica bloqueia fechamento crítico", () => {
   for (const entityType of ["monthlyClosing", "reconciliation", "hospitalAccount"]) {
     const result = validateEvent(event({ entityType, workflowState: "CLOSED" }), 500);

@@ -2,7 +2,7 @@
 
 **Data da fundação:** 26/08/2026  
 **Escopo:** WMGJ Operação, gestão hospitalar replicável e auditoria runtime  
-**Estado:** arquitetura e código-base preparados; **nenhuma escrita foi feita em Firestore de produção**.
+**Estado:** projeto Firebase isolado de homologação inicializado e código-base preparado; **nenhum deploy, dado real ou escrita em Firestore de produção foi executado**. Estado verificável: `docs/17-estado-homologacao-2026-09-27.md`.
 
 ## Decisão arquitetural
 
@@ -53,6 +53,15 @@ FastAPI Control Plane (homologação)
 - `tests/`: testes mínimos das Security Rules.
 - `api/evals/`: casos sintéticos de regressão; live eval é opt-in.
 - `skills/`: habilidade operacional aprendida para continuidade.
+- `policy/`: política sanitizada e versionada do aplicativo.
+
+## Aplicação Full Firebase
+
+O pacote inclui um shell operacional privado no Firebase Hosting, APIs autenticadas em Cloud Functions e um motor de projeções sanitizadas. O agendamento roda a cada 15 minutos, mas o motor nasce desabilitado e só publica quando a organização define `projectionEnabled=true`, `projectionMode=SHADOW` e uma competência `YYYY-MM`. Ele cobre o mapa M01–M10, lê a réplica canônica, calcula indicadores e grava snapshot+auditoria atomicamente sem escrever na fonte atual.
+
+O back-end exige simultaneamente allowlist de e-mail, sessão Firebase revogável e membership ativa em `organizations/wmgj/members/{uid}`. Mutações humanas usam CSRF HMAC vinculado à sessão/rota, RBAC, idempotência e controle de revisão. Ações irreversíveis, dados clínicos sensíveis e mutação da fonte continuam bloqueados.
+
+Arquitetura, gates, implantação e rollback: `docs/16-full-firebase-shadow-mode.md`.
 
 ## Validação controlada
 

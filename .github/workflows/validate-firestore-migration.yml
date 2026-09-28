@@ -5,6 +5,7 @@ on:
     paths:
       - "firebase-migration/**"
       - ".github/workflows/validate-firestore-migration.yml"
+      - ".github/workflows/deploy-aurora-firebase.yml"
   push:
     branches:
       - main
@@ -12,6 +13,7 @@ on:
     paths:
       - "firebase-migration/**"
       - ".github/workflows/validate-firestore-migration.yml"
+      - ".github/workflows/deploy-aurora-firebase.yml"
   workflow_dispatch:
 
 permissions:
@@ -90,7 +92,10 @@ jobs:
             "firebase-migration/functions/package-lock.json",
             "firebase-migration/functions/tsconfig.json",
             "firebase-migration/tests/package.json",
-            "firebase-migration/tests/package-lock.json"
+            "firebase-migration/tests/package-lock.json",
+            "firebase-migration/policy/aurora-nexus-source-2.3.0.json",
+            "firebase-migration/policy/aurora-nexus-policy.sanitized.json",
+            "firebase-migration/policy/manifest.json"
           ];
           for (const file of files) {
             JSON.parse(fs.readFileSync(file, "utf8"));
@@ -98,10 +103,17 @@ jobs:
           console.log("FIRESTORE_CONFIG_JSON_OK");
           NODE
 
+          echo '9a8f7f291be65c0ef1feba043592452b77bef03e965198ca451f0044703a6d8f  firebase-migration/policy/aurora-nexus-source-2.3.0.json' | sha256sum -c -
+          echo '077e7cbf4c60e578dee971ce5af5f847c773ba35c7b8beb020caa7cb6af971a7  firebase-migration/policy/aurora-nexus-policy.sanitized.json' | sha256sum -c -
+
       - name: Build Functions and run Security Rules tests
         env:
           WMGJ_FIREBASE_TEST_PROJECT_ID: wmgj-firestore-rules-test
         run: bash firebase-migration/scripts/bootstrap-homologacao.sh
+
+      - name: Block high or critical production dependency advisories
+        working-directory: firebase-migration/functions
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Validate FastAPI, OpenAI contracts and dashboard
         working-directory: firebase-migration/api

@@ -1,5 +1,4 @@
-import { initializeApp } from "firebase-admin/app";
-import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { onRequest } from "firebase-functions/v2/https";
@@ -17,8 +16,8 @@ import {
   type HmacV2Headers
 } from "./security.js";
 import { validateEvent } from "./validation.js";
+import { auroraDb as db } from "./firebase.js";
 
-initializeApp();
 setGlobalOptions({
   region: "southamerica-east1",
   maxInstances: 10,
@@ -26,7 +25,6 @@ setGlobalOptions({
   memory: "512MiB"
 });
 
-const db = getFirestore();
 const HMAC_KEYRING = defineSecret("WMGJ_INGEST_HMAC_KEYRING");
 const NONCE_TTL_MILLISECONDS = 15 * 60 * 1000;
 
@@ -57,6 +55,76 @@ function stableValue(value: unknown): unknown {
 
 function stableJson(value: unknown): string {
   return JSON.stringify(stableValue(value));
+}
+
+type IngestOrganizationRejection =
+  | "ORGANIZATION_NOT_BOOTSTRAPPED"
+  | "ORGANIZATION_GUARDRAILS_INVALID";
+
+/**
+ * A ingestão é permitida somente no tenant explicitamente preparado para
+ * homologação não clínica. Comparações estritas mantêm o gate fechado para
+ * campos ausentes, nulos ou serializados com o tipo incorreto.
+ */
+export function ingestOrganizationRejection(
+  exists: boolean,
+  organization: Record<string, unknown> | undefined
+): IngestOrganizationRejection | null {
+  if (!exists || !organization) return "ORGANIZATION_NOT_BOOTSTRAPPED";
+
+  if (
+    organization.active !== true
+    || organization.environment !== "HOMOLOGATION"
+    || organization.projectionMode !== "SHADOW"
+    || organization.sourceMutation !== false
+    || organization.productionMutation !== false
+    || organization.clinicalSensitiveEnabled !== false
+  ) {
+    return "ORGANIZATION_GUARDRAILS_INVALID";
+  }
+
+  return null;
+}
+
+function isPlainDocumentMap(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/**
+ * Reproduz a semântica relevante de set(..., { merge: true }) para o material
+ * coberto pelo hash. Mapas são mesclados recursivamente; arrays e escalares
+ * substituem o valor anterior. Sentinelas temporais não entram neste patch e
+ * são removidas por stableValue antes do hash.
+ */
+export function mergedDocumentForAudit(
+  previous: Record<string, unknown> | null,
+  patch: Record<string, unknown>
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = previous ? { ...previous } : {};
+
+  for (const [key, value] of Object.entries(patch)) {
+    const current = merged[key];
+    if (isPlainDocumentMap(value) && Object.keys(value).length === 0) {
+      // Firestore trata um mapa vazio explícito como substituição do mapa,
+      // mesmo com merge=true.
+      merged[key] = {};
+    } else {
+      merged[key] = isPlainDocumentMap(current) && isPlainDocumentMap(value)
+        ? mergedDocumentForAudit(current, value)
+        : value;
+    }
+  }
+
+  return merged;
+}
+
+export function persistedDocumentHash(
+  previous: Record<string, unknown> | null,
+  patch: Record<string, unknown>
+): string {
+  return sha256Hex(stableJson(mergedDocumentForAudit(previous, patch)));
 }
 
 function deterministicId(entityType: string, entityKey: string): string {
@@ -169,7 +237,13 @@ export const ingestWmgjEvent = onRequest(
         const idemSnap = await tx.get(idemRef);
         const entitySnap = await tx.get(entityRef);
 
-        if (!orgSnap.exists) throw new IngestDomainError(412, "ORGANIZATION_NOT_BOOTSTRAPPED");
+        const organizationRejection = ingestOrganizationRejection(
+          orgSnap.exists,
+          orgSnap.exists ? orgSnap.data() : undefined
+        );
+        if (organizationRejection) {
+          throw new IngestDomainError(412, organizationRejection);
+        }
         if (nonceSnap.exists) throw new IngestDomainError(409, "REPLAY_DETECTED");
 
         const idempotency = decideIdempotency(
@@ -196,7 +270,9 @@ export const ingestWmgjEvent = onRequest(
           };
         }
 
-        const previous = entitySnap.exists ? entitySnap.data() : null;
+        const previous: Record<string, unknown> | null = entitySnap.exists
+          ? entitySnap.data() ?? null
+          : null;
         const sourceVersionDecision = decideSourceVersion(
           previous?.sourceVersion,
           event.sourceVersion
@@ -241,7 +317,10 @@ export const ingestWmgjEvent = onRequest(
         };
 
         const beforeHash = previous ? sha256Hex(stableJson(previous)) : null;
-        const afterHash = sha256Hex(stableJson(hashableAfter));
+        // Firestore preserva campos ausentes no patch quando merge=true. O hash
+        // deve representar o documento lógico final, inclusive campos legados
+        // e mapas aninhados preservados, não apenas o payload parcial recebido.
+        const afterHash = persistedDocumentHash(previous, hashableAfter);
 
         tx.set(entityRef, normalized, { merge: true });
         tx.create(idemRef, {

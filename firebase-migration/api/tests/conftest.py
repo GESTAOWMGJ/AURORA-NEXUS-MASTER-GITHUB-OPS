@@ -40,6 +40,7 @@ class FakeRepository:
             )
         }
         self.snapshot = DashboardSnapshot(
+            schema_version=2,
             org_id="wmgj",
             competence="2026-08",
             generated_at=datetime.now(UTC) - timedelta(seconds=120),
@@ -83,6 +84,54 @@ class FakeRepository:
                     created_at=datetime.now(UTC),
                 )
             ],
+            sanitized=True,
+            sensitivity="INTERNAL",
+            state="SHADOW",
+            financial_cents={
+                "invoicedCents": 100_000,
+                "receivedCents": 80_000,
+                "glossCents": 0,
+                "outstandingCents": 20_000,
+            },
+            operations={"openActions": 2, "overdueActions": 1, "openFindings": 2},
+            coverage={"evidencePercent": 80, "reconciliationPercent": 75},
+            sample_sizes={
+                "invoices": 10,
+                "bankTransactions": 8,
+                "glosses": 1,
+                "actionItems": 2,
+                "sourceDocuments": 5,
+                "reconciliations": 4,
+                "auditFindings": 2,
+            },
+            data_quality={
+                "complete": True,
+                "sourcePresent": True,
+                "invalidFinancialRecords": 0,
+                "validFinancialRecords": 19,
+            },
+            modules=[
+                {"id": f"M{index:02d}", "name": name, "status": "LEARNING"}
+                for index, name in enumerate(
+                    [
+                        "Ingestão e Proveniência Documental",
+                        "Contratos, Regras e Evidências",
+                        "Ciclo de Receita e Conciliação",
+                        "Glosas, Recursos e Divergências",
+                        "SLA e Workflow",
+                        "Governança e Planos de Ação",
+                        "Indicadores e Relatórios",
+                        "Integrações e Conectores",
+                        "Segurança, LGPD e Segregação",
+                        "Trilha de Auditoria e Integridade",
+                    ],
+                    start=1,
+                )
+            ],
+            engine={"name": "aurora-projection", "version": 2, "mode": "SHADOW"},
+            source_limit=1000,
+            source_hash="a" * 64,
+            snapshot_id="123e4567-e89b-42d3-a456-426614174000",
         )
         self.runs: dict[str, AiRunResponse] = {}
         self.idempotency: dict[str, tuple[str, str]] = {}

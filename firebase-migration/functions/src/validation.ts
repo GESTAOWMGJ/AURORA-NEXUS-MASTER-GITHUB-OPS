@@ -128,6 +128,8 @@ export function validateEvent(input: unknown, rawBytes: number): ValidationResul
       id: String(actor.id),
       source: String(actor.source)
     },
+    // A política recebe também extensões desconhecidas de source. Assim, um
+    // produtor não consegue esconder PHI em um campo extra antes da validação.
     source: cleanObject(source) as unknown as WmgjIngestionEvent["source"],
     workflowState: input.workflowState as WmgjIngestionEvent["workflowState"],
     reviewState: input.reviewState as WmgjIngestionEvent["reviewState"],

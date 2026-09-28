@@ -132,13 +132,60 @@ class DashboardAlert(StrictModel):
     created_at: datetime
 
 
+class DashboardFinancialCents(StrictModel):
+    invoiced_cents: Annotated[int, Field(ge=0)] | None
+    received_cents: Annotated[int, Field(ge=0)] | None
+    gloss_cents: Annotated[int, Field(ge=0)] | None
+    outstanding_cents: int | None
+
+
+class DashboardOperations(StrictModel):
+    open_actions: int = Field(ge=0)
+    overdue_actions: int = Field(ge=0)
+    open_findings: int = Field(ge=0)
+
+
+class DashboardCoverage(StrictModel):
+    evidence_percent: Annotated[float, Field(ge=0, le=100)] | None
+    reconciliation_percent: Annotated[float, Field(ge=0, le=100)] | None
+
+
+class DashboardSampleSizes(StrictModel):
+    invoices: int = Field(ge=0)
+    bank_transactions: int = Field(ge=0)
+    glosses: int = Field(ge=0)
+    action_items: int = Field(ge=0)
+    source_documents: int = Field(ge=0)
+    reconciliations: int = Field(ge=0)
+    audit_findings: int = Field(ge=0)
+
+
+class DashboardDataQuality(StrictModel):
+    complete: Literal[True]
+    source_present: Literal[True]
+    invalid_financial_records: Literal[0]
+    valid_financial_records: int = Field(ge=0)
+
+
+class DashboardModule(StrictModel):
+    id: Literal["M01", "M02", "M03", "M04", "M05", "M06", "M07", "M08", "M09", "M10"]
+    name: str = Field(min_length=1, max_length=128)
+    status: Literal["LEARNING"]
+
+
+class DashboardEngine(StrictModel):
+    name: Literal["aurora-projection"]
+    version: Literal[2]
+    mode: Literal["SHADOW"]
+
+
 class DashboardSnapshot(StrictModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2]
     org_id: str
     facility_id: str | None = None
     competence: str = Field(pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     generated_at: datetime
-    as_of: datetime | None = None
+    as_of: datetime
     policy_version: str
     completeness: CompletenessState
     severity: OperationalSeverity
@@ -146,7 +193,22 @@ class DashboardSnapshot(StrictModel):
     financial: FinancialMetrics
     audit: AuditMetrics
     sources: list[SourceState]
-    alerts: list[DashboardAlert] = Field(default_factory=list, max_length=50)
+    alerts: list[DashboardAlert] = Field(max_length=50)
+    sanitized: Literal[True]
+    sensitivity: Literal["INTERNAL"]
+    state: Literal["SHADOW"]
+    financial_cents: DashboardFinancialCents
+    operations: DashboardOperations
+    coverage: DashboardCoverage
+    sample_sizes: DashboardSampleSizes
+    data_quality: DashboardDataQuality
+    modules: list[DashboardModule] = Field(min_length=10, max_length=10)
+    engine: DashboardEngine
+    source_limit: Literal[1000]
+    source_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    snapshot_id: str = Field(
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    )
 
 
 class Freshness(StrictModel):

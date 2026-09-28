@@ -15,6 +15,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 import re
 import shutil
+import shlex
+import plistlib
+from aurora_onboarding import installation_config, install_assets
 import stat
 import sys
 
@@ -173,6 +176,7 @@ def install(args: argparse.Namespace) -> None:
     watch_dir = validate_watch_dir(args.watch_dir)
     config = build_config(args, target, watch_dir)
     identity = str(config["technicalIdentityId"])
+    onboarding = installation_config(args, target, watch_dir)
 
     target.mkdir(mode=0o700, parents=True, exist_ok=False)
     (target / "bin").mkdir(mode=0o700)
@@ -189,7 +193,7 @@ def install(args: argparse.Namespace) -> None:
 
     run_sh = f"""#!/bin/sh
 set -eu
-exec python3 {target / 'bin' / 'aurora_collector.py'} --config {target / 'collector-config.json'} "$@"
+exec {shlex.quote(sys.executable)} {shlex.quote(str(target / 'bin' / 'aurora_collector.py'))} --config {shlex.quote(str(target / 'collector-config.json'))} "$@"
 """
     write_text(target / "run.sh", run_sh, 0o700)
     make_executable(target / "run.sh")
@@ -232,35 +236,19 @@ AURORA_COLLECTOR_TOKEN=
 """
     write_text(target / "aurora-coletor.env.example", env_example, 0o600)
 
-    launchd_example = f"""<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
- "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-  <dict>
-    <key>Label</key>
-    <string>br.com.auroranexus.collector.{identity}</string>
-    <key>ProgramArguments</key>
-    <array>
-      <string>/usr/bin/python3</string>
-      <string>{target / 'bin' / 'aurora_collector.py'}</string>
-      <string>--config</string>
-      <string>{target / 'collector-config.json'}</string>
-      <string>--watch</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>{target / 'log' / 'collector.out.log'}</string>
-    <key>StandardErrorPath</key>
-    <string>{target / 'log' / 'collector.err.log'}</string>
-  </dict>
-</plist>
-"""
+    launchd_example = plistlib.dumps({
+        "Label": f"br.com.auroranexus.collector.{identity}",
+        "ProgramArguments": [sys.executable, str(target / "bin" / "aurora_collector.py"), "--config", str(target / "collector-config.json"), "--watch"],
+        "RunAtLoad": True, "KeepAlive": True,
+        "StandardOutPath": str(target / "log" / "collector.out.log"),
+        "StandardErrorPath": str(target / "log" / "collector.err.log"),
+    }).decode("utf-8")
     write_text(target / "aurora-coletor.launchd.plist.example", launchd_example, 0o600)
+    install_assets(source_dir, target, onboarding)
 
     print("INSTALAÇÃO PREPARADA")
+    print("Descoberta documental: autorizada localmente" if onboarding["authorization"]["approved"] else "Descoberta documental: bloqueada até autorização institucional")
+    print("Ferramentas adaptativas: rascunhos locais; nenhuma ativação ou implantação automática")
     print(f"Target: {target}")
     print(f"Entrada: {watch_dir}")
     print(f"Estado local: {target / 'state'}")
@@ -283,6 +271,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--max-file-bytes", type=int, default=10 * 1024 * 1024, help="Tamanho máximo por arquivo.")
     parser.add_argument("--recursive", action="store_true", help="Varre subpastas da entrada.")
     parser.add_argument("--auth-env", default="AURORA_COLLECTOR_TOKEN", help="Nome da variável de ambiente do bearer token.")
+    parser.add_argument("--authorize-discovery", action="store_true", help="Autoriza apenas descoberta local de metadados no escopo documentado.")
+    parser.add_argument("--discovery-root", action="append", help="Pasta institucional autorizada. Repetível; padrão: watch-dir.")
+    parser.add_argument("--discovery-actor-ref", help="ID técnico do responsável pela autorização, sem nome pessoal.")
+    parser.add_argument("--discovery-authorization-ref", help="Referência técnica da autorização institucional.")
+    parser.add_argument("--discovery-expires-at", help="Vencimento da autorização ISO-8601 com fuso. Não é a credencial do coletor.")
     args = parser.parse_args(argv)
     if args.poll_seconds < 5:
         fail("--poll-seconds deve ser >= 5")

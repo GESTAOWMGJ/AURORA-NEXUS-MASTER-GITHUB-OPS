@@ -1,0 +1,37 @@
+name: Validate Aurora Onboarding
+
+on:
+  pull_request:
+    paths:
+      - 'aurora-coletor/**'
+      - '.github/workflows/validate-aurora-onboarding.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'aurora-coletor/**'
+      - '.github/workflows/validate-aurora-onboarding.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-onboarding-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Test local discovery without deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile installer and onboarding module
+        run: python -m py_compile aurora-coletor/install.py aurora-coletor/aurora_onboarding.py
+      - name: Synthetic scope and capability tests
+        run: python -m unittest discover -s aurora-coletor/tests -p 'test_onboarding.py' -v
