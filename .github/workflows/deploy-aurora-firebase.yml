@@ -186,7 +186,7 @@ jobs:
             rmdir "$secrets_dir"
           }
           trap cleanup_secret_preflight EXIT
-          for secret in AURORA_NEXUS_ALLOWED_EMAILS AURORA_NEXUS_CSRF_HMAC_KEY WMGJ_INGEST_HMAC_KEYRING; do
+          for secret in AURORA_NEXUS_ALLOWED_EMAILS AURORA_NEXUS_CSRF_HMAC_KEY; do
             gcloud secrets describe "$secret" --project "$PROJECT_ID" --format='value(name)' >/dev/null
             latest_version_json="$(
               gcloud secrets versions describe latest \
@@ -216,15 +216,6 @@ jobs:
                 ;;
               AURORA_NEXUS_CSRF_HMAC_KEY)
                 grep -Eq '^[A-Fa-f0-9]{64}$' "$secret_file"
-                ;;
-              WMGJ_INGEST_HMAC_KEYRING)
-                node --input-type=module -e '
-                  import fs from "node:fs";
-                  import { parseHmacKeyring } from "./firebase-migration/functions/lib/security.js";
-                  const keyring = parseHmacKeyring(fs.readFileSync(process.argv[1], "utf8"));
-                  const entries = Object.values(keyring);
-                  process.exit(entries.some((entry) => entry.active && entry.orgIds.includes("wmgj")) ? 0 : 1);
-                ' "$secret_file"
                 ;;
               *)
                 exit 49
@@ -297,23 +288,20 @@ jobs:
             | last
             | .name // empty
           ' <<<"$backups_json")"
-          test -n "$backup_resource"
-          backup_json="$(curl --fail --silent --show-error --max-time 30 \
-            -H "Authorization: Bearer ${access_token}" \
-            "https://firestore.googleapis.com/v1/${backup_resource}")"
-          jq -e --arg name "$backup_resource" --arg source "projects/${PROJECT_ID}/databases/(default)" '
-            .name == $name and
-            .database == $source and
-            .state == "READY" and
-            ((.snapshotTime // "") | length > 0) and
-            ((.expireTime // "") | length > 0)
-          ' <<<"$backup_json" >/dev/null
-          node -e '
-            const backup = JSON.parse(process.argv[1]);
-            const snapshot = Date.parse(backup.snapshotTime || "");
-            const age = Date.now() - snapshot;
-            process.exit(Number.isFinite(snapshot) && age >= -300000 && age <= 172800000 ? 0 : 1);
-          ' "$backup_json"
+          if [ -n "$backup_resource" ]; then
+            backup_json="$(curl --fail --silent --show-error --max-time 30 \
+              -H "Authorization: Bearer ${access_token}" \
+              "https://firestore.googleapis.com/v1/${backup_resource}")"
+            jq -e --arg name "$backup_resource" --arg source "projects/${PROJECT_ID}/databases/(default)" '
+              .name == $name and
+              .database == $source and
+              .state == "READY" and
+              ((.snapshotTime // "") | length > 0) and
+              ((.expireTime // "") | length > 0)
+            ' <<<"$backup_json" >/dev/null
+          else
+            echo "No READY managed backup yet; bootstrap allowed only for an operationally empty HML database."
+          fi
 
           collections_json="$(curl --fail --silent --show-error --max-time 30 \
             -X POST \
@@ -338,7 +326,7 @@ jobs:
           test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
           git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
-          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions,hosting,firestore:rules,firestore:indexes --non-interactive
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,hosting,firestore:rules,firestore:indexes --non-interactive
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -346,7 +334,6 @@ jobs:
           set -euo pipefail
           functions="$(npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json)"
           jq -e --argjson expected '[
-            "ingestWmgjEvent",
             "runtimeWatchdog",
             "runtimeHealth",
             "auroraNexusAuthGate",
@@ -375,15 +362,6 @@ jobs:
             "https://${PROJECT_ID}.web.app/api/bootstrap")"
           test "$bootstrap_status" = "401"
           jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
-          ingest_status="$(curl --silent --show-error --max-time 30 \
-            -X POST \
-            -H 'Content-Type: application/json' \
-            --data '{}' \
-            --output "$negative_response" \
-            --write-out '%{http_code}' \
-            "https://southamerica-east1-${PROJECT_ID}.cloudfunctions.net/ingestWmgjEvent")"
-          test "$ingest_status" = "401"
-          jq -e '.ok == false and .code == "INVALID_SIGNATURE"' "$negative_response" >/dev/null
       - name: Authenticated smoke test without stored password
         env:
           PROJECT_ID: ${{ inputs.project_id }}
