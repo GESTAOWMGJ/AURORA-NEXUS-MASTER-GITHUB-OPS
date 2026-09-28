@@ -22,45 +22,27 @@
     "rewrites": [
       {
         "source": "/__sessionLogin",
-        "function": {
-          "functionId": "auroraNexusSessionLogin",
-          "region": "southamerica-east1"
-        }
+        "function": { "functionId": "auroraNexusSessionLogin", "region": "southamerica-east1" }
       },
       {
         "source": "/__sessionLogout",
-        "function": {
-          "functionId": "auroraNexusSessionLogout",
-          "region": "southamerica-east1"
-        }
+        "function": { "functionId": "auroraNexusSessionLogout", "region": "southamerica-east1" }
       },
       {
         "source": "/api/bootstrap",
-        "function": {
-          "functionId": "auroraNexusBootstrap",
-          "region": "southamerica-east1"
-        }
+        "function": { "functionId": "auroraNexusBootstrap", "region": "southamerica-east1" }
       },
       {
         "source": "/api/actions",
-        "function": {
-          "functionId": "auroraNexusAction",
-          "region": "southamerica-east1"
-        }
+        "function": { "functionId": "auroraNexusAction", "region": "southamerica-east1" }
       },
       {
         "source": "/api/refresh",
-        "function": {
-          "functionId": "auroraNexusRefresh",
-          "region": "southamerica-east1"
-        }
+        "function": { "functionId": "auroraNexusRefresh", "region": "southamerica-east1" }
       },
       {
         "source": "**",
-        "function": {
-          "functionId": "auroraNexusAuthGate",
-          "region": "southamerica-east1"
-        }
+        "function": { "functionId": "auroraNexusAuthGate", "region": "southamerica-east1" }
       }
     ]
   },
@@ -70,7 +52,12 @@
   },
   "functions": {
     "source": "functions",
-    "runtime": "nodejs22"
+    "runtime": "nodejs22",
+    "predeploy": [
+      "test \"$GCLOUD_PROJECT\" = \"wmgj-hml-jfn-20260927\"",
+      "python3 \"$PROJECT_DIR/../desktop/build_installers.py\" --output \"$RESOURCE_DIR/private-downloads\"",
+      "npm --prefix \"$RESOURCE_DIR\" run build"
+    ]
   },
   "emulators": {
     "auth": { "port": 9099 },
