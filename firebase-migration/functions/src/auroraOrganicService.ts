@@ -1,12 +1,13 @@
 import {CATEGORIES,KINDS,digest,fail,reconcile,executeReadOnly,type Approval,type Memory,type Signal} from './auroraOrganicCore.js';
+import {compileToolPlan,buildToolReport,learningCycle,type ToolReport} from './auroraOrganicLearning.js';
 import {validateResolutionEvidence,validEvidenceRef,type FirestoreDocumentReader} from './auroraEvidence.js';
 export const STATE_ID='aurora-organic-v1';
 export const MAX_SIGNALS=64, MAX_RUNS=64;
 const WRITERS=['platform_admin','org_admin','director','auditor'];
 export type Actor={uid:string;orgId:string;role:string;permissions:string[];allFacilities:boolean;mfaVerified:boolean};
 export type Proof={signalHash:string;actorUid:string;actionId:string|null;snapshotHash:string|null;runId:string|null};
-export type Run={id:string;proposalId:string;revision:number;fingerprint:string;actorUid:string;result:ReturnType<typeof executeReadOnly>;outcome:string|null};
-export type State={schemaVersion:1;orgId:string;version:number;memory:Memory|null;proofs:Record<string,Proof>;approvals:Record<string,Approval>;runs:Run[]};
+export type Run={id:string;proposalId:string;revision:number;fingerprint:string;actorUid:string;result:ReturnType<typeof executeReadOnly>&{report?:ToolReport};outcome:string|null};
+export type State={schemaVersion:1;orgId:string;version:number;memory:Memory|null;proofs:Record<string,Proof>;approvals:Record<string,Approval&{planFingerprint?:string}>;runs:Run[]};
 export type Command={type:'OBSERVE'|'REVALIDATE'|'APPROVE_PILOT'|'EXECUTE'|'ROLLBACK'|'OUTCOME';expectedVersion:number;kind?:Signal['kind'];category?:Signal['category'];sector?:string;actionId?:string;proposalId?:string;proposalRevision?:number;runId?:string;outcome?:Signal['outcome']};
 const BODY_KEYS:Record<Command['type'],string[]>={OBSERVE:['type','expectedVersion','kind','category','sector','actionId'],REVALIDATE:['type','expectedVersion'],APPROVE_PILOT:['type','expectedVersion','proposalId','proposalRevision'],EXECUTE:['type','expectedVersion','proposalId','proposalRevision'],ROLLBACK:['type','expectedVersion','proposalId','proposalRevision'],OUTCOME:['type','expectedVersion','runId','outcome']};
 export function parseCommand(raw:unknown):Command {
@@ -76,36 +77,46 @@ export async function transition(original:State|null,c:Command|null,a:Actor,org:
     inputs.push(event);s.proofs[event.id]={signalHash:digest(event),actorUid:a.uid,actionId:null,snapshotHash:null,runId:run.id};run.outcome=c.outcome!;
   }
   const all=[...(s.memory?.signals??[]),...inputs],verified=new Set<string>();
-  for(const e of all) {
+  for(const e of all.filter(e=>e.kind!=='TOOL_OUTCOME')) {
     const proof=s.proofs[e.id];
     if(!proof||proof.signalHash!==digest(e)||!sectors.has(e.sector)||!validEvidenceRef(proof.actorUid)||!activeWriter(await read(`organizations/${a.orgId}/members/${proof.actorUid}`))) continue;
-    if(e.kind==='TOOL_OUTCOME') {
-      const run=s.runs.find(r=>r.id===proof.runId);
-      if(run&&run.outcome===e.outcome&&run.proposalId===e.toolId&&e.evidenceRefs.join()===digest([a.orgId,'run',run.id])) verified.add(e.id);
-    } else {
-      const snap=await actionSnapshot(a.orgId,proof.actionId!,read);
-      if(snap&&snap.hash===proof.snapshotHash&&snap.hash===e.decisionRef&&snap.caseRef===e.caseRef&&snap.evidenceRefs.join()===e.evidenceRefs.join()) verified.add(e.id);
-    }
+    const snap=await actionSnapshot(a.orgId,proof.actionId!,read);
+    if(snap&&snap.hash===proof.snapshotHash&&snap.hash===e.decisionRef&&snap.caseRef===e.caseRef&&snap.evidenceRefs.join()===e.evidenceRefs.join()) verified.add(e.id);
   }
   const historySectors=new Set([...sectors,...all.map(e=>e.sector)]);
-  s.memory=reconcile(a.orgId,s.memory,inputs,historySectors,e=>verified.has(e.id),new Set(s.memory?.proposals.map(p=>p.id)??[]));
+  const knownTools=new Set(s.memory?.proposals.map(p=>p.id)??[]);
+  const candidate=reconcile(a.orgId,s.memory,inputs,historySectors,e=>verified.has(e.id),knownTools);
+  for(const e of all.filter(e=>e.kind==='TOOL_OUTCOME')) {
+    const proof=s.proofs[e.id],run=s.runs.find(r=>r.id===proof?.runId);
+    const p=candidate.proposals.find(p=>p.id===e.toolId);
+    if(!proof||proof.signalHash!==digest(e)||!run||!p||!sectors.has(e.sector)||!validEvidenceRef(proof.actorUid)||!validEvidenceRef(run.actorUid)) continue;
+    if(!activeWriter(await read(`organizations/${a.orgId}/members/${proof.actorUid}`))||!activeWriter(await read(`organizations/${a.orgId}/members/${run.actorUid}`))) continue;
+    if(p.status==='GENERATED_AWAITING_HUMAN_REVIEW'&&run.revision===p.revision&&run.fingerprint===p.definitionFingerprint&&run.outcome===e.outcome&&run.proposalId===e.toolId&&e.evidenceRefs.join()===digest([a.orgId,'run',run.id])) verified.add(e.id);
+  }
+  // Reconcile against the original memory, not the intermediate candidate: revisions advance once.
+  s.memory=reconcile(a.orgId,s.memory,inputs,historySectors,e=>verified.has(e.id),knownTools);
   if(s.memory.signals.length>MAX_SIGNALS) fail('MEMORY_LIMIT_REVIEW_REQUIRED');
   for(const [id,approval] of Object.entries(s.approvals)) {
     const p=s.memory.proposals.find(p=>p.id===id);
-    if(!p||p.status!=='GENERATED_AWAITING_HUMAN_REVIEW'||p.revision!==approval.revision||p.definitionFingerprint!==approval.fingerprint||!validEvidenceRef(approval.actorUid)||!activeWriter(await read(`organizations/${a.orgId}/members/${approval.actorUid}`))) approval.status='ROLLED_BACK';
+    if(!p||p.status!=='GENERATED_AWAITING_HUMAN_REVIEW'||p.revision!==approval.revision||p.definitionFingerprint!==approval.fingerprint||approval.planFingerprint!==compileToolPlan(s.memory,p).fingerprint||!validEvidenceRef(approval.actorUid)||!activeWriter(await read(`organizations/${a.orgId}/members/${approval.actorUid}`))) approval.status='ROLLED_BACK';
   }
   for(const performance of s.memory.performance) if(performance.recommendation==='REVIEW_OR_ROLLBACK'&&s.approvals[performance.toolId]) s.approvals[performance.toolId]!.status='ROLLED_BACK';
+  // Adverse history must not disappear when old evidence loses eligibility.
+  for(const run of s.runs) if(run.outcome==='ADVERSE'&&s.approvals[run.proposalId]) s.approvals[run.proposalId]!.status='ROLLED_BACK';
   let result:Record<string,unknown>={kind:c?.type??'READ',readOnly:true};
   if(c&&['APPROVE_PILOT','EXECUTE','ROLLBACK'].includes(c.type)) {
     const p=s.memory.proposals.find(p=>p.id===c.proposalId);if(!p) fail('PROPOSAL_NOT_FOUND');
     if(p.revision!==c.proposalRevision) fail('PROPOSAL_REVISION_CONFLICT');
     if(c.type==='ROLLBACK') s.approvals[p.id]={revision:p.revision,fingerprint:p.definitionFingerprint,actorUid:a.uid,status:'ROLLED_BACK'};
     else if(c.type==='APPROVE_PILOT') {
-      if(p.status!=='GENERATED_AWAITING_HUMAN_REVIEW'||s.memory.performance.some(x=>x.toolId===p.id&&x.recommendation==='REVIEW_OR_ROLLBACK')) fail('CURRENT_EVIDENCE_REQUIRED');
-      s.approvals[p.id]={revision:p.revision,fingerprint:p.definitionFingerprint,actorUid:a.uid,status:'PILOT'};
+      const plan=compileToolPlan(s.memory,p);
+      if(!plan.readyForReview||s.runs.some(r=>r.proposalId===p.id&&r.outcome==='ADVERSE')) fail('CURRENT_EVIDENCE_REQUIRED');
+      s.approvals[p.id]={revision:p.revision,fingerprint:p.definitionFingerprint,planFingerprint:plan.fingerprint,actorUid:a.uid,status:'PILOT'};
     } else {
       const approval=s.approvals[p.id];if(!approval) fail('CURRENT_APPROVAL_REQUIRED');
-      const output=executeReadOnly(s.memory,p.id,approval);
+      const plan=compileToolPlan(s.memory,p);
+      if(approval.planFingerprint!==plan.fingerprint) fail('CURRENT_APPROVAL_REQUIRED');
+      const output={...executeReadOnly(s.memory,p.id,approval),report:buildToolReport(s.memory,p,plan)};
       if(s.runs.length>=MAX_RUNS) fail('RUN_LIMIT_REVIEW_REQUIRED');
       const run={id:digest([a.orgId,'organic-run',operationId]),proposalId:p.id,revision:p.revision,fingerprint:p.definitionFingerprint,actorUid:a.uid,result:output,outcome:null};
       s.runs.push(run);result={...result,runId:run.id,...output};
@@ -116,5 +127,5 @@ export async function transition(original:State|null,c:Command|null,a:Actor,org:
   return {state:s,result};
 }
 export function publicState(s:State):Record<string,unknown> {
-  return {version:s.version,signalCount:s.memory?.signals.length??0,deferredCount:s.memory?.deferredSignalRefs.length??0,proposals:(s.memory?.proposals??[]).map(p=>({id:p.id,template:p.template,sector:p.sector,category:p.category,revision:p.revision,status:p.status,cases:p.distinctCases,evidenceReferences:p.evidenceRefs.length,approval:s.approvals[p.id]?.status??'AWAITING_REVIEW'})),runs:s.runs.map(r=>({id:r.id,proposalId:r.proposalId,revision:r.revision,result:r.result,outcome:r.outcome})),performance:s.memory?.performance??[]};
+  return {learning:learningCycle(s),version:s.version,signalCount:s.memory?.signals.length??0,deferredCount:s.memory?.deferredSignalRefs.length??0,proposals:(s.memory?.proposals??[]).map(p=>({id:p.id,template:p.template,sector:p.sector,category:p.category,revision:p.revision,status:p.status,cases:p.distinctCases,evidenceReferences:p.evidenceRefs.length,approval:s.approvals[p.id]?.status??'AWAITING_REVIEW'})),runs:s.runs.map(r=>({id:r.id,proposalId:r.proposalId,revision:r.revision,result:r.result,outcome:r.outcome})),performance:s.memory?.performance??[]};
 }
