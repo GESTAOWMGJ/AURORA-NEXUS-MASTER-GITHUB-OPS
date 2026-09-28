@@ -72,6 +72,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
     input, select { width:100%; padding:14px 14px; border-radius:14px; border:1px solid #2e5f68; background:#061a1f; color:var(--text); outline:none; font-size:15px; }
     input:focus { border-color:var(--gold); box-shadow:0 0 0 3px rgba(198,164,93,.18); }
     button { width:100%; margin-top:18px; border:0; border-radius:14px; padding:14px 16px; background:var(--gold); color:#08191d; font-weight:800; cursor:pointer; font-size:15px; }
+    button.secondary { margin-top:10px; background:transparent; color:var(--text); border:1px solid #2e5f68; }
     button:disabled { opacity:.62; cursor:wait; }
     .status { min-height:22px; margin-top:14px; color:#f0d99c; font-size:13px; }
     .fineprint { margin-top:22px; font-size:12px; color:#91a7a6; }
@@ -88,6 +89,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
       <label for="password">Senha</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required>
       <button id="submit" type="submit">Entrar</button>
+      <button id="reset-password" class="secondary" type="button">Definir ou redefinir senha</button>
       <div id="status" class="status" aria-live="polite"></div>
     </form>
     <section id="mfa-panel" hidden>
@@ -108,6 +110,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
     const form = document.getElementById('login-form');
     const statusEl = document.getElementById('status');
     const submit = document.getElementById('submit');
+    const resetPassword = document.getElementById('reset-password');
     const mfaPanel = document.getElementById('mfa-panel');
     const mfaFactor = document.getElementById('mfa-factor');
     const mfaCode = document.getElementById('mfa-code');
@@ -147,6 +150,24 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
       mfaStatus.textContent = 'Digite o código do aplicativo autenticador.';
       mfaCode.focus();
     }
+
+    resetPassword.addEventListener('click', async () => {
+      const email = document.getElementById('email').value.trim();
+      if (!email || !email.includes('@')) {
+        statusEl.textContent = 'Informe o e-mail autorizado.';
+        return;
+      }
+      resetPassword.disabled = true;
+      statusEl.textContent = 'Solicitando redefinição...';
+      try {
+        await firebase.auth().sendPasswordResetEmail(email);
+      } catch (_) {
+        // Resposta deliberadamente genérica para não revelar existência de conta.
+      } finally {
+        statusEl.textContent = 'Se o e-mail estiver autorizado, as instruções de redefinição serão enviadas.';
+        resetPassword.disabled = false;
+      }
+    });
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
