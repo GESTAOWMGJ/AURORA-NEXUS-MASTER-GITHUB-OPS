@@ -43,7 +43,7 @@ Nenhuma opção é habilitada pela página nem pela instalação. O administrado
 
 Antes de liberar: CI verde no SHA final; revisão de segurança; testes de sessão/CSRF/revogação/transação concorrente no emulador e HML; confirmação do projeto aprovado e seus gates; deploy rastreável; smoke anônimo, autenticado e com MFA; piloto sintético reconciliado; só então amostra operacional autorizada.
 
-O plano não autoriza dispensar WIF, secrets, billing/orçamento, proteção de ambiente, backup/recuperação ou login. Resolver o conflito entre gates legados de restore em banco separado e a restrição atual de não criar banco ANTES do deploy, sem improvisar nova infraestrutura.
+O plano não autoriza dispensar WIF, secrets, billing/orçamento, proteção de ambiente, backup/recuperação ou login. O conflito do gate legado foi resolvido sem banco paralelo: primeiro deploy somente com HML sem coleções operacionais, PITR/delete protection ativos, agenda de backup e backup `READY` recente. Ensaio real de restore permanece obrigatório antes de ingestão operacional ou cutover.
 
 ## Evidência desta fase e limitações
 
