@@ -437,9 +437,9 @@ jobs:
             --output "$auth_response" \
             "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${api_key}"
           id_token="$(jq -r '.idToken // empty' "$auth_response")"
-          local_id="$(jq -r '.localId // empty' "$auth_response")"
           test -n "$id_token"
-          test "$local_id" = "$SMOKE_UID"
+          token_uid="$(node -e 'const parts=process.argv[1].split("."); if(parts.length!==3) process.exit(2); const payload=JSON.parse(Buffer.from(parts[1],"base64url").toString("utf8")); process.stdout.write(String(payload.sub || payload.user_id || ""));' "$id_token")"
+          test "$token_uid" = "$SMOKE_UID"
 
           base_url="https://${PROJECT_ID}.web.app"
           jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$session_payload"
