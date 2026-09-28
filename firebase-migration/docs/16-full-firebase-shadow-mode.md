@@ -30,7 +30,7 @@ O motor falha fechado se qualquer coleção exceder o limite de leitura, se falt
 - Workload Identity Federation e service account de deploy com menor privilégio.
 - Secrets `AURORA_NEXUS_ALLOWED_EMAILS` e `AURORA_NEXUS_CSRF_HMAC_KEY` configurados no Secret Manager.
 - Usuários criados no Firebase Auth e memberships individuais ativas no Firestore.
-- Firestore Native, região, retenção, backup/restore e delete protection comprovados.
+- Firestore Native, região, delete protection e PITR comprovados; agenda diária de backup e ao menos um backup `READY` recente antes do primeiro deploy. O primeiro HML permanece sem dados operacionais, portanto não cria banco paralelo só para ensaio de restore.
 - CI verde para Functions, regras, FastAPI, contratos e evals.
 - Ambiente GitHub `firebase-homologation` com aprovadores obrigatórios.
 - Organização `wmgj` ativa, motor inicialmente desabilitado e competência piloto definida somente após reconciliação da amostra.
@@ -46,7 +46,7 @@ O workflow `Deploy Aurora Firebase Homologation` sempre valida o commit. Ele só
 
 O escopo implantado é limitado a Functions, Hosting, Firestore Rules e índices. O preflight exige os três secrets técnicos, região e delete protection, e o smoke público confirma que apenas a tela de login está exposta. Dados reais, DNS, valores de segredos, criação de usuários e migração operacional não são feitos pelo workflow.
 
-O preflight também exige secrets na versão `latest`, usuário sintético vinculado à organização, `projectionEnabled=false` e prova recente de backup `READY` com restore concluído em banco separado. O marcador dessa prova usa uma geração imutável do Cloud Storage. Depois do deploy, o smoke valida a lista exata de Functions, resposta `401` anônima do bootstrap, carregamento do secret de ingestão e sessão autenticada. O estado remoto observado e os gates ainda pendentes estão registrados em `docs/17-estado-homologacao-2026-09-27.md`.
+O preflight também exige secrets na versão `latest`, usuário sintético vinculado à organização, `projectionEnabled=false`, delete protection, PITR, agenda de backup, ao menos um backup `READY` recente e ausência de coleções operacionais além de `organizations`. Assim o primeiro deploy HML não cria banco paralelo. O ensaio real de restore continua obrigatório antes de qualquer ingestão operacional ou cutover. Depois do deploy, o smoke valida a lista exata de Functions, resposta `401` anônima do bootstrap, carregamento do secret de ingestão e sessão autenticada. O estado remoto observado e os gates ainda pendentes estão registrados em `docs/17-estado-homologacao-2026-09-27.md`.
 
 ## Contrato de operação
 
