@@ -47,7 +47,7 @@ export async function servePrivateDownloads(req: { method: string; path: string 
   if (!['platform_admin','org_admin','director'].includes(member.role) && !member.permissions.includes('downloads.hml.read')) { res.status(403).json({ code: 'HML_DOWNLOAD_PERMISSION_REQUIRED' }); return; }
   const listing = req.path === '/downloads' || req.path === '/downloads/';
   const match = /^\/downloads\/([A-Za-z0-9._-]+)$/.exec(req.path);
-  if (!listing && (!match || (!names.has(match[1]) && match[1] !== 'manifest.json'))) { res.status(404).json({ code: 'NOT_FOUND' }); return; }
+  if (!listing && (!match || (!names.has(match[1] ?? '') && match[1] !== 'manifest.json'))) { res.status(404).json({ code: 'NOT_FOUND' }); return; }
   try {
     const manifest = await release(root);
     if (listing) {
