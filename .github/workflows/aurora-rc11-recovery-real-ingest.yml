@@ -16,7 +16,7 @@ permissions:
 
 concurrency:
   group: aurora-rc11-hml
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   rc11:
@@ -173,8 +173,6 @@ jobs:
           mkdir -p "$RUNNER_TEMP/build-appscript"
           cp appsscript.json "$RUNNER_TEMP/build-appscript/appsscript.json"
           cp src/*.gs "$RUNNER_TEMP/build-appscript/"
-          cp firebase-migration/apps-script/FirestoreBridge.gs "$RUNNER_TEMP/build-appscript/80_AURORA_FIRESTORE_BRIDGE.gs"
-          cp firebase-migration/apps-script/MigrationDryRun.gs "$RUNNER_TEMP/build-appscript/81_AURORA_FIRESTORE_MIGRATION.gs"
           printf '{"scriptId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" > "$RUNNER_TEMP/build-appscript/.clasp.json"
           cd "$RUNNER_TEMP/build-appscript"
           clasp push --force
