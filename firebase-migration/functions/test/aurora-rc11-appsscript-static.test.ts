@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+const source = readFileSync(new URL("../../../src/34_AURORA_RC11_FIRESTORE_CONTROL.gs", import.meta.url), "utf8");
+
+test("RC1.1 is one-shot and restores dry-run", () => {
+  assert.match(source, /AURORA_RC11_SAMPLE_COMPETENCE = '2026-05'/);
+  assert.match(source, /AURORA_RC11_CONFIRMATION = 'ATIVAR_RC11_WMGJ_HML'/);
+  assert.match(source, /finally \{[\s\S]*WMGJ_FIRESTORE_DRY_RUN', 'true'/);
+  assert.match(source, /sourceMutation: false/);
+});
+
+test("RC1.1 uses reconciled invoice and bank entities", () => {
+  assert.match(source, /=== '8'/);
+  assert.match(source, /cents !== 4950000/);
+  assert.match(source, /entityType: 'invoice'/);
+  assert.match(source, /entityType: 'bankTransaction'/);
+  assert.match(source, /status: 'RECONCILED'/);
+});
