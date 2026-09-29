@@ -1,0 +1,48 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { generateNativeInsight, parseNativeInsightIntent } from "../src/auroraNativeIntelligence.js";
+
+const projection = {
+  schemaVersion: 2,
+  competence: "2026-09",
+  policyVersion: "aurora-nexus-2.3.0-firebase-shadow-v2",
+  dataQuality: { sourcePresent: true, invalidFinancialRecords: 0 },
+  financialCents: { outstandingCents: 125000, glossCents: 25000 },
+  operations: { overdueActions: 2, openFindings: 1 },
+  coverage: { evidencePercent: 90, reconciliationPercent: 75 }
+};
+
+test("native intelligence never declares an external provider", () => {
+  const result = generateNativeInsight(projection, "EXECUTIVE") as any;
+  assert.equal(result.externalProviderUsed, false);
+  assert.equal(result.mode, "NATIVE_DETERMINISTIC");
+  assert.equal(result.engine, "AURORA_NATIVE_INTELLIGENCE");
+});
+
+test("revenue risk preserves reconciliation caveat", () => {
+  const result = generateNativeInsight(projection, "REVENUE_RISK") as any;
+  const gap = result.findings.find((item: any) => item.code === "REVENUE_GAP");
+  assert.ok(gap);
+  assert.match(gap.detail, /não prova perda definitiva/i);
+  assert.match(gap.action, /glosa|crédito bancário/i);
+});
+
+test("data quality blocker outranks financial interpretation", () => {
+  const result = generateNativeInsight({
+    ...projection,
+    dataQuality: { sourcePresent: true, invalidFinancialRecords: 3 }
+  }, "EXECUTIVE") as any;
+  assert.equal(result.findings[0].code, "FINANCIAL_DATA_QUALITY");
+  assert.equal(result.findings[0].severity, "CRITICAL");
+});
+
+test("next action returns only the highest-priority actionable finding", () => {
+  const result = generateNativeInsight(projection, "NEXT_ACTION") as any;
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0].severity, "HIGH");
+});
+
+test("intent parser is closed", () => {
+  assert.equal(parseNativeInsightIntent("revenue_risk"), "REVENUE_RISK");
+  assert.equal(parseNativeInsightIntent("free_form_prompt"), null);
+});
