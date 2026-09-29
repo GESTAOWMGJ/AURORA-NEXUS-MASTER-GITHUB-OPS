@@ -49,6 +49,8 @@ jobs:
           mkdir -p build-appscript
           cp appsscript.json build-appscript/appsscript.json
           cp src/*.gs build-appscript/
+          cp firebase-migration/apps-script/FirestoreBridge.gs build-appscript/80_AURORA_FIRESTORE_BRIDGE.gs
+          cp firebase-migration/apps-script/MigrationDryRun.gs build-appscript/81_AURORA_FIRESTORE_MIGRATION.gs
           cat > build-appscript/.clasp.json <<EOF
           {
             "scriptId": "$APPS_SCRIPT_ID",
@@ -77,6 +79,8 @@ jobs:
           clasp pull
           grep -R "v1.2.0-gemini-api-validada" .
           grep -R "diagnosticarSincronizacaoRepositorioWMGJ" .
+          grep -R "wmgjFirestoreDiagnostico" .
+          grep -R "auroraRc11DryRunAmostra" .
 
       - name: Validate API security gate
         working-directory: build-appscript
