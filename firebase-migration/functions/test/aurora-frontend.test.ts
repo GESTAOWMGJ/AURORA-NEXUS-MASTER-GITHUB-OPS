@@ -20,6 +20,10 @@ test("shell privado carrega dados somente pela API autenticada e não contém de
   assert.match(html, /evidenceRefs/);
   assert.match(html, /EVIDENCE_CONFIRMED/);
   assert.match(html, /const sessionMfa=true/);
+  assert.match(html, /Aurora Native Intelligence/);
+  assert.match(html, /\/api\/native-insight\?intent=/);
+  assert.match(html, /Conclusão da versão vendável/);
+  assert.match(html, /release\.engineeringReadinessPercent/);
   assert.doesNotMatch(html, /demo pública/i);
 });
 

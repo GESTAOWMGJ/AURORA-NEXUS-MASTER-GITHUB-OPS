@@ -41,6 +41,10 @@
         "function": { "functionId": "auroraNexusRefresh", "region": "southamerica-east1" }
       },
       {
+        "source": "/api/native-insight",
+        "function": { "functionId": "auroraNexusNativeInsight", "region": "southamerica-east1" }
+      },
+      {
         "source": "/organic",
         "function": { "functionId": "auroraNexusOrganic", "region": "southamerica-east1" }
       },
