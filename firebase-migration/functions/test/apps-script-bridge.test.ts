@@ -27,7 +27,7 @@ function appsScriptContext(): Record<string, unknown> {
     }
   };
   vm.createContext(context);
-  for (const relative of ["apps-script/FirestoreBridge.gs", "apps-script/MigrationDryRun.gs"]) {
+  for (const relative of ["../src/35_AURORA_FIRESTORE_BRIDGE_WMGJ.gs", "../src/36_AURORA_FIRESTORE_MIGRATION_WMGJ.gs"]) {
     vm.runInContext(fs.readFileSync(path.join(migrationRoot, relative), "utf8"), context, {
       filename: relative
     });
