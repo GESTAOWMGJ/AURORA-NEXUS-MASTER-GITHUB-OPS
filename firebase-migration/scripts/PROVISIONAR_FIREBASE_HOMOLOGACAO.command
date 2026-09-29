@@ -211,11 +211,11 @@ configure_app_secrets() {
 configure_app_guardrails() {
   local token payload url
   token="$(gcloud auth application-default print-access-token 2>/dev/null)" || fail 76 FAILED_ADC_TOKEN "ADC indisponível para configurar a organização."
-  payload='{"fields":{"active":{"booleanValue":true},"environment":{"stringValue":"HOMOLOGATION"},"projectionEnabled":{"booleanValue":false},"projectionMode":{"stringValue":"SHADOW"},"clinicalSensitiveEnabled":{"booleanValue":false},"productionMutation":{"booleanValue":false},"sourceMutation":{"booleanValue":false}}}'
-  url="https://firestore.googleapis.com/v1/projects/$PROJECT_ID/databases/(default)/documents/organizations/$ORG_ID?updateMask.fieldPaths=active&updateMask.fieldPaths=environment&updateMask.fieldPaths=projectionEnabled&updateMask.fieldPaths=projectionMode&updateMask.fieldPaths=clinicalSensitiveEnabled&updateMask.fieldPaths=productionMutation&updateMask.fieldPaths=sourceMutation"
+  payload='{"fields":{"active":{"booleanValue":true},"environment":{"stringValue":"HOMOLOGATION"},"projectionEnabled":{"booleanValue":false},"projectionMode":{"stringValue":"SHADOW"},"organicEnabled":{"booleanValue":true},"organicSectors":{"arrayValue":{"values":[{"stringValue":"AUDIT"},{"stringValue":"FINANCE"}]}},"clinicalSensitiveEnabled":{"booleanValue":false},"productionMutation":{"booleanValue":false},"sourceMutation":{"booleanValue":false}}}'
+  url="https://firestore.googleapis.com/v1/projects/$PROJECT_ID/databases/(default)/documents/organizations/$ORG_ID?updateMask.fieldPaths=active&updateMask.fieldPaths=environment&updateMask.fieldPaths=projectionEnabled&updateMask.fieldPaths=projectionMode&updateMask.fieldPaths=organicEnabled&updateMask.fieldPaths=organicSectors&updateMask.fieldPaths=clinicalSensitiveEnabled&updateMask.fieldPaths=productionMutation&updateMask.fieldPaths=sourceMutation"
   curl -fsS -X PATCH -H "Authorization: Bearer $token" -H 'Content-Type: application/json' --data "$payload" "$url" >/dev/null \
     || fail 77 FAILED_APP_GUARDRAILS "Não foi possível fixar os bloqueios iniciais da organização."
-  printf '{"ok":true,"projectId":"%s","orgId":"%s","projectionEnabled":false,"projectionMode":"SHADOW","clinicalSensitiveEnabled":false,"productionMutation":false,"sourceMutation":false}\n' "$PROJECT_ID" "$ORG_ID" > "$STATE/firebase-app-guardrails.json"
+  printf '{"ok":true,"projectId":"%s","orgId":"%s","projectionEnabled":false,"projectionMode":"SHADOW","organicEnabled":true,"organicSectors":["AUDIT","FINANCE"],"clinicalSensitiveEnabled":false,"productionMutation":false,"sourceMutation":false}\n' "$PROJECT_ID" "$ORG_ID" > "$STATE/firebase-app-guardrails.json"
 }
 
 verify() {
@@ -223,7 +223,7 @@ verify() {
   billing="$(gcloud billing projects describe "$PROJECT_ID" --format='value(billingEnabled)' 2>/dev/null || true)"
   db=false; firebase firestore:databases:list --project "$PROJECT_ID" --json 2>/dev/null | grep -Fq '(default)' && db=true
   functions="$(firebase functions:list --project "$PROJECT_ID" --json 2>/dev/null | jq -c '[..|objects|.id?//.name?//empty]|unique' 2>/dev/null || printf '[]')"
-  for fn in ingestWmgjEvent runtimeHealth auroraNexusAuthGate auroraNexusSessionLogin auroraNexusSessionLogout auroraNexusBootstrap auroraNexusAction auroraNexusRefresh auroraNexusProjectionEngine; do
+  for fn in ingestWmgjEvent runtimeHealth auroraNexusAuthGate auroraNexusSessionLogin auroraNexusSessionLogout auroraNexusBootstrap auroraNexusNativeInsight auroraNexusAction auroraNexusRefresh auroraNexusProjectionEngine auroraNexusOrganic; do
     printf '%s' "$functions" | grep -Fq "$fn" || fail 80 VERIFY_FUNCTIONS "Function obrigatória ausente: $fn"
   done
   ingest_secret=false; firebase functions:secrets:get WMGJ_INGEST_HMAC_KEYRING --project "$PROJECT_ID" >/dev/null 2>&1 && ingest_secret=true
@@ -233,7 +233,7 @@ verify() {
   token="$(gcloud auth application-default print-access-token 2>/dev/null || true)"
   if [ -n "$token" ]; then
     org_json="$(curl -fsS -H "Authorization: Bearer $token" "https://firestore.googleapis.com/v1/projects/$PROJECT_ID/databases/(default)/documents/organizations/$ORG_ID" 2>/dev/null || true)"
-    printf '%s' "$org_json" | jq -e '.fields.active.booleanValue==true and .fields.environment.stringValue=="HOMOLOGATION" and .fields.projectionEnabled.booleanValue==false and .fields.projectionMode.stringValue=="SHADOW" and .fields.clinicalSensitiveEnabled.booleanValue==false and .fields.productionMutation.booleanValue==false and .fields.sourceMutation.booleanValue==false' >/dev/null 2>&1 && org=true
+    printf '%s' "$org_json" | jq -e '.fields.active.booleanValue==true and .fields.environment.stringValue=="HOMOLOGATION" and .fields.projectionEnabled.booleanValue==false and .fields.projectionMode.stringValue=="SHADOW" and .fields.organicEnabled.booleanValue==true and ([.fields.organicSectors.arrayValue.values[]?.stringValue] | index("AUDIT")) != null and ([.fields.organicSectors.arrayValue.values[]?.stringValue] | index("FINANCE")) != null and .fields.clinicalSensitiveEnabled.booleanValue==false and .fields.productionMutation.booleanValue==false and .fields.sourceMutation.booleanValue==false' >/dev/null 2>&1 && org=true
   fi
   deploy=false; [ -f "$STATE/firebase-deploy.json" ] && jq -e --arg p "$PROJECT_ID" '.ok==true and .projectId==$p and .productionMutation==false' "$STATE/firebase-deploy.json" >/dev/null 2>&1 && deploy=true
   budget=false; gcloud billing budgets list --billing-account "$BILLING_ID" --filter="displayName='WMGJ HML $PROJECT_ID'" --format='value(name)' 2>/dev/null | grep -q . && budget=true
