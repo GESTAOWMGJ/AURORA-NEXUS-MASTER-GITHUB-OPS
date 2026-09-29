@@ -15,6 +15,8 @@ import {
 } from "./auroraAccess.js";
 import { validateResolutionEvidence } from "./auroraEvidence.js";
 import { buildProjection, parseActionCommand, type ProjectionSource } from "./auroraEngine.js";
+import { generateNativeInsight, parseNativeInsightIntent } from "./auroraNativeIntelligence.js";
+import { buildReleaseStatus } from "./auroraReleaseStatus.js";
 import { auroraDb } from "./firebase.js";
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
@@ -188,7 +190,40 @@ export const auroraNexusBootstrap = onRequest(
       organization: { id: member.orgId, name: String(org.data()?.name ?? "WMGJ") },
       member: { email: member.email, role: member.role, mfaVerified: member.mfaVerified },
       projection: visibleProjection(rawProjection, member),
+      release: buildReleaseStatus(org.data() ?? {}),
       actions: safeActions
+    });
+  }
+);
+
+export const auroraNexusNativeInsight = onRequest(
+  { cors: false, secrets: [ALLOWED_EMAILS] },
+  async (req, res) => {
+    apiHeaders(res);
+    if (req.method !== "GET") { res.set("Allow", "GET"); res.status(405).json({ ok: false, code: "METHOD_NOT_ALLOWED" }); return; }
+    const member = await requireAccess(req, res); if (!member) return;
+    if (!can(member, "dashboard.read", ["platform_admin", "org_admin", "director", "auditor", "operator", "finance", "viewer"])) {
+      res.status(403).json({ ok: false, code: "PERMISSION_DENIED" });
+      return;
+    }
+    const intent = parseNativeInsightIntent(String(req.query.intent ?? "EXECUTIVE"));
+    if (!intent) { res.status(400).json({ ok: false, code: "INVALID_NATIVE_INTENT" }); return; }
+
+    const [org, snapshot] = await Promise.all([
+      auroraDb.doc(`organizations/${member.orgId}`).get(),
+      auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get()
+    ]);
+    const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
+    const competence = safeString(org.data()?.projectionCompetence, 7) ?? new Date().toISOString().slice(0, 7);
+    const rawProjection = snapshot.exists
+      ? { ...snapshot.data(), generatedAt: snapshot.data()?.generatedAt?.toDate?.().toISOString?.() ?? null }
+      : { ...buildProjection(empty, new Date(), { orgId: member.orgId, competence }), generatedAt: null };
+    const projection = visibleProjection(rawProjection, member);
+    res.status(200).json({
+      ok: true,
+      environment: "HOMOLOGATION",
+      mode: "SHADOW",
+      insight: generateNativeInsight(projection, intent)
     });
   }
 );
