@@ -25,5 +25,10 @@ test("RC1.1 workflow uses supported synchronous Firestore restore", () => {
   assert.match(workflow, /gcloud firestore databases restore/);
   assert.doesNotMatch(workflow, /databases restore[^\n]*--async/);
   assert.match(workflow, /restore-result\.json/);
+  assert.match(workflow, /gcloud firestore operations describe "\$op"/);
+  assert.match(workflow, /SUCCESSFUL/);
+  assert.match(workflow, /sourceInfo\.backup\.backup/);
+  assert.match(workflow, /Cleanup temporary restore database/);
+  assert.match(workflow, /if: always\(\)/);
   assert.match(workflow, /gcloud firestore databases describe --database="\$restore_db"/);
 });
