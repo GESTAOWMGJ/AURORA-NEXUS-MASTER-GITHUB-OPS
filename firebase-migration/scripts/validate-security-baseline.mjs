@@ -9,10 +9,12 @@ const fail = (message) => {
 };
 
 if (policy.id !== "AURORA-SEC-001") fail("unexpected id");
-if (policy.version !== "1.0.0") fail("unexpected version");\nif (policy.status !== "DRAFT_POLICY_VALIDATED_IN_CI") fail("policy status must not claim implementation enforcement");
+if (policy.version !== "1.0.0") fail("unexpected version");
+if (policy.status !== "DRAFT_POLICY_VALIDATED_IN_CI") fail("policy status must not claim implementation enforcement");
 if (policy.transport?.minimumTls !== "1.2") fail("TLS minimum must be 1.2");
 if (policy.transport?.preferredTls !== "1.3") fail("TLS preferred must be 1.3");
-if (policy.integrity?.hmacMinimumSecretBits < 256) fail("HMAC secret floor must be >=256 bits");\nif (policy.integrity?.hmacSecretEncoding !== "HEX_32_BYTES_CSPRNG") fail("HMAC secret must use canonical 32-byte CSPRNG hex format");
+if (policy.integrity?.hmacMinimumSecretBits < 256) fail("HMAC secret floor must be >=256 bits");
+if (policy.integrity?.hmacSecretEncoding !== "HEX_32_BYTES_CSPRNG") fail("HMAC secret must use canonical 32-byte CSPRNG hex format");
 if (!policy.integrity?.constantTimeMacComparison) fail("constant-time MAC comparison is required");
 
 const forbidden = new Set(policy.integrity?.forbidden || []);
@@ -26,8 +28,11 @@ if (policy.applicationLayerEncryption?.nonceBits !== 96) fail("GCM nonce must be
 if (policy.applicationLayerEncryption?.keyWrapping !== "CLOUD_KMS_KEK") fail("DEK wrapping must use Cloud KMS");
 if (policy.atRest?.existingGoogleEncryptedDatabaseConvertibleToCmek !== false) fail("existing Firestore must not be treated as CMEK-convertible");
 if (policy.atRest?.destructiveRecreateAuthorized !== false) fail("baseline must not authorize destructive DB recreation");
-if (policy.keyManagement?.persistentServiceAccountJsonAllowed !== false) fail("persistent service-account JSON must be forbidden");\nconst legacyExceptions = policy.keyManagement?.legacyCredentialExceptions || [];\nif (!legacyExceptions.some((item) => item.id === "GOOGLE_WORKSPACE_DOMAIN_WIDE_DELEGATION" && item.state === "TEMPORARY_EXCEPTION" && item.sunsetGate)) fail("legacy Google Workspace credential exception must be explicit and time-bounded by a sunset gate");
-if (!policy.sdlc?.unresolvedHighCriticalVulnerabilityBlocksRelease) fail("high/critical vulnerabilities must block release by policy");\nif (policy.sdlc?.releaseEnforcementState !== "SPECIFIED_PENDING_GITHUB_RULESET") fail("release enforcement must remain pending until a GitHub ruleset is verified");
+if (policy.keyManagement?.persistentServiceAccountJsonAllowed !== false) fail("persistent service-account JSON must be forbidden");
+const legacyExceptions = policy.keyManagement?.legacyCredentialExceptions || [];
+if (!legacyExceptions.some((item) => item.id === "GOOGLE_WORKSPACE_DOMAIN_WIDE_DELEGATION" && item.state === "TEMPORARY_EXCEPTION" && item.sunsetGate)) fail("legacy Google Workspace credential exception must be explicit and time-bounded by a sunset gate");
+if (!policy.sdlc?.unresolvedHighCriticalVulnerabilityBlocksRelease) fail("high/critical vulnerabilities must block release by policy");
+if (policy.sdlc?.releaseEnforcementState !== "SPECIFIED_PENDING_GITHUB_RULESET") fail("release enforcement must remain pending until a GitHub ruleset is verified");
 
 const sensitive = new Set(policy.applicationLayerEncryption?.requiredFor || []);
 if (!sensitive.has("CLINICAL_SENSITIVE")) fail("clinical-sensitive encryption requirement missing");
