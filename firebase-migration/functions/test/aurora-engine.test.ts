@@ -42,6 +42,8 @@ test("motor financeiro usa centavos inteiros e somente estados validados", () =>
   assert.equal(projection.financial.billedAmount, 125.01);
   assert.equal(projection.sanitized, true);
   assert.equal(projection.dataQuality.complete, true);
+  assert.equal(projection.revenueSanitation.engine, "AURORA_REVENUE_SANITATION");
+  assert.ok(projection.revenueSanitation.openCount >= 1);
 });
 
 test("motor preserva ausência como null, nunca zero", () => {
@@ -183,7 +185,7 @@ test("comandos exigem SLA, competência, códigos e evidência", () => {
   assert.equal(parseActionCommand({ type: "PAY_INVOICE", actionId: "A-1", expectedRevision: 1 }), null);
 });
 
-test("mapa operacional preserva os módulos Aurora Nexus 2.3.0", () => {
+test("mapa operacional preserva os módulos Aurora Nexus 2.4.0", () => {
   assert.deepEqual(AURORA_MODULES[0], ["M01", "Ingestão e Proveniência Documental"]);
   assert.deepEqual(AURORA_MODULES[9], ["M10", "Trilha de Auditoria e Integridade"]);
 });
