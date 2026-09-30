@@ -49,7 +49,7 @@ jobs:
             .projectId==$project and
             .projectId=="wmgj-hml-jfn-20260927" and
             .sourceDatabase=="(default)" and
-            .restoreDatabase=="rc11-restore-20260929" and
+            .restoreDatabasePrefix=="rc11-restore" and
             .competence=="2026-05" and
             .sample.invoiceNumber=="8" and
             .sample.expectedPairCount==2 and
@@ -105,40 +105,123 @@ jobs:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
-          restore_db="$(jq -r '.restoreDatabase' "$REQUEST_FILE")"
+          restore_prefix="$(jq -r '.restoreDatabasePrefix' "$REQUEST_FILE")"
+          [[ "$restore_prefix" =~ ^[a-z0-9][a-z0-9-]{2,30}$ ]]
+          restore_db="${restore_prefix}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ "$restore_db" =~ ^[a-z0-9][a-z0-9-]{3,62}$ ]]
           test "$restore_db" != "(default)"
-          if gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" >/dev/null 2>&1; then exit 51; fi
-          # Firestore database restore does not expose --async in the pinned
-          # gcloud surface. Run synchronously and verify the restored database
-          # explicitly before reading any document from it.
+          if gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "UNEXPECTED_TEMP_DATABASE_COLLISION:$restore_db" >&2
+            exit 51
+          fi
+          # The restore command starts a long-running Firestore operation.
+          # It does not support --async on this gcloud surface, but its JSON
+          # output still contains the operation resource. Wait for SUCCESSFUL
+          # before attempting any document read from the named database.
           gcloud firestore databases restore \
             --source-backup="$AURORA_RC11_BACKUP_RESOURCE" \
             --destination-database="$restore_db" \
             --project="$PROJECT_ID" \
             --format=json > "$RUNNER_TEMP/restore-result.json"
           test -s "$RUNNER_TEMP/restore-result.json"
-          restored=""
-          for _ in $(seq 1 40); do
-            if restored="$(gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" --format=json 2>/dev/null)"; then
-              test -n "$restored" && break
-            fi
+          op="$(jq -r '.name // empty' "$RUNNER_TEMP/restore-result.json")"
+          test -n "$op"
+          restore_success=false
+          for _ in $(seq 1 120); do
+            gcloud firestore operations describe "$op" --project "$PROJECT_ID" --format=json > "$RUNNER_TEMP/restore-op.json"
+            err="$(jq -r '.error.message // empty' "$RUNNER_TEMP/restore-op.json")"
+            test -z "$err" || { echo "RESTORE_OPERATION_ERROR" >&2; exit 52; }
+            state="$(jq -r '.metadata.operationState // empty' "$RUNNER_TEMP/restore-op.json")"
+            case "$state" in
+              SUCCESSFUL) restore_success=true; break ;;
+              FAILED|CANCELLED) echo "RESTORE_OPERATION_$state" >&2; exit 53 ;;
+            esac
             sleep 15
           done
+          test "$restore_success" = true
+          restored="$(gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" --format=json)"
           test -n "$restored"
+          test "$(jq -r '.sourceInfo.backup.backup // empty' <<<"$restored")" = "$AURORA_RC11_BACKUP_RESOURCE"
           test "$(jq -r '.locationId' <<<"$restored")" = "$REGION"
           access_token="$(gcloud auth print-access-token)"
           source_org="$(curl -fsS -H "Authorization: Bearer ${access_token}" "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj")"
-          restored_org="$(curl -fsS -H "Authorization: Bearer ${access_token}" "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${restore_db}/documents/organizations/wmgj")"
+          restored_org=""
+          for _ in $(seq 1 20); do
+            status="$(curl --silent --show-error --output "$RUNNER_TEMP/restored-org.json" --write-out '%{http_code}' -H "Authorization: Bearer ${access_token}" "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${restore_db}/documents/organizations/wmgj")"
+            if [ "$status" = "200" ]; then
+              restored_org="$(cat "$RUNNER_TEMP/restored-org.json")"
+              break
+            fi
+            if [ "$status" != "400" ] && [ "$status" != "404" ] && [ "$status" != "409" ]; then
+              cat "$RUNNER_TEMP/restored-org.json" >&2
+              exit 54
+            fi
+            sleep 10
+          done
+          test -n "$restored_org"
           for json in "$source_org" "$restored_org"; do
             jq -e '.fields.active.booleanValue==true and .fields.environment.stringValue=="HOMOLOGATION" and .fields.clinicalSensitiveEnabled.booleanValue==false and .fields.productionMutation.booleanValue==false and .fields.sourceMutation.booleanValue==false' <<<"$json" >/dev/null
           done
           mkdir -p "$RUNNER_TEMP/rc11-evidence"
           fp="$(jq -c '{a:.fields.active.booleanValue,e:.fields.environment.stringValue,c:.fields.clinicalSensitiveEnabled.booleanValue,p:.fields.productionMutation.booleanValue,s:.fields.sourceMutation.booleanValue}' <<<"$restored_org" | sha256sum | awk '{print $1}')"
           jq -n --arg backup "$AURORA_RC11_BACKUP_RESOURCE" --arg snapshot "$AURORA_RC11_BACKUP_SNAPSHOT" --arg db "$restore_db" --arg fp "$fp" '{gate:"RESTORE_VERIFIED",backupResource:$backup,backupSnapshot:$snapshot,restoreDatabase:$db,guardrailFingerprint:$fp,verified:true}' > "$RUNNER_TEMP/rc11-evidence/recovery.json"
-          if [ "$(jq -r '.deleteProtectionState//"DELETE_PROTECTION_DISABLED"' <<<"$restored")" = "DELETE_PROTECTION_ENABLED" ]; then
-            gcloud firestore databases update --database="$restore_db" --project "$PROJECT_ID" --no-delete-protection --quiet
+
+      - name: Cleanup temporary restore database
+        if: always()
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          restore_prefix="$(jq -r '.restoreDatabasePrefix' "$REQUEST_FILE")"
+          restore_db="${restore_prefix}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          if restored="$(gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" --format=json 2>/dev/null)"; then
+            source_backup="$(jq -r '.sourceInfo.backup.backup // empty' <<<"$restored")"
+            if [ "$source_backup" = "$AURORA_RC11_BACKUP_RESOURCE" ]; then
+              cleanup_ready=false
+              for _ in $(seq 1 60); do
+                restored="$(gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" --format=json)"
+                protection="$(jq -r '.deleteProtectionState // "DELETE_PROTECTION_DISABLED"' <<<"$restored")"
+                if [ "$protection" = "DELETE_PROTECTION_ENABLED" ]; then
+                  set +e
+                  update_out="$(gcloud firestore databases update --database="$restore_db" --project "$PROJECT_ID" --no-delete-protection --quiet 2>&1)"
+                  update_rc=$?
+                  set -e
+                  if [ "$update_rc" -eq 0 ]; then
+                    cleanup_ready=true
+                    break
+                  fi
+                  if grep -qi "in the middle of restore" <<<"$update_out"; then
+                    sleep 15
+                    continue
+                  fi
+                  echo "$update_out" >&2
+                  exit "$update_rc"
+                else
+                  cleanup_ready=true
+                  break
+                fi
+              done
+              test "$cleanup_ready" = true
+              delete_done=false
+              for _ in $(seq 1 40); do
+                set +e
+                delete_out="$(gcloud firestore databases delete --database="$restore_db" --project "$PROJECT_ID" --quiet 2>&1)"
+                delete_rc=$?
+                set -e
+                if [ "$delete_rc" -eq 0 ]; then
+                  delete_done=true
+                  break
+                fi
+                if grep -Eqi "in the middle of restore|FAILED_PRECONDITION" <<<"$delete_out"; then
+                  sleep 15
+                  continue
+                fi
+                echo "$delete_out" >&2
+                exit "$delete_rc"
+              done
+              test "$delete_done" = true
+            fi
           fi
-          gcloud firestore databases delete --database="$restore_db" --project "$PROJECT_ID" --quiet
 
       - name: Build and configure HMAC keyring
         env:
