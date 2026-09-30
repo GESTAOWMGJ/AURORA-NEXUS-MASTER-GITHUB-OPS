@@ -1,7 +1,7 @@
 {
-  "policyVersion": "aurora-nexus-2.3.0-firebase-shadow-v2",
+  "policyVersion": "aurora-nexus-2.4.0-revenue-sanitation-v1",
   "sourceSkill": "aurora-nexus",
-  "sourceSkillVersion": "2.3.0",
+  "sourceSkillVersion": "2.4.0",
   "governance": "JFN-AUD-GOV-001",
   "organizationId": "wmgj",
   "environment": "HOMOLOGATION",
@@ -25,6 +25,51 @@
     "writesRestrictedToBackend": true,
     "idempotencyRequired": true,
     "irreversibleActionsEnabled": false
+  },
+  "revenueSanitation": {
+    "capabilityId": "AURORA-REV-SAN-001",
+    "enabled": true,
+    "crossCuttingModules": [
+      "M02",
+      "M03",
+      "M04",
+      "M05",
+      "M09",
+      "M10"
+    ],
+    "closureRequiresEvidence": true,
+    "closureRequiresHumanReview": true,
+    "silentAbsenceIsNotResolution": true,
+    "financialAggregation": "NO_SUM_ACROSS_OVERLAPPING_EXCEPTIONS",
+    "states": [
+      "PREVISTO",
+      "FATURAVEL",
+      "FATURADO",
+      "RECEBIVEL",
+      "RECEBIDO",
+      "RECUPERAVEL",
+      "DIVERGENTE",
+      "ENCERRADO_COM_EVIDENCIA"
+    ],
+    "exceptionFamilies": [
+      "BILLED_NOT_RECEIVED",
+      "BILLING_EVIDENCE_GAP",
+      "GLOSS_UNSUPPORTED_OR_UNRESOLVED",
+      "RECONCILIATION_OPEN",
+      "FOLLOWUP_SLA_BREACH",
+      "FOLLOWUP_OPEN",
+      "AUDIT_FINDING_OPEN",
+      "EVIDENCE_GAP",
+      "DUPLICATE_OR_VERSION_CONFLICT"
+    ],
+    "forbiddenAutomaticActions": [
+      "ACCEPT_GLOSS",
+      "WRITE_OFF_RECEIVABLE",
+      "SEND_EXTERNAL_COLLECTION",
+      "EXECUTE_PAYMENT",
+      "ALTER_SOURCE_DOCUMENT",
+      "MARK_DISTRIBUTABLE_PROFIT"
+    ]
   },
   "modules": {
     "M01": "Ingestão e Proveniência Documental",
