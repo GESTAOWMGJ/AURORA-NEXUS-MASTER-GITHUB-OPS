@@ -9,7 +9,8 @@ const projection = {
   dataQuality: { sourcePresent: true, invalidFinancialRecords: 0 },
   financialCents: { outstandingCents: 125000, glossCents: 25000 },
   operations: { overdueActions: 2, openFindings: 1 },
-  coverage: { evidencePercent: 90, reconciliationPercent: 75 }
+  coverage: { evidencePercent: 90, reconciliationPercent: 75 },
+  revenueSanitation: { openCount: 4, overdueCount: 1, unownedCount: 2, evidenceGapCount: 3 }
 };
 
 test("native intelligence never declares an external provider", () => {
@@ -42,7 +43,15 @@ test("next action returns only the highest-priority actionable finding", () => {
   assert.equal(result.findings[0].severity, "HIGH");
 });
 
+test("sanitation intent surfaces loose ends without declaring financial loss", () => {
+  const result = generateNativeInsight(projection, "SANITATION") as any;
+  assert.ok(result.findings.some((item: any) => item.code === "REVENUE_LOOSE_ENDS"));
+  assert.ok(result.findings.some((item: any) => item.code === "REVENUE_LOOSE_ENDS_OVERDUE"));
+  assert.match(result.limitation, /não aceita glosa|revisão humana/i);
+});
+
 test("intent parser is closed", () => {
   assert.equal(parseNativeInsightIntent("revenue_risk"), "REVENUE_RISK");
+  assert.equal(parseNativeInsightIntent("sanitation"), "SANITATION");
   assert.equal(parseNativeInsightIntent("free_form_prompt"), null);
 });
