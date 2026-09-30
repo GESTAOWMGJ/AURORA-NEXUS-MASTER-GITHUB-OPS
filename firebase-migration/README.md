@@ -53,7 +53,7 @@ FastAPI Control Plane (homologação)
 - `tests/`: testes mínimos das Security Rules.
 - `api/evals/`: casos sintéticos de regressão; live eval é opt-in.
 - `skills/`: habilidade operacional aprendida para continuidade.
-- `policy/`: política sanitizada e versionada do aplicativo.
+- `policy/`: política sanitizada, baseline criptográfica e regras de segurança versionadas do aplicativo.\n- `../skills/aurora-nexus-security/`: AURORA-SEC-001, gate nativo de criptografia, privacidade, supply chain e market readiness.
 
 ## Aplicação Full Firebase
 
@@ -133,3 +133,10 @@ O primeiro backfill de Sheets usa `sourceVersion=1` como fotografia congelada. Q
 ## Critério de cutover
 
 O Firestore só passa a ser fonte de leitura principal após dois fechamentos completos em paralelo, sem divergência material em contagens, valores, competência, vínculos de evidência, notas substituídas, conciliações e pendências críticas.
+
+
+## Baseline de segurança comercial
+
+AURORA-SEC-001 define o piso criptográfico e documental do produto. TLS 1.3 é preferido e TLS 1.2 é o mínimo; HMAC-SHA-256 permanece para autenticação de mensagens com chave forte e rotacionável; dados CLINICAL_SENSITIVE exigem criptografia de aplicação AES-256-GCM com envelope encryption e KMS antes de produção.
+
+Firestore existente com Google default encryption não pode ser convertido in-place para CMEK. O caminho aprovado é banco novo CMEK com migração controlada por clone/restore/export-import, sem apagar a fonte e com reconciliação/rollback. Ver `policy/security-baseline-v1.json` e `docs/21-security-market-readiness.md`.
