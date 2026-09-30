@@ -108,19 +108,23 @@ jobs:
           restore_db="$(jq -r '.restoreDatabase' "$REQUEST_FILE")"
           test "$restore_db" != "(default)"
           if gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" >/dev/null 2>&1; then exit 51; fi
-          gcloud firestore databases restore --source-backup="$AURORA_RC11_BACKUP_RESOURCE" --destination-database="$restore_db" --project="$PROJECT_ID" --async --format=json > "$RUNNER_TEMP/restore-start.json"
-          op="$(jq -r '.name//empty' "$RUNNER_TEMP/restore-start.json")"; test -n "$op"
-          completed=false
-          for _ in $(seq 1 120); do
-            gcloud firestore operations describe "$op" --project "$PROJECT_ID" --format=json > "$RUNNER_TEMP/restore-op.json"
-            test -z "$(jq -r '.error.message//empty' "$RUNNER_TEMP/restore-op.json")"
-            done_flag="$(jq -r '.done//false' "$RUNNER_TEMP/restore-op.json")"
-            state="$(jq -r '.metadata.operationState//empty' "$RUNNER_TEMP/restore-op.json")"
-            if [ "$done_flag" = true ] || [ "$state" = "SUCCESSFUL" ]; then completed=true; break; fi
+          # Firestore database restore does not expose --async in the pinned
+          # gcloud surface. Run synchronously and verify the restored database
+          # explicitly before reading any document from it.
+          gcloud firestore databases restore \
+            --source-backup="$AURORA_RC11_BACKUP_RESOURCE" \
+            --destination-database="$restore_db" \
+            --project="$PROJECT_ID" \
+            --format=json > "$RUNNER_TEMP/restore-result.json"
+          test -s "$RUNNER_TEMP/restore-result.json"
+          restored=""
+          for _ in $(seq 1 40); do
+            if restored="$(gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" --format=json 2>/dev/null)"; then
+              test -n "$restored" && break
+            fi
             sleep 15
           done
-          test "$completed" = true
-          restored="$(gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" --format=json)"
+          test -n "$restored"
           test "$(jq -r '.locationId' <<<"$restored")" = "$REGION"
           access_token="$(gcloud auth print-access-token)"
           source_org="$(curl -fsS -H "Authorization: Bearer ${access_token}" "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj")"
