@@ -44,7 +44,7 @@ function signedHeaders(body: Buffer): HmacV2Headers {
   return headers;
 }
 
-test("HMAC v2 autentica body e todos os headers de escopo", () => {
+test("keyring exige segredo canônico de 32 bytes em hex", () => {\n  assert.throws(() => parseHmacKeyring(JSON.stringify({\n    weak: { active: true, secret: "a".repeat(32), orgIds: ["wmgj"], entityTypes: ["invoice"] }\n  })), /HMAC_KEYRING_INVALID_ENTRY/);\n  assert.throws(() => parseHmacKeyring(JSON.stringify({\n    malformed: { active: true, secret: "z".repeat(64), orgIds: ["wmgj"], entityTypes: ["invoice"] }\n  })), /HMAC_KEYRING_INVALID_ENTRY/);\n});\n\ntest("HMAC v2 autentica body e todos os headers de escopo", () => {
   const body = Buffer.from('{"orgId":"wmgj"}', "utf8");
   const headers = signedHeaders(body);
   const result = verifyHmacV2(body, headers, rawKeyring, now);
