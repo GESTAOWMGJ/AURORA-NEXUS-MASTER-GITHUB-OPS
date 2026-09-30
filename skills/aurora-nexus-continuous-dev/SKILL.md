@@ -18,13 +18,13 @@ Para toda solicitação de produto, engenharia, gestão, auditoria, interface, i
 1. Revalidar a baseline da `main` e a versão funcional instalada quando o trabalho envolver desktop.
 2. Classificar a solicitação como correção, capacidade, integração, hardening, experiência, inteligência ou release.
 3. Criar o menor patch coerente no mesmo sistema-mãe.
-4. Preservar M01–M10, M03.1/JFN-AUD-FAT-001, AURORA-ORG-001 e isolamento por organização.
-5. Adicionar ou atualizar testes.
-6. Atualizar o Release Cockpit quando o patch muda um gate.
-7. Separar claramente: especificado, implementado, testado, CI, implantado, publicado e validado com dados reais.
-8. Não declarar conclusão por existência de código.
-9. Não contornar gates de segurança, recuperação, login, MFA, proveniência ou rollback.
-10. Informar o próximo incremento de maior valor para aproximar `1.0.0` GA.
+4. Preservar M01–M10, M03.1/JFN-AUD-FAT-001, AURORA-ORG-001, AURORA-SEC-001 e isolamento por organização.
+5. Aplicar AURORA-SEC-001 quando houver segurança, criptografia, dados, dependências, deploy ou liberação comercial.\n6. Adicionar ou atualizar testes.
+7. Atualizar o Release Cockpit quando o patch muda um gate.
+8. Separar claramente: especificado, implementado, testado, CI, implantado, publicado e validado com dados reais.
+9. Não declarar conclusão por existência de código.
+10. Não contornar gates de segurança, recuperação, login, MFA, proveniência ou rollback.
+11. Informar o próximo incremento de maior valor para aproximar `1.0.0` GA.
 
 ## Estratégia de independência de IA externa
 
