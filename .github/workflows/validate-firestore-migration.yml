@@ -85,6 +85,13 @@ jobs:
 
           node - <<'NODE'
           const fs = require("node:fs");
+          const path = require("node:path");
+          const crypto = require("node:crypto");
+
+          const policyDir = "firebase-migration/policy";
+          const manifestPath = path.join(policyDir, "manifest.json");
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+
           const files = [
             "firebase-migration/firebase.json",
             "firebase-migration/firestore/firestore.indexes.json",
@@ -93,18 +100,34 @@ jobs:
             "firebase-migration/functions/tsconfig.json",
             "firebase-migration/tests/package.json",
             "firebase-migration/tests/package-lock.json",
-            "firebase-migration/policy/aurora-nexus-source-2.3.0.json",
-            "firebase-migration/policy/aurora-nexus-policy.sanitized.json",
-            "firebase-migration/policy/manifest.json"
+            manifestPath,
+            path.join(policyDir, manifest.source.file),
+            path.join(policyDir, manifest.export.file)
           ];
+
           for (const file of files) {
             JSON.parse(fs.readFileSync(file, "utf8"));
           }
-          console.log("FIRESTORE_CONFIG_JSON_OK");
-          NODE
 
-          echo '9a8f7f291be65c0ef1feba043592452b77bef03e965198ca451f0044703a6d8f  firebase-migration/policy/aurora-nexus-source-2.3.0.json' | sha256sum -c -
-          echo '077e7cbf4c60e578dee971ce5af5f847c773ba35c7b8beb020caa7cb6af971a7  firebase-migration/policy/aurora-nexus-policy.sanitized.json' | sha256sum -c -
+          const digest = (file) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+          const sourcePath = path.join(policyDir, manifest.source.file);
+          const exportPath = path.join(policyDir, manifest.export.file);
+          const sourceHash = digest(sourcePath);
+          const exportHash = digest(exportPath);
+
+          if (sourceHash !== manifest.source.sha256) {
+            throw new Error(`Policy source hash mismatch: expected ${manifest.source.sha256}, got ${sourceHash}`);
+          }
+          if (exportHash !== manifest.export.sha256) {
+            throw new Error(`Sanitized policy hash mismatch: expected ${manifest.export.sha256}, got ${exportHash}`);
+          }
+          if (manifest.export.policyVersion !== JSON.parse(fs.readFileSync(exportPath, "utf8")).policyVersion) {
+            throw new Error("Manifest policyVersion does not match sanitized policy");
+          }
+
+          console.log("FIRESTORE_CONFIG_JSON_OK");
+          console.log("AURORA_POLICY_MANIFEST_HASHES_OK");
+          NODE
 
       - name: Build Functions and run Security Rules tests
         env:
