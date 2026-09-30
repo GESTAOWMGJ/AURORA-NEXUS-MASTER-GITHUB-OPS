@@ -1,117 +1,88 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://wmgj.local/schemas/operational-status.schema.json",
-  "title": "AURORA NEXUS Operational Status",
+  "title": "WMGJ Operational Status",
   "type": "object",
-  "required": ["status", "ultimaExecucao", "pipeline", "auditoria", "acoesDisponiveis"],
+  "required": [
+    "status",
+    "ultimaExecucao",
+    "pipeline",
+    "auditoria",
+    "acoesDisponiveis"
+  ],
   "properties": {
     "status": {
       "type": "string",
-      "enum": ["OK", "ATENCAO", "ERRO", "CRITICO", "BLOQUEANTE"]
+      "enum": [
+        "OK",
+        "ATENCAO",
+        "ERRO"
+      ]
     },
     "ultimaExecucao": {
       "type": "string",
       "format": "date-time"
     },
-    "clientSkill": {
-      "type": "object",
-      "required": ["orgId", "clientSkillId", "mode", "baseVersion", "clientVersion"],
-      "properties": {
-        "orgId": { "type": "string", "minLength": 2, "maxLength": 80 },
-        "clientSkillId": { "type": "string", "minLength": 4, "maxLength": 120 },
-        "mode": { "type": "string", "enum": ["trial", "contracted", "hml", "production"] },
-        "baseVersion": { "type": "string", "minLength": 1, "maxLength": 40 },
-        "clientVersion": { "type": "string", "minLength": 1, "maxLength": 80 }
-      },
-      "additionalProperties": false
-    },
     "pipeline": {
       "type": "object",
-      "required": ["pendentes", "processando", "processados", "duplicados", "erros", "revisaoHumana"],
-      "properties": {
-        "pendentes": { "type": "integer", "minimum": 0 },
-        "processando": { "type": "integer", "minimum": 0 },
-        "processados": { "type": "integer", "minimum": 0 },
-        "duplicados": { "type": "integer", "minimum": 0 },
-        "erros": { "type": "integer", "minimum": 0 },
-        "revisaoHumana": { "type": "integer", "minimum": 0 }
-      },
-      "additionalProperties": false
-    },
-    "financialLeakage": {
-      "type": "object",
       "required": [
-        "receitaEmRiscoCentavos",
-        "dinheiroParadoCentavos",
-        "receitaRecuperavelCentavos",
-        "perdaProvavelCentavos",
-        "perdaConfirmadaCentavos",
-        "confiabilidadeGlobal"
+        "pendentes",
+        "processando",
+        "processados",
+        "duplicados",
+        "erros",
+        "revisaoHumana"
       ],
       "properties": {
-        "receitaEmRiscoCentavos": { "type": "integer", "minimum": 0 },
-        "dinheiroParadoCentavos": { "type": "integer", "minimum": 0 },
-        "receitaRecuperavelCentavos": { "type": "integer", "minimum": 0 },
-        "perdaProvavelCentavos": { "type": "integer", "minimum": 0 },
-        "perdaConfirmadaCentavos": { "type": "integer", "minimum": 0 },
-        "confiabilidadeGlobal": {
-          "type": "string",
-          "enum": [
-            "COMPROVADO",
-            "ESTIMADO",
-            "EM_RISCO",
-            "RECUPERAVEL_PROVAVEL",
-            "PENDENTE_DE_EVIDENCIA",
-            "DIVERGENTE_ATE_VALIDACAO",
-            "PERDA_PROVAVEL",
-            "PERDA_CONFIRMADA"
-          ]
-        }
-      },
-      "additionalProperties": false
-    },
-    "trialFriction": {
-      "type": "object",
-      "required": ["tentativasManuais", "itensSemDono", "itensVencidos", "resolvidoClienteCentavos", "travadoCentavos"],
-      "properties": {
-        "tentativasManuais": { "type": "integer", "minimum": 0 },
-        "diasAtePrimeiraResposta": { "type": "integer", "minimum": 0 },
-        "diasAteEvidenciaValida": { "type": "integer", "minimum": 0 },
-        "itensSemDono": { "type": "integer", "minimum": 0 },
-        "itensVencidos": { "type": "integer", "minimum": 0 },
-        "itensReabertos": { "type": "integer", "minimum": 0 },
-        "resolvidoClienteCentavos": { "type": "integer", "minimum": 0 },
-        "travadoCentavos": { "type": "integer", "minimum": 0 }
-      },
-      "additionalProperties": false
-    },
-    "organicPatcher": {
-      "type": "object",
-      "required": ["status", "lastCheckAt", "manifestId", "rollbackAvailable"],
-      "properties": {
-        "status": {
-          "type": "string",
-          "enum": ["APTO", "PENDENTE", "BLOQUEADO", "APLICADO", "ROLLBACK_DISPONIVEL"]
+        "pendentes": {
+          "type": "integer",
+          "minimum": 0
         },
-        "lastCheckAt": { "type": "string", "format": "date-time" },
-        "manifestId": { "type": "string", "minLength": 1, "maxLength": 120 },
-        "rollbackAvailable": { "type": "boolean" },
-        "requiresHumanReview": { "type": "boolean" }
+        "processando": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "processados": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplicados": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "erros": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "revisaoHumana": {
+          "type": "integer",
+          "minimum": 0
+        }
       },
       "additionalProperties": false
     },
     "auditoria": {
       "type": "object",
-      "required": ["ok", "erros", "avisos"],
+      "required": [
+        "ok",
+        "erros",
+        "avisos"
+      ],
       "properties": {
-        "ok": { "type": "boolean" },
+        "ok": {
+          "type": "boolean"
+        },
         "erros": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "avisos": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -127,14 +98,7 @@
           "auditarCodigo",
           "validarStatus",
           "abrirRevisao",
-          "marcarRevisado",
-          "verDinheiroPeloRalo",
-          "verRelogioDaPerda",
-          "verInsightServico",
-          "verDificuldadeCliente",
-          "simularPatchOrganico",
-          "abrirManifestoPatch",
-          "solicitarRevisaoPatch"
+          "marcarRevisado"
         ]
       }
     }

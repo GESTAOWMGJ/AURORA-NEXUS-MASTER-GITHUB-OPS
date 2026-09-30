@@ -15,12 +15,12 @@ E-mail, Drive, planilha, Notion, Firebase e integrações viram backend operacio
 +--------------------------------------------------------------------------------------------------+
 | AURORA NEXUS®                                                                                    |
 | Cliente: ORG_NAME | Skill: CLIENT_OPERATION_SKILL | Ambiente: HML/PROD | Modo: TESTE/CONTRATADO |
-| Usuário: ROLE | Sessão: VERIFICADA | MFA: OK | Patch orgânico: APTO / PENDENTE / BLOQUEADO       |
+| Usuário: ROLE | Sessão: VERIFICADA | MFA: OK | Orgânico: PROPOSTA / REVISÃO / BLOQUEADO          |
 +--------------------------------------------------------------------------------------------------+
 | DINHEIRO PELO RALO AGORA                                                                         |
 | R$ em risco       | R$ parado       | R$ recuperável provável | R$ perda provável | R$ confirmada |
 | 000.000,00        | 000.000,00      | 000.000,00              | 000.000,00        | 000.000,00    |
-| Selo global: COMPROVADO / ESTIMADO / PENDENTE DE EVIDÊNCIA / DIVERGENTE ATÉ VALIDAÇÃO            |
+| Cada cifra possui valor em centavos + selo próprio de confiabilidade e evidência                    |
 +--------------------------------------------------------------------------------------------------+
 | RELÓGIO DA PERDA                                                                                 |
 | Valor               | Prazo restante | Categoria          | Responsável         | Status         |
@@ -39,8 +39,8 @@ E-mail, Drive, planilha, Notion, Firebase e integrações viram backend operacio
 | 02 | NFS-e     | R$    | DIVERGENTE     | Drive  | Financeiro  | D+5   | Conferir NF  | Abrir     |
 +--------------------------------------------------------------------------------------------------+
 | DIFICULDADE DO CLIENTE NO TESTE                                                                  |
-| Tentativas manuais | Dias até resposta | Itens sem dono | Itens vencidos | Resolvido sozinho | Travado |
-| 000                | 000               | 000            | 000            | R$ 00.000,00      | R$ 00.000,00 |
+| Tentativas manuais | Resp. acionados | Dias até resposta | Itens sem dono | Vencidos | Resolvido | Travado |
+| 000                | 000              | 000               | 000            | 000      | R$ 0,00   | R$ 0,00 |
 | Mensagem: O teste revela onde a receita rasga. A contratação entrega saneamento com método.       |
 +--------------------------------------------------------------------------------------------------+
 | COMUNICAÇÕES E ROBÔ FIREBASE                                                                     |
@@ -48,8 +48,8 @@ E-mail, Drive, planilha, Notion, Firebase e integrações viram backend operacio
 | [Ver fila] [Ver templates permitidos] [Ver bloqueios de segurança]                               |
 +--------------------------------------------------------------------------------------------------+
 | PATCHER ORGÂNICO                                                                                 |
-| Versão base | Versão cliente | Último patch | Próximo boot | Rollback | Evidência | Revisão humana |
-| 1.0.x       | client-x.y.z   | OK/PENDENTE  | APPLY/CHECK  | DISPON.  | Hash      | OBRIG./NÃO      |
+| Versão base | Versão cliente | Estado orgânico | Execução  | Ativação | Evidência | Revisão humana |
+| 1.0.x       | client-x.y.z   | PROPOSTA/REVISÃO| READ_ONLY | BLOQ.    | Hash      | OBRIGATÓRIA     |
 | [Simular patch] [Ver manifesto] [Ver diff permitido] [Solicitar revisão]                         |
 +--------------------------------------------------------------------------------------------------+
 | AUDITORIA                                                                                        |
@@ -180,23 +180,25 @@ A interface deve sempre mostrar:
 
 ## Patcher orgânico por boot
 
-Toda plataforma deve executar checagem de patch no início:
+No estado atual do AURORA-ORG-001, o boot executa somente checagem e projeção governada. Não existe autoaplicação de código, regra financeira ou escrita operacional.
 
 ```text
 app inicia
 ↓
 valida sessão + App Check + orgId + role
 ↓
-baixa manifesto server-side permitido
+baixa manifesto server-side versionado
 ↓
 compara versão base e versão do cliente
 ↓
-aplica apenas patch autorizado e assinado
+simula/projeta a proposta em READ_ONLY
 ↓
-registra auditoria
+exige evidência atual + revisão humana/MFA para piloto limitado
 ↓
-mantém rollback disponível
+registra auditoria e recomendação de rollback
 ```
+
+O manifesto é contrato server-side em `firebase-migration/schemas/organic-patcher.schema.json`. `activationAllowed` permanece `false` neste contrato.
 
 Superfícies cobertas:
 
@@ -237,9 +239,9 @@ Abre item em fila humana com fonte, evidência, cálculo e status.
 
 Calcula diff permitido do patch orgânico, sem aplicar mudança.
 
-### Aplicar patch
+### Aprovar piloto / executar leitura limitada
 
-Disponível somente no backend/ambiente autorizado, com auditoria e rollback.
+Somente o backend do AURORA-ORG-001 pode aprovar o piloto vigente após revisão humana/MFA. A execução permanece `READ_ONLY`, vinculada à revisão/fingerprint atuais e não autoriza mutação financeira, documental ou de código.
 
 ### Ver “O que o AURORA teria feito”
 

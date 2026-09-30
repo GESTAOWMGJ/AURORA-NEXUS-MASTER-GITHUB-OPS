@@ -13,7 +13,7 @@ Consolidar os prompts operacionais de 2026-09-29 na última versão da interface
 - ferramenta Pensar como o Serviço;
 - modo teste 0–60 dias;
 - diagnóstico como benefício e saneamento completo como produto;
-- patcher orgânico executado no início de cada plataforma.
+- checagem orgânica governada no início de cada plataforma, sem autoaplicação.
 
 ## Princípio de produto
 
@@ -137,25 +137,27 @@ No modo teste, pode mostrar o que teria sido feito, sem entregar templates, play
 
 ## Patcher orgânico por inicialização
 
-Toda plataforma deve executar rotina de atualização no boot:
+O AURORA-ORG-001 presente na `main` é o limite de execução desta especificação: propostas permanecem `activationAllowed=false`, a revisão humana é obrigatória e o executor disponível é somente leitura.
 
 ```text
 inicialização
 ↓
 validar sessão, orgId, role, App Check e ambiente
 ↓
-consultar manifesto server-side do cliente
+consultar manifesto server-side versionado
 ↓
 comparar versão base x versão cliente
 ↓
-simular patch se houver mudança sensível
+simular/projetar proposta em READ_ONLY
 ↓
-aplicar apenas patch autorizado
+revalidar evidência e fingerprint
 ↓
-registrar auditoria
+submeter piloto à revisão humana/MFA
 ↓
-manter rollback disponível
+registrar auditoria e recomendação de rollback
 ```
+
+Não há autoaplicação no boot. Novos executores, escrita operacional, alteração de código ou mutação financeira exigem implementação, testes e autorização próprios.
 
 ### Plataformas cobertas
 
@@ -175,20 +177,21 @@ manter rollback disponível
 - Patch limitado por `orgId`, papel e ambiente.
 - LGPD e escopo documental preservados.
 - Fontes nunca são movidas, apagadas ou sobrescritas.
-- Patch sensível exige revisão humana quando configurado.
-- Todo patch tem manifesto, evidência, hash e rollback.
+- Toda proposta exige revisão humana; piloto exige MFA no backend atual.
+- Todo manifesto traz evidência opaca, fingerprint SHA-256 e trilha de auditoria.
+- `executionMode=READ_ONLY` e `activationAllowed=false` são invariantes deste contrato.
 
-## O que o patcher pode atualizar
+## O que o patcher pode fazer neste incremento
 
-- layout e cards habilitados;
-- regras visuais do painel;
-- textos de orientação;
-- módulos permitidos por cliente;
-- critérios de priorização;
-- templates aprovados no modo contratado;
-- filas e rótulos;
-- parâmetros de alertas;
-- listas de fontes autorizadas já aprovadas.
+- descrever e versionar propostas;
+- comparar versão base e versão do cliente;
+- declarar superfícies permitidas;
+- vincular evidências opacas e fingerprint;
+- simular/projetar diferenças;
+- encaminhar revisão humana;
+- representar piloto aprovado sem transformar isso em ativação automática.
+
+Alteração efetiva de layout, regras, templates, filas, alertas ou fontes autorizadas continua fora do executor orgânico atual até existir implementação específica.
 
 ## O que o patcher não pode atualizar sozinho
 

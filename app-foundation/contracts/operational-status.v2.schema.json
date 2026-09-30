@@ -1,0 +1,444 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aurora.local/schemas/operational-status.v2.schema.json",
+  "title": "AURORA NEXUS Operational Status v2",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "status",
+    "ultimaExecucao",
+    "pipeline",
+    "auditoria",
+    "acoesDisponiveis"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "ATENCAO",
+        "ERRO",
+        "CRITICO",
+        "BLOQUEANTE"
+      ]
+    },
+    "ultimaExecucao": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "clientSkill": {
+      "type": "object",
+      "required": [
+        "orgId",
+        "clientSkillId",
+        "mode",
+        "environment",
+        "baseVersion",
+        "clientVersion"
+      ],
+      "properties": {
+        "orgId": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80,
+          "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        },
+        "clientSkillId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 120,
+          "pattern": "^aurora-client-[a-z0-9_-]+$"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "trial",
+            "contracted"
+          ]
+        },
+        "environment": {
+          "type": "string",
+          "enum": [
+            "hml",
+            "production"
+          ]
+        },
+        "baseVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "clientVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "additionalProperties": false
+    },
+    "pipeline": {
+      "type": "object",
+      "required": [
+        "pendentes",
+        "processando",
+        "processados",
+        "duplicados",
+        "erros",
+        "revisaoHumana"
+      ],
+      "properties": {
+        "pendentes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "processando": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "processados": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duplicados": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "erros": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "revisaoHumana": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "financialLeakage": {
+      "type": "object",
+      "required": [
+        "receitaEmRisco",
+        "dinheiroParado",
+        "receitaRecuperavel",
+        "perdaEvitavel",
+        "perdaProvavel",
+        "perdaConfirmada"
+      ],
+      "properties": {
+        "receitaEmRisco": {
+          "type": "object",
+          "required": [
+            "centavos",
+            "confiabilidade"
+          ],
+          "properties": {
+            "centavos": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "confiabilidade": {
+              "type": "string",
+              "enum": [
+                "COMPROVADO",
+                "ESTIMADO",
+                "EM_RISCO",
+                "RECUPERAVEL_PROVAVEL",
+                "PENDENTE_DE_EVIDENCIA",
+                "DIVERGENTE_ATE_VALIDACAO",
+                "PERDA_PROVAVEL",
+                "PERDA_CONFIRMADA"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "dinheiroParado": {
+          "type": "object",
+          "required": [
+            "centavos",
+            "confiabilidade"
+          ],
+          "properties": {
+            "centavos": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "confiabilidade": {
+              "type": "string",
+              "enum": [
+                "COMPROVADO",
+                "ESTIMADO",
+                "EM_RISCO",
+                "RECUPERAVEL_PROVAVEL",
+                "PENDENTE_DE_EVIDENCIA",
+                "DIVERGENTE_ATE_VALIDACAO",
+                "PERDA_PROVAVEL",
+                "PERDA_CONFIRMADA"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "receitaRecuperavel": {
+          "type": "object",
+          "required": [
+            "centavos",
+            "confiabilidade"
+          ],
+          "properties": {
+            "centavos": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "confiabilidade": {
+              "type": "string",
+              "enum": [
+                "COMPROVADO",
+                "ESTIMADO",
+                "EM_RISCO",
+                "RECUPERAVEL_PROVAVEL",
+                "PENDENTE_DE_EVIDENCIA",
+                "DIVERGENTE_ATE_VALIDACAO",
+                "PERDA_PROVAVEL",
+                "PERDA_CONFIRMADA"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "perdaEvitavel": {
+          "type": "object",
+          "required": [
+            "centavos",
+            "confiabilidade"
+          ],
+          "properties": {
+            "centavos": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "confiabilidade": {
+              "type": "string",
+              "enum": [
+                "COMPROVADO",
+                "ESTIMADO",
+                "EM_RISCO",
+                "RECUPERAVEL_PROVAVEL",
+                "PENDENTE_DE_EVIDENCIA",
+                "DIVERGENTE_ATE_VALIDACAO",
+                "PERDA_PROVAVEL",
+                "PERDA_CONFIRMADA"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "perdaProvavel": {
+          "type": "object",
+          "required": [
+            "centavos",
+            "confiabilidade"
+          ],
+          "properties": {
+            "centavos": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "confiabilidade": {
+              "type": "string",
+              "enum": [
+                "COMPROVADO",
+                "ESTIMADO",
+                "EM_RISCO",
+                "RECUPERAVEL_PROVAVEL",
+                "PENDENTE_DE_EVIDENCIA",
+                "DIVERGENTE_ATE_VALIDACAO",
+                "PERDA_PROVAVEL",
+                "PERDA_CONFIRMADA"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "perdaConfirmada": {
+          "type": "object",
+          "required": [
+            "centavos",
+            "confiabilidade"
+          ],
+          "properties": {
+            "centavos": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "confiabilidade": {
+              "type": "string",
+              "enum": [
+                "COMPROVADO",
+                "ESTIMADO",
+                "EM_RISCO",
+                "RECUPERAVEL_PROVAVEL",
+                "PENDENTE_DE_EVIDENCIA",
+                "DIVERGENTE_ATE_VALIDACAO",
+                "PERDA_PROVAVEL",
+                "PERDA_CONFIRMADA"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "trialFriction": {
+      "type": "object",
+      "required": [
+        "tentativasManuais",
+        "responsaveisAcionados",
+        "itensSemDono",
+        "itensVencidos",
+        "resolvidoClienteCentavos",
+        "travadoCentavos"
+      ],
+      "properties": {
+        "tentativasManuais": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "responsaveisAcionados": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "diasAtePrimeiraResposta": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "diasAteEvidenciaValida": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "itensSemDono": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "itensVencidos": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "itensReabertos": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resolvidoClienteCentavos": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "travadoCentavos": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "organicPatcher": {
+      "type": "object",
+      "required": [
+        "status",
+        "lastCheckAt",
+        "manifestId",
+        "executionMode",
+        "activationAllowed",
+        "requiresHumanReview",
+        "rollbackRecommended"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "NAO_CONFIGURADO",
+            "PROPOSTA",
+            "AGUARDANDO_REVISAO",
+            "PILOTO_APROVADO",
+            "BLOQUEADO",
+            "ROLLBACK_RECOMENDADO",
+            "ROLLED_BACK"
+          ]
+        },
+        "lastCheckAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "manifestId": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 120
+        },
+        "executionMode": {
+          "const": "READ_ONLY"
+        },
+        "activationAllowed": {
+          "const": false
+        },
+        "requiresHumanReview": {
+          "const": true
+        },
+        "rollbackRecommended": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "auditoria": {
+      "type": "object",
+      "required": [
+        "ok",
+        "erros",
+        "avisos"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "erros": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "avisos": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "acoesDisponiveis": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "diagnosticar",
+          "processarFila",
+          "reprocessarErros",
+          "auditarCodigo",
+          "validarStatus",
+          "abrirRevisao",
+          "marcarRevisado",
+          "verDinheiroPeloRalo",
+          "verRelogioDaPerda",
+          "verInsightServico",
+          "verDificuldadeCliente",
+          "simularPatchOrganico",
+          "abrirManifestoPatch",
+          "solicitarRevisaoPatch"
+        ]
+      }
+    }
+  },
+  "additionalProperties": false
+}
