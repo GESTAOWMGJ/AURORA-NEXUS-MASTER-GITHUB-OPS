@@ -18,3 +18,12 @@ test("RC1.1 uses reconciled invoice and bank entities", () => {
   assert.match(source, /entityType: 'bankTransaction'/);
   assert.match(source, /status: 'RECONCILED'/);
 });
+
+
+test("RC1.1 workflow uses supported synchronous Firestore restore", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  assert.match(workflow, /gcloud firestore databases restore/);
+  assert.doesNotMatch(workflow, /databases restore[^\n]*--async/);
+  assert.match(workflow, /restore-result\.json/);
+  assert.match(workflow, /gcloud firestore databases describe --database="\$restore_db"/);
+});
