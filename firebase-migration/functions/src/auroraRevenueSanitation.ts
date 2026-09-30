@@ -177,10 +177,6 @@ function closureReady(record: Record<string, unknown>, verifiedEvidence: Readonl
   return closureEvidenceVerified(record, verifiedEvidence) && humanClosureApproved(record);
 }
 
-function trueField(record: Record<string, unknown>, fields: string[]): boolean {
-  return fields.some((field) => record[field] === true);
-}
-
 function glossClosureCriteriaMet(
   record: Record<string, unknown>,
   source: ProjectionSource,
@@ -192,11 +188,8 @@ function glossClosureCriteriaMet(
 
   const amount = amountCents(record, ["glossAmountCents", "amountCents", "valorCentavos"]);
   if (amount === 0) return true;
-  if (trueField(record, ["financialImpactReconciled", "financial_impact_reconciled", "financialReconciled", "impactoFinanceiroConciliado"])) {
-    return true;
-  }
 
-  const reconciliationId = textField(record, ["reconciliationId", "reconciliation_id"]);
+  const reconciliationId = textField(record, ["reconciliationId", "reconciliation_id", "reconciliationRef", "reconciliation_ref"]);
   if (!reconciliationId) return false;
   const reconciliation = source.reconciliations.find((item, index) =>
     !isTestRecord(item) && recordId(item, `reconciliation-${index + 1}`) === reconciliationId
@@ -336,7 +329,6 @@ export function buildRevenueSanitation(
   source.glosses.forEach((record, index) => {
     if (isTestRecord(record) || !inContext(record, context)) return;
     const state = financialStatus(record);
-    const refs = evidenceRefs(record);
     if (ACCEPTED_GLOSS.has(state) && closureReady(record, verifiedEvidence) && glossClosureCriteriaMet(record, source, verifiedEvidence)) return;
     looseEnds.push(looseEnd(
       "GLOSS_UNSUPPORTED_OR_UNRESOLVED",
