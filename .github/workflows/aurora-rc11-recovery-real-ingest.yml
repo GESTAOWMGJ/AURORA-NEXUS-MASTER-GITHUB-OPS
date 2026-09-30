@@ -49,7 +49,7 @@ jobs:
             .projectId==$project and
             .projectId=="wmgj-hml-jfn-20260927" and
             .sourceDatabase=="(default)" and
-            .restoreDatabase=="rc11-restore-20260930-r4" and
+            .restoreDatabasePrefix=="rc11-restore" and
             .competence=="2026-05" and
             .sample.invoiceNumber=="8" and
             .sample.expectedPairCount==2 and
@@ -105,9 +105,15 @@ jobs:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
-          restore_db="$(jq -r '.restoreDatabase' "$REQUEST_FILE")"
+          restore_prefix="$(jq -r '.restoreDatabasePrefix' "$REQUEST_FILE")"
+          [[ "$restore_prefix" =~ ^[a-z0-9][a-z0-9-]{2,30}$ ]]
+          restore_db="${restore_prefix}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ "$restore_db" =~ ^[a-z0-9][a-z0-9-]{3,62}$ ]]
           test "$restore_db" != "(default)"
-          if gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" >/dev/null 2>&1; then exit 51; fi
+          if gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            echo "UNEXPECTED_TEMP_DATABASE_COLLISION:$restore_db" >&2
+            exit 51
+          fi
           # The restore command starts a long-running Firestore operation.
           # It does not support --async on this gcloud surface, but its JSON
           # output still contains the operation resource. Wait for SUCCESSFUL
@@ -166,7 +172,8 @@ jobs:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
-          restore_db="$(jq -r '.restoreDatabase' "$REQUEST_FILE")"
+          restore_prefix="$(jq -r '.restoreDatabasePrefix' "$REQUEST_FILE")"
+          restore_db="${restore_prefix}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           if restored="$(gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" --format=json 2>/dev/null)"; then
             source_backup="$(jq -r '.sourceInfo.backup.backup // empty' <<<"$restored")"
             if [ "$source_backup" = "$AURORA_RC11_BACKUP_RESOURCE" ]; then
