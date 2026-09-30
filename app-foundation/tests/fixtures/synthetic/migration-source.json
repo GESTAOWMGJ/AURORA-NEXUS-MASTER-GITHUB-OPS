@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "source": "SYNTHETIC_DETERMINISTIC",
+  "tenants": [
+    {"id": "tenant-demo-a", "name": "Tenant demonstrativo A"}
+  ],
+  "sites": [
+    {"id": "site-demo-01", "tenantId": "tenant-demo-a", "name": "Unidade sintética 01"}
+  ],
+  "records": [
+    {"id": "record-demo-001", "tenantId": "tenant-demo-a", "siteId": "site-demo-01", "revision": 1},
+    {"id": "record-demo-002", "tenantId": "tenant-demo-a", "siteId": "site-demo-01", "revision": 1}
+  ]
+}

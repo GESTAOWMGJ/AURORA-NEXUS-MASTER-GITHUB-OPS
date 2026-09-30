@@ -1,0 +1,67 @@
+name: Validate Firestore MVP
+
+on:
+  pull_request:
+    paths:
+      - "app-foundation/**"
+      - "src/**"
+      - "tools/audit-appscript.js"
+      - ".github/workflows/validate-firestore-mvp.yml"
+      - ".github/workflows/deploy-firebase-shadow.yml"
+  push:
+    branches:
+      - "main"
+      - "codex/firestore-mvp"
+    paths:
+      - "app-foundation/**"
+      - "src/**"
+      - "tools/audit-appscript.js"
+      - ".github/workflows/validate-firestore-mvp.yml"
+      - ".github/workflows/deploy-firebase-shadow.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app-foundation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app-foundation/package-lock.json
+
+      - name: Set up Java for Emulator Suite
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build functions
+        run: npm run functions:build
+
+      - name: Build dashboard
+        run: npm run build
+
+      - name: Run contract tests
+        run: npm run test
+
+      - name: Run Firestore rules tests
+        run: npm run test:rules
+
+      - name: Verify Apps Script baseline remains coherent
+        working-directory: .
+        run: node tools/audit-appscript.js

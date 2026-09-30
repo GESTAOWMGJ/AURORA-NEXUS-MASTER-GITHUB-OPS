@@ -184,6 +184,13 @@ function runWMGJ() {
 
     registrarLogWMGJ_("FIM", "runWMGJ", "AppsScript", "Pipeline finalizado");
 
+    // Réplica observacional: desabilitada por padrão e isolada do resultado
+    // oficial. Falha, rejeição ou indisponibilidade do Firebase nunca altera a
+    // execução V3, seus dados ou seu retorno.
+    if (typeof tentarPublicarSnapshotFirebaseShadowWMGJ_ === "function") {
+      tentarPublicarSnapshotFirebaseShadowWMGJ_();
+    }
+
     return {
       ok: true,
       comando: "runWMGJ",

@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 const root = process.cwd();
 const srcDir = path.join(root, 'src');
@@ -204,6 +205,12 @@ for (const file of srcGsFiles) {
   const text = fs.readFileSync(file, 'utf8');
   const fileRel = rel(file);
   let match;
+
+  try {
+    new vm.Script(text, { filename: fileRel });
+  } catch (error) {
+    errors.push('Sintaxe JavaScript invalida em ' + fileRel + ': ' + error.message);
+  }
 
   const functionRegex = /^\s*function\s+([A-Za-z_$][\w$]*)\s*\(/gm;
   while ((match = functionRegex.exec(text)) !== null) {

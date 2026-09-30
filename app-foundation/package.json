@@ -1,0 +1,42 @@
+{
+  "name": "@wmgj/app-foundation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "functions"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run --exclude tests/firestore.rules.test.ts --exclude tests/storage.rules.test.ts",
+    "test:rules": "firebase emulators:exec --project wmgj-master-data-demo --only firestore,storage \"vitest run tests/firestore.rules.test.ts tests/storage.rules.test.ts\"",
+    "test:all": "npm run test && npm run test:rules",
+    "seed:emulator": "tsx scripts/seed-emulator.ts",
+    "check": "npm run build && npm run test:all",
+    "functions:build": "npm --workspace functions run build"
+  },
+  "dependencies": {
+    "firebase": "12.18.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.2",
+    "@types/node": "26.3.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "6.1.0",
+    "firebase-tools": "15.28.1",
+    "jsdom": "30.0.1",
+    "tsx": "4.23.12",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}

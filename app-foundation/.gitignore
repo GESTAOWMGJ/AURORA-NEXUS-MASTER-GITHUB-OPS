@@ -1,0 +1,16 @@
+node_modules/
+dist/
+functions/lib/
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+.env
+.env.*
+!.env.example
+coverage/
+*.tsbuildinfo
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/

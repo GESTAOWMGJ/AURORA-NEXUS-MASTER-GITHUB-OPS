@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // O MVP não permite acesso direto a evidências. Endpoints backend auditados
+    // e URLs assinadas de curta duração pertencem a uma fase futura.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

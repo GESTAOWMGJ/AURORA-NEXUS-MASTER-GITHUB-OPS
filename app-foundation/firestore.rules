@@ -1,0 +1,143 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function memberPath(tenantId) {
+      return /databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid);
+    }
+
+    function memberData(tenantId) {
+      return get(memberPath(tenantId)).data;
+    }
+
+    function activeMember(tenantId) {
+      return signedIn()
+        && exists(memberPath(tenantId))
+        && memberData(tenantId).status == "ACTIVE"
+        && (!("expiresAt" in memberData(tenantId)) || request.time < memberData(tenantId).expiresAt);
+    }
+
+    function hasPermission(tenantId, permission) {
+      return activeMember(tenantId)
+        && memberData(tenantId).permissions.hasAny([permission]);
+    }
+
+    function siteAllowed(tenantId, data) {
+      return memberData(tenantId).allSites == true
+        || (("siteId" in data)
+          && data.siteId != null
+          && data.siteId in memberData(tenantId).siteIds);
+    }
+
+    function boundedList() {
+      return request.query.limit <= 100;
+    }
+
+    match /tenants/{tenantId} {
+      allow get: if activeMember(tenantId);
+      allow list, create, update, delete: if false;
+
+      match /members/{uid} {
+        allow get: if activeMember(tenantId)
+          && (request.auth.uid == uid || hasPermission(tenantId, "members.read"));
+        allow list: if hasPermission(tenantId, "members.read") && boundedList();
+        allow create, update, delete: if false;
+      }
+
+      match /sources/{sourceId} {
+        allow get: if hasPermission(tenantId, "sources.read")
+          && siteAllowed(tenantId, resource.data);
+        allow list: if hasPermission(tenantId, "sources.read")
+          && siteAllowed(tenantId, resource.data)
+          && boundedList();
+        allow create, update, delete: if false;
+      }
+
+      match /processing_runs/{runId} {
+        allow get: if hasPermission(tenantId, "operations.read")
+          && siteAllowed(tenantId, resource.data);
+        allow list: if hasPermission(tenantId, "operations.read")
+          && siteAllowed(tenantId, resource.data)
+          && boundedList();
+        allow create, update, delete: if false;
+      }
+
+      match /validation_tasks/{taskId} {
+        allow get: if hasPermission(tenantId, "validation.read")
+          && siteAllowed(tenantId, resource.data);
+        allow list: if hasPermission(tenantId, "validation.read")
+          && siteAllowed(tenantId, resource.data)
+          && boundedList();
+        allow create, update, delete: if false;
+      }
+
+      match /action_requests/{requestId} {
+        allow get: if hasPermission(tenantId, "operations.read")
+          && siteAllowed(tenantId, resource.data);
+        allow list: if hasPermission(tenantId, "operations.read")
+          && siteAllowed(tenantId, resource.data)
+          && boundedList();
+        allow create, update, delete: if false;
+      }
+
+      match /dashboard_snapshots/{snapshotId} {
+        allow get: if hasPermission(tenantId, "dashboard.read")
+          && siteAllowed(tenantId, resource.data);
+        allow list: if hasPermission(tenantId, "dashboard.read")
+          && siteAllowed(tenantId, resource.data)
+          && boundedList();
+        allow create, update, delete: if false;
+      }
+
+      match /reports/{reportId} {
+        allow get: if hasPermission(tenantId, "reports.read")
+          && siteAllowed(tenantId, resource.data);
+        allow list: if hasPermission(tenantId, "reports.read")
+          && siteAllowed(tenantId, resource.data)
+          && boundedList();
+        allow create, update, delete: if false;
+      }
+
+      match /shadow_snapshots/{snapshotId} {
+        allow get: if hasPermission(tenantId, "shadow.read")
+          && siteAllowed(tenantId, resource.data);
+        allow list: if hasPermission(tenantId, "shadow.read")
+          && siteAllowed(tenantId, resource.data)
+          && boundedList();
+        allow create, update, delete: if false;
+      }
+
+      match /learning_observations/{observationId} {
+        allow get: if hasPermission(tenantId, "learning.read")
+          && siteAllowed(tenantId, resource.data);
+        allow list: if hasPermission(tenantId, "learning.read")
+          && siteAllowed(tenantId, resource.data)
+          && boundedList();
+        allow create, update, delete: if false;
+      }
+
+      match /audit_events/{eventId} {
+        allow get: if hasPermission(tenantId, "audit.read")
+          && siteAllowed(tenantId, resource.data);
+        allow list: if hasPermission(tenantId, "audit.read")
+          && siteAllowed(tenantId, resource.data)
+          && boundedList();
+        allow create, update, delete: if false;
+      }
+
+      // Evidência bruta, dados privados, idempotência e outbox são acessíveis
+      // apenas pelo backend com IAM mínimo. Admin SDK não é protegido por Rules.
+      match /{privateCollection}/{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

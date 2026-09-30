@@ -14,6 +14,10 @@ GESTAOWMGJ/automacao-gestao-wmgj
 
 A partir desta versão, qualquer melhoria do robô, webhook, Gemini, Sheets, relatórios ou painel deve entrar primeiro neste repositório.
 
+## Migração Firebase segura
+
+A operação oficial permanece em Google Sheets/Apps Script V3. A fundação em `app-foundation/` acrescenta uma integração Firebase paralela para homologação, SLA, auditoria e aprendizado supervisionado. O envio é agregado, não clínico, desativado por padrão e incapaz de solicitar cutover. Consulte `app-foundation/docs/migration/shadow-rollout.md`.
+
 ## Pipeline oficial
 
 Arquivo principal:
