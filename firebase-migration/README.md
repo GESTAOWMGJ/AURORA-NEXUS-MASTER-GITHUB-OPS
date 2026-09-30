@@ -53,7 +53,8 @@ FastAPI Control Plane (homologação)
 - `tests/`: testes mínimos das Security Rules.
 - `api/evals/`: casos sintéticos de regressão; live eval é opt-in.
 - `skills/`: habilidade operacional aprendida para continuidade.
-- `policy/`: política sanitizada, baseline criptográfica e regras de segurança versionadas do aplicativo.\n- `../skills/aurora-nexus-security/`: AURORA-SEC-001, gate nativo de criptografia, privacidade, supply chain e market readiness.
+- `policy/`: política sanitizada, baseline criptográfica e regras de segurança versionadas do aplicativo.
+- `../skills/aurora-nexus-security/`: AURORA-SEC-001, gate nativo de criptografia, privacidade, supply chain e market readiness.
 
 ## Aplicação Full Firebase
 
