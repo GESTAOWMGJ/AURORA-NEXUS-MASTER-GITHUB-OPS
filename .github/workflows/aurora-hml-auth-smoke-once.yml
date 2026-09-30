@@ -1,0 +1,124 @@
+name: Aurora HML Auth Smoke Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/aurora-hml-auth-smoke-once.yml"
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: firebase-homologation
+    env:
+      PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+      WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      SMOKE_UID: ${{ vars.FIREBASE_HML_SMOKE_UID }}
+      SMOKE_EMAIL: ${{ vars.FIREBASE_HML_SMOKE_EMAIL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate fixed HML scope
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = "wmgj-hml-jfn-20260927"
+          [[ "$SMOKE_UID" =~ ^[A-Za-z0-9_-]{6,128}$ ]]
+          [[ "$SMOKE_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]
+          test -n "$WIF_PROVIDER"
+          test -n "$DEPLOY_SERVICE_ACCOUNT"
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: "548.0.0"
+          project_id: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+
+      - name: Anonymous login-first smoke
+        run: |
+          set -euo pipefail
+          base="https://${PROJECT_ID}.web.app"
+          shell="$(curl --fail --silent --show-error --max-time 30 "$base/")"
+          grep -Fq "Ambiente privado" <<<"$shell"
+          ! grep -Fq "Operação WMGJ" <<<"$shell"
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          for path in "/api/bootstrap" "/organic?format=json"; do
+            code="$(curl --silent --show-error --max-time 30 -H 'Accept: application/json' -o "$tmp" -w '%{http_code}' "$base$path")"
+            test "$code" = "401"
+            jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$tmp" >/dev/null
+          done
+
+      - name: Authenticated smoke with custom token
+        run: |
+          set -euo pipefail
+          umask 077
+          d="$(mktemp -d)"
+          trap 'find "$d" -type f -delete; rmdir "$d"' EXIT
+          access_token="$(gcloud auth print-access-token)"
+          apps_json="$(curl --fail --silent --show-error --max-time 30 -H "Authorization: Bearer ${access_token}" "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/webApps?pageSize=100")"
+          app_name="$(jq -r '[.apps[]? | select(.state == "ACTIVE")] | first | .name // empty' <<<"$apps_json")"
+          test -n "$app_name"
+          web_config="$(curl --fail --silent --show-error --max-time 30 -H "Authorization: Bearer ${access_token}" "https://firebase.googleapis.com/v1beta1/${app_name}/config")"
+          api_key="$(jq -r '.apiKey // empty' <<<"$web_config")"
+          [[ "$api_key" =~ ^[A-Za-z0-9_-]{20,200}$ ]]
+
+          now="$(date +%s)"
+          exp="$((now + 3000))"
+          jq -nc --arg iss "$DEPLOY_SERVICE_ACCOUNT" --arg sub "$DEPLOY_SERVICE_ACCOUNT" --arg uid "$SMOKE_UID" --arg aud "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit" --argjson iat "$now" --argjson exp "$exp" '{iss:$iss,sub:$sub,aud:$aud,iat:$iat,exp:$exp,uid:$uid}' > "$d/claims.json"
+          gcloud iam service-accounts sign-jwt "$d/claims.json" "$d/custom.jwt" --iam-account "$DEPLOY_SERVICE_ACCOUNT" --project "$PROJECT_ID" >/dev/null
+          jq -nc --arg token "$(cat "$d/custom.jwt")" '{token:$token,returnSecureToken:true}' > "$d/auth.json"
+          status="$(curl --silent --show-error --max-time 30 -H 'Content-Type: application/json' --data-binary @"$d/auth.json" -o "$d/auth-out.json" -w '%{http_code}' "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${api_key}")"
+          if [ "$status" != "200" ]; then
+            jq -r '.error.message // "CUSTOM_TOKEN_AUTH_FAILED"' "$d/auth-out.json" >&2
+            exit 71
+          fi
+          id_token="$(jq -r '.idToken // empty' "$d/auth-out.json")"
+          local_id="$(jq -r '.localId // empty' "$d/auth-out.json")"
+          test -n "$id_token"
+          test "$local_id" = "$SMOKE_UID"
+
+          base="https://${PROJECT_ID}.web.app"
+          jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$d/session.json"
+          curl --fail --silent --show-error --max-time 30 -X POST -H 'Content-Type: application/json' -H "Origin: ${base}" -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$d/cookies.txt" --data-binary @"$d/session.json" -o /dev/null "$base/__sessionLogin"
+          curl --fail --silent --show-error --max-time 30 --cookie "$d/cookies.txt" -o "$d/private.html" "$base/"
+          grep -Fq "Operação WMGJ" "$d/private.html"
+          ! grep -Fq "Ambiente privado" "$d/private.html"
+
+          curl --fail --silent --show-error --max-time 30 -H 'Accept: application/json' --cookie "$d/cookies.txt" -o "$d/bootstrap.json" "$base/api/bootstrap"
+          jq -e --arg email "$SMOKE_EMAIL" '.ok == true and .environment == "HOMOLOGATION" and .mode == "SHADOW" and .organization.id == "wmgj" and .member.email == $email' "$d/bootstrap.json" >/dev/null
+
+          curl --fail --silent --show-error --max-time 30 -H 'Accept: application/json' --cookie "$d/cookies.txt" -o "$d/organic.json" "$base/organic?format=json"
+          jq -e '.ok == true and .environment == "HOMOLOGATION" and .mode == "SHADOW" and .enabled == true and (.sectors | index("AUDIT")) != null and (.sectors | index("FINANCE")) != null' "$d/organic.json" >/dev/null
+
+      - name: Record sanitized success
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 32 --repo "${{ github.repository }}" --body "### HML smoke autenticado — APROVADO
+
+Execução one-shot em `$(date -u +%Y-%m-%dT%H:%M:%SZ)`.
+
+- projeto: `wmgj-hml-jfn-20260927`
+- login-first anônimo: aprovado
+- bootstrap anônimo 401: aprovado
+- organic anônimo 401: aprovado
+- autenticação por custom token sem senha armazenada: aprovada
+- shell privado autenticado: aprovado
+- bootstrap HOMOLOGATION/SHADOW + membership: aprovado
+- runtime orgânico AUDIT/FINANCE: aprovado
+- nenhum dado operacional foi criado ou alterado por este smoke
+- nenhum deploy foi executado neste workflow
+
+A execução valida o HML já publicado; não implica cutover de produção."
