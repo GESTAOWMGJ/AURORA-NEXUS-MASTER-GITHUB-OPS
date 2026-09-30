@@ -1,15 +1,15 @@
 {
   "manifestVersion": 1,
-  "generatedAt": "2026-09-27",
+  "generatedAt": "2026-09-30",
   "source": {
-    "file": "aurora-nexus-source-2.3.0.json",
-    "version": "2.3.0",
-    "sha256": "9a8f7f291be65c0ef1feba043592452b77bef03e965198ca451f0044703a6d8f"
+    "file": "aurora-nexus-source-2.4.0.json",
+    "version": "2.4.0",
+    "sha256": "7e3dd2cd9c5afcd0505c4cee243ebe84810d69b19e2690a811c7f6a4cc68ea8b"
   },
   "export": {
     "file": "aurora-nexus-policy.sanitized.json",
-    "policyVersion": "aurora-nexus-2.3.0-firebase-shadow-v2",
-    "sha256": "077e7cbf4c60e578dee971ce5af5f847c773ba35c7b8beb020caa7cb6af971a7"
+    "policyVersion": "aurora-nexus-2.4.0-revenue-sanitation-v1",
+    "sha256": "5c30f7b8d946253d7f093373915e34809293c6906a69bfa7dfe80c58ebfc8b92"
   },
   "runtime": {
     "environment": "HOMOLOGATION",
