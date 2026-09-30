@@ -3,21 +3,11 @@
   "$id": "https://wmgj.local/schemas/operational-status.schema.json",
   "title": "WMGJ Operational Status",
   "type": "object",
-  "required": [
-    "status",
-    "ultimaExecucao",
-    "pipeline",
-    "auditoria",
-    "acoesDisponiveis"
-  ],
+  "required": ["status", "ultimaExecucao", "pipeline", "auditoria", "acoesDisponiveis"],
   "properties": {
     "status": {
       "type": "string",
-      "enum": [
-        "OK",
-        "ATENCAO",
-        "ERRO"
-      ]
+      "enum": ["OK", "ATENCAO", "ERRO"]
     },
     "ultimaExecucao": {
       "type": "string",
@@ -25,64 +15,29 @@
     },
     "pipeline": {
       "type": "object",
-      "required": [
-        "pendentes",
-        "processando",
-        "processados",
-        "duplicados",
-        "erros",
-        "revisaoHumana"
-      ],
+      "required": ["pendentes", "processando", "processados", "duplicados", "erros", "revisaoHumana"],
       "properties": {
-        "pendentes": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "processando": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "processados": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "duplicados": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "erros": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "revisaoHumana": {
-          "type": "integer",
-          "minimum": 0
-        }
+        "pendentes": { "type": "integer", "minimum": 0 },
+        "processando": { "type": "integer", "minimum": 0 },
+        "processados": { "type": "integer", "minimum": 0 },
+        "duplicados": { "type": "integer", "minimum": 0 },
+        "erros": { "type": "integer", "minimum": 0 },
+        "revisaoHumana": { "type": "integer", "minimum": 0 }
       },
       "additionalProperties": false
     },
     "auditoria": {
       "type": "object",
-      "required": [
-        "ok",
-        "erros",
-        "avisos"
-      ],
+      "required": ["ok", "erros", "avisos"],
       "properties": {
-        "ok": {
-          "type": "boolean"
-        },
+        "ok": { "type": "boolean" },
         "erros": {
           "type": "array",
-          "items": {
-            "type": "string"
-          }
+          "items": { "type": "string" }
         },
         "avisos": {
           "type": "array",
-          "items": {
-            "type": "string"
-          }
+          "items": { "type": "string" }
         }
       },
       "additionalProperties": false
