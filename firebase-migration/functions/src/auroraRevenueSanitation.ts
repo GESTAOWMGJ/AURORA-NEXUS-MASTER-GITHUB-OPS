@@ -1,6 +1,7 @@
+import { validEvidenceRef } from "./auroraEvidence.js";
 import type { ProjectionContext, ProjectionSource } from "./auroraEngine.js";
 
-export const AURORA_REVENUE_SANITATION_VERSION = "0.1.0";
+export const AURORA_REVENUE_SANITATION_VERSION = "0.1.1";
 
 export type RevenueLooseEndCode =
   | "BILLED_NOT_RECEIVED"
@@ -46,6 +47,7 @@ export type RevenueLooseEnd = {
 const CLOSED = new Set(["CLOSED", "RESOLVED", "CANCELLED", "ENCERRADO", "ENCERRADA"]);
 const SETTLED = new Set(["PAID", "LIQUIDATED", "RECONCILED", "MATCHED", "PAGO", "LIQUIDADO", "CONCILIADO"]);
 const ACCEPTED_GLOSS = new Set(["ACCEPTED", "APPROVED", "CLOSED", "RESOLVED", "ACEITA", "APROVADA", "ENCERRADA"]);
+const HUMAN_RESOLUTION_CODES = new Set(["EVIDENCE_CONFIRMED", "SOURCE_CORRECTED", "FALSE_POSITIVE", "ESCALATED"]);
 const TEST_MARKERS = new Set(["TEST", "TESTE"]);
 const SEVERITY_PRIORITY: Record<LooseEndSeverity, number> = {
   CRITICAL: 4,
@@ -127,6 +129,81 @@ function evidenceRefs(record: Record<string, unknown>): string[] {
   const direct = textField(record, ["sourceRef", "documentRef", "evidenceRef", "source_ref", "document_ref"]);
   if (direct) refs.push(direct);
   return [...new Set(refs)];
+}
+
+function hasTimestamp(record: Record<string, unknown>, fields: string[]): boolean {
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === "string" && Number.isFinite(Date.parse(value))) return true;
+    if (value && typeof value === "object" && "toDate" in value && typeof (value as { toDate?: unknown }).toDate === "function") {
+      const date = (value as { toDate(): Date }).toDate();
+      if (date instanceof Date && Number.isFinite(date.getTime())) return true;
+    }
+  }
+  return false;
+}
+
+function verifiedEvidenceIds(source: ProjectionSource): Set<string> {
+  const ids = new Set<string>();
+  source.sourceDocuments.forEach((record, index) => {
+    if (isTestRecord(record)) return;
+    if (!["VALIDATED", "CLOSED"].includes(workflowStatus(record))) return;
+    const id = recordId(record, `document-${index + 1}`);
+    if (validEvidenceRef(id)) ids.add(id);
+  });
+  return ids;
+}
+
+function closureEvidenceVerified(record: Record<string, unknown>, verifiedEvidence: ReadonlySet<string>): boolean {
+  const refs = evidenceRefs(record);
+  return refs.length > 0 && refs.every((ref) => validEvidenceRef(ref) && verifiedEvidence.has(ref));
+}
+
+function humanClosureApproved(record: Record<string, unknown>): boolean {
+  const reviewState = normalized(record.reviewState ?? record.review_state);
+  const reviewer = textField(record, ["reviewerUid", "reviewer_uid", "reviewer", "reviewedBy", "approvedBy"]);
+  if (reviewState === "APPROVED" && reviewer && hasTimestamp(record, ["reviewedAt", "reviewed_at", "approvedAt", "approved_at"])) {
+    return true;
+  }
+
+  const resolutionCode = normalized(record.resolutionCode ?? record.resolution_code);
+  const updatedBy = textField(record, ["updatedBy", "updated_by"]);
+  return HUMAN_RESOLUTION_CODES.has(resolutionCode) &&
+    Boolean(updatedBy) &&
+    hasTimestamp(record, ["updatedAt", "updated_at"]);
+}
+
+function closureReady(record: Record<string, unknown>, verifiedEvidence: ReadonlySet<string>): boolean {
+  return closureEvidenceVerified(record, verifiedEvidence) && humanClosureApproved(record);
+}
+
+function trueField(record: Record<string, unknown>, fields: string[]): boolean {
+  return fields.some((field) => record[field] === true);
+}
+
+function glossClosureCriteriaMet(
+  record: Record<string, unknown>,
+  source: ProjectionSource,
+  verifiedEvidence: ReadonlySet<string>
+): boolean {
+  const reason = textField(record, ["glossReason", "gloss_reason", "reason", "reasonCode", "motivo", "motivoGlosa", "motivo_glosa"]);
+  const basis = textField(record, ["contractualBasis", "contractual_basis", "clinicalBasis", "clinical_basis", "basis", "basisRef", "fundamento", "fundamentoContratual"]);
+  if (!reason || !basis) return false;
+
+  const amount = amountCents(record, ["glossAmountCents", "amountCents", "valorCentavos"]);
+  if (amount === 0) return true;
+  if (trueField(record, ["financialImpactReconciled", "financial_impact_reconciled", "financialReconciled", "impactoFinanceiroConciliado"])) {
+    return true;
+  }
+
+  const reconciliationId = textField(record, ["reconciliationId", "reconciliation_id"]);
+  if (!reconciliationId) return false;
+  const reconciliation = source.reconciliations.find((item, index) =>
+    !isTestRecord(item) && recordId(item, `reconciliation-${index + 1}`) === reconciliationId
+  );
+  if (!reconciliation) return false;
+  const state = financialStatus(reconciliation);
+  return (SETTLED.has(state) || CLOSED.has(state)) && closureReady(reconciliation, verifiedEvidence);
 }
 
 function ownerOf(record: Record<string, unknown>): string | null {
@@ -227,14 +304,16 @@ export function buildRevenueSanitation(
   context: ProjectionContext = {}
 ): Record<string, unknown> {
   const looseEnds: RevenueLooseEnd[] = [];
+  const verifiedEvidence = verifiedEvidenceIds(source);
 
   source.invoices.forEach((record, index) => {
     if (isTestRecord(record) || !inContext(record, context)) return;
     const state = financialStatus(record);
-    if (SETTLED.has(state) || CLOSED.has(state)) return;
+    const closureClaimed = SETTLED.has(state) || CLOSED.has(state);
+    if (closureClaimed && closureReady(record, verifiedEvidence)) return;
     const workflow = workflowStatus(record);
-    const issued = ["VALIDATED", "ISSUED", "EMITTED", "EMITIDA", "FATURADO", "CLOSED"].includes(workflow) ||
-      ["ISSUED", "EMITTED", "EMITIDA", "FATURADO"].includes(state);
+    const issued = !closureClaimed && (["VALIDATED", "ISSUED", "EMITTED", "EMITIDA", "FATURADO"].includes(workflow) ||
+      ["ISSUED", "EMITTED", "EMITIDA", "FATURADO"].includes(state));
     looseEnds.push(looseEnd(
       issued ? "BILLED_NOT_RECEIVED" : "BILLING_EVIDENCE_GAP",
       issued ? "RECEBIVEL" : "DIVERGENTE",
@@ -258,7 +337,7 @@ export function buildRevenueSanitation(
     if (isTestRecord(record) || !inContext(record, context)) return;
     const state = financialStatus(record);
     const refs = evidenceRefs(record);
-    if (ACCEPTED_GLOSS.has(state) && refs.length > 0) return;
+    if (ACCEPTED_GLOSS.has(state) && closureReady(record, verifiedEvidence) && glossClosureCriteriaMet(record, source, verifiedEvidence)) return;
     looseEnds.push(looseEnd(
       "GLOSS_UNSUPPORTED_OR_UNRESOLVED",
       "RECUPERAVEL",
@@ -277,7 +356,7 @@ export function buildRevenueSanitation(
   source.reconciliations.forEach((record, index) => {
     if (isTestRecord(record) || !inContext(record, context)) return;
     const state = financialStatus(record);
-    if (SETTLED.has(state) || CLOSED.has(state)) return;
+    if ((SETTLED.has(state) || CLOSED.has(state)) && closureReady(record, verifiedEvidence)) return;
     looseEnds.push(looseEnd(
       "RECONCILIATION_OPEN",
       "DIVERGENTE",
@@ -296,7 +375,7 @@ export function buildRevenueSanitation(
   source.actionItems.forEach((record, index) => {
     if (isTestRecord(record) || !inContext(record, context)) return;
     const state = financialStatus(record);
-    if (CLOSED.has(state)) return;
+    if (CLOSED.has(state) && closureReady(record, verifiedEvidence)) return;
     const overdue = isOverdue(record, now);
     looseEnds.push(looseEnd(
       overdue ? "FOLLOWUP_SLA_BREACH" : "FOLLOWUP_OPEN",
@@ -318,7 +397,7 @@ export function buildRevenueSanitation(
   source.auditFindings.forEach((record, index) => {
     if (isTestRecord(record) || !inContext(record, context)) return;
     const state = financialStatus(record);
-    if (CLOSED.has(state)) return;
+    if (CLOSED.has(state) && closureReady(record, verifiedEvidence)) return;
     looseEnds.push(looseEnd(
       "AUDIT_FINDING_OPEN",
       "DIVERGENTE",
@@ -379,6 +458,7 @@ export function buildRevenueSanitation(
   const unownedCount = unique.filter((item) => item.owner === null).length;
   const evidenceGapCount = unique.filter((item) =>
     item.evidenceRefs.length === 0 ||
+    item.evidenceRefs.some((ref) => !validEvidenceRef(ref) || !verifiedEvidence.has(ref)) ||
     ["EVIDENCE_GAP", "GLOSS_UNSUPPORTED_OR_UNRESOLVED", "BILLING_EVIDENCE_GAP"].includes(item.code)
   ).length;
 
