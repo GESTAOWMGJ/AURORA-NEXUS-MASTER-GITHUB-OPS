@@ -32,3 +32,13 @@ test("RC1.1 workflow uses supported synchronous Firestore restore", () => {
   assert.match(workflow, /if: always\(\)/);
   assert.match(workflow, /gcloud firestore databases describe --database="\$restore_db"/);
 });
+
+
+test("RC1.1 restore database is unique per workflow attempt", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  assert.match(workflow, /restoreDatabasePrefix/);
+  assert.match(workflow, /GITHUB_RUN_ID/);
+  assert.match(workflow, /GITHUB_RUN_ATTEMPT/);
+  assert.match(workflow, /UNEXPECTED_TEMP_DATABASE_COLLISION/);
+  assert.doesNotMatch(workflow, /restoreDatabase=="rc11-restore-/);
+});
