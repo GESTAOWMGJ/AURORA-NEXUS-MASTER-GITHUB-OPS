@@ -2,7 +2,7 @@
   "id": "AURORA-SEC-001",
   "name": "Aurora Nexus Security Baseline",
   "version": "1.0.0",
-  "status": "DRAFT_ENFORCED_IN_CI",
+  "status": "DRAFT_POLICY_VALIDATED_IN_CI",
   "dataClassification": [
     "PUBLIC",
     "INTERNAL",
@@ -30,7 +30,8 @@
       "3DES",
       "RC4",
       "AES-ECB"
-    ]
+    ],
+    "hmacSecretEncoding": "HEX_32_BYTES_CSPRNG"
   },
   "atRest": {
     "hmlNonSensitive": "GOOGLE_DEFAULT_ENCRYPTION_ALLOWED",
@@ -68,7 +69,22 @@
     "persistentServiceAccountJsonAllowed": false,
     "automaticSymmetricRotationRequiredWhenSupported": true,
     "defaultInternalRotationTargetDays": 90,
-    "emergencyRotationRequiredOnSuspectedExposure": true
+    "emergencyRotationRequiredOnSuspectedExposure": true,
+    "legacyCredentialExceptions": [
+      {
+        "id": "GOOGLE_WORKSPACE_DOMAIN_WIDE_DELEGATION",
+        "state": "TEMPORARY_EXCEPTION",
+        "storage": "GITHUB_ACTIONS_SECRET",
+        "scope": "tools/google-workspace and provision-google-workspace workflow only",
+        "owner": "repository administrator",
+        "compensation": [
+          "protected GitHub environment",
+          "secret value not committed",
+          "restricted workflow scope"
+        ],
+        "sunsetGate": "migrate to keyless/WIF plus signJwt-compatible domain-wide delegation flow before commercial security readiness"
+      }
+    ]
   },
   "authentication": {
     "sharedAccountsAllowed": false,
@@ -110,7 +126,8 @@
       "ARTIFACT_HASHES",
       "ROLLBACK"
     ],
-    "unresolvedHighCriticalVulnerabilityBlocksRelease": true
+    "unresolvedHighCriticalVulnerabilityBlocksRelease": true,
+    "releaseEnforcementState": "SPECIFIED_PENDING_GITHUB_RULESET"
   },
   "marketFrameworks": [
     "LGPD_ANPD",
