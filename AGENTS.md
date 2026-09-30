@@ -29,3 +29,10 @@ Eventos exigem ação resolvida, autor autorizado e vínculo verificável às ev
 No PR #38: manter draft até validação; não fazer merge, deploy, migração, publicação de instaladores ou criar infraestrutura para contornar gates. Uma ordem de implementação não elimina a necessidade de comprovar credenciais, configuração e homologação. Mac indisponível não comprova falha do pacote, nem permite alegar instalação remota. Trigger sent não significa execução concluída.
 
 Cada entrega deve separar especificação, código, testes locais, CI, teste com emulador/identidade real, integração, instalação, deploy e publicação, com commit/run correspondente. Nunca reportar execução sem resultado verificável.
+
+
+## Segurança digital nativa
+
+AURORA-SEC-001 governa criptografia, IAM, secrets, supply chain, privacidade, incidentes e market readiness. HML sem dado sensível pode usar criptografia padrão do provedor; persistência de CLINICAL_SENSITIVE exige estratégia de CMEK e criptografia de aplicação homologadas conforme a habilidade. Banco Firestore existente com criptografia Google-managed não deve ser tratado como convertível in-place para CMEK.
+
+Toda entrega deve separar SPECIFIED, IMPLEMENTED, TESTED, CI_VERIFIED, HML_VERIFIED, PRODUCTION_VERIFIED, AUDITED_INDEPENDENTLY e CERTIFIED. Nunca vender certificação, conformidade ou segurança de produção por inferência a partir de código ou CI.
