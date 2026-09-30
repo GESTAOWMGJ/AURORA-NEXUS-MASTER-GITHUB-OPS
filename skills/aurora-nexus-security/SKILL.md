@@ -93,7 +93,7 @@ Camada 2 — aplicação:
 
 - Cloud KMS é a autoridade para KEKs.
 - Google Secret Manager é a autoridade para secrets de aplicação.
-- Nenhuma chave JSON persistente de service account em repositório ou estação.
+- Nenhuma chave JSON persistente de service account em repositório ou estação. A automação legada de Google Workspace que recebe `GOOGLE_SERVICE_ACCOUNT_JSON` por GitHub Actions secret é exceção transitória documentada, não conformidade com este alvo; deve migrar para fluxo keyless/WIF + assinatura compatível com domain-wide delegation antes de readiness comercial de segurança.
 - WIF/OIDC é preferido para CI/CD.
 - Rotação automática de chave simétrica é obrigatória quando suportada.
 - Alvo interno padrão de rotação: 90 dias, ajustável por risco, contrato e capacidade operacional; não é apresentado como requisito legal universal.
@@ -143,7 +143,7 @@ Cada PR relevante deve passar por:
 - provenance de build quando suportada;
 - rollback documentado.
 
-Dependência vulnerável de severidade alta/crítica não pode ser ignorada sem exceção formal, prazo e compensação.
+Dependência vulnerável de severidade alta/crítica não pode ser ignorada sem exceção formal, prazo e compensação. Enquanto não houver ruleset GitHub verificado exigindo os checks/scans, esse bloqueio permanece SPECIFIED/PARTIAL e não deve ser descrito como enforcement do repositório.
 
 ## Logging, detecção e resposta
 
