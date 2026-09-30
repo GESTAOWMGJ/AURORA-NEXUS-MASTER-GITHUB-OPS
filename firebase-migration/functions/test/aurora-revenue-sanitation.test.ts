@@ -53,22 +53,130 @@ test("glosa contestada sem evidência permanece recuperável e aberta", () => {
   assert.equal(result.evidenceGapCount, 1);
 });
 
-test("glosa encerrada exige evidência para sair da fila", () => {
-  const semEvidencia = buildRevenueSanitation(source({
-    glosses: [{ id: "G-1", competence: "2026-07", status: "CLOSED", glossAmountCents: 10000 }]
-  }), now, context) as any;
+test("glosa aceita só sai da fila com prova verificável, revisão humana e critérios de fechamento", () => {
+  const baseGloss = {
+    id: "G-1",
+    competence: "2026-07",
+    status: "ACCEPTED",
+    glossAmountCents: 10000
+  };
+
+  const semEvidencia = buildRevenueSanitation(source({ glosses: [baseGloss] }), now, context) as any;
   assert.equal(semEvidencia.openCount, 1);
 
-  const comEvidencia = buildRevenueSanitation(source({
+  const referenciaSemDocumento = buildRevenueSanitation(source({
     glosses: [{
-      id: "G-1",
-      competence: "2026-07",
-      status: "CLOSED",
-      glossAmountCents: 10000,
-      evidenceRefs: ["doc:glosa-g1"]
+      ...baseGloss,
+      evidenceRefs: ["doc-glosa-g1"],
+      reviewState: "APPROVED",
+      reviewerUid: "reviewer-1",
+      reviewedAt: "2026-09-30T17:00:00Z",
+      glossReason: "não elegível",
+      contractualBasis: "clausula-7",
+      financialImpactReconciled: true
     }]
   }), now, context) as any;
-  assert.equal(comEvidencia.openCount, 0);
+  assert.equal(referenciaSemDocumento.openCount, 1);
+
+  const semRevisaoHumana = buildRevenueSanitation(source({
+    glosses: [{
+      ...baseGloss,
+      evidenceRefs: ["doc-glosa-g1"],
+      glossReason: "não elegível",
+      contractualBasis: "clausula-7",
+      financialImpactReconciled: true
+    }],
+    sourceDocuments: [{ id: "doc-glosa-g1", workflowState: "VALIDATED" }]
+  }), now, context) as any;
+  assert.equal(semRevisaoHumana.openCount, 1);
+
+  const criteriosIncompletos = buildRevenueSanitation(source({
+    glosses: [{
+      ...baseGloss,
+      evidenceRefs: ["doc-glosa-g1"],
+      reviewState: "APPROVED",
+      reviewerUid: "reviewer-1",
+      reviewedAt: "2026-09-30T17:00:00Z",
+      financialImpactReconciled: true
+    }],
+    sourceDocuments: [{ id: "doc-glosa-g1", workflowState: "VALIDATED" }]
+  }), now, context) as any;
+  assert.equal(criteriosIncompletos.openCount, 1);
+
+  const fechamentoCompleto = buildRevenueSanitation(source({
+    glosses: [{
+      ...baseGloss,
+      evidenceRefs: ["doc-glosa-g1"],
+      reviewState: "APPROVED",
+      reviewerUid: "reviewer-1",
+      reviewedAt: "2026-09-30T17:00:00Z",
+      glossReason: "não elegível",
+      contractualBasis: "clausula-7",
+      financialImpactReconciled: true
+    }],
+    sourceDocuments: [{ id: "doc-glosa-g1", workflowState: "VALIDATED" }]
+  }), now, context) as any;
+  assert.equal(fechamentoCompleto.openCount, 0);
+});
+
+test("estado CLOSED ou RESOLVED isolado não encerra famílias sem prova", () => {
+  const result = buildRevenueSanitation(source({
+    invoices: [{ id: "NF-CLOSED", competence: "2026-07", status: "CLOSED", totalCents: 10000 }],
+    reconciliations: [{ id: "R-CLOSED", competence: "2026-07", status: "CLOSED", differenceCents: 10000 }],
+    actionItems: [{ id: "A-CLOSED", competence: "2026-07", status: "RESOLVED", impactCents: 10000 }],
+    auditFindings: [{ id: "F-CLOSED", competence: "2026-07", status: "CLOSED", financialImpactCents: 10000 }]
+  }), now, context) as any;
+
+  assert.equal(result.openCount, 4);
+  assert.equal(result.byCode.BILLING_EVIDENCE_GAP, 1);
+  assert.equal(result.byCode.RECONCILIATION_OPEN, 1);
+  assert.equal(result.byCode.FOLLOWUP_OPEN, 1);
+  assert.equal(result.byCode.AUDIT_FINDING_OPEN, 1);
+});
+
+test("famílias encerradas saem da fila somente com evidência validada e decisão humana registrada", () => {
+  const reviewed = {
+    evidenceRefs: ["doc-close-1"],
+    reviewState: "APPROVED",
+    reviewerUid: "reviewer-1",
+    reviewedAt: "2026-09-30T17:00:00Z"
+  };
+  const result = buildRevenueSanitation(source({
+    invoices: [{
+      id: "NF-CLOSED",
+      competence: "2026-07",
+      status: "CLOSED",
+      totalCents: 10000,
+      ...reviewed
+    }],
+    reconciliations: [{
+      id: "R-CLOSED",
+      competence: "2026-07",
+      status: "CLOSED",
+      differenceCents: 10000,
+      ...reviewed
+    }],
+    actionItems: [{
+      id: "A-CLOSED",
+      competence: "2026-07",
+      status: "RESOLVED",
+      impactCents: 10000,
+      evidenceRefs: ["doc-close-1"],
+      resolutionCode: "EVIDENCE_CONFIRMED",
+      updatedBy: "reviewer-1",
+      updatedAt: "2026-09-30T17:00:00Z"
+    }],
+    auditFindings: [{
+      id: "F-CLOSED",
+      competence: "2026-07",
+      status: "CLOSED",
+      financialImpactCents: 10000,
+      ...reviewed
+    }],
+    sourceDocuments: [{ id: "doc-close-1", workflowState: "VALIDATED" }]
+  }), now, context) as any;
+
+  assert.equal(result.openCount, 0);
 });
 
 test("follow-up vencido continua aberto e sem dono é sinalizado", () => {
