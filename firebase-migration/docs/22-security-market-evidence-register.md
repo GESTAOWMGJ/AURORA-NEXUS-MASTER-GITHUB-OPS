@@ -20,9 +20,9 @@
 | Inventário de ativos e dados | PARTIAL | docs de inventário/migração | inventário de ativos, owners e criticidade |
 | Política de Segurança da Informação | PARTIAL | docs 06, 09, 13 + AURORA-SEC-001 | aprovação corporativa/versionamento |
 | Política de Controle de Acesso | PARTIAL | Security Rules, membership, RBAC | revisão formal periódica + matriz de acesso |
-| Política de Criptografia e Chaves | SPECIFIED | `policy/security-baseline-v1.json` | KMS/CMEK/envelope encryption homologados |
+| Política de Criptografia e Chaves | PARTIAL | política CI-validada; HMAC implementado; AES/KMS/CMEK ainda não implantados | KMS/CMEK/envelope encryption homologados |
 | Secure SDLC | PARTIAL | AURORA-DEV-001 + workflows | política formal + métricas |
-| Vulnerability/Patch Management | SPECIFIED | Dependabot/npm audit/CodeQL proposto | SLA por severidade + registro de exceções |
+| Vulnerability/Patch Management | PARTIAL | CodeQL ativo; `npm audit --omit=dev --audit-level=high` cobre Functions; ruleset de bloqueio ainda não comprovado | ampliar cobertura + ruleset + SLA/exceções |
 | Threat model | MISSING | — | STRIDE/abuse cases por trust boundary |
 | Matriz de riscos de segurança | MISSING | — | registro de risco, owner e risco residual |
 | RoPA / registro de tratamentos | MISSING | — | mapear finalidade, base legal, titulares e fluxo |
@@ -38,9 +38,9 @@
 | Direitos dos titulares | MISSING | — | processo, canal, identidade e SLA |
 | Governança de IA | PARTIAL | regras de revisão humana/evals | inventário de modelos + risco + incidentes |
 | SBOM | MISSING | — | gerar por release comercial |
-| SAST/CodeQL | SPECIFIED | workflow `security-codeql.yml` | CI verde + relatório arquivado |
-| Dependency scanning | PARTIAL | Dependabot/npm audit | cobertura de todos os módulos + SLA |
-| Secret scanning | PARTIAL | secrets proibidos por política | habilitar/provar scanning e resposta |
+| SAST/CodeQL | PARTIAL | workflow executável para JavaScript/TypeScript e Python; resultado deve ser associado ao SHA final | CI verde no SHA final + ruleset exigindo resultado |
+| Dependency scanning | PARTIAL | Dependabot + npm audit de dependências de produção das Functions | cobrir Python, demais módulos e política de exceção/SLA |
+| Secret scanning | SPECIFIED | proibição documental não comprova scanner habilitado | habilitar/provar scanning, push protection ou equivalente e resposta |
 | Pentest independente | EXTERNAL_REQUIRED | — | executar antes de escala com dado sensível |
 | Evidência de remediação | MISSING | — | fechar highs/criticals com prova |
 | Revisão de acesso | MISSING | — | periodicidade, owner e primeira revisão |
@@ -52,7 +52,7 @@
 | ISO/IEC 27701 | EXTERNAL_REQUIRED | não certificada | projeto PIMS + auditoria independente |
 | SOC 2 | EXTERNAL_REQUIRED | não auditado | avaliar demanda comercial e escopo |
 
-## Gate comercial
+## Controles criptográficos ainda não homologados\n\n- TLS 1.2 mínimo / TLS 1.3 preferencial: **SPECIFIED/PARTIAL**; HTTPS existente não comprova versão negociada em todos os endpoints.\n- AES-256-GCM / envelope encryption: **SPECIFIED**; implementação e testes de adulteração/AAD/rotação ainda necessários.\n- Cloud KMS/KEK e Firestore CMEK: **SPECIFIED**; nenhuma implantação é inferida desta política.\n- Bloqueio high/critical no GitHub: **SPECIFIED** até ruleset verificado.\n- Exceção legada: `GOOGLE_SERVICE_ACCOUNT_JSON` permanece restrita ao provisionamento Google Workspace via GitHub Actions secret; migrar para fluxo keyless compatível com domain-wide delegation antes de declarar readiness comercial de segurança.\n\n## Gate comercial
 
 ### Piloto sem dado clínico identificável
 
