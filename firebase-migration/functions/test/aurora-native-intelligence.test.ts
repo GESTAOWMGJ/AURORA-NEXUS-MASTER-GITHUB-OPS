@@ -40,7 +40,7 @@ test("data quality blocker outranks financial interpretation", () => {
 test("next action returns only the highest-priority actionable finding", () => {
   const result = generateNativeInsight(projection, "NEXT_ACTION") as any;
   assert.equal(result.findings.length, 1);
-  assert.equal(result.findings[0].severity, "HIGH");
+  assert.equal(result.findings[0].severity, "CRITICAL");
 });
 
 test("sanitation intent surfaces loose ends without declaring financial loss", () => {
