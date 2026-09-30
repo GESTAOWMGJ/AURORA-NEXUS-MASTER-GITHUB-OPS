@@ -1,10 +1,11 @@
-export const AURORA_NATIVE_INTELLIGENCE_VERSION = "0.1.0";
+export const AURORA_NATIVE_INTELLIGENCE_VERSION = "0.2.0";
 
 export type NativeInsightIntent =
   | "EXECUTIVE"
   | "REVENUE_RISK"
   | "SLA_RISK"
   | "DATA_QUALITY"
+  | "SANITATION"
   | "NEXT_ACTION";
 
 export type NativeInsightFinding = {
@@ -21,6 +22,7 @@ const INTENTS = new Set<NativeInsightIntent>([
   "REVENUE_RISK",
   "SLA_RISK",
   "DATA_QUALITY",
+  "SANITATION",
   "NEXT_ACTION"
 ]);
 
@@ -65,9 +67,12 @@ function matchesIntent(item: NativeInsightFinding, intent: NativeInsightIntent):
     return ["FINANCIAL_DATA_QUALITY", "REVENUE_GAP", "GLOSS_EXPOSURE", "RECONCILIATION_GAP"].includes(item.code);
   }
   if (intent === "SLA_RISK") {
-    return ["SLA_OVERDUE", "AUDIT_FINDINGS"].includes(item.code);
+    return ["SLA_OVERDUE", "AUDIT_FINDINGS", "REVENUE_LOOSE_ENDS_OVERDUE"].includes(item.code);
   }
-  return ["FINANCIAL_DATA_QUALITY", "EVIDENCE_GAP", "NO_SOURCE"].includes(item.code);
+  if (intent === "SANITATION") {
+    return ["REVENUE_LOOSE_ENDS", "REVENUE_LOOSE_ENDS_OVERDUE", "UNOWNED_LOOSE_ENDS", "SANITATION_EVIDENCE_GAP"].includes(item.code);
+  }
+  return ["FINANCIAL_DATA_QUALITY", "EVIDENCE_GAP", "NO_SOURCE", "SANITATION_EVIDENCE_GAP"].includes(item.code);
 }
 
 export function generateNativeInsight(
@@ -79,6 +84,7 @@ export function generateNativeInsight(
   const financial = record(projection.financialCents);
   const operations = record(projection.operations);
   const coverage = record(projection.coverage);
+  const sanitation = record(projection.revenueSanitation);
 
   const findings: NativeInsightFinding[] = [];
   const sourcePresent = dataQuality.sourcePresent === true;
@@ -89,6 +95,10 @@ export function generateNativeInsight(
   const openFindings = finiteNumber(operations.openFindings) ?? 0;
   const evidencePercent = finiteNumber(coverage.evidencePercent);
   const reconciliationPercent = finiteNumber(coverage.reconciliationPercent);
+  const openLooseEnds = finiteNumber(sanitation.openCount) ?? 0;
+  const overdueLooseEnds = finiteNumber(sanitation.overdueCount) ?? 0;
+  const unownedLooseEnds = finiteNumber(sanitation.unownedCount) ?? 0;
+  const sanitationEvidenceGaps = finiteNumber(sanitation.evidenceGapCount) ?? 0;
 
   if (!sourcePresent) {
     findings.push(finding(
@@ -178,6 +188,50 @@ export function generateNativeInsight(
     ));
   }
 
+  if (openLooseEnds > 0) {
+    findings.push(finding(
+      "REVENUE_LOOSE_ENDS",
+      "HIGH",
+      "Pontas soltas na cadeia de faturamento",
+      `${openLooseEnds} exceção(ões) permanecem abertas entre produção, faturamento, glosa, recebível, conciliação e evidência.`,
+      "Abrir a fila de saneamento, priorizar materialidade + prazo + evidência e encerrar somente com prova verificável e validação humana.",
+      "projection.revenueSanitation.openCount"
+    ));
+  }
+
+  if (overdueLooseEnds > 0) {
+    findings.push(finding(
+      "REVENUE_LOOSE_ENDS_OVERDUE",
+      "CRITICAL",
+      "Pontas soltas vencidas",
+      `${overdueLooseEnds} exceção(ões) da cadeia de receita ultrapassaram o prazo conhecido.`,
+      "Escalonar responsável, preservar a última evidência, registrar nova ação permitida e manter a exceção aberta até resolução comprovada.",
+      "projection.revenueSanitation.overdueCount"
+    ));
+  }
+
+  if (unownedLooseEnds > 0) {
+    findings.push(finding(
+      "UNOWNED_LOOSE_ENDS",
+      "MEDIUM",
+      "Exceções sem responsável definido",
+      `${unownedLooseEnds} ponta(s) solta(s) não possuem responsável nominal na projeção.`,
+      "Atribuir responsável e SLA sem alterar a fonte original; ausência de dono não encerra nem reduz o impacto.",
+      "projection.revenueSanitation.unownedCount"
+    ));
+  }
+
+  if (sanitationEvidenceGaps > 0) {
+    findings.push(finding(
+      "SANITATION_EVIDENCE_GAP",
+      "HIGH",
+      "Saneamento bloqueado por evidência incompleta",
+      `${sanitationEvidenceGaps} exceção(ões) possuem lacuna documental ou exigem fundamentação adicional.`,
+      "Obter a evidência mínima necessária, vincular proveniência e versão e só então promover o estado para encerrado.",
+      "projection.revenueSanitation.evidenceGapCount"
+    ));
+  }
+
   const relevant = findings
     .filter((item) => matchesIntent(item, intent))
     .sort((a, b) => PRIORITY[b.severity] - PRIORITY[a.severity] || a.code.localeCompare(b.code));
@@ -197,7 +251,7 @@ export function generateNativeInsight(
     generatedAt: now.toISOString(),
     headline,
     findings: selected,
-    limitation: "Motor nativo v0: análise determinística da projeção governada. Não é modelo generativo, não substitui revisão clínica/financeira e não acessa provedores externos.",
+    limitation: "Motor nativo determinístico da projeção governada. O saneamento classifica exceções e próximas ações, mas não aceita glosa, baixa recebível, executa cobrança externa, altera fonte ou substitui revisão humana.",
     source: {
       type: "AURORA_PROJECTION",
       schemaVersion: projection.schemaVersion ?? null,
