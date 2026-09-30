@@ -42,3 +42,13 @@ test("RC1.1 restore database is unique per workflow attempt", () => {
   assert.match(workflow, /UNEXPECTED_TEMP_DATABASE_COLLISION/);
   assert.doesNotMatch(workflow, /restoreDatabase=="rc11-restore-/);
 });
+
+
+test("RC1.1 cleanup tolerates Firestore post-restore finalization", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  assert.match(workflow, /in the middle of restore/);
+  assert.match(workflow, /cleanup_ready=false/);
+  assert.match(workflow, /delete_done=false/);
+  assert.match(workflow, /gcloud firestore databases update/);
+  assert.match(workflow, /gcloud firestore databases delete/);
+});
