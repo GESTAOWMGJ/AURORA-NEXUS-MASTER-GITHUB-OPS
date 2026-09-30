@@ -4,7 +4,8 @@ export const HMAC_V2 = "v2";
 export const HMAC_CLOCK_SKEW_SECONDS = 300;
 
 const KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/;
-const NONCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/;\nconst HMAC_SECRET_HEX_PATTERN = /^[a-f0-9]{64}$/i;
+const NONCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/;
+const HMAC_SECRET_HEX_PATTERN = /^[a-f0-9]{64}$/i;
 
 export interface HmacV2Headers {
   signatureVersion: string;
@@ -180,7 +181,13 @@ export function verifyHmacV2(
   };
 }
 
-function decodeHmacSecret(secret: string): Buffer | null {\n  if (!HMAC_SECRET_HEX_PATTERN.test(secret)) return null;\n  const key = Buffer.from(secret, "hex");\n  return key.length === 32 ? key : null;\n}\n\nfunction normalizeContentType(value: string | undefined): string {
+function decodeHmacSecret(secret: string): Buffer | null {
+  if (!HMAC_SECRET_HEX_PATTERN.test(secret)) return null;
+  const key = Buffer.from(secret, "hex");
+  return key.length === 32 ? key : null;
+}
+
+function normalizeContentType(value: string | undefined): string {
   return String(value || "application/json").split(";", 1)[0]?.trim().toLowerCase() || "";
 }
 
