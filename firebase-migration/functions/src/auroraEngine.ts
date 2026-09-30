@@ -1,4 +1,5 @@
 import { validEvidenceRef } from "./auroraEvidence.js";
+import { buildRevenueSanitation } from "./auroraRevenueSanitation.js";
 
 export const AURORA_MODULES = [
   ["M01", "Ingestão e Proveniência Documental"],
@@ -157,6 +158,13 @@ function sourceStates(source: ProjectionSource): Array<Record<string, unknown>> 
 
 export function buildProjection(source: ProjectionSource, now = new Date(), context: ProjectionContext = {}): Record<string, unknown> {
   const operationalSource = withoutTestRecords(source);
+  const revenueSanitation = buildRevenueSanitation(source, now, context) as {
+    openCount: number;
+    overdueCount: number;
+    unownedCount: number;
+    evidenceGapCount: number;
+    bySeverity: Record<string, number>;
+  } & Record<string, unknown>;
   const invoiced = sumCents(operationalSource.invoices, ["totalCents", "amountCents", "grossAmountCents", "valorCentavos"], { competence: context.competence });
   const received = sumCents(operationalSource.bankTransactions, ["liquidatedAmountCents", "amountCents", "valorCentavos"], {
     competence: context.competence,
@@ -185,10 +193,11 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
   const ratio = (part: number, total: number): number | null => total === 0 ? null : Math.round((part / total) * 1000) / 10;
   const outstanding = invoiced.value === null || received.value === null ? null : invoiced.value - received.value;
   const completeness = totalRecords === 0 ? "EMPTY" : invalidFinancialRecords > 0 ? "INVALID" : "PARTIAL";
-  const severity = invalidFinancialRecords > 0 ? "BLOCKED" : (criticalFindings > 0 || overdueActions > 0 ? "ATTENTION" : totalRecords > 0 ? "NOMINAL" : "UNKNOWN");
+  const severity = invalidFinancialRecords > 0 ? "BLOCKED" : ((criticalFindings > 0 || overdueActions > 0 || (revenueSanitation.bySeverity.CRITICAL ?? 0) > 0 || (revenueSanitation.bySeverity.HIGH ?? 0) > 0) ? "ATTENTION" : totalRecords > 0 ? "NOMINAL" : "UNKNOWN");
   const alerts: Array<Record<string, unknown>> = [];
   if (invalidFinancialRecords > 0) alerts.push({ alertId: "financial-data-quality", severity: "CRITICAL", title: "Dados financeiros bloqueados", detail: `${invalidFinancialRecords} registro(s) sem centavos canônicos válidos`, evidenceRefs: [], createdAt: now.toISOString() });
   if (overdueActions > 0) alerts.push({ alertId: "overdue-actions", severity: "HIGH", title: "SLA vencido", detail: `${overdueActions} ação(ões) aguardam tratamento`, evidenceRefs: [], createdAt: now.toISOString() });
+  if (revenueSanitation.overdueCount > 0) alerts.push({ alertId: "revenue-loose-ends-overdue", severity: "HIGH", title: "Pontas soltas vencidas na cadeia de receita", detail: `${revenueSanitation.overdueCount} exceção(ões) de receita ultrapassaram o prazo conhecido`, evidenceRefs: [], createdAt: now.toISOString() });
 
   return {
     schemaVersion: 2,
@@ -196,7 +205,7 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
     competence: context.competence ?? now.toISOString().slice(0, 7),
     generatedAt: now.toISOString(),
     asOf: now.toISOString(),
-    policyVersion: "aurora-nexus-2.3.0-firebase-shadow-v2",
+    policyVersion: "aurora-nexus-2.4.0-revenue-sanitation-v1",
     completeness,
     severity,
     pipeline: pipelineMetrics(operationalSource),
@@ -214,12 +223,21 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
     sensitivity: "INTERNAL",
     state: dataState,
     financialCents: { invoicedCents: invoiced.value, receivedCents: received.value, glossCents: gloss.value, outstandingCents: outstanding },
-    operations: { openActions, overdueActions, openFindings },
+    operations: {
+      openActions,
+      overdueActions,
+      openFindings,
+      openLooseEnds: revenueSanitation.openCount,
+      overdueLooseEnds: revenueSanitation.overdueCount,
+      unownedLooseEnds: revenueSanitation.unownedCount,
+      looseEndsWithEvidenceGap: revenueSanitation.evidenceGapCount
+    },
     coverage: {
       evidencePercent: ratio(validatedSources, operationalSource.sourceDocuments.length),
       reconciliationPercent: ratio(reconciled, operationalSource.reconciliations.length)
     },
     sampleSizes,
+    revenueSanitation,
     dataQuality: {
       complete: invalidFinancialRecords === 0,
       sourcePresent: totalRecords > 0,
