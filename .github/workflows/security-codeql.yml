@@ -5,8 +5,7 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
-
+  workflow_dispatch:\n  schedule:\n    - cron: "23 4 * * 1"\n
 permissions:
   contents: read
 
@@ -16,9 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       security-events: write
-      packages: read
       contents: read
-      actions: read
     strategy:
       fail-fast: false
       matrix:
