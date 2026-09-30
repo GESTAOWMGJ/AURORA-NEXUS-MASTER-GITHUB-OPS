@@ -73,7 +73,7 @@ test("glosa aceita só sai da fila com prova verificável, revisão humana e cri
       reviewedAt: "2026-09-30T17:00:00Z",
       glossReason: "não elegível",
       contractualBasis: "clausula-7",
-      financialImpactReconciled: true
+      reconciliationId: "R-G-1"
     }]
   }), now, context) as any;
   assert.equal(referenciaSemDocumento.openCount, 1);
@@ -84,7 +84,7 @@ test("glosa aceita só sai da fila com prova verificável, revisão humana e cri
       evidenceRefs: ["doc-glosa-g1"],
       glossReason: "não elegível",
       contractualBasis: "clausula-7",
-      financialImpactReconciled: true
+      reconciliationId: "R-G-1"
     }],
     sourceDocuments: [{ id: "doc-glosa-g1", workflowState: "VALIDATED" }]
   }), now, context) as any;
@@ -97,11 +97,26 @@ test("glosa aceita só sai da fila com prova verificável, revisão humana e cri
       reviewState: "APPROVED",
       reviewerUid: "reviewer-1",
       reviewedAt: "2026-09-30T17:00:00Z",
-      financialImpactReconciled: true
+      reconciliationId: "R-G-1"
     }],
     sourceDocuments: [{ id: "doc-glosa-g1", workflowState: "VALIDATED" }]
   }), now, context) as any;
   assert.equal(criteriosIncompletos.openCount, 1);
+
+  const afirmacaoSemConciliacao = buildRevenueSanitation(source({
+    glosses: [{
+      ...baseGloss,
+      evidenceRefs: ["doc-glosa-g1"],
+      reviewState: "APPROVED",
+      reviewerUid: "reviewer-1",
+      reviewedAt: "2026-09-30T17:00:00Z",
+      glossReason: "não elegível",
+      contractualBasis: "clausula-7",
+      financialImpactReconciled: true
+    }],
+    sourceDocuments: [{ id: "doc-glosa-g1", workflowState: "VALIDATED" }]
+  }), now, context) as any;
+  assert.equal(afirmacaoSemConciliacao.openCount, 1);
 
   const fechamentoCompleto = buildRevenueSanitation(source({
     glosses: [{
@@ -112,7 +127,16 @@ test("glosa aceita só sai da fila com prova verificável, revisão humana e cri
       reviewedAt: "2026-09-30T17:00:00Z",
       glossReason: "não elegível",
       contractualBasis: "clausula-7",
-      financialImpactReconciled: true
+      reconciliationId: "R-G-1"
+    }],
+    reconciliations: [{
+      id: "R-G-1",
+      competence: "2026-07",
+      status: "CLOSED",
+      evidenceRefs: ["doc-glosa-g1"],
+      reviewState: "APPROVED",
+      reviewerUid: "reviewer-1",
+      reviewedAt: "2026-09-30T17:00:00Z"
     }],
     sourceDocuments: [{ id: "doc-glosa-g1", workflowState: "VALIDATED" }]
   }), now, context) as any;
