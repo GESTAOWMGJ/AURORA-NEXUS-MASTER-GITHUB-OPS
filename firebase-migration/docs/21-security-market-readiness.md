@@ -187,4 +187,4 @@ AURORA-SEC-001 usa os estados:
 
 SPECIFIED → IMPLEMENTED → TESTED → CI_VERIFIED → HML_VERIFIED → PRODUCTION_VERIFIED → AUDITED_INDEPENDENTLY → CERTIFIED
 
-A existência deste documento coloca o baseline apenas em SPECIFIED. O workflow de validação pode elevar a política para CI_VERIFIED; CMEK, criptografia de campo, pentest, LGPD operacional e produção exigem evidência separada.
+A existência deste documento coloca o baseline apenas em SPECIFIED. O workflow de validação pode tornar o **documento de política** CI_VERIFIED, mas não eleva automaticamente seus controles técnicos. TLS mínimo negociado, AES-256-GCM/envelope encryption, KMS/CMEK, secret scanning, bloqueio high/critical, pentest, LGPD operacional e produção exigem evidência separada.\n\nExceção legada conhecida: o provisionamento de Google Workspace ainda consome `GOOGLE_SERVICE_ACCOUNT_JSON` via GitHub Actions secret para domain-wide delegation. A exceção é transitória e deve migrar para mecanismo keyless/WIF + assinatura compatível antes de readiness comercial de segurança.
