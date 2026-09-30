@@ -69,7 +69,9 @@ export function canonicalHmacV2Payload(rawBody: Buffer, headers: HmacV2Headers):
 }
 
 export function signHmacV2(rawBody: Buffer, headers: HmacV2Headers, secret: string): string {
-  return createHmac("sha256", secret)
+  const key = decodeHmacSecret(secret);
+  if (!key) throw new Error("HMAC_SECRET_INVALID");
+  return createHmac("sha256", key)
     .update(canonicalHmacV2Payload(rawBody, headers))
     .digest("hex");
 }
@@ -98,7 +100,7 @@ export function parseHmacKeyring(raw: string): Record<string, HmacKeyEntry> {
     if (
       typeof value.active !== "boolean" ||
       typeof secret !== "string" ||
-      secret.length < 32 ||
+      !decodeHmacSecret(secret) ||
       !isNonEmptyStringArray(orgIds) ||
       !isNonEmptyStringArray(entityTypes)
     ) {
