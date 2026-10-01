@@ -5,6 +5,7 @@ import tempfile
 import unittest
 
 import connector_setup as c
+import one_click_deploy
 
 
 class ConnectorSetupTest(unittest.TestCase):
@@ -60,6 +61,29 @@ class ConnectorSetupTest(unittest.TestCase):
                 firestore_hmac_secret="ab" * 32,
                 external_system_name="tasy",
             )
+
+    def test_one_click_executes_real_installer_and_uses_stable_commands(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            watch = root / "incoming"
+            watch.mkdir()
+            target = root / "aurora"
+            rc = one_click_deploy.main([
+                "--one-click",
+                "--target", str(target),
+                "--watch-dir", str(watch),
+                "--endpoint", "https://api.auroranexus.com.br/coletor",
+                "--org", "wmgj",
+                "--facility", "WMGJ",
+                "--without-connectors",
+            ])
+            self.assertEqual(rc, 0)
+            self.assertTrue((target / "run.sh").is_file())
+            commands = json.loads((target / "support" / "triggercmd-commands.json").read_text())
+            command_text = json.dumps(commands)
+            self.assertIn(str(target / "run.sh"), command_text)
+            self.assertNotIn("one_click_deploy.py --one-click", command_text)
+            self.assertFalse((target / "connectors").exists())
 
 
 if __name__ == "__main__":
