@@ -40,6 +40,39 @@ class ConnectorSetupTest(unittest.TestCase):
         self.assertEqual(manifest["googleDrive"]["continuousExtraction"], True)
         self.assertEqual(secrets_map["AURORA_FIRESTORE_HMAC_SECRET"], "ab" * 32)
 
+    def test_document_sources_are_multi_erp_and_firebase_native(self):
+        sources = c.normalize_document_sources(
+            "1Gz0GtUfvKezI8OmAH0h8fkNLlqEzfYU-",
+            [
+                {"sourceId": "mv-faturamento", "system": "MV", "folderId": "1Gz0GtUfvKezI8OmAH0h8fkNLlqEzfYU-", "slaMinutes": 60},
+                {"sourceId": "tasy-contas", "system": "TASY", "folderId": "1AttD216I2uYk44twuAYHwkDBa8tGAEIo", "slaMinutes": 120},
+                {"sourceId": "erp-outros", "system": "ERP", "folderId": "1Q7uhuOorLFO2GjFyU_cPeS3qSMBMTHNQ", "slaMinutes": 1440},
+            ],
+        )
+        self.assertEqual([item["system"] for item in sources], ["MV", "TASY", "ERP"])
+        manifest, _, _ = c.build_install_bundle(
+            org="wmgj",
+            drive_folder_id="1Gz0GtUfvKezI8OmAH0h8fkNLlqEzfYU-",
+            firestore_ingest_url="https://api.auroranexus.com.br/ingest",
+            firestore_hmac_key_id="drive-prod-001",
+            firestore_hmac_secret="ab" * 32,
+            document_sources=sources,
+        )
+        self.assertEqual(len(manifest["documentSources"]), 3)
+        self.assertEqual(manifest["nativeDataPlane"]["storage"], "FIRESTORE")
+        self.assertFalse(manifest["nativeDataPlane"]["sourceAccessRequiredAfterIngest"])
+        self.assertFalse(manifest["nativeDataPlane"]["externalAiFallbackDefault"])
+
+    def test_document_source_rejects_unknown_system_and_invalid_sla(self):
+        with self.assertRaises(c.ConnectorSetupError):
+            c.normalize_document_sources("1Gz0GtUfvKezI8OmAH0h8fkNLlqEzfYU-", [
+                {"sourceId": "bad-source", "system": "UNKNOWN", "folderId": "1Gz0GtUfvKezI8OmAH0h8fkNLlqEzfYU-", "slaMinutes": 60}
+            ])
+        with self.assertRaises(c.ConnectorSetupError):
+            c.normalize_document_sources("1Gz0GtUfvKezI8OmAH0h8fkNLlqEzfYU-", [
+                {"sourceId": "mv-source", "system": "MV", "folderId": "1Gz0GtUfvKezI8OmAH0h8fkNLlqEzfYU-", "slaMinutes": 1}
+            ])
+
     def test_private_env_permissions_and_no_overwrite(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "private" / "secrets.env"
