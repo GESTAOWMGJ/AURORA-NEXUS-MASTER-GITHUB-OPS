@@ -1,0 +1,109 @@
+name: Aurora CMEK HML
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "plan, apply, restore-test or key-failure-test"
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - restore-test
+          - key-failure-test
+        default: plan
+      confirmation:
+        description: "Exact confirmation required for mutating modes"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-cmek-hml
+  cancel-in-progress: false
+
+jobs:
+  cmek:
+    name: CMEK HML guarded operation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: firebase-homologation
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PROJECT_ID: wmgj-hml-jfn-20260927
+      SCRIPT: firebase-migration/scripts/aurora-cmek-hml.sh
+      POLICY: firebase-migration/policy/cmek-hml-baseline-v1.json
+    steps:
+      - name: Checkout exact workflow SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Static safety gates
+        env:
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          bash -n "$SCRIPT"
+          node firebase-migration/scripts/validate-cmek-hml-baseline.mjs
+          ! grep -Eq 'firestore databases delete|kms versions destroy|kms keys delete|projects delete|billing projects unlink' "$SCRIPT"
+          case "$MODE" in
+            plan)
+              test -z "$CONFIRMATION"
+              ;;
+            apply)
+              test "$CONFIRMATION" = "APPLY_AURORA_CMEK_HML"
+              ;;
+            restore-test)
+              test "$CONFIRMATION" = "RESTORE_AURORA_CMEK_HML"
+              ;;
+            key-failure-test)
+              test "$CONFIRMATION" = "TEST_AURORA_CMEK_KEY_FAILURE_HML"
+              ;;
+            *)
+              exit 64
+              ;;
+          esac
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: "548.0.0"
+          project_id: wmgj-hml-jfn-20260927
+
+      - name: Verify HML identity only
+        env:
+          EXPECTED_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')" = "$EXPECTED_ACCOUNT"
+          test "$(gcloud config get-value project 2>/dev/null)" = "wmgj-hml-jfn-20260927"
+
+      - name: Execute selected HML mode
+        env:
+          MODE: ${{ inputs.mode }}
+          AURORA_CMEK_CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/aurora-cmek-hml-evidence"
+          "$SCRIPT" "$MODE" | tee "$RUNNER_TEMP/aurora-cmek-hml-evidence/result.txt"
+          jq -n             --arg mode "$MODE"             --arg sha "$GITHUB_SHA"             --arg runId "$GITHUB_RUN_ID"             --arg project "wmgj-hml-jfn-20260927"             '{control:"AURORA-SEC-002-CMEK-HML", mode:$mode, sha:$sha, runId:$runId, project:$project, productionMutation:false, clinicalSensitiveEnabled:false}'             > "$RUNNER_TEMP/aurora-cmek-hml-evidence/metadata.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurora-cmek-hml-evidence-${{ inputs.mode }}
+          path: ${{ runner.temp }}/aurora-cmek-hml-evidence/
+          if-no-files-found: error
+          retention-days: 90
