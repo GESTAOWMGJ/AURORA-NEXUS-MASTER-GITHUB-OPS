@@ -42,6 +42,29 @@ test("free text and unknown fields are rejected", () => {
   assert.equal(parseIntegrationDocumentPayload({ ...base, diagnosis: "X" }), null);
 });
 
+test("native-ready financial and production records require canonical facts", () => {
+  assert.equal(parseIntegrationDocumentPayload({ ...base, amountCents: null, nativeReady: true }), null);
+  assert.equal(parseIntegrationDocumentPayload({
+    ...base,
+    documentType: "PRODUCTION",
+    amountCents: null,
+    count: null,
+    nativeReady: true
+  }), null);
+  assert.ok(parseIntegrationDocumentPayload({
+    ...base,
+    amountCents: null,
+    nativeReady: false,
+    sourceIndependent: false,
+    documentFragility: "MISSING_CANONICAL_FIELDS",
+    missingFieldsCount: 1
+  }));
+});
+
+test("pure numeric external IDs are rejected to reduce accidental personal identifiers", () => {
+  assert.equal(parseIntegrationDocumentPayload({ ...base, externalDocumentId: "12345678901" }), null);
+});
+
 test("clinical identifiers are not accepted as external document IDs", () => {
   assert.equal(parseIntegrationDocumentPayload({ ...base, externalDocumentId: "patient:123" }), null);
   assert.equal(parseIntegrationDocumentPayload({ ...base, externalDocumentId: "cpf:00000000000" }), null);
