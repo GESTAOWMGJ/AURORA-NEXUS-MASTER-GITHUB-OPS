@@ -59,6 +59,11 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#06191e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Aurora Nexus">
+  <link rel="manifest" href="/manifest.webmanifest">
   <title>Aurora Nexus | Login</title>
   <style>
     :root { color-scheme: dark; --bg:#071f25; --panel:#0d2d34; --line:#1d4a53; --gold:#c6a45d; --text:#f7f1e7; --muted:#b9c7c6; }
