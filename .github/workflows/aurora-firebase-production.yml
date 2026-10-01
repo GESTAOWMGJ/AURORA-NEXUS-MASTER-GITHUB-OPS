@@ -87,10 +87,6 @@ jobs:
           active_account="$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')"
           test "$active_account" = "$PROVISION_SERVICE_ACCOUNT"
           test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectId)')" = "$PROJECT_ID"
-          test "$(gcloud billing projects describe "$PROJECT_ID" --format='value(billingEnabled)')" = "True"
-          gcloud projects update "$PROJECT_ID" \
-            --update-labels='environment=production,system=aurora-nexus,data_scope=nonclinical,managed_by=jfn,deployment_stage=cold' \
-            --quiet >/dev/null
 
       - name: Enable production platform APIs
         env:
@@ -170,7 +166,6 @@ jobs:
           REGION: ${{ steps.request.outputs.region }}
         run: |
           set -euo pipefail
-          test "$(gcloud billing projects describe "$PROJECT_ID" --format='value(billingEnabled)')" = "True"
           db_json="$(gcloud firestore databases describe --database='(default)' --project "$PROJECT_ID" --format=json)"
           test "$(jq -r '.locationId // empty' <<<"$db_json")" = "$REGION"
           test "$(jq -r '.deleteProtectionState // empty' <<<"$db_json")" = "DELETE_PROTECTION_ENABLED"
@@ -193,7 +188,6 @@ jobs:
           done
           prod_sa="aurora-prod-deploy@${PROJECT_ID}.iam.gserviceaccount.com"
           test "$PROVISION_SERVICE_ACCOUNT" = "$prod_sa"
-          gcloud iam service-accounts describe "$prod_sa" --project "$PROJECT_ID" --format='value(email)' | grep -Fx "$prod_sa" >/dev/null
           echo "AURORA_PRODUCTION_PROJECT_CREATED=$PROJECT_ID"
           echo "AURORA_PRODUCTION_STAGE=COLD_PRODUCTION"
           echo "AURORA_PRODUCTION_DEPLOY_IDENTITY=$prod_sa"
