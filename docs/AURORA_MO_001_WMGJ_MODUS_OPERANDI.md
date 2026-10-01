@@ -6,7 +6,7 @@
 - Escopo: operação, automação, auditoria, receita, governança e evolução do AURORA NEXUS.
 - Tenant de referência: `WMGJ Operação`.
 - Sistema-mãe: `AURORA NEXUS / JFN-AUD-GOV-001`.
-- Regra: WMGJ é piloto e fonte de aprendizado operacional; não é dependência estrutural do produto.
+- Regra: WMGJ é tenant-piloto e fonte de aprendizado operacional; não é dependência estrutural do produto.
 
 Este documento é a fonte canônica do modus operandi operacional aprendido com a WMGJ.
 Mudanças futuras devem preservar esta linhagem ou registrar explicitamente a razão, evidência, teste e rollback da alteração.
