@@ -10,47 +10,103 @@
       {
         "source": "**",
         "headers": [
-          { "key": "Cache-Control", "value": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0" },
-          { "key": "Pragma", "value": "no-cache" },
-          { "key": "X-Content-Type-Options", "value": "nosniff" },
-          { "key": "X-Frame-Options", "value": "DENY" },
-          { "key": "Referrer-Policy", "value": "no-referrer" },
-          { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), payment=()" }
+          {
+            "key": "Cache-Control",
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+          },
+          {
+            "key": "Pragma",
+            "value": "no-cache"
+          },
+          {
+            "key": "X-Content-Type-Options",
+            "value": "nosniff"
+          },
+          {
+            "key": "X-Frame-Options",
+            "value": "DENY"
+          },
+          {
+            "key": "Referrer-Policy",
+            "value": "no-referrer"
+          },
+          {
+            "key": "Permissions-Policy",
+            "value": "camera=(), microphone=(), geolocation=(), payment=()"
+          }
         ]
       }
     ],
     "rewrites": [
       {
         "source": "/__sessionLogin",
-        "function": { "functionId": "auroraNexusSessionLogin", "region": "southamerica-east1" }
+        "function": {
+          "functionId": "auroraNexusSessionLogin",
+          "region": "southamerica-east1"
+        }
       },
       {
         "source": "/__sessionLogout",
-        "function": { "functionId": "auroraNexusSessionLogout", "region": "southamerica-east1" }
+        "function": {
+          "functionId": "auroraNexusSessionLogout",
+          "region": "southamerica-east1"
+        }
       },
       {
         "source": "/api/bootstrap",
-        "function": { "functionId": "auroraNexusBootstrap", "region": "southamerica-east1" }
+        "function": {
+          "functionId": "auroraNexusBootstrap",
+          "region": "southamerica-east1"
+        }
       },
       {
         "source": "/api/actions",
-        "function": { "functionId": "auroraNexusAction", "region": "southamerica-east1" }
+        "function": {
+          "functionId": "auroraNexusAction",
+          "region": "southamerica-east1"
+        }
       },
       {
         "source": "/api/refresh",
-        "function": { "functionId": "auroraNexusRefresh", "region": "southamerica-east1" }
+        "function": {
+          "functionId": "auroraNexusRefresh",
+          "region": "southamerica-east1"
+        }
       },
       {
         "source": "/api/native-insight",
-        "function": { "functionId": "auroraNexusNativeInsight", "region": "southamerica-east1" }
+        "function": {
+          "functionId": "auroraNexusNativeInsight",
+          "region": "southamerica-east1"
+        }
       },
       {
         "source": "/organic",
-        "function": { "functionId": "auroraNexusOrganic", "region": "southamerica-east1" }
+        "function": {
+          "functionId": "auroraNexusOrganic",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/integration-keys",
+        "function": {
+          "functionId": "auroraNexusIntegrationKeys",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/integration/ping",
+        "function": {
+          "functionId": "auroraNexusIntegrationPing",
+          "region": "southamerica-east1"
+        }
       },
       {
         "source": "**",
-        "function": { "functionId": "auroraNexusAuthGate", "region": "southamerica-east1" }
+        "function": {
+          "functionId": "auroraNexusAuthGate",
+          "region": "southamerica-east1"
+        }
       }
     ]
   },
@@ -68,11 +124,22 @@
     ]
   },
   "emulators": {
-    "auth": { "port": 9099 },
-    "functions": { "port": 5001 },
-    "firestore": { "port": 8080 },
-    "hosting": { "port": 5000 },
-    "ui": { "enabled": true, "port": 4000 },
+    "auth": {
+      "port": 9099
+    },
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "hosting": {
+      "port": 5000
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4000
+    },
     "singleProjectMode": true
   }
 }
