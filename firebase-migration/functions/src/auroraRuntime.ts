@@ -196,7 +196,14 @@ export const auroraNexusBootstrap = onRequest(
         .sort((a, b) => Date.parse(String(b.updatedAt ?? b.createdAt ?? 0)) - Date.parse(String(a.updatedAt ?? a.createdAt ?? 0)))
       : [];
     const nowMs = Date.now();
-    const actionSummary = safeActions.reduce((summary, item) => {
+    const actionSummary = safeActions.reduce<{
+      total: number;
+      open: number;
+      inProgress: number;
+      resolved: number;
+      cancelled: number;
+      overdue: number;
+    }>((summary, item) => {
       const status = String(item.status ?? "");
       if (status === "OPEN") summary.open += 1;
       else if (status === "ACKNOWLEDGED") summary.inProgress += 1;
