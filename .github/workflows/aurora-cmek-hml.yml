@@ -17,6 +17,11 @@ on:
         description: "Exact confirmation required for mutating modes"
         required: false
         type: string
+      cmek_access_confirmed:
+        description: "Confirm Firestore CMEK feature access was approved for this HML project"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -60,12 +65,15 @@ jobs:
               test -z "$CONFIRMATION"
               ;;
             apply)
+              test "${{ inputs.cmek_access_confirmed }}" = "true"
               test "$CONFIRMATION" = "APPLY_AURORA_CMEK_HML"
               ;;
             restore-test)
+              test "${{ inputs.cmek_access_confirmed }}" = "true"
               test "$CONFIRMATION" = "RESTORE_AURORA_CMEK_HML"
               ;;
             key-failure-test)
+              test "${{ inputs.cmek_access_confirmed }}" = "true"
               test "$CONFIRMATION" = "TEST_AURORA_CMEK_KEY_FAILURE_HML"
               ;;
             *)
@@ -95,6 +103,7 @@ jobs:
         env:
           MODE: ${{ inputs.mode }}
           AURORA_CMEK_CONFIRMATION: ${{ inputs.confirmation }}
+          AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED: ${{ inputs.cmek_access_confirmed && 'YES' || 'NO' }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/aurora-cmek-hml-evidence"
