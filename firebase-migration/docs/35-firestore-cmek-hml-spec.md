@@ -33,6 +33,7 @@ A chave CMEK de Firestore é distinta da KEK `aurora-field-encryption` usada pel
 
 ## 3. Premissas técnicas
 
+- O acesso ao recurso Firestore CMEK deve ser solicitado e confirmado para o projeto antes de qualquer `apply`. O workflow exige `cmek_access_confirmed=true` e o script exige `AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED=YES`.
 - Firestore existente com Google default encryption não é convertido in-place para CMEK.
 - A CMEK só é selecionada na criação do novo banco.
 - A chave Cloud KMS deve estar na mesma localização do banco regional.
