@@ -23,7 +23,7 @@ permissions:
 
 concurrency:
   group: aurora-firebase-homologation
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   validate:
@@ -339,7 +339,7 @@ jobs:
           test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
           git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
-          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,hosting,firestore:rules,firestore:indexes --non-interactive
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,hosting,firestore:rules,firestore:indexes --non-interactive
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -359,7 +359,9 @@ jobs:
             "auroraNexusProjectionEngine",
             "auroraNexusOrganic",
             "auroraNexusIntegrationKeys",
-            "auroraNexusIntegrationPing"
+            "auroraNexusIntegrationPing",
+            "auroraNexusIntegrationDocuments",
+            "auroraNexusDocumentWatchdog"
           ]' '
             (.result // .functions // []) as $functions |
             [$functions[] | (.id // .name // "") | split("/")[-1]] | sort == ($expected | sort)
@@ -498,19 +500,36 @@ jobs:
             .release.productVersion == "1.0.0-rc.1" and
             (.release.engineeringReadinessPercent | type) == "number"
           ' "$bootstrap_response" >/dev/null
-          curl --fail --silent --show-error --max-time 30 \
+          native_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --cookie "$cookie_jar" \
             --output "$native_response" \
-            "${base_url}/api/native-insight?intent=EXECUTIVE"
-          jq -e '
-            .ok == true and
-            .environment == "HOMOLOGATION" and
-            .mode == "SHADOW" and
-            .insight.engine == "AURORA_NATIVE_INTELLIGENCE" and
-            .insight.mode == "NATIVE_DETERMINISTIC" and
-            .insight.externalProviderUsed == false
-          ' "$native_response" >/dev/null
+            --write-out '%{http_code}' \
+            "${base_url}/api/native-insight?intent=EXECUTIVE")"
+          case "$native_status" in
+            200)
+              jq -e '
+                .ok == true and
+                .environment == "HOMOLOGATION" and
+                .mode == "FIREBASE_NATIVE" and
+                .sourceAccessDuringInference == false and
+                .externalAiUsed == false and
+                .insight.engine == "AURORA_NATIVE_INTELLIGENCE" and
+                .insight.mode == "FIREBASE_NATIVE_DETERMINISTIC" and
+                .insight.externalProviderUsed == false
+              ' "$native_response" >/dev/null
+              ;;
+            409)
+              jq -e '
+                .ok == false and
+                (.code == "FIREBASE_NATIVE_SNAPSHOT_REQUIRED" or .code == "FIREBASE_NATIVE_CONTRACT_REQUIRED")
+              ' "$native_response" >/dev/null
+              ;;
+            *)
+              cat "$native_response" >&2
+              exit 92
+              ;;
+          esac
           curl --fail --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --cookie "$cookie_jar" \
