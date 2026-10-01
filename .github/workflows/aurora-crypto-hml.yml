@@ -1,8 +1,8 @@
 name: Aurora Cryptography HML
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
     paths:
       - ".github/requests/aurora-crypto-hml.json"
   workflow_dispatch:
@@ -17,7 +17,6 @@ concurrency:
 jobs:
   provision:
     name: Provision KMS and deploy crypto HML
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     environment: firebase-homologation
@@ -30,13 +29,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 1
 
       - name: Validate immutable HML request
         env:
           APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
-          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CANDIDATE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
@@ -135,7 +134,7 @@ jobs:
       - name: Publish non-secret crypto configuration to HML tenant
         env:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
-          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CANDIDATE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           token="$(gcloud auth print-access-token)"
@@ -162,7 +161,7 @@ jobs:
       - name: Capture non-secret deployment evidence
         env:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
-          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CANDIDATE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/aurora-crypto-evidence"
