@@ -48,7 +48,7 @@ test('the actual emitted browser script parses; missing regex delimiters fail th
 test('all navigation links target existing sections, not placeholder pages', () => {
   const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
   const targets = [...html.matchAll(/href="#([^"]+)"/g)].map(match => match[1]);
-  assert.equal(targets.length, 8);
+  assert.equal(targets.length, 9);
   targets.forEach(id => assert.ok(ids.has(id), id));
 });
 
@@ -130,6 +130,25 @@ test('timeout aborts the read and reports unconfirmed freshness', async () => {
   assert.equal(f.elements.get('content')!.hidden, true);
   assert.equal(f.elements.get('notice')!.hidden, false);
   assert.equal(f.timeouts.size, 0);
+});
+
+test('manager can create a structured action directly in the app', async () => {
+  const f = await fixture();
+  f.elements.get('review-target-type')!.value = 'managementInput';
+  f.elements.get('review-title')!.value = 'Atualizar faturamento e relatório atual';
+  f.elements.get('review-details')!.value = 'Conferir pendências e registrar evidência no fluxo do app.';
+  f.elements.get('review-reason')!.value = 'MANUAL_REVIEW';
+  f.elements.get('review-risk')!.value = 'HIGH';
+  f.elements.get('review-due')!.value = '2026-10-02';
+  await f.submit('create-review');
+  const write = f.calls.find(call => call.url === '/api/actions' && call.options.method === 'POST');
+  assert.ok(write);
+  const body = JSON.parse(write.options.body);
+  assert.equal(body.targetType, 'managementInput');
+  assert.match(body.targetId, /^mgmt-/);
+  assert.equal(body.title, 'Atualizar faturamento e relatório atual');
+  assert.equal(body.riskLevel, 'HIGH');
+  assert.equal(write.options.headers['X-Aurora-CSRF'], 'synthetic-action');
 });
 
 test('invalid evidence identifiers do not trigger a write; valid identifiers do', async () => {
