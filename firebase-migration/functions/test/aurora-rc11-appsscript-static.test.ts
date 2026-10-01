@@ -52,3 +52,13 @@ test("RC1.1 cleanup tolerates Firestore post-restore finalization", () => {
   assert.match(workflow, /gcloud firestore databases update/);
   assert.match(workflow, /gcloud firestore databases delete/);
 });
+
+
+test("RC1.1 rotates HMAC keyring without mutating secret metadata", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  assert.match(workflow, /gcloud secrets describe "\$secret_name"/);
+  assert.match(workflow, /gcloud secrets versions add "\$secret_name"/);
+  assert.doesNotMatch(workflow, /functions:secrets:set WMGJ_INGEST_HMAC_KEYRING/);
+  assert.doesNotMatch(workflow, /gcloud secrets update/);
+  assert.doesNotMatch(workflow, /gcloud secrets create/);
+});
