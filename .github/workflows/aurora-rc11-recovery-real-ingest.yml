@@ -1,15 +1,11 @@
 name: Aurora RC1.1 Recovery and Real WMGJ Ingest
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
       - ".github/requests/aurora-rc11-run.json"
-      - ".github/workflows/aurora-rc11-recovery-real-ingest.yml"
-      - "src/34_AURORA_RC11_FIRESTORE_CONTROL.gs"
-      - "firebase-migration/apps-script/**"
-      - "firebase-migration/functions/**"
-      - "firebase-migration/firebase.json"
 
 permissions:
   contents: read
@@ -212,9 +208,13 @@ jobs:
                   delete_done=true
                   break
                 fi
-                if grep -Eqi "in the middle of restore|FAILED_PRECONDITION" <<<"$delete_out"; then
+                if grep -qi "in the middle of restore" <<<"$delete_out"; then
                   sleep 15
                   continue
+                fi
+                if grep -qi "FAILED_PRECONDITION" <<<"$delete_out"; then
+                  echo "$delete_out" >&2
+                  exit "$delete_rc"
                 fi
                 echo "$delete_out" >&2
                 exit "$delete_rc"

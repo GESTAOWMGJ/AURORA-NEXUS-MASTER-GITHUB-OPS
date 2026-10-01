@@ -51,6 +51,9 @@ test("RC1.1 cleanup tolerates Firestore post-restore finalization", () => {
   assert.match(workflow, /delete_done=false/);
   assert.match(workflow, /gcloud firestore databases update/);
   assert.match(workflow, /gcloud firestore databases delete/);
+  assert.match(workflow, /grep -qi "in the middle of restore" <<<"\$delete_out"/);
+  assert.doesNotMatch(workflow, /in the middle of restore\|FAILED_PRECONDITION/);
+  assert.match(workflow, /grep -qi "FAILED_PRECONDITION" <<<"\$delete_out"[\s\S]*exit "\$delete_rc"/);
 });
 
 
@@ -61,4 +64,13 @@ test("RC1.1 rotates HMAC keyring without mutating secret metadata", () => {
   assert.doesNotMatch(workflow, /functions:secrets:set WMGJ_INGEST_HMAC_KEYRING/);
   assert.doesNotMatch(workflow, /gcloud secrets update/);
   assert.doesNotMatch(workflow, /gcloud secrets create/);
+});
+
+
+test("RC1.1 workflow cannot auto-run from implementation changes", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /paths:\s*\n\s*- "\.github\/requests\/aurora-rc11-run\.json"/);
+  assert.doesNotMatch(workflow, /paths:[\s\S]*aurora-rc11-recovery-real-ingest\.yml/);
+  assert.doesNotMatch(workflow, /paths:[\s\S]*firebase-migration\/functions\/\*\*/);
 });
