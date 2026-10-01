@@ -51,6 +51,9 @@ test("RC1.1 cleanup tolerates Firestore post-restore finalization", () => {
   assert.match(workflow, /delete_done=false/);
   assert.match(workflow, /gcloud firestore databases update/);
   assert.match(workflow, /gcloud firestore databases delete/);
+  assert.match(workflow, /grep -qi "in the middle of restore" <<<"\\$delete_out"/);
+  assert.doesNotMatch(workflow, /in the middle of restore\\|FAILED_PRECONDITION/);
+  assert.match(workflow, /grep -qi "FAILED_PRECONDITION" <<<"\\$delete_out"[\\s\\S]*exit "\\$delete_rc"/);
 });
 
 
