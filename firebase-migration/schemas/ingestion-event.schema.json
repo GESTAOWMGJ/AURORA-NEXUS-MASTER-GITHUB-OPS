@@ -45,7 +45,7 @@
       "additionalProperties": false,
       "required": ["system", "sourceId"],
       "properties": {
-        "system": { "enum": ["GMAIL", "DRIVE", "SHEETS", "APPS_SCRIPT", "MANUAL"] },
+        "system": { "enum": ["GMAIL", "DRIVE", "SHEETS", "APPS_SCRIPT", "MANUAL", "MV", "TASY", "ERP"] },
         "sourceId": { "type": "string", "minLength": 1, "maxLength": 512 },
         "parentId": { "type": "string", "maxLength": 512 },
         "fileName": { "type": "string", "maxLength": 512 },

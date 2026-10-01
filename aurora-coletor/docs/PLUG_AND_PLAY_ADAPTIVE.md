@@ -48,7 +48,7 @@ Exemplo-alvo: recorrência de escala sem evidência de produção pode motivar u
 
 ## Pendências de integração e critérios de aceite
 
-Ainda necessários: seletor de fontes e aceite autenticado no web app; adaptadores autorizados Drive/Gmail; parsers documentais em isolamento; revisão do catálogo e ponte sanitizada para o backend; registro persistente de ferramentas e feedback humano; empacotamento/atualização assinada do app macOS existente; teste nativo macOS e teste ponta a ponta autenticado em homologação. Não distribuir este incremento como `.app`/DMG assinado nem afirmar que está instalado no cliente.
+Ainda necessários para distribuição comercial completa: seletor visual/aceite autenticado das fontes no web app; conectores vendor-specific quando MV/TASY exigirem APIs proprietárias em vez de pasta/exportação ou push canônico; empacotamento/atualização assinada do app macOS existente; teste nativo macOS; teste ponta a ponta autenticado com uma instalação cliente real. O registro `DRIVE_FOLDER`, o endpoint canônico de integração, a ponte Firebase sanitizada e o acompanhamento documental contínuo estão implementados em código, mas não constituem deploy ou instalação comprovados.
 
 A passagem para operação exige também os gates do PR #38/issue #32: ambiente de homologação aprovado, identidade de deploy, segredos, usuários/memberships, proteção do banco, backup/restore e smoke tests. `wmgj-ops` permanece inalterado. Testes unitários e código no repositório não são evidência de deploy, ingestão real, resultado financeiro ou aplicativo instalado.
 
@@ -59,3 +59,41 @@ python -m unittest discover -s aurora-coletor/tests -p 'test_onboarding.py' -v
 ```
 
 A suíte usa apenas dados sintéticos e diretórios temporários. Cobre consentimento, expiração, escopo, isolamento, links, leitura apenas de metadados, limites, versões, cobertura, permissões, bloqueio concorrente, geração de ferramentas, rejeição de operações e integração do instalador. O workflow `Validate Aurora Onboarding` não possui etapa de deploy nem usa segredos.
+
+
+## Atualização 1.2 — plano nativo Firebase e vigilância documental
+
+A instalação atual possui registro de fontes documentais por organização e suporta dois caminhos complementares:
+
+1. `DRIVE_FOLDER`: pasta explicitamente autorizada que recebe documentos/exportações de Drive, MV, TASY ou outro ERP. Cada fonte recebe `sourceId`, `system`, `folderId`, SLA e estado ativo.
+2. `AURORA_INTEGRATION_API`: endpoint `/api/integration/documents` para MV/TASY/ERP que consigam fazer push server-to-server usando chave Aurora com escopo `documents.ingest`.
+
+O segundo caminho aceita somente contrato estruturado fechado. Não aceita narrativa, arquivo bruto, paciente, prontuário, diagnóstico ou campos arbitrários. O identificador externo é imediatamente reduzido a hash técnico para persistência.
+
+Depois da ingestão aceita, a origem deixa de ser dependência da inteligência nativa. O estado operacional é materializado em Firestore com `canonicalSnapshotVersion`, `canonicalSnapshotHash`, `nativeReady`, `sourceIndependent`, origem, SLA, fluxo e fragilidade. A inferência nativa exige `dashboardSnapshots/current` e `sourceAccessDuringInference=false`.
+
+Classificação documental segue native-first. `AURORA_EXTERNAL_AI_FALLBACK_ENABLED` nasce desativado; Gemini/OpenAI ou outro provedor externo só pode ser chamado para documento não resolvido pelo classificador nativo e quando o fallback tiver sido explicitamente habilitado.
+
+O watchdog Firebase cria uma pendência governada e idempotente quando encontra:
+- fragilidade documental;
+- SLA documental vencido;
+- bloqueio/gargalo de workflow.
+
+A ação é direcionada ao `sourceDocument` canônico e não altera o ERP. A resolução material exige evidência e usuário autorizado. Quando uma ação gerada pelo watchdog é resolvida, o sistema tenta registrar automaticamente o caso no AURORA-ORG-001. Evidência `RESTRICTED` só é elegível para esse aprendizado quando for snapshot sanitizado, `nativeReady`, `sourceIndependent`, com hash canônico e sem necessidade de nova busca na origem.
+
+O fluxo é, portanto:
+
+```text
+MV / TASY / ERP / Drive
+→ captura autorizada
+→ Firebase canônico
+→ Native Intelligence
+→ watchdog de fragilidade/SLA/fluxo
+→ resolução validada
+→ observação orgânica
+→ proposta limitada
+→ revisão humana
+→ medição / manutenção / rollback
+```
+
+Nenhum desses componentes autoriza mutação autônoma do MV/TASY, encerramento financeiro, mudança contratual ou decisão clínica.

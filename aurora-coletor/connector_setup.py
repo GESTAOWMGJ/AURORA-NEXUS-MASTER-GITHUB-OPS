@@ -25,6 +25,7 @@ SCHEMA_VERSION = "aurora.connectors.install.v1"
 KEY_PREFIX = "anx"
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$")
 SAFE_ORG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
+DOCUMENT_SOURCE_SYSTEMS = {"DRIVE", "MV", "TASY", "ERP"}
 
 
 class ConnectorSetupError(ValueError):
@@ -76,6 +77,52 @@ def validate_drive_folder_id(value: str) -> str:
         raise ConnectorSetupError("Google Drive folder ID inválido")
     return value
 
+def normalize_document_sources(
+    primary_folder_id: str,
+    sources: list[dict[str, object]] | None = None,
+) -> list[dict[str, object]]:
+    primary = validate_drive_folder_id(primary_folder_id)
+    raw = sources or [{
+        "sourceId": "drive-primary",
+        "system": "DRIVE",
+        "folderId": primary,
+        "slaMinutes": 1440,
+        "active": True,
+    }]
+    if len(raw) > 12:
+        raise ConnectorSetupError("máximo de 12 fontes documentais por instalação")
+    normalized: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw):
+        source_id = str(item.get("sourceId") or f"source-{index + 1}").strip().lower()
+        system = str(item.get("system") or "DRIVE").strip().upper()
+        if system == "GENERIC_ERP":
+            system = "ERP"
+        folder_id = validate_drive_folder_id(str(item.get("folderId") or "").strip())
+        try:
+            sla_minutes = int(item.get("slaMinutes") or 1440)
+        except (TypeError, ValueError):
+            raise ConnectorSetupError("SLA da fonte documental inválido")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{2,63}", source_id):
+            raise ConnectorSetupError("sourceId documental inválido")
+        if source_id in seen:
+            raise ConnectorSetupError("sourceId documental duplicado")
+        if system not in DOCUMENT_SOURCE_SYSTEMS:
+            raise ConnectorSetupError("sistema documental deve ser DRIVE, MV, TASY ou ERP")
+        if sla_minutes < 15 or sla_minutes > 43200:
+            raise ConnectorSetupError("SLA documental deve ficar entre 15 e 43200 minutos")
+        seen.add(source_id)
+        normalized.append({
+            "sourceId": source_id,
+            "system": system,
+            "mode": "DRIVE_FOLDER",
+            "folderId": folder_id,
+            "slaMinutes": sla_minutes,
+            "active": item.get("active") is not False,
+        })
+    return normalized
+
+
 
 def validate_hmac_secret(value: str) -> str:
     value = value.strip()
@@ -87,7 +134,7 @@ def validate_hmac_secret(value: str) -> str:
 def issue_aurora_api_key(
     org: str,
     connector_name: str,
-    scopes: tuple[str, ...] = ("integration.read", "integration.write"),
+    scopes: tuple[str, ...] = ("integration.read", "integration.write", "documents.ingest"),
     days: int = 90,
 ) -> AuroraIssuedKey:
     validate_org(org)
@@ -158,8 +205,8 @@ def redacted_secret_inventory(secrets_map: dict[str, str]) -> dict[str, dict[str
     return {
         _safe_env_name(key): {
             "configured": bool(value),
-            "sha256": sha256_text(value) if value else None,
             "valueStoredInManifest": False,
+            "fingerprintStored": False,
         }
         for key, value in sorted(secrets_map.items())
     }
@@ -172,6 +219,7 @@ def build_install_bundle(
     firestore_ingest_url: str,
     firestore_hmac_key_id: str,
     firestore_hmac_secret: str,
+    document_sources: list[dict[str, object]] | None = None,
     external_system_name: str | None = None,
     external_base_url: str | None = None,
     external_api_key: str | None = None,
@@ -180,6 +228,7 @@ def build_install_bundle(
 ) -> tuple[dict[str, object], dict[str, str], AuroraIssuedKey | None]:
     org = validate_org(org)
     folder = validate_drive_folder_id(drive_folder_id)
+    normalized_sources = normalize_document_sources(folder, document_sources)
     ingest = validate_https_url(firestore_ingest_url, field="Firebase ingest URL")
     key_id = validate_identifier(firestore_hmac_key_id, field="HMAC key ID")
     hmac_secret = validate_hmac_secret(firestore_hmac_secret)
@@ -214,6 +263,18 @@ def build_install_bundle(
             "sourceMutation": False,
             "continuousExtraction": True,
             "pollMinutes": 15,
+        },
+        "documentSources": normalized_sources,
+        "documentInputs": {
+            "supportedModes": ["DRIVE_FOLDER", "AURORA_INTEGRATION_API"],
+            "canonicalApiPath": "/api/integration/documents",
+            "requiredApiScope": "documents.ingest",
+        },
+        "nativeDataPlane": {
+            "storage": "FIRESTORE",
+            "sourceAccessRequiredAfterIngest": False,
+            "nativeInferenceRequiresFirebaseSnapshot": True,
+            "externalAiFallbackDefault": False,
         },
         "firebase": {
             "ingestUrl": ingest,
@@ -251,7 +312,31 @@ def interactive_install(
     secret_prompt: Callable[[str], str] = getpass.getpass,
 ) -> dict[str, object]:
     validate_org(org)
-    folder = validate_drive_folder_id(_public_prompt("Google Drive folder ID: ", public_prompt))
+    folder = validate_drive_folder_id(_public_prompt("Google Drive folder ID principal: ", public_prompt))
+    document_sources: list[dict[str, object]] = [{
+        "sourceId": "drive-primary",
+        "system": "DRIVE",
+        "folderId": folder,
+        "slaMinutes": 1440,
+        "active": True,
+    }]
+    while _public_prompt("Adicionar fonte contínua MV/TASY/ERP? [s/N]: ", public_prompt).lower() in {"s", "sim", "y", "yes"}:
+        system = _public_prompt("Sistema [MV/TASY/ERP/DRIVE]: ", public_prompt).upper()
+        source_id = _public_prompt("Identificador técnico da fonte: ", public_prompt).lower()
+        source_folder = validate_drive_folder_id(_public_prompt("Google Drive folder ID desta exportação: ", public_prompt))
+        sla_raw = _public_prompt("SLA documental em minutos [1440]: ", public_prompt) or "1440"
+        try:
+            sla_minutes = int(sla_raw)
+        except ValueError:
+            raise ConnectorSetupError("SLA documental inválido")
+        document_sources.append({
+            "sourceId": source_id,
+            "system": system,
+            "folderId": source_folder,
+            "slaMinutes": sla_minutes,
+            "active": True,
+        })
+    document_sources = normalize_document_sources(folder, document_sources)
     ingest_url = validate_https_url(_public_prompt("Firebase/Aurora ingest URL (HTTPS): ", public_prompt), field="Firebase ingest URL")
     hmac_key_id = validate_identifier(_public_prompt("Aurora HMAC key ID: ", public_prompt), field="HMAC key ID")
     hmac_secret = validate_hmac_secret(_secret_prompt("Aurora HMAC secret (64 hex; oculto): ", secret_prompt))
@@ -270,6 +355,7 @@ def interactive_install(
         firestore_ingest_url=ingest_url,
         firestore_hmac_key_id=hmac_key_id,
         firestore_hmac_secret=hmac_secret,
+        document_sources=document_sources,
         external_system_name=external_name or None,
         external_base_url=external_url,
         external_api_key=external_key,

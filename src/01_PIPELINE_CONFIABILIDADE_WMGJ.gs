@@ -461,53 +461,81 @@ function enfileirarArquivosEntradaWMGJ_V3(limite) {
   var fila = obterOuCriarAba_(ss, cfg.SHEETS.FILA, cabecalhoFilaWMGJ_V3_());
   obterOuCriarAba_(ss, cfg.SHEETS.MEMORIA, cabecalhoMemoriaWMGJ_V3_());
 
-  var pasta = DriveApp.getFolderById(cfg.PASTA_ENTRADA_ID);
-  var arquivos = pasta.getFiles();
+  var sources = typeof auroraFontesDocumentaisConfiguradas_ === 'function'
+    ? auroraFontesDocumentaisConfiguradas_()
+    : [{ sourceId: 'drive-primary', system: 'DRIVE', mode: 'DRIVE_FOLDER', folderId: cfg.PASTA_ENTRADA_ID, slaMinutes: 1440, active: true }];
   var idsNaFila = carregarIdsFilaWMGJ_(fila);
-
   var lidos = 0;
   var enfileirados = 0;
   var duplicados = 0;
   var max = Number(limite) || 100;
+  var sourceStats = [];
 
-  while (arquivos.hasNext() && lidos < max) {
-    var file = arquivos.next();
-    lidos++;
+  for (var s = 0; s < sources.length && lidos < max; s++) {
+    var source = sources[s] || {};
+    if (source.active === false || source.mode !== 'DRIVE_FOLDER') continue;
+    var folderId = String(source.folderId || '').trim();
+    var system = String(source.system || 'DRIVE').trim().toUpperCase();
+    var sourceId = String(source.sourceId || ('source-' + (s + 1))).trim();
+    var slaMinutes = Number(source.slaMinutes || 1440);
+    if (!folderId) continue;
 
-    var id = file.getId();
-    var nome = file.getName();
-    var mime = file.getMimeType();
-    var hash = gerarHashArquivoWMGJ_(file);
+    var stats = { sourceId: sourceId, system: system, folderId: folderId, lidos: 0, enfileirados: 0, duplicados: 0, accessible: false, error: "" };
+    try {
+      var pasta = DriveApp.getFolderById(folderId);
+      var arquivos = pasta.getFiles();
+      stats.accessible = true;
 
-    if (idsNaFila[id] || documentoJaProcessadoWMGJ_(id, hash)) {
-      duplicados++;
-      continue;
+      while (arquivos.hasNext() && lidos < max) {
+        var file = arquivos.next();
+        lidos++;
+        stats.lidos++;
+
+        var id = file.getId();
+        var nome = file.getName();
+        var mime = file.getMimeType();
+        var hash = gerarHashArquivoWMGJ_(file);
+
+        if (idsNaFila[id] || documentoJaProcessadoWMGJ_(id, hash)) {
+          duplicados++;
+          stats.duplicados++;
+          continue;
+        }
+
+        fila.appendRow([
+          new Date(),
+          system,
+          id,
+          nome,
+          mime,
+          "PENDENTE",
+          0,
+          "PROCESSAR_ARQUIVO_V3",
+          "",
+          "Fonte=" + sourceId + "; SLA_MIN=" + slaMinutes + "; monitoramento contínuo"
+        ]);
+
+        idsNaFila[id] = true;
+        enfileirados++;
+        stats.enfileirados++;
+      }
+    } catch (sourceError) {
+      stats.error = sourceError && sourceError.message ? String(sourceError.message).slice(0, 180) : "SOURCE_UNAVAILABLE";
+      registrarLogWMGJ_("ALERTA", "enfileirarArquivosEntradaWMGJ_V3", system, JSON.stringify({ sourceId: sourceId, folderId: folderId, error: stats.error }));
     }
-
-    fila.appendRow([
-      new Date(),
-      "DRIVE",
-      id,
-      nome,
-      mime,
-      "PENDENTE",
-      0,
-      "PROCESSAR_ARQUIVO_V3",
-      "",
-      "Arquivo enfileirado automaticamente pela V3"
-    ]);
-
-    idsNaFila[id] = true;
-    enfileirados++;
+    sourceStats.push(stats);
   }
 
   return {
     ok: true,
     versao: WMGJ_PIPELINE_VERSAO,
-    pastaEntradaId: cfg.PASTA_ENTRADA_ID,
+    sourceRegistry: true,
+    sourceCount: sources.length,
     lidos: lidos,
     enfileirados: enfileirados,
-    duplicados: duplicados
+    duplicados: duplicados,
+    sources: sourceStats,
+    unavailableSources: sourceStats.filter(function(item) { return item.accessible !== true; }).length
   };
 }
 

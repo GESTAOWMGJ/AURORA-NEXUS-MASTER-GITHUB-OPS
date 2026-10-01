@@ -35,7 +35,7 @@ export type ReviewState = typeof REVIEW_STATES[number];
 export type RiskLevel = typeof RISK_LEVELS[number];
 
 export interface WmgjSource {
-  system: "GMAIL" | "DRIVE" | "SHEETS" | "APPS_SCRIPT" | "MANUAL";
+  system: "GMAIL" | "DRIVE" | "SHEETS" | "APPS_SCRIPT" | "MANUAL" | "MV" | "TASY" | "ERP";
   sourceId: string;
   parentId?: string;
   fileName?: string;

@@ -38,6 +38,30 @@ test('integrated observation composes a stable proposal',async()=>{const f=await
 test('replaying an observation never duplicates a case',async()=>{const f=await prepared();const n=await transition(f.state,{type:'OBSERVE',expectedVersion:f.state.version,kind:'REWORK',category:'AUDIT',sector:'AUDIT',actionId:'action-1'},actor,f.org,f.read,'repeat');assert.equal(n.state.memory!.signals.length,3);assert.equal(n.state.memory!.proposals[0]!.revision,1);});
 test('concurrency conflict is rejected',async()=>{const f=await prepared();await assert.rejects(transition(f.state,{type:'REVALIDATE',expectedVersion:0},actor,f.org,f.read,'conflict'),/REVISION_CONFLICT/);});
 test('missing source never counts as validated',async()=>{const f=fixture();delete f.records['organizations/wmgj/sourceDocuments/doc-1'];await assert.rejects(transition(null,{type:'OBSERVE',expectedVersion:0,kind:'REWORK',category:'AUDIT',sector:'AUDIT',actionId:'action-1'},actor,f.org,f.read,'x'),/VERIFIED_RESOLVED/);});
+test('sanitized source-independent Firebase evidence can feed organic learning without origin reread',async()=>{
+ const f=fixture();
+ for(let i=1;i<=3;i++)Object.assign(f.records[`organizations/wmgj/sourceDocuments/doc-${i}`]!,{
+   reviewState:'NOT_REQUIRED',
+   sensitivity:'RESTRICTED',
+   sanitized:true,
+   nativeReady:true,
+   sourceIndependent:true,
+   externalFetchRequired:false,
+   canonicalSnapshotVersion:1,
+   canonicalSnapshotHash:digest(['canonical',i])
+ });
+ let state:State|null=null;
+ for(let i=1;i<=3;i++)state=(await transition(state,{type:'OBSERVE',expectedVersion:i-1,kind:'REWORK',category:'AUDIT',sector:'AUDIT',actionId:`action-${i}`},actor,f.org,f.read,`native-${i}`)).state;
+ assert.equal(state!.memory!.proposals.length,1);
+ assert.equal(state!.memory!.deferredSignalRefs.length,0);
+});
+
+test('restricted evidence without Firebase-native safeguards is refused',async()=>{
+ const f=fixture();
+ Object.assign(f.records['organizations/wmgj/sourceDocuments/doc-1']!,{reviewState:'NOT_REQUIRED',sensitivity:'RESTRICTED'});
+ await assert.rejects(transition(null,{type:'OBSERVE',expectedVersion:0,kind:'REWORK',category:'AUDIT',sector:'AUDIT',actionId:'action-1'},actor,f.org,f.read,'restricted'),/VERIFIED_RESOLVED/);
+});
+
 test('pending or clinical evidence is refused',async()=>{for(const change of [{reviewState:'PENDING'},{sensitivity:'CLINICAL_SENSITIVE'},{revoked:true},{expiresAt:'2020-01-01T00:00:00Z'}]){const f=fixture();Object.assign(f.records['organizations/wmgj/sourceDocuments/doc-1']!,change);await assert.rejects(transition(null,{type:'OBSERVE',expectedVersion:0,kind:'REWORK',category:'AUDIT',sector:'AUDIT',actionId:'action-1'},actor,f.org,f.read,'x'),/VERIFIED_RESOLVED/);}});
 test('review requires MFA',async()=>{const f=await prepared(),p=f.state.memory!.proposals[0]!;await assert.rejects(transition(f.state,{type:'APPROVE_PILOT',expectedVersion:3,proposalId:p.id,proposalRevision:1},{...actor,mfaVerified:false},f.org,f.read,'x'),/MFA/);});
 test('execution before approval is refused',async()=>{const f=await prepared();await assert.rejects(transition(f.state,commandFor(f.state,'EXECUTE'),actor,f.org,f.read,'x'),/CURRENT_APPROVAL/);});

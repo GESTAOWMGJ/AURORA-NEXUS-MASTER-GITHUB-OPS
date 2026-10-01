@@ -10,7 +10,7 @@
  * Cole este arquivo inteiro em: 04_EXTRACAO_DOCUMENTAL_WMGJ
  */
 
-var WMGJ_EXTRACAO_VERSAO = "v1.1.2-extracao-documental-compat-total";
+var WMGJ_EXTRACAO_VERSAO = "v1.2.0-firebase-native-document-intelligence";
 var WMGJ_EXTRACAO_PASTA_PADRAO_ID = "1Gz0GtUfvKezI8OmAH0h8fkNLlqEzfYU-";
 
 function executarExtracaoRealWMGJ(limite) {
@@ -72,6 +72,7 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
     var linha = dados[i];
     var status = String(linha[idx.STATUS] || "").toUpperCase();
     var idOrigem = String(linha[idx.ID_ORIGEM] || "");
+    var sourceSystem = String(linha[idx.ORIGEM] || "DRIVE").trim().toUpperCase();
 
     if (status !== "PENDENTE" && status !== "ERRO_REPROCESSAR") {
       continue;
@@ -93,14 +94,26 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
       var file = DriveApp.getFileById(idOrigem);
       var hash = gerarHashArquivoWMGJ_Compat_(file);
 
-      if (documentoJaProcessadoWMGJ_Compat_(idOrigem, hash)) {
+      var jaProcessado = documentoJaProcessadoWMGJ_Compat_(idOrigem, hash);
+      var mirrorRequired = firestoreMirrorObrigatorioWMGJ_();
+      var mirrorConfirmed = firestoreMirrorJaConfirmadoWMGJ_(idOrigem, hash);
+      if (jaProcessado && (!mirrorRequired || mirrorConfirmed)) {
         atualizarLinhaFilaWMGJ_Compat_(fila, i + 1, idx, {
           STATUS: "DUPLICADO",
           ULTIMO_ERRO: "",
-          OBSERVACAO: "Arquivo já reconhecido por ID_ORIGEM + HASH"
+          OBSERVACAO: mirrorConfirmed
+            ? "Arquivo já reconhecido por ID_ORIGEM + HASH e Firebase confirmado"
+            : "Arquivo já reconhecido por ID_ORIGEM + HASH"
         });
         duplicados++;
         continue;
+      }
+      if (jaProcessado && mirrorRequired && !mirrorConfirmed) {
+        atualizarLinhaFilaWMGJ_Compat_(fila, i + 1, idx, {
+          STATUS: "EXTRAINDO",
+          ULTIMO_ERRO: "",
+          OBSERVACAO: "Backfill idempotente: memória local existe, Firebase ainda não confirmado"
+        });
       }
 
       var extracao = extrairConteudoArquivoWMGJ_V1_(file);
@@ -113,6 +126,7 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
 
       var classificacao = classificarDocumentoGeminiOuFallbackWMGJ_V1_(extracao, file);
       var validacao = validarDocumentoJsonWMGJ_Compat_(classificacao);
+      if (validacao.ok) validacao.dados.sla_due_at = calcularSlaDocumentoFilaWMGJ_(linha, idx);
 
       if (!validacao.ok) {
         atualizarLinhaFilaWMGJ_Compat_(fila, i + 1, idx, {
@@ -125,22 +139,26 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
         continue;
       }
 
-      var firestoreMirror = espelharDocumentoProcessadoFirestoreWMGJ_(file, validacao.dados, extracao);
+      var firestoreMirror = espelharDocumentoProcessadoFirestoreWMGJ_(file, validacao.dados, extracao, sourceSystem);
       if (firestoreMirror.required && !firestoreMirror.ok) {
+        registrarFirestoreMirrorWMGJ_(file, hash, firestoreMirror);
         throw new Error("FIRESTORE_MIRROR_REQUIRED:" + firestoreMirror.status);
       }
+      if (firestoreMirror.ok) registrarFirestoreMirrorWMGJ_(file, hash, firestoreMirror);
 
-      registrarDocumentoMemoriaWMGJ_Compat_(memoria, {
-        origem: "DRIVE_EXTRACAO_REAL",
-        idOrigem: idOrigem,
-        nome: file.getName(),
-        mimeType: file.getMimeType(),
-        hash: hash,
-        competencia: validacao.dados.competencia || "",
-        categoria: validacao.dados.categoria || "outro",
-        status: "PROCESSADO",
-        resumo: montarResumoMemoriaExtracaoWMGJ_V1_(validacao.dados, extracao)
-      });
+      if (!jaProcessado) {
+        registrarDocumentoMemoriaWMGJ_Compat_(memoria, {
+          origem: "DRIVE_EXTRACAO_REAL",
+          idOrigem: idOrigem,
+          nome: file.getName(),
+          mimeType: file.getMimeType(),
+          hash: hash,
+          competencia: validacao.dados.competencia || "",
+          categoria: validacao.dados.categoria || "outro",
+          status: "PROCESSADO",
+          resumo: montarResumoMemoriaExtracaoWMGJ_V1_(validacao.dados, extracao)
+        });
+      }
 
       atualizarLinhaFilaWMGJ_Compat_(fila, i + 1, idx, {
         STATUS: "PROCESSADO",
@@ -176,7 +194,55 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
   return resultado;
 }
 
-function espelharDocumentoProcessadoFirestoreWMGJ_(file, dados, extracao) {
+function firestoreMirrorObrigatorioWMGJ_() {
+  return String(PropertiesService.getScriptProperties().getProperty("AURORA_FIRESTORE_MIRROR_REQUIRED") || "false").toLowerCase() === "true";
+}
+
+function garantirAbaFirestoreMirrorWMGJ_() {
+  var ss = getPlanilhaWMGJ_Compat_();
+  return obterOuCriarAbaWMGJ_Compat_(ss, "17_FIRESTORE_MIRROR", [
+    "DATA",
+    "ID_ORIGEM",
+    "HASH",
+    "STATUS",
+    "ENTITY_ID",
+    "EVENT_ID",
+    "REQUIRED"
+  ]);
+}
+
+function registrarFirestoreMirrorWMGJ_(file, hash, mirror) {
+  var aba = garantirAbaFirestoreMirrorWMGJ_();
+  aba.appendRow([
+    new Date(),
+    file.getId(),
+    hash,
+    mirror && mirror.status || "UNKNOWN",
+    mirror && mirror.entityId || "",
+    mirror && mirror.eventId || "",
+    !!(mirror && mirror.required)
+  ]);
+}
+
+function firestoreMirrorJaConfirmadoWMGJ_(idOrigem, hash) {
+  var ss = getPlanilhaWMGJ_Compat_();
+  var aba = ss.getSheetByName("17_FIRESTORE_MIRROR");
+  if (!aba || aba.getLastRow() < 2) return false;
+  var values = aba.getDataRange().getValues();
+  var idx = mapearCabecalhoWMGJ_Compat_(values[0]);
+  for (var i = values.length - 1; i >= 1; i--) {
+    if (
+      String(values[i][idx.ID_ORIGEM] || "") === String(idOrigem || "")
+      && String(values[i][idx.HASH] || "") === String(hash || "")
+    ) {
+      var status = String(values[i][idx.STATUS] || "").toUpperCase();
+      return status === "ACCEPTED" || status === "DUPLICATE_CONFIRMED";
+    }
+  }
+  return false;
+}
+
+function espelharDocumentoProcessadoFirestoreWMGJ_(file, dados, extracao, sourceSystem) {
   var props = PropertiesService.getScriptProperties();
   var required = String(props.getProperty("AURORA_FIRESTORE_MIRROR_REQUIRED") || "false").toLowerCase() === "true";
 
@@ -189,7 +255,11 @@ function espelharDocumentoProcessadoFirestoreWMGJ_(file, dados, extracao) {
     classification.status = "PROCESSADO";
     classification.metodo_extracao = String(extracao && extracao.metodo || "");
     var event = wmgjFirestoreEventoArquivo_(file, classification, {
-      sourceContext: "drive-continuous-extraction",
+      sourceContext: "continuous-document-ingestion",
+      sourceSystem: sourceSystem || "DRIVE",
+      originConnector: "DRIVE_FOLDER",
+      sourceRegistryVersion: "1",
+      mirrorRequired: required,
       pipelineVersion: WMGJ_EXTRACAO_VERSAO
     });
     var response = wmgjFirestoreEnviarEvento_(event);
@@ -213,6 +283,22 @@ function espelharDocumentoProcessadoFirestoreWMGJ_(file, dados, extracao) {
       status: "ERROR",
       error: error && error.message ? String(error.message).slice(0, 240) : "unknown"
     };
+  }
+}
+
+function calcularSlaDocumentoFilaWMGJ_(linha, idx) {
+  try {
+    var obs = String(linha[idx.OBSERVACAO] || "");
+    var match = obs.match(/SLA_MIN=(\d{2,5})/i);
+    if (!match) return "";
+    var minutes = Number(match[1]);
+    if (!Number.isSafeInteger(minutes) || minutes < 15 || minutes > 43200) return "";
+    var entered = linha[idx.DATA_ENTRADA];
+    var enteredDate = entered instanceof Date ? entered : new Date(entered);
+    if (!Number.isFinite(enteredDate.getTime())) return "";
+    return new Date(enteredDate.getTime() + minutes * 60000).toISOString();
+  } catch (ignore) {
+    return "";
   }
 }
 
@@ -349,11 +435,20 @@ function extrairTextoGoogleSheetsWMGJ_V1_(spreadsheetId) {
 }
 
 function classificarDocumentoGeminiOuFallbackWMGJ_V1_(extracao, file) {
-  if (typeof classificarDocumentoGeminiWMGJ_V1 === "function") {
-    return classificarDocumentoGeminiWMGJ_V1(extracao, file);
+  var local = classificarDocumentoFallbackLocalWMGJ_V1_(extracao.texto || "", file);
+  if (local.categoria !== "outro" && Number(local.confianca || 0) >= 0.6) {
+    return local;
   }
 
-  return classificarDocumentoFallbackLocalWMGJ_V1_(extracao.texto || "", file);
+  var props = PropertiesService.getScriptProperties();
+  var externalEnabled = String(props.getProperty("AURORA_EXTERNAL_AI_FALLBACK_ENABLED") || "false").toLowerCase() === "true";
+  if (externalEnabled && typeof classificarDocumentoGeminiWMGJ_V1 === "function") {
+    try {
+      return classificarDocumentoGeminiWMGJ_V1(extracao, file);
+    } catch (ignoreExternalAi) {}
+  }
+
+  return local;
 }
 
 function classificarDocumentoFallbackLocalWMGJ_V1_(texto, file) {
@@ -361,20 +456,20 @@ function classificarDocumentoFallbackLocalWMGJ_V1_(texto, file) {
   var lower = texto.toLowerCase();
   var categoria = "outro";
 
-  if (lower.indexOf("glosa") >= 0) categoria = "glosa";
-  else if (lower.indexOf("contrato") >= 0) categoria = "contrato";
-  else if (lower.indexOf("atendimento") >= 0 || lower.indexOf("produtividade") >= 0) categoria = "produtividade";
-  else if (lower.indexOf("r$") >= 0 || lower.indexOf("valor") >= 0 || lower.indexOf("pagamento") >= 0 || lower.indexOf("receita") >= 0) categoria = "financeiro";
-  else if (lower.indexOf("relatório") >= 0 || lower.indexOf("relatorio") >= 0) categoria = "relatorio";
+  if (lower.indexOf("glosa") >= 0 || lower.indexOf("recurso de glosa") >= 0) categoria = "glosa";
+  else if (lower.indexOf("contrato") >= 0 || lower.indexOf("aditivo") >= 0) categoria = "contrato";
+  else if (lower.indexOf("atendimento") >= 0 || lower.indexOf("produtividade") >= 0 || lower.indexOf("produção") >= 0 || lower.indexOf("producao") >= 0) categoria = "produtividade";
+  else if (lower.indexOf("faturamento") >= 0 || lower.indexOf("conta hospitalar") >= 0 || lower.indexOf("nota fiscal") >= 0 || lower.indexOf("nfse") >= 0 || lower.indexOf("r$") >= 0 || lower.indexOf("valor") >= 0 || lower.indexOf("pagamento") >= 0 || lower.indexOf("receita") >= 0) categoria = "financeiro";
+  else if (lower.indexOf("relatório") >= 0 || lower.indexOf("relatorio") >= 0 || lower.indexOf("guia") >= 0 || lower.indexOf("autorização") >= 0 || lower.indexOf("autorizacao") >= 0) categoria = "relatorio";
 
   var valor = extrairValorMonetarioWMGJ_V1_(texto);
   var atendimentos = extrairNumeroAtendimentosWMGJ_V1_(texto);
   var competencia = extrairCompetenciaWMGJ_V1_(texto);
-  var confianca = categoria !== "outro" || valor > 0 || atendimentos > 0 ? 0.62 : 0.4;
+  var confianca = categoria !== "outro" ? 0.78 : ((Number(valor) > 0 || Number(atendimentos) > 0) ? 0.68 : 0.4);
 
   return {
     categoria: categoria,
-    tipo_documento: "classificacao_fallback_local",
+    tipo_documento: "classificacao_aurora_nativa",
     data_documento: "",
     competencia: competencia,
     valor_total: valor,
@@ -383,20 +478,20 @@ function classificarDocumentoFallbackLocalWMGJ_V1_(texto, file) {
     cnpj: "",
     medico: "",
     paciente: "",
-    descricao: "Classificação local por fallback. Gemini indisponível ou não carregado.",
+    descricao: "Classificação determinística nativa. Provedor externo não é necessário para categorias reconhecidas.",
     pendencias: [],
     nivel_risco: confianca >= 0.6 ? "baixo" : "medio",
     resumo_operacional: String(texto || "").slice(0, 500),
     destino_drive: "",
     aba_planilha_destino: "",
     confianca: confianca,
-    origem_classificacao: "fallback_local"
+    origem_classificacao: "aurora_native_rules_v2"
   };
 }
 
 function extrairValorMonetarioWMGJ_V1_(texto) {
   var match = String(texto || "").match(/R\$\s*([0-9\.]+,[0-9]{2})/i);
-  if (!match) return 0;
+  if (!match) return null;
   var normalizado = match[1].replace(/\./g, "").replace(",", ".");
   var valor = Number(normalizado);
   return isNaN(valor) ? 0 : valor;
@@ -405,7 +500,7 @@ function extrairValorMonetarioWMGJ_V1_(texto) {
 function extrairNumeroAtendimentosWMGJ_V1_(texto) {
   var t = String(texto || "");
   var match = t.match(/(\d{1,6})\s+atendimentos?/i) || t.match(/atendimentos?\D+(\d{1,6})/i);
-  if (!match) return 0;
+  if (!match) return null;
   var n = Number(match[1]);
   return isNaN(n) ? 0 : n;
 }

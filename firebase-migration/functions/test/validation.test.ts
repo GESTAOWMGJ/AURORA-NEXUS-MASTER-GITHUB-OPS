@@ -31,6 +31,42 @@ test("evento genérico permitido é validado", () => {
   assert.equal(result.event?.entityType, "invoice");
 });
 
+test("fontes MV TASY e ERP entram pelo mesmo contrato sanitizado", () => {
+  for (const system of ["MV", "TASY", "ERP"]) {
+    const result = validateEvent(event({
+      eventType: "DOCUMENT_UPSERT",
+      entityType: "sourceDocument",
+      entityKey: `${system}:doc-1`,
+      source: { system, sourceId: "doc-1", contentHash: "a".repeat(64), hashMethod: "content_sha256" },
+      record: {
+        category: "financeiro",
+        confidence: 0.8,
+        canonicalSnapshotVersion: 1,
+        canonicalSnapshotHash: "b".repeat(64),
+        extractionComplete: true,
+        nativeReady: true,
+        sourceIndependent: true,
+        externalFetchRequired: false,
+        externalAiUsed: false,
+        originSystem: system,
+        originConnector: "DRIVE_FOLDER",
+        documentFragility: "NONE",
+        missingFieldsCount: 0,
+        flowStage: "FIREBASE_CANONICALIZED"
+      },
+      metadata: {
+        nativeDataPlane: "FIRESTORE",
+        sourceAccessRequiredAfterIngest: false,
+        externalAiUsed: false,
+        originConnector: "DRIVE_FOLDER",
+        sourceRegistryVersion: "1"
+      }
+    }), 2000);
+    assert.equal(result.ok, true, result.errors.join("; "));
+  }
+  assert.equal(validateEvent(event({ source: { system: "UNKNOWN", sourceId: "x" } }), 500).ok, false);
+});
+
 test("entityType desconhecido falha antes de chegar ao Firestore", () => {
   const result = validateEvent(event({ entityType: "arbitraryCollection" }), 500);
   assert.equal(result.ok, false);

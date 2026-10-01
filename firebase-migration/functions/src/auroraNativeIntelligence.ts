@@ -1,4 +1,4 @@
-export const AURORA_NATIVE_INTELLIGENCE_VERSION = "0.1.0";
+export const AURORA_NATIVE_INTELLIGENCE_VERSION = "0.2.0-firebase-native";
 
 export type NativeInsightIntent =
   | "EXECUTIVE"
@@ -65,9 +65,9 @@ function matchesIntent(item: NativeInsightFinding, intent: NativeInsightIntent):
     return ["FINANCIAL_DATA_QUALITY", "REVENUE_GAP", "GLOSS_EXPOSURE", "RECONCILIATION_GAP"].includes(item.code);
   }
   if (intent === "SLA_RISK") {
-    return ["SLA_OVERDUE", "AUDIT_FINDINGS"].includes(item.code);
+    return ["SLA_OVERDUE", "DOCUMENT_SLA_OVERDUE", "FLOW_BOTTLENECK", "AUDIT_FINDINGS"].includes(item.code);
   }
-  return ["FINANCIAL_DATA_QUALITY", "EVIDENCE_GAP", "NO_SOURCE"].includes(item.code);
+  return ["FINANCIAL_DATA_QUALITY", "EVIDENCE_GAP", "NO_SOURCE", "FIREBASE_NATIVE_GAP", "DOCUMENT_FRAGILITY", "EXTERNAL_AI_PATH"].includes(item.code);
 }
 
 export function generateNativeInsight(
@@ -79,6 +79,8 @@ export function generateNativeInsight(
   const financial = record(projection.financialCents);
   const operations = record(projection.operations);
   const coverage = record(projection.coverage);
+  const documentIntelligence = record(projection.documentIntelligence);
+  const nativeDataPlane = record(projection.nativeDataPlane);
 
   const findings: NativeInsightFinding[] = [];
   const sourcePresent = dataQuality.sourcePresent === true;
@@ -89,6 +91,31 @@ export function generateNativeInsight(
   const openFindings = finiteNumber(operations.openFindings) ?? 0;
   const evidencePercent = finiteNumber(coverage.evidencePercent);
   const reconciliationPercent = finiteNumber(coverage.reconciliationPercent);
+  const fragileDocuments = finiteNumber(documentIntelligence.fragileDocuments) ?? 0;
+  const sourceDependentDocuments = finiteNumber(documentIntelligence.sourceDependentDocuments) ?? 0;
+  const overdueDocumentSla = finiteNumber(documentIntelligence.overdueDocumentSla) ?? 0;
+  const pendingDocumentFlow = finiteNumber(documentIntelligence.pendingDocumentFlow) ?? 0;
+  const externalAiDocuments = finiteNumber(documentIntelligence.externalAiDocuments) ?? 0;
+
+  if (nativeDataPlane.storage !== "FIRESTORE" || nativeDataPlane.sourceAccessDuringInference !== false) {
+    findings.push(finding(
+      "FIREBASE_NATIVE_GAP",
+      "CRITICAL",
+      "Plano nativo Firebase incompleto",
+      "A inteligência nativa exige snapshot canônico persistido no Firebase e não pode depender de releitura da origem durante a inferência.",
+      "Regenerar o snapshot Firebase e bloquear inferência até o contrato sourceAccessDuringInference=false estar comprovado.",
+      "projection.nativeDataPlane"
+    ));
+  } else if (sourceDependentDocuments > 0) {
+    findings.push(finding(
+      "FIREBASE_NATIVE_GAP",
+      "HIGH",
+      "Documentos ainda dependentes da origem",
+      `${sourceDependentDocuments} documento(s) não possuem snapshot operacional suficiente para continuidade independente da origem.`,
+      "Reprocessar somente os documentos dependentes até nativeReady/sourceIndependent ficarem confirmados no Firebase.",
+      "projection.documentIntelligence.sourceDependentDocuments"
+    ));
+  }
 
   if (!sourcePresent) {
     findings.push(finding(
@@ -156,6 +183,50 @@ export function generateNativeInsight(
     ));
   }
 
+  if (fragileDocuments > 0) {
+    findings.push(finding(
+      "DOCUMENT_FRAGILITY",
+      fragileDocuments > 5 ? "HIGH" : "MEDIUM",
+      "Fragilidade documental detectada",
+      `${fragileDocuments} documento(s) apresentam extração degradada, baixa confiança ou campos canônicos ausentes.`,
+      "Abrir tratamento por causa-raiz, origem e recorrência; validar a correção e alimentar o ciclo orgânico somente com resultado comprovado.",
+      "projection.documentIntelligence.fragileDocuments"
+    ));
+  }
+
+  if (overdueDocumentSla > 0) {
+    findings.push(finding(
+      "DOCUMENT_SLA_OVERDUE",
+      "HIGH",
+      "SLA documental vencido",
+      `${overdueDocumentSla} documento(s) permanecem pendentes após o SLA configurado para a fonte.`,
+      "Priorizar por aging e impacto, corrigir o gargalo do fluxo e registrar evidência do fechamento.",
+      "projection.documentIntelligence.overdueDocumentSla"
+    ));
+  }
+
+  if (pendingDocumentFlow > 0) {
+    findings.push(finding(
+      "FLOW_BOTTLENECK",
+      pendingDocumentFlow > 10 ? "HIGH" : "MEDIUM",
+      "Gargalo no fluxo documental",
+      `${pendingDocumentFlow} documento(s) ainda não atingiram estado VALIDATED/CLOSED.`,
+      "Separar fila por origem (MV/TASY/ERP), estágio e fragilidade; promover melhoria orgânica somente após validação humana do resultado.",
+      "projection.documentIntelligence.pendingDocumentFlow"
+    ));
+  }
+
+  if (externalAiDocuments > 0) {
+    findings.push(finding(
+      "EXTERNAL_AI_PATH",
+      "LOW",
+      "Uso residual de IA externa",
+      `${externalAiDocuments} documento(s) registram classificação por provedor externo.`,
+      "Revisar se o padrão já pode ser absorvido por regra nativa antes de novas chamadas externas.",
+      "projection.documentIntelligence.externalAiDocuments"
+    ));
+  }
+
   if (evidencePercent !== null && evidencePercent < 100) {
     findings.push(finding(
       "EVIDENCE_GAP",
@@ -190,20 +261,22 @@ export function generateNativeInsight(
   return {
     engine: "AURORA_NATIVE_INTELLIGENCE",
     version: AURORA_NATIVE_INTELLIGENCE_VERSION,
-    mode: "NATIVE_DETERMINISTIC",
+    mode: "FIREBASE_NATIVE_DETERMINISTIC",
     externalProviderUsed: false,
     explainable: true,
     intent,
     generatedAt: now.toISOString(),
     headline,
     findings: selected,
-    limitation: "Motor nativo v0: análise determinística da projeção governada. Não é modelo generativo, não substitui revisão clínica/financeira e não acessa provedores externos.",
+    limitation: "Motor nativo: análise determinística exclusiva do snapshot governado no Firebase. Não relê a origem durante a inferência, não usa provedor externo e mantém revisão humana para decisões críticas.",
     source: {
-      type: "AURORA_PROJECTION",
+      type: "FIREBASE_CANONICAL_SNAPSHOT",
       schemaVersion: projection.schemaVersion ?? null,
       policyVersion: projection.policyVersion ?? null,
       competence: projection.competence ?? null,
-      asOf: projection.asOf ?? null
+      asOf: projection.asOf ?? null,
+      sourceAccessRequired: false,
+      externalAiRequired: false
     }
   };
 }

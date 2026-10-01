@@ -1,7 +1,7 @@
 ---
 name: aurora-nexus-organic
 description: Evolução orgânica governada do AURORA NEXUS. Usar ao instalar, descobrir documentos, adaptar rotinas, tratar retrabalho e exceções, propor ferramentas ou avaliar resultados. Braço do sistema-mãe JFN-AUD-GOV-001; nunca produto ou banco paralelo.
-version: 1.1.1-draft
+version: 1.2.0-firebase-native-draft
 code: AURORA-ORG-001
 ---
 
@@ -41,6 +41,18 @@ Código integrado não significa ambiente implantado. CI, emulador, identidade r
 6. Revisar permissões, evidências, limitações, risco, revisão e reversão. Piloto somente após aceite autenticado. No runtime 1.1, aprovar/executar/reverter exige MFA e revisão atual. O executor é fixo: COUNT_VALIDATED_SIGNALS, sem mutações financeiras ou documentais.
 7. Medir retrabalho, tempo, falsos alertas, conflitos, adesão e resultados validados. BENEFIT/NO_BENEFIT/ADVERSE são resultados observados de execuções registradas. Benefício informado não é benefício causal; receita recuperada/protegida exige prova financeira própria. Repetições dos mesmos casos não aumentam a amostra independente. Efeito adverso suspende o piloto read-only sem alterar sistemas-fonte.
 8. Promover somente capacidades expressamente implementadas e homologadas. A versão 1.1 não possui promoção automática para escrita, rotinas gerais ou geração livre de código. Reverter preservando memória, fontes e auditoria.
+
+## Document intelligence contínua e Firebase nativo
+
+AURORA-ORG-001 recebe aprendizado operacional a partir do estado canônico persistido no Firebase, não por releitura oportunística de Drive, MV, TASY ou outro ERP. Conectores capturam; Firebase materializa; Native Intelligence detecta; Organic Engine aprende somente de desfechos validados.
+
+Fragilidade documental, SLA vencido, gargalo de fluxo e dependência residual da origem podem gerar necessidade operacional e proposta de melhoria. Porém, um achado automático não é um sinal orgânico validado por si só. Para entrar na memória promovível, deve existir ação resolvida por ator autorizado, evidência atual e vínculo verificável conforme o fluxo já existente.
+
+Fontes MV/TASY/ERP são tratadas como proveniência do mesmo sistema-mãe. Não criar regras permanentes específicas por fornecedor quando o padrão puder ser expresso como tipo documental, estágio, SLA, causa de retrabalho ou resultado. O aprendizado deve generalizar a capacidade, preservando o `originSystem` apenas para diagnóstico e segmentação.
+
+A operação normal após `nativeReady=true` não depende de acesso contínuo à origem. Alteração/revogação futura da evidência pode exigir revalidação, mas não autoriza apagar histórico, recalcular silenciosamente conclusões passadas ou buscar credenciais adicionais.
+
+IA externa é fallback explicitamente habilitado, nunca caminho padrão. Padrão recorrente resolvido com segurança deve migrar para regra nativa/testável para reduzir latência, superfície de dados e consumo de tokens externos.
 
 ## Memória, continuidade e idempotência
 

@@ -17,6 +17,7 @@ import { validateResolutionEvidence } from "./auroraEvidence.js";
 import { buildProjection, parseActionCommand, type ProjectionSource } from "./auroraEngine.js";
 import { generateNativeInsight, parseNativeInsightIntent } from "./auroraNativeIntelligence.js";
 import { buildReleaseStatus } from "./auroraReleaseStatus.js";
+import { autoObserveResolvedDocumentAction } from "./auroraOrganicAutoObserve.js";
 import { auroraDb } from "./firebase.js";
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
@@ -249,20 +250,38 @@ export const auroraNexusNativeInsight = onRequest(
     const intent = parseNativeInsightIntent(String(req.query.intent ?? "EXECUTIVE"));
     if (!intent) { res.status(400).json({ ok: false, code: "INVALID_NATIVE_INTENT" }); return; }
 
-    const [org, snapshot] = await Promise.all([
-      auroraDb.doc(`organizations/${member.orgId}`).get(),
-      auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get()
-    ]);
-    const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
-    const competence = safeString(org.data()?.projectionCompetence, 7) ?? new Date().toISOString().slice(0, 7);
-    const rawProjection = snapshot.exists
-      ? { ...snapshot.data(), generatedAt: snapshot.data()?.generatedAt?.toDate?.().toISOString?.() ?? null }
-      : { ...buildProjection(empty, new Date(), { orgId: member.orgId, competence }), generatedAt: null };
+    const snapshot = await auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get();
+    if (!snapshot.exists) {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_SNAPSHOT_REQUIRED" });
+      return;
+    }
+    const snapshotData = snapshot.data() ?? {};
+    const generatedAtValue = snapshotData.generatedAt;
+    const generatedAt = generatedAtValue
+      && typeof generatedAtValue === "object"
+      && "toDate" in generatedAtValue
+      && typeof (generatedAtValue as { toDate?: unknown }).toDate === "function"
+        ? (generatedAtValue as { toDate(): Date }).toDate().toISOString()
+        : null;
+    const rawProjection: Record<string, unknown> = {
+      ...snapshotData,
+      generatedAt
+    };
+    const nativeDataPlaneValue = rawProjection["nativeDataPlane"];
+    const nativeDataPlane = nativeDataPlaneValue && typeof nativeDataPlaneValue === "object" && !Array.isArray(nativeDataPlaneValue)
+      ? nativeDataPlaneValue as Record<string, unknown>
+      : {};
+    if (nativeDataPlane.storage !== "FIRESTORE" || nativeDataPlane.sourceAccessDuringInference !== false) {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_CONTRACT_REQUIRED" });
+      return;
+    }
     const projection = visibleProjection(rawProjection, member);
     res.status(200).json({
       ok: true,
       environment: "HOMOLOGATION",
-      mode: "SHADOW",
+      mode: "FIREBASE_NATIVE",
+      sourceAccessDuringInference: false,
+      externalAiUsed: false,
       insight: generateNativeInsight(projection, intent)
     });
   }
@@ -401,7 +420,19 @@ export const auroraNexusAction = onRequest(
         tx.create(idemRef, { commandHash, actionId: actionRef.id, createdAt: FieldValue.serverTimestamp() });
         return { actionId: actionRef.id, duplicate: false };
       });
-      res.status(result.duplicate ? 200 : 201).json({ ok: true, ...result });
+      let organicObservation: unknown = null;
+      if (command.type === "RESOLVE") {
+        try {
+          organicObservation = await autoObserveResolvedDocumentAction(member.orgId, result.actionId, member);
+        } catch (organicError) {
+          logger.warn("Aurora organic document observation deferred", {
+            actionId: result.actionId,
+            error: organicError instanceof Error ? organicError.message : String(organicError)
+          });
+          organicObservation = { recorded: false, code: "ORGANIC_OBSERVATION_DEFERRED" };
+        }
+      }
+      res.status(result.duplicate ? 200 : 201).json({ ok: true, ...result, organicObservation });
     } catch (error) {
       const code = error instanceof Error ? error.message : "ACTION_FAILED";
       const status = code === "ACTION_NOT_FOUND" ? 404
@@ -415,19 +446,29 @@ export const auroraNexusAction = onRequest(
 );
 
 export const auroraNexusProjectionEngine = onSchedule(
-  { schedule: "every 15 minutes", timeZone: "America/Sao_Paulo", retryCount: 1, maxInstances: 1 },
+  { schedule: "every 15 minutes", timeZone: "America/Sao_Paulo", retryCount: 1, maxInstances: 1, timeoutSeconds: 300 },
   async () => {
-    try {
-      await refreshProjection(DEFAULT_ORG_ID);
-      logger.info("Aurora projection refreshed", { orgId: DEFAULT_ORG_ID });
-    } catch (error) {
-      const code = error instanceof Error ? error.message : "PROJECTION_FAILED";
-      if (["PROJECTION_DISABLED", "PROJECTION_COMPETENCE_REQUIRED", "PROJECTION_NO_SOURCE"].includes(code)) {
-        logger.info("Aurora projection skipped safely", { orgId: DEFAULT_ORG_ID, code });
-        return;
+    const organizations = await auroraDb.collection("organizations")
+      .where("active", "==", true)
+      .limit(20)
+      .get();
+    const orgIds = organizations.empty ? [DEFAULT_ORG_ID] : organizations.docs.map((doc) => doc.id);
+    const failures: Array<{ orgId: string; code: string }> = [];
+
+    for (const orgId of orgIds) {
+      try {
+        await refreshProjection(orgId);
+        logger.info("Aurora projection refreshed", { orgId });
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "PROJECTION_FAILED";
+        if (["PROJECTION_DISABLED", "PROJECTION_COMPETENCE_REQUIRED", "PROJECTION_NO_SOURCE"].includes(code)) {
+          logger.info("Aurora projection skipped safely", { orgId, code });
+          continue;
+        }
+        failures.push({ orgId, code });
+        logger.error("Aurora projection failed", { orgId, code });
       }
-      logger.error("Aurora projection failed", { orgId: DEFAULT_ORG_ID, code });
-      throw error;
     }
+    if (failures.length > 0) throw new Error(`PROJECTION_TENANT_FAILURES:${failures.length}`);
   }
 );

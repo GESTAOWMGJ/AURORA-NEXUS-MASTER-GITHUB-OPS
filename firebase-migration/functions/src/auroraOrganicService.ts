@@ -38,7 +38,17 @@ async function actionSnapshot(org:string,id:string,read:FirestoreDocumentReader)
   if(!v.ok) return null;
   for(const ref of v.evidenceRefs) {
     const d=records[`organizations/${org}/sourceDocuments/${ref}`] as Record<string,unknown>;
-    if(!d||d.reviewState!=='APPROVED'||!['VALIDATED','CLOSED'].includes(String(d.workflowState))||!['PUBLIC','INTERNAL'].includes(String(d.sensitivity))||d.revoked===true||d.deleted===true||d.active===false) return null;
+    if(!d||!['VALIDATED','CLOSED'].includes(String(d.workflowState))||d.revoked===true||d.deleted===true||d.active===false) return null;
+    const legacyReviewed=d.reviewState==='APPROVED'&&['PUBLIC','INTERNAL'].includes(String(d.sensitivity));
+    const firebaseNativeSanitized=d.sensitivity==='RESTRICTED'
+      &&d.sanitized===true
+      &&d.nativeReady===true
+      &&d.sourceIndependent===true
+      &&d.externalFetchRequired!==true
+      &&d.canonicalSnapshotVersion===1
+      &&typeof d.canonicalSnapshotHash==='string'
+      &&/^[a-f0-9]{64}$/.test(d.canonicalSnapshotHash);
+    if(!legacyReviewed&&!firebaseNativeSanitized) return null;
     // An expiry is not inferred from filename or modification time.
     if(d.expiresAt!==undefined) {
       const raw=d.expiresAt as {toMillis?:()=>number};

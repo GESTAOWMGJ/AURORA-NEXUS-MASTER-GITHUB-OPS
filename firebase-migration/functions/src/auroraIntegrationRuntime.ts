@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
@@ -18,6 +19,7 @@ import {
   type IntegrationScope
 } from "./auroraIntegrationCredential.js";
 import { auroraDb } from "./firebase.js";
+import { canonicalIntegrationDocument, parseIntegrationDocumentPayload } from "./auroraIntegrationDocument.js";
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -38,6 +40,14 @@ function sameOrigin(req: {get(name:string):string|undefined}): boolean {
 
 function jsonRequest(req: {get(name:string):string|undefined}): boolean {
   return String(req.get("content-type") || "").split(";", 1)[0]?.trim().toLowerCase() === "application/json";
+}
+
+function timestampIso(value: unknown): string | null {
+  if (!value || typeof value !== "object" || !("toDate" in value)) return null;
+  const toDate=(value as {toDate?:unknown}).toDate;
+  if (typeof toDate !== "function") return null;
+  const date=(toDate as () => Date).call(value);
+  return date instanceof Date && Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
 function canManage(member: AuroraMember): boolean {
@@ -102,8 +112,8 @@ export const auroraNexusIntegrationKeys = onRequest(
             name:data.name,
             scopes:Array.isArray(data.scopes)?data.scopes:[],
             active:data.active===true,
-            expiresAt:data.expiresAt?.toDate?.().toISOString?.() || null,
-            createdAt:data.createdAt?.toDate?.().toISOString?.() || null
+            expiresAt:timestampIso(data.expiresAt),
+            createdAt:timestampIso(data.createdAt)
           };
         })
       });
@@ -248,5 +258,151 @@ export const auroraNexusIntegrationPing = onRequest({cors:false}, async (req,res
     keyId:principal.keyId,
     connector:principal.name,
     time:new Date().toISOString()
+  });
+});
+
+
+export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (req,res) => {
+  apiHeaders(res);
+  if (req.method !== "POST") {
+    res.set("Allow","POST");
+    res.status(405).json({ok:false, code:"METHOD_NOT_ALLOWED"});
+    return;
+  }
+  if (!jsonRequest(req)) {
+    res.status(415).json({ok:false, code:"UNSUPPORTED_MEDIA_TYPE"});
+    return;
+  }
+  const principal=await verifyIntegrationBearer(req.get("authorization"), "documents.ingest");
+  if (!principal) {
+    res.status(401).json({ok:false, code:"INVALID_INTEGRATION_KEY"});
+    return;
+  }
+  const idempotencyKey=String(req.get("idempotency-key") || "");
+  if (!/^[A-Za-z0-9._:-]{16,160}$/.test(idempotencyKey)) {
+    res.status(400).json({ok:false, code:"INVALID_IDEMPOTENCY_KEY"});
+    return;
+  }
+  const payload=parseIntegrationDocumentPayload(req.body);
+  if (!payload) {
+    res.status(400).json({ok:false, code:"INVALID_DOCUMENT_PAYLOAD"});
+    return;
+  }
+  const canonical=canonicalIntegrationDocument(principal.orgId,payload);
+  const bodyHash=createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+  const idemId=createHash("sha256")
+    .update(`integration-document:${principal.keyId}:${idempotencyKey}`)
+    .digest("hex");
+  const base=`organizations/${principal.orgId}`;
+  const orgRef=auroraDb.doc(base);
+  const docRef=auroraDb.doc(`${base}/sourceDocuments/${canonical.id}`);
+  const idemRef=auroraDb.doc(`${base}/apiIdempotency/${idemId}`);
+  const auditRef=auroraDb.doc(`${base}/auditEvents/integration-document-${idemId.slice(0,40)}`);
+  const checkpointRef=auroraDb.doc(`${base}/runtimeCheckpoints/integration-documents`);
+
+  const result=await auroraDb.runTransaction(async(tx)=>{
+    const [orgSnap,idemSnap,currentSnap]=await Promise.all([
+      tx.get(orgRef),tx.get(idemRef),tx.get(docRef)
+    ]);
+    if (!orgSnap.exists || orgSnap.data()?.active !== true) {
+      return {kind:"ERROR" as const,code:"ORGANIZATION_DISABLED"};
+    }
+    if (idemSnap.exists) {
+      if (idemSnap.data()?.bodyHash !== bodyHash) return {kind:"ERROR" as const,code:"IDEMPOTENCY_CONFLICT"};
+      return {kind:"DUPLICATE" as const,documentId:String(idemSnap.data()?.documentId || canonical.id)};
+    }
+    const current=currentSnap.exists ? currentSnap.data() ?? {} : null;
+    const currentVersion=current?.sourceVersion;
+    if (typeof currentVersion === "number") {
+      if (payload.sourceVersion < currentVersion) return {kind:"ERROR" as const,code:"SOURCE_VERSION_REGRESSION"};
+      if (payload.sourceVersion === currentVersion) {
+        if (current?.canonicalSnapshotHash !== canonical.canonicalSnapshotHash) {
+          return {kind:"ERROR" as const,code:"SOURCE_VERSION_CONFLICT"};
+        }
+        tx.create(idemRef,{
+          bodyHash,documentId:docRef.id,keyId:principal.keyId,
+          createdAt:FieldValue.serverTimestamp()
+        });
+        return {kind:"DUPLICATE" as const,documentId:docRef.id};
+      }
+    }
+
+    const facts=canonical.facts as Record<string,unknown>;
+    const riskLevel=payload.documentFragility === "DEGRADED_EXTRACTION"
+      || ["BLOCKED","FAILED"].includes(payload.workflowState) ? "HIGH"
+      : payload.documentFragility !== "NONE" || !payload.nativeReady ? "MEDIUM" : "LOW";
+    tx.set(docRef,{
+      ...facts,
+      orgId:principal.orgId,
+      schemaVersion:1,
+      entityType:"sourceDocument",
+      entityKey:`${payload.sourceSystem}:${canonical.sourceIdHash.slice(0,32)}`,
+      sourceVersion:payload.sourceVersion,
+      occurredAt:Timestamp.fromDate(new Date(payload.occurredAt)),
+      competence:payload.competence,
+      documentType:payload.documentType,
+      workflowState:payload.workflowState,
+      reviewState:"NOT_REQUIRED",
+      riskLevel,
+      sensitivity:"RESTRICTED",
+      canonicalSnapshotHash:canonical.canonicalSnapshotHash,
+      source:{
+        system:payload.sourceSystem,
+        sourceId:`external:${canonical.sourceIdHash.slice(0,32)}`,
+        contentHash:canonical.canonicalSnapshotHash,
+        hashMethod:"canonical_structured_sha256"
+      },
+      integration:{
+        keyId:principal.keyId,
+        connector:principal.name,
+        transport:"AURORA_INTEGRATION_API"
+      },
+      createdAt:current?.createdAt ?? FieldValue.serverTimestamp(),
+      updatedAt:FieldValue.serverTimestamp()
+    },{merge:true});
+    tx.create(idemRef,{
+      bodyHash,documentId:docRef.id,keyId:principal.keyId,
+      sourceVersion:payload.sourceVersion,
+      createdAt:FieldValue.serverTimestamp()
+    });
+    tx.create(auditRef,{
+      orgId:principal.orgId,
+      action:currentSnap.exists?"INTEGRATION_DOCUMENT_UPDATED":"INTEGRATION_DOCUMENT_CREATED",
+      type:currentSnap.exists?"INTEGRATION_DOCUMENT_UPDATED":"INTEGRATION_DOCUMENT_CREATED",
+      documentId:docRef.id,
+      keyId:principal.keyId,
+      sourceSystem:payload.sourceSystem,
+      sourceVersion:payload.sourceVersion,
+      canonicalSnapshotHash:canonical.canonicalSnapshotHash,
+      occurredAt:FieldValue.serverTimestamp(),
+      sanitized:true,
+      sensitivity:"INTERNAL"
+    });
+    tx.set(checkpointRef,{
+      orgId:principal.orgId,
+      component:"integration-documents",
+      state:"HEALTHY",
+      lastDocumentId:docRef.id,
+      lastSourceSystem:payload.sourceSystem,
+      lastAcceptedAt:FieldValue.serverTimestamp(),
+      acceptedCount:FieldValue.increment(1),
+      updatedAt:FieldValue.serverTimestamp()
+    },{merge:true});
+    return {kind:"ACCEPTED" as const,documentId:docRef.id};
+  });
+
+  if (result.kind === "ERROR") {
+    const status=["IDEMPOTENCY_CONFLICT","SOURCE_VERSION_REGRESSION","SOURCE_VERSION_CONFLICT"].includes(result.code)?409:412;
+    res.status(status).json({ok:false,code:result.code});
+    return;
+  }
+  res.status(result.kind === "DUPLICATE" ? 200 : 202).json({
+    ok:true,
+    accepted:result.kind === "ACCEPTED",
+    duplicate:result.kind === "DUPLICATE",
+    documentId:result.documentId,
+    sourceSystem:payload.sourceSystem,
+    sourceIndependent:payload.sourceIndependent,
+    nativeReady:payload.nativeReady
   });
 });
