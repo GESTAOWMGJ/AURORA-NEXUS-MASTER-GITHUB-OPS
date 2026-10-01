@@ -1,0 +1,13 @@
+{
+  "requestVersion": 1,
+  "confirmation": "CREATE_PRODUCTION_PROJECT",
+  "projectId": "aurora-nexus-prod-wmgj",
+  "region": "southamerica-east1",
+  "organizationId": "wmgj",
+  "deploymentStage": "COLD_PRODUCTION",
+  "expectedSourceSha": "57d9058082521b82415a37310b327f9ff637e76f",
+  "productionMutation": false,
+  "sourceMutation": false,
+  "clinicalSensitiveEnabled": false,
+  "requestedAt": "2026-10-01"
+}
