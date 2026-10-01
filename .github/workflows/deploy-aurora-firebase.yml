@@ -329,7 +329,7 @@ jobs:
           test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
           git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
-          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,hosting,firestore:rules,firestore:indexes --non-interactive
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,hosting,firestore:rules,firestore:indexes --non-interactive
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -347,14 +347,16 @@ jobs:
             "auroraNexusAction",
             "auroraNexusRefresh",
             "auroraNexusProjectionEngine",
-            "auroraNexusOrganic"
+            "auroraNexusOrganic",
+            "auroraNexusIntegrationKeys",
+            "auroraNexusIntegrationPing"
           ]' '
             (.result // .functions // []) as $functions |
             [$functions[] | (.id // .name // "") | split("/")[-1]] | sort == ($expected | sort)
           ' <<<"$functions" >/dev/null
           shell="$(curl --fail --silent --show-error --max-time 30 "https://${PROJECT_ID}.web.app/")"
           grep -Fq "Ambiente privado" <<<"$shell"
-          if grep -Fq "Operação WMGJ" <<<"$shell"; then
+          if grep -Fq "Centro de gestão WMGJ" <<<"$shell"; then
             echo "Protected shell was exposed without login" >&2
             exit 90
           fi
@@ -465,7 +467,7 @@ jobs:
             --cookie "$cookie_jar" \
             --output "$private_shell" \
             "${base_url}/"
-          grep -Fq "Operação WMGJ" "$private_shell"
+          grep -Fq "Centro de gestão WMGJ" "$private_shell"
           if grep -Fq "Ambiente privado" "$private_shell"; then
             echo "Authenticated smoke remained on the login shell" >&2
             exit 91
