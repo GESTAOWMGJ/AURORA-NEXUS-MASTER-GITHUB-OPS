@@ -91,7 +91,9 @@ Arquitetura recomendada:
 - Logs de execução.
 - Ações humanas controladas: reprocessar, revisar, aprovar, ignorar, diagnosticar.
 
-## Contrato mínimo de dados do dashboard
+## Contrato mínimo de dados do dashboard — v1 estável
+
+`app-foundation/contracts/operational-status.schema.json` permanece o contrato legado compatível e não recebe os novos estados/campos.
 
 ```json
 {
@@ -119,6 +121,14 @@ Arquitetura recomendada:
 }
 ```
 
+## Contrato AURORA NEXUS v2
+
+A evolução da interface usa `app-foundation/contracts/operational-status.v2.schema.json`, com `schemaVersion: 2`. O v2 pode representar `CRITICO` e `BLOQUEANTE`, `Client Operation Skill`, perda financeira com confiabilidade por cifra, atrito do teste e estado orgânico governado.
+
+`mode` representa somente `trial|contracted`; `environment` representa somente `hml|production`. O estado orgânico permanece `READ_ONLY`, `activationAllowed=false` e sujeito a revisão humana.
+
+O manifesto server-side canônico fica em `firebase-migration/schemas/organic-patcher.schema.json`. Ele não substitui o checkpoint/runtime AURORA-ORG-001 nem autoriza autoaplicação.
+
 ## Regra de evolução
 
-Toda nova interface deve consumir um contrato de dados explícito. A interface não deve depender diretamente de nomes soltos de abas, colunas ou funções Apps Script sem uma camada de adaptação.
+Toda nova interface deve consumir um contrato de dados explícito e versionado. Mudança incompatível exige nova versão; o mesmo `$id` não deve ganhar semântica incompatível silenciosamente. A interface não deve depender diretamente de nomes soltos de abas, colunas ou funções Apps Script sem uma camada de adaptação.
