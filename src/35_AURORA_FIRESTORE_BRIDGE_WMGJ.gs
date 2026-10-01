@@ -139,16 +139,85 @@ function wmgjFirestoreRespostaAceita_(response) {
   );
 }
 
+function wmgjFirestoreSourceSystem_(value) {
+  var normalized = String(value || 'DRIVE')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .trim().toUpperCase();
+  if (normalized === 'GENERIC_ERP') normalized = 'ERP';
+  var allowed = { GMAIL: true, DRIVE: true, SHEETS: true, APPS_SCRIPT: true, MANUAL: true, MV: true, TASY: true, ERP: true };
+  return allowed[normalized] ? normalized : 'DRIVE';
+}
+
+function wmgjFirestoreAmountCents_(value) {
+  var amount = Number(value);
+  if (!isFinite(amount) || amount < 0) return null;
+  var cents = Math.round(amount * 100);
+  return Number.isSafeInteger(cents) ? cents : null;
+}
+
+function wmgjFirestoreNativeSnapshot_(classification, context) {
+  classification = classification || {};
+  context = context || {};
+  var category = String(classification.categoria || 'outro').trim().toLowerCase();
+  var confidence = Number(classification.confianca || 0);
+  if (!isFinite(confidence)) confidence = 0;
+  var competence = wmgjFirestoreCompetencia_(classification.competencia);
+  var extractionMethod = String(classification.metodo_extracao || '').trim();
+  var extractionComplete = !!extractionMethod
+    && extractionMethod !== 'metadata_fallback'
+    && extractionMethod !== 'drive_api_indisponivel';
+  var amountCents = wmgjFirestoreAmountCents_(classification.valor_total);
+  var missing = 0;
+  if (['financeiro', 'glosa', 'produtividade'].indexOf(category) >= 0 && !competence) missing++;
+  if (['financeiro', 'glosa'].indexOf(category) >= 0 && amountCents === null) missing++;
+
+  var fragility = 'NONE';
+  if (!extractionComplete) fragility = 'DEGRADED_EXTRACTION';
+  else if (confidence < 0.75) fragility = 'LOW_CONFIDENCE';
+  else if (missing > 0) fragility = 'MISSING_CANONICAL_FIELDS';
+
+  var classificationSource = String(classification.origem_classificacao || 'aurora_native_rules').slice(0, 64);
+  var externalAiUsed = /gemini|openai|external/i.test(classificationSource);
+  var snapshot = {
+    canonicalSnapshotVersion: 1,
+    category: category,
+    confidence: confidence,
+    competence: competence,
+    extractionMethod: extractionMethod,
+    extractionComplete: extractionComplete,
+    classificationSource: classificationSource,
+    externalAiUsed: externalAiUsed,
+    nativeReady: extractionComplete && confidence >= 0.6,
+    sourceIndependent: extractionComplete,
+    externalFetchRequired: !extractionComplete,
+    originSystem: wmgjFirestoreSourceSystem_(context.sourceSystem),
+    originConnector: String(context.originConnector || 'DRIVE_FOLDER').slice(0, 64),
+    documentFragility: fragility,
+    missingFieldsCount: missing,
+    flowStage: 'FIREBASE_CANONICALIZED'
+  };
+  if (amountCents !== null) snapshot.amountCents = amountCents;
+  var count = Number(classification.atendimentos);
+  if (Number.isSafeInteger(count) && count >= 0) snapshot.count = count;
+  if (classification.sla_due_at && Number.isFinite(Date.parse(String(classification.sla_due_at)))) {
+    snapshot.slaDueAt = new Date(String(classification.sla_due_at)).toISOString();
+  }
+  snapshot.canonicalSnapshotHash = wmgjFirestoreHashString_(JSON.stringify(snapshot));
+  return snapshot;
+}
+
 function wmgjFirestoreEventoArquivo_(file, classification, context) {
   context = context || {};
   classification = classification || {};
   var cfg = wmgjFirestoreConfig_();
   var hash = wmgjFirestoreHashArquivo_(file);
   var sourceId = file.getId();
-  var entityKey = ['DRIVE', sourceId].join(':');
+  var sourceSystem = wmgjFirestoreSourceSystem_(context.sourceSystem);
+  var entityKey = [sourceSystem, sourceId].join(':');
   var occurredAt = new Date();
   var sourceUpdatedAt = file.getLastUpdated();
   var sourceVersion = wmgjFirestoreSourceVersion_(sourceUpdatedAt, occurredAt);
+  var nativeSnapshot = wmgjFirestoreNativeSnapshot_(classification, context);
 
   return {
     schemaVersion: 1,
@@ -157,7 +226,7 @@ function wmgjFirestoreEventoArquivo_(file, classification, context) {
     orgId: cfg.orgId,
     occurredAt: occurredAt.toISOString(),
     sourceVersion: sourceVersion,
-    idempotencyKey: [cfg.orgId, 'DRIVE', sourceId, hash.value].join(':'),
+    idempotencyKey: [cfg.orgId, sourceSystem, sourceId, hash.value].join(':'),
     entityType: 'sourceDocument',
     entityKey: entityKey,
     actor: {
@@ -166,7 +235,7 @@ function wmgjFirestoreEventoArquivo_(file, classification, context) {
       source: 'WMGJ_APPS_SCRIPT'
     },
     source: {
-      system: 'DRIVE',
+      system: sourceSystem,
       sourceId: sourceId,
       mimeType: file.getMimeType(),
       url: file.getUrl(),
@@ -180,18 +249,39 @@ function wmgjFirestoreEventoArquivo_(file, classification, context) {
     competence: wmgjFirestoreCompetencia_(classification.competencia),
     documentType: String(classification.tipo_documento || classification.categoria || 'outro').slice(0, 128),
     record: {
-      category: classification.categoria || 'outro',
-      confidence: Number(classification.confianca || 0),
-      extractionMethod: classification.metodo_extracao || '',
+      category: nativeSnapshot.category,
+      confidence: nativeSnapshot.confidence,
+      extractionMethod: nativeSnapshot.extractionMethod,
       legacyStatus: classification.status || '',
-      sourceContext: String(context.sourceContext || 'pipeline-v3')
+      sourceContext: String(context.sourceContext || 'pipeline-v3'),
+      canonicalSnapshotVersion: nativeSnapshot.canonicalSnapshotVersion,
+      canonicalSnapshotHash: nativeSnapshot.canonicalSnapshotHash,
+      classificationSource: nativeSnapshot.classificationSource,
+      externalAiUsed: nativeSnapshot.externalAiUsed,
+      extractionComplete: nativeSnapshot.extractionComplete,
+      nativeReady: nativeSnapshot.nativeReady,
+      sourceIndependent: nativeSnapshot.sourceIndependent,
+      externalFetchRequired: nativeSnapshot.externalFetchRequired,
+      originSystem: nativeSnapshot.originSystem,
+      originConnector: nativeSnapshot.originConnector,
+      documentFragility: nativeSnapshot.documentFragility,
+      missingFieldsCount: nativeSnapshot.missingFieldsCount,
+      flowStage: nativeSnapshot.flowStage,
+      ...(nativeSnapshot.amountCents !== undefined ? { amountCents: nativeSnapshot.amountCents } : {}),
+      ...(nativeSnapshot.count !== undefined ? { count: nativeSnapshot.count } : {}),
+      ...(nativeSnapshot.slaDueAt ? { slaDueAt: nativeSnapshot.slaDueAt } : {})
     },
     metadata: {
       bridgeVersion: WMGJ_FIRESTORE_BRIDGE_VERSION,
       pipelineVersion: context.pipelineVersion || '',
       fileNameWithheld: true,
       narrativeWithheld: true,
-      nonBlockingMirror: true
+      nonBlockingMirror: context.mirrorRequired !== true,
+      nativeDataPlane: 'FIRESTORE',
+      originConnector: nativeSnapshot.originConnector,
+      externalAiUsed: nativeSnapshot.externalAiUsed,
+      sourceAccessRequiredAfterIngest: !nativeSnapshot.sourceIndependent,
+      sourceRegistryVersion: String(context.sourceRegistryVersion || '1')
     }
   };
 }
