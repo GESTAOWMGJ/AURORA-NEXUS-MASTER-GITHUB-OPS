@@ -248,9 +248,10 @@ export const auroraNexusAuthGate = onRequest(
     const csrfTokens = {
       action: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.action),
       refresh: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.refresh),
+      integrationKey: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.integrationKey),
       logout: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.logout)
     };
-    if (!csrfTokens.action || !csrfTokens.refresh || !csrfTokens.logout) {
+    if (!csrfTokens.action || !csrfTokens.refresh || !csrfTokens.integrationKey || !csrfTokens.logout) {
       logger.error("Aurora Nexus CSRF key is not configured");
       res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança."));
       return;
