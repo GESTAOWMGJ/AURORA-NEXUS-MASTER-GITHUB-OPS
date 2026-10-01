@@ -10,7 +10,7 @@
  * Cole este arquivo inteiro em: 04_EXTRACAO_DOCUMENTAL_WMGJ
  */
 
-var WMGJ_EXTRACAO_VERSAO = "v1.1.2-extracao-documental-compat-total";
+var WMGJ_EXTRACAO_VERSAO = "v1.2.0-firebase-native-document-intelligence";
 var WMGJ_EXTRACAO_PASTA_PADRAO_ID = "1Gz0GtUfvKezI8OmAH0h8fkNLlqEzfYU-";
 
 function executarExtracaoRealWMGJ(limite) {
