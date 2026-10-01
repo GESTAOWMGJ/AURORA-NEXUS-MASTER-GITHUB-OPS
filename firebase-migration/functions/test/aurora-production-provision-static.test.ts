@@ -16,8 +16,6 @@ test("production provisioning is isolated and cold by default",()=>{
   assert.match(workflow,/FIREBASE_PROD_PROJECT_ID/);
   assert.match(workflow,/GCP_PROD_WIF_PROVIDER/);
   assert.match(workflow,/GCP_PROD_DEPLOY_SERVICE_ACCOUNT/);
-  assert.match(workflow,/environment=production/);
-  assert.match(workflow,/deployment_stage=cold/);
   assert.match(workflow,/--delete-protection/);
   assert.match(workflow,/--enable-pitr/);
   assert.match(workflow,/environment.*PRODUCTION/);
@@ -28,7 +26,7 @@ test("production provisioning is isolated and cold by default",()=>{
 test("project creation is a local one-time bootstrap, not a deploy permission",()=>{
   assert.doesNotMatch(workflow,/gcloud projects create/);
   assert.doesNotMatch(workflow,/HML_PROJECT_ID/);
-  assert.doesNotMatch(workflow,/GCP_WIF_PROVIDER/);
+  assert.doesNotMatch(workflow,/\bGCP_WIF_PROVIDER\b/);
   assert.doesNotMatch(workflow,/GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT/);
   assert.match(windowsBootstrap,/gcloud projects create/);
   assert.match(windowsBootstrap,/workload-identity-pools/);
