@@ -8,6 +8,7 @@ on:
       - "firebase-migration/functions/src/auroraAccess.ts"
       - "firebase-migration/functions/src/entry.ts"
       - "firebase-migration/functions/test/aurora-crypto-envelope.test.ts"
+      - "firebase-migration/functions/test/aurora-crypto-runtime-static.test.ts"
       - "firebase-migration/schemas/crypto-envelope.v1.schema.json"
       - "firebase-migration/policy/security-baseline-v1.json"
       - "firebase-migration/docs/2*-crypto-*.md"
@@ -56,7 +57,7 @@ jobs:
 
       - name: Run cryptographic regression tests
         working-directory: firebase-migration/functions
-        run: node --import tsx --test test/aurora-crypto-envelope.test.ts
+        run: node --import tsx --test test/aurora-crypto-envelope.test.ts test/aurora-crypto-runtime-static.test.ts
 
       - name: Validate versioned crypto JSON
         run: |
