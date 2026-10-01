@@ -65,3 +65,12 @@ test("RC1.1 rotates HMAC keyring without mutating secret metadata", () => {
   assert.doesNotMatch(workflow, /gcloud secrets update/);
   assert.doesNotMatch(workflow, /gcloud secrets create/);
 });
+
+
+test("RC1.1 workflow cannot auto-run from implementation changes", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /paths:\s*\n\s*- "\.github\/requests\/aurora-rc11-run\.json"/);
+  assert.doesNotMatch(workflow, /paths:[\s\S]*aurora-rc11-recovery-real-ingest\.yml/);
+  assert.doesNotMatch(workflow, /paths:[\s\S]*firebase-migration\/functions\/\*\*/);
+});
