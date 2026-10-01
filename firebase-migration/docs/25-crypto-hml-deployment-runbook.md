@@ -63,7 +63,8 @@ Depois do deploy:
 
 - entrar com usuário autorizado;
 - MFA obrigatório;
-- executar POST `/api/crypto/self-test` com CSRF válido;
+- executar GET `/api/crypto/self-test` para obter CSRF específico, já autenticado e com MFA;
+- executar POST `/api/crypto/self-test` com `X-Aurora-CSRF` retornado pelo GET;
 - verificar retorno `HML_VERIFIED`;
 - confirmar audit event `CRYPTO_SELF_TEST_VERIFIED`;
 - conferir Cloud KMS audit logs;
