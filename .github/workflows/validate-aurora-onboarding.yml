@@ -4,7 +4,9 @@ on:
   pull_request:
     paths:
       - 'aurora-coletor/**'
+      - 'src/01_PIPELINE_CONFIABILIDADE_WMGJ.gs'
       - 'src/04_EXTRACAO_DOCUMENTAL_WMGJ.gs'
+      - 'src/35_AURORA_FIRESTORE_BRIDGE_WMGJ.gs'
       - 'src/37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'
       - '.github/workflows/validate-aurora-onboarding.yml'
   push:
@@ -44,7 +46,11 @@ jobs:
         run: python -m unittest discover -s aurora-coletor/tests -p 'test_connector_setup.py' -v
       - name: Parse Apps Script connector path
         run: |
+          cp src/01_PIPELINE_CONFIABILIDADE_WMGJ.gs "$RUNNER_TEMP/pipeline.js"
           cp src/04_EXTRACAO_DOCUMENTAL_WMGJ.gs "$RUNNER_TEMP/extraction.js"
+          cp src/35_AURORA_FIRESTORE_BRIDGE_WMGJ.gs "$RUNNER_TEMP/firestore-bridge.js"
           cp src/37_AURORA_CONECTORES_PLUG_AND_PLAY.gs "$RUNNER_TEMP/connectors.js"
+          node --check "$RUNNER_TEMP/pipeline.js"
           node --check "$RUNNER_TEMP/extraction.js"
+          node --check "$RUNNER_TEMP/firestore-bridge.js"
           node --check "$RUNNER_TEMP/connectors.js"
