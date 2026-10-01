@@ -243,6 +243,24 @@ test("snapshot documental nativo persiste fatos suficientes sem narrativa da ori
   assert.equal("narrative" in snapshot, false);
 });
 
+test("financial snapshot with missing amount remains source-dependent", () => {
+  const context = appsScriptContext() as any;
+  const snapshot = context.wmgjFirestoreNativeSnapshot_({
+    categoria: "financeiro",
+    confianca: 0.82,
+    competencia: "2026-09",
+    valor_total: null,
+    metodo_extracao: "google_docs_text",
+    origem_classificacao: "aurora_native_rules_v2"
+  }, { sourceSystem: "TASY" });
+  assert.equal(snapshot.amountCents, undefined);
+  assert.equal(snapshot.missingFieldsCount, 1);
+  assert.equal(snapshot.nativeReady, false);
+  assert.equal(snapshot.sourceIndependent, false);
+  assert.equal(snapshot.externalFetchRequired, true);
+  assert.equal(snapshot.documentFragility, "MISSING_CANONICAL_FIELDS");
+});
+
 test("snapshot documental marca extração degradada como dependente da origem", () => {
   const context = appsScriptContext() as any;
   const snapshot = context.wmgjFirestoreNativeSnapshot_({
