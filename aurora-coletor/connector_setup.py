@@ -134,7 +134,7 @@ def validate_hmac_secret(value: str) -> str:
 def issue_aurora_api_key(
     org: str,
     connector_name: str,
-    scopes: tuple[str, ...] = ("integration.read", "integration.write"),
+    scopes: tuple[str, ...] = ("integration.read", "integration.write", "documents.ingest"),
     days: int = 90,
 ) -> AuroraIssuedKey:
     validate_org(org)
