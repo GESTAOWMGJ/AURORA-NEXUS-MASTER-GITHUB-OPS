@@ -46,6 +46,6 @@ jobs:
 
       - name: Enforce legacy credential isolation
         run: |
-          ! grep -q 'GOOGLE_SERVICE_ACCOUNT_JSON.*secrets\.' ../../.github/workflows/provision-google-workspace.yml
+          ! grep -q 'secrets\.' ../../.github/workflows/provision-google-workspace.yml
           ! grep -q -- '--apply' ../../.github/workflows/provision-google-workspace.yml
           echo "GOOGLE_WORKSPACE_CI_KEYLESS_GATE=ENFORCED"
