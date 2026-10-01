@@ -31,5 +31,9 @@
     "recoveryRequired": true
   },
   "applyConfirmation": "APPLY_AURORA_CMEK_HML",
-  "restoreConfirmation": "RESTORE_AURORA_CMEK_HML"
+  "restoreConfirmation": "RESTORE_AURORA_CMEK_HML",
+  "firestoreCmekFeatureAccessRequired": true,
+  "firestoreCmekFeatureAccessState": "MUST_BE_CONFIRMED_BEFORE_APPLY",
+  "sameLocationKmsRequired": true,
+  "serviceAgentRole": "roles/cloudkms.cryptoKeyEncrypterDecrypter"
 }
