@@ -17,6 +17,7 @@ import { validateResolutionEvidence } from "./auroraEvidence.js";
 import { buildProjection, parseActionCommand, type ProjectionSource } from "./auroraEngine.js";
 import { generateNativeInsight, parseNativeInsightIntent } from "./auroraNativeIntelligence.js";
 import { buildReleaseStatus } from "./auroraReleaseStatus.js";
+import { autoObserveResolvedDocumentAction } from "./auroraOrganicAutoObserve.js";
 import { auroraDb } from "./firebase.js";
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
@@ -350,7 +351,19 @@ export const auroraNexusAction = onRequest(
         tx.create(idemRef, { commandHash, actionId: actionRef.id, createdAt: FieldValue.serverTimestamp() });
         return { actionId: actionRef.id, duplicate: false };
       });
-      res.status(result.duplicate ? 200 : 201).json({ ok: true, ...result });
+      let organicObservation: Record<string, unknown> | null = null;
+      if (command.type === "RESOLVE") {
+        try {
+          organicObservation = await autoObserveResolvedDocumentAction(member.orgId, result.actionId, member);
+        } catch (organicError) {
+          logger.warn("Aurora organic document observation deferred", {
+            actionId: result.actionId,
+            error: organicError instanceof Error ? organicError.message : String(organicError)
+          });
+          organicObservation = { recorded: false, code: "ORGANIC_OBSERVATION_DEFERRED" };
+        }
+      }
+      res.status(result.duplicate ? 200 : 201).json({ ok: true, ...result, organicObservation });
     } catch (error) {
       const code = error instanceof Error ? error.message : "ACTION_FAILED";
       const status = code === "ACTION_NOT_FOUND" ? 404
