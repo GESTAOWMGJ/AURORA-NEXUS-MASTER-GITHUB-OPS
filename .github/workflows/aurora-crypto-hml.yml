@@ -1,0 +1,194 @@
+name: Aurora Cryptography HML
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - ".github/requests/aurora-crypto-hml.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-crypto-hml
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    name: Provision KMS and deploy crypto HML
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: firebase-homologation
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      REQUEST_FILE: .github/requests/aurora-crypto-hml.json
+      REGION: southamerica-east1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
+
+      - name: Validate immutable HML request
+        env:
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          jq -e --arg project "$APPROVED_PROJECT" '
+            .confirmation=="APPLY_AURORA_CRYPTO_HML" and
+            .projectId==$project and
+            .projectId=="wmgj-hml-jfn-20260927" and
+            .location=="southamerica-east1" and
+            .keyRing=="aurora-hml" and
+            .cryptoKey=="aurora-field-encryption" and
+            .rotationDays==90 and
+            .productionMutation==false and
+            .clinicalSensitiveEnabled==false
+          ' "$REQUEST_FILE" >/dev/null
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: firebase-migration/functions/package-lock.json
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: "548.0.0"
+          project_id: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+
+      - name: Verify identity and enable Cloud KMS
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')" = "$DEPLOY_SERVICE_ACCOUNT"
+          gcloud services enable cloudkms.googleapis.com --project "$PROJECT_ID" --quiet
+          gcloud services list --enabled --project "$PROJECT_ID" --filter='config.name:cloudkms.googleapis.com' --format='value(config.name)' | grep -Fx 'cloudkms.googleapis.com'
+
+      - name: Create or verify KMS key with rotation
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          keyring="$(jq -r '.keyRing' "$REQUEST_FILE")"
+          key="$(jq -r '.cryptoKey' "$REQUEST_FILE")"
+          rotation="$(jq -r '.rotationDays' "$REQUEST_FILE")d"
+          if ! gcloud kms keyrings describe "$keyring" --location "$REGION" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud kms keyrings create "$keyring" --location "$REGION" --project "$PROJECT_ID"
+          fi
+          if ! gcloud kms keys describe "$key" --keyring "$keyring" --location "$REGION" --project "$PROJECT_ID" >/dev/null 2>&1; then
+            gcloud kms keys create "$key"               --keyring "$keyring"               --location "$REGION"               --project "$PROJECT_ID"               --purpose encryption               --rotation-period "$rotation"               --protection-level software               --labels env=hml,system=aurora-nexus,data-class=restricted
+          fi
+          key_json="$(gcloud kms keys describe "$key" --keyring "$keyring" --location "$REGION" --project "$PROJECT_ID" --format=json)"
+          test "$(jq -r '.purpose' <<<"$key_json")" = "ENCRYPT_DECRYPT"
+          test -n "$(jq -r '.primary.name // empty' <<<"$key_json")"
+          test -n "$(jq -r '.rotationPeriod // empty' <<<"$key_json")"
+          key_resource="$(jq -r '.name' <<<"$key_json")"
+          test -n "$key_resource"
+          echo "AURORA_CRYPTO_KEY_RESOURCE=$key_resource" >> "$GITHUB_ENV"
+
+      - name: Revalidate exact crypto candidate
+        run: |
+          set -euo pipefail
+          npm --prefix firebase-migration/functions ci
+          npm --prefix firebase-migration/functions run build
+          cd firebase-migration/functions
+          node --import tsx --test test/aurora-crypto-envelope.test.ts
+
+      - name: Deploy crypto self-test and HML route
+        working-directory: firebase-migration
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@14.17.0 deploy             --project "$PROJECT_ID"             --non-interactive             --only functions:auroraNexusCryptoSelfTest,hosting
+
+      - name: Bind exact runtime identity to KMS
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          keyring="$(jq -r '.keyRing' "$REQUEST_FILE")"
+          key="$(jq -r '.cryptoKey' "$REQUEST_FILE")"
+          runtime_sa="$(gcloud functions describe auroraNexusCryptoSelfTest             --gen2 --region "$REGION" --project "$PROJECT_ID"             --format='value(serviceConfig.serviceAccountEmail)')"
+          test -n "$runtime_sa"
+          gcloud kms keys add-iam-policy-binding "$key"             --keyring "$keyring"             --location "$REGION"             --project "$PROJECT_ID"             --member "serviceAccount:$runtime_sa"             --role roles/cloudkms.cryptoKeyEncrypterDecrypter             --quiet >/dev/null
+          policy="$(gcloud kms keys get-iam-policy "$key" --keyring "$keyring" --location "$REGION" --project "$PROJECT_ID" --format=json)"
+          jq -e --arg member "serviceAccount:$runtime_sa" '
+            [.bindings[]? | select(.role=="roles/cloudkms.cryptoKeyEncrypterDecrypter") | .members[]?] | index($member) != null
+          ' <<<"$policy" >/dev/null
+          echo "AURORA_CRYPTO_RUNTIME_SERVICE_ACCOUNT=$runtime_sa" >> "$GITHUB_ENV"
+
+      - name: Publish non-secret crypto configuration to HML tenant
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          token="$(gcloud auth print-access-token)"
+          payload="$(jq -nc             --arg state "HML_READY"             --arg algorithm "AES-256-GCM"             --arg keyResource "$AURORA_CRYPTO_KEY_RESOURCE"             --arg runId "$GITHUB_RUN_ID"             --arg sha "$CANDIDATE_SHA"             '{
+              fields:{
+                crypto:{
+                  mapValue:{
+                    fields:{
+                      state:{stringValue:$state},
+                      algorithm:{stringValue:$algorithm},
+                      envelopeVersion:{integerValue:"1"},
+                      keyResource:{stringValue:$keyResource},
+                      rotationDays:{integerValue:"90"},
+                      clinicalDataEnabled:{booleanValue:false},
+                      provisionedByRun:{stringValue:$runId},
+                      baselineSha:{stringValue:$sha}
+                    }
+                  }
+                }
+              }
+            }')"
+          curl -fsS -X PATCH             -H "Authorization: Bearer $token"             -H 'Content-Type: application/json'             --data "$payload"             "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj?updateMask.fieldPaths=crypto"             >/dev/null
+
+      - name: Capture non-secret deployment evidence
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/aurora-crypto-evidence"
+          key_hash="$(printf '%s' "$AURORA_CRYPTO_KEY_RESOURCE" | sha256sum | awk '{print $1}')"
+          jq -n             --arg project "$PROJECT_ID"             --arg region "$REGION"             --arg sha "$CANDIDATE_SHA"             --arg keyHash "$key_hash"             --arg runtimeSa "$AURORA_CRYPTO_RUNTIME_SERVICE_ACCOUNT"             '{
+              control:"AURORA-SEC-001-CRYPTO",
+              environment:"HOMOLOGATION",
+              project:$project,
+              region:$region,
+              sha:$sha,
+              algorithm:"AES-256-GCM",
+              envelopeVersion:1,
+              keyResourceSha256:$keyHash,
+              rotationDays:90,
+              runtimeServiceAccount:$runtimeSa,
+              kmsIamVerified:true,
+              functionDeployed:true,
+              hostingRouteDeployed:true,
+              clinicalSensitiveEnabled:false,
+              productionMutation:false,
+              userMfaRoundTrip:"PENDING_ADMIN_SESSION"
+            }' > "$RUNNER_TEMP/aurora-crypto-evidence/hml-deployment.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aurora-crypto-hml-evidence
+          path: ${{ runner.temp }}/aurora-crypto-evidence/
+          if-no-files-found: error
+          retention-days: 90
