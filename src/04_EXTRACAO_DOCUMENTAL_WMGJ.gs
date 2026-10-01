@@ -144,17 +144,19 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
       }
       if (firestoreMirror.ok) registrarFirestoreMirrorWMGJ_(file, hash, firestoreMirror);
 
-      registrarDocumentoMemoriaWMGJ_Compat_(memoria, {
-        origem: "DRIVE_EXTRACAO_REAL",
-        idOrigem: idOrigem,
-        nome: file.getName(),
-        mimeType: file.getMimeType(),
-        hash: hash,
-        competencia: validacao.dados.competencia || "",
-        categoria: validacao.dados.categoria || "outro",
-        status: "PROCESSADO",
-        resumo: montarResumoMemoriaExtracaoWMGJ_V1_(validacao.dados, extracao)
-      });
+      if (!jaProcessado) {
+        registrarDocumentoMemoriaWMGJ_Compat_(memoria, {
+          origem: "DRIVE_EXTRACAO_REAL",
+          idOrigem: idOrigem,
+          nome: file.getName(),
+          mimeType: file.getMimeType(),
+          hash: hash,
+          competencia: validacao.dados.competencia || "",
+          categoria: validacao.dados.categoria || "outro",
+          status: "PROCESSADO",
+          resumo: montarResumoMemoriaExtracaoWMGJ_V1_(validacao.dados, extracao)
+        });
+      }
 
       atualizarLinhaFilaWMGJ_Compat_(fila, i + 1, idx, {
         STATUS: "PROCESSADO",
