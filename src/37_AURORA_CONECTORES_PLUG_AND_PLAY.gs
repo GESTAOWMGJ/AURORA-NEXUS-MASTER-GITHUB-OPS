@@ -5,7 +5,61 @@
  * Segredos entram somente por parâmetro de uma chamada autenticada/administrativa
  * e são persistidos em ScriptProperties. Nunca são retornados ou logados.
  */
-var AURORA_CONNECTOR_SETUP_VERSION = 'v1.0.0-plug-and-play';
+var AURORA_CONNECTOR_SETUP_VERSION = 'v1.1.0-firebase-native-sources';
+
+function auroraNormalizarSistemaFonte_(value) {
+  var system = String(value || 'DRIVE').trim().toUpperCase();
+  if (system === 'GENERIC_ERP') system = 'ERP';
+  if (['DRIVE', 'MV', 'TASY', 'ERP'].indexOf(system) < 0) {
+    throw new Error('AURORA_DOCUMENT_SOURCE_SYSTEM_INVALID');
+  }
+  return system;
+}
+
+function auroraNormalizarFontesDocumentais_(sources, primaryFolderId) {
+  var raw = Array.isArray(sources) && sources.length
+    ? sources
+    : [{ sourceId: 'drive-primary', system: 'DRIVE', folderId: primaryFolderId, slaMinutes: 1440 }];
+  if (raw.length > 12) throw new Error('AURORA_DOCUMENT_SOURCE_LIMIT');
+
+  var seen = {};
+  return raw.map(function(item, index) {
+    item = item || {};
+    var sourceId = String(item.sourceId || ('source-' + (index + 1))).trim().toLowerCase();
+    var folderId = String(item.folderId || '').trim();
+    var system = auroraNormalizarSistemaFonte_(item.system);
+    var slaMinutes = Number(item.slaMinutes || 1440);
+    if (!/^[a-z0-9][a-z0-9_.-]{2,63}$/.test(sourceId)) throw new Error('AURORA_DOCUMENT_SOURCE_ID_INVALID');
+    if (seen[sourceId]) throw new Error('AURORA_DOCUMENT_SOURCE_DUPLICATE');
+    if (!/^[A-Za-z0-9_-]{10,200}$/.test(folderId)) throw new Error('AURORA_DOCUMENT_SOURCE_FOLDER_INVALID');
+    if (!Number.isSafeInteger(slaMinutes) || slaMinutes < 15 || slaMinutes > 43200) throw new Error('AURORA_DOCUMENT_SOURCE_SLA_INVALID');
+    var folder = DriveApp.getFolderById(folderId);
+    seen[sourceId] = true;
+    return {
+      sourceId: sourceId,
+      system: system,
+      mode: 'DRIVE_FOLDER',
+      folderId: folderId,
+      folderName: folder.getName(),
+      slaMinutes: slaMinutes,
+      active: item.active !== false
+    };
+  });
+}
+
+function auroraFontesDocumentaisConfiguradas_() {
+  var props = PropertiesService.getScriptProperties();
+  var raw = props.getProperty('AURORA_DOCUMENT_SOURCE_REGISTRY');
+  if (raw) {
+    try {
+      var parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length) return parsed.filter(function(item) { return item && item.active !== false; });
+    } catch (ignore) {}
+  }
+  var fallback = String(props.getProperty('WMGJ_PASTA_ENTRADA_ID') || '');
+  return fallback ? [{ sourceId: 'drive-primary', system: 'DRIVE', mode: 'DRIVE_FOLDER', folderId: fallback, slaMinutes: 1440, active: true }] : [];
+}
+
 
 function auroraConfigurarConectoresPlugAndPlay(config) {
   config = config || {};
@@ -19,6 +73,7 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
   var externalBaseUrl = String(config.externalBaseUrl || '').trim();
   var externalApiKey = String(config.externalApiKey || '');
   var activate = config.activate === true;
+  var documentSources = auroraNormalizarFontesDocumentais_(config.documentSources, driveFolderId);
 
   if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(orgId)) throw new Error('AURORA_CONNECTOR_ORG_INVALID');
   if (!/^[A-Za-z0-9_-]{10,200}$/.test(driveFolderId)) throw new Error('AURORA_CONNECTOR_DRIVE_FOLDER_INVALID');
@@ -44,7 +99,9 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
     WMGJ_FIRESTORE_ORG_ID: orgId,
     WMGJ_FIRESTORE_DRY_RUN: activate ? 'false' : 'true',
     AURORA_FIRESTORE_MIRROR_REQUIRED: activate ? 'true' : 'false',
-    AURORA_CONNECTOR_SETUP_VERSION: AURORA_CONNECTOR_SETUP_VERSION
+    AURORA_CONNECTOR_SETUP_VERSION: AURORA_CONNECTOR_SETUP_VERSION,
+    AURORA_DOCUMENT_SOURCE_REGISTRY: JSON.stringify(documentSources),
+    AURORA_EXTERNAL_AI_FALLBACK_ENABLED: config.externalAiFallbackEnabled === true ? 'true' : 'false'
   };
   if (spreadsheetId) values.WMGJ_SPREADSHEET_ID = spreadsheetId;
   if (externalName) {
@@ -82,6 +139,8 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
       baseUrl: externalBaseUrl,
       inboundSecretConfigured: true
     } : null,
+    documentSources: documentSources.map(function(item) { return { sourceId: item.sourceId, system: item.system, mode: item.mode, folderId: item.folderId, slaMinutes: item.slaMinutes, active: item.active }; }),
+    nativeDataPlane: { storage: 'FIRESTORE', sourceAccessRequiredAfterIngest: false, externalAiFallbackEnabled: config.externalAiFallbackEnabled === true },
     continuousExtraction: activate,
     triggerInstalled: !!trigger,
     checkedAt: new Date().toISOString()
@@ -119,6 +178,12 @@ function auroraDiagnosticarConectoresPlugAndPlay() {
       mirrorRequired: String(props.getProperty('AURORA_FIRESTORE_MIRROR_REQUIRED') || 'false') === 'true',
       dryRun: String(props.getProperty('WMGJ_FIRESTORE_DRY_RUN') || 'true') !== 'false',
       diagnostic: firestore
+    },
+    documentSources: auroraFontesDocumentaisConfiguradas_().map(function(item) { return { sourceId: item.sourceId, system: item.system, mode: item.mode, folderId: item.folderId, slaMinutes: item.slaMinutes, active: item.active !== false }; }),
+    nativeDataPlane: {
+      storage: 'FIRESTORE',
+      sourceAccessRequiredAfterIngest: false,
+      externalAiFallbackEnabled: String(props.getProperty('AURORA_EXTERNAL_AI_FALLBACK_ENABLED') || 'false') === 'true'
     },
     externalSystem: {
       configured: !!props.getProperty('AURORA_EXTERNAL_SYSTEM_NAME'),
