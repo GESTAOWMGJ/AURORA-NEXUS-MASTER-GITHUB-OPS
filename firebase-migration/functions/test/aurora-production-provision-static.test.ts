@@ -41,6 +41,6 @@ test("production secrets stay local to bootstrap and are only verified in CI",()
   assert.match(workflow,/AURORA_NEXUS_CSRF_HMAC_KEY/);
   assert.match(workflow,/WMGJ_INGEST_HMAC_KEYRING/);
   assert.doesNotMatch(workflow,/secrets versions access latest[\s\S]*HML/);
-  assert.match(windowsBootstrap,/openssl/);
+  assert.match(windowsBootstrap,/RandomNumberGenerator/);
   assert.doesNotMatch(windowsBootstrap,/Write-Host.*hmac/i);
 });
