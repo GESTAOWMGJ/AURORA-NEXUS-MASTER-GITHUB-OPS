@@ -6,9 +6,11 @@ const workflow = readFileSync(new URL("../../../.github/workflows/aurora-cmek-hm
 const script = readFileSync(new URL("../../scripts/aurora-cmek-hml.sh", import.meta.url), "utf8");
 const policy = JSON.parse(readFileSync(new URL("../../policy/cmek-hml-baseline-v1.json", import.meta.url), "utf8"));
 
-test("CMEK HML workflow is manual-only and protected", () => {
+test("CMEK HML workflow is manual or one-shot request only and protected", () => {
   assert.match(workflow, /workflow_dispatch:/);
-  assert.doesNotMatch(workflow, /\npush:/);
+  assert.match(workflow, /push:/);
+  assert.match(workflow, /feat\/aurora-sec-002-cmek-lgpd-pack-20261001/);
+  assert.match(workflow, /\.github\/requests\/aurora-cmek-hml\.json/);
   assert.doesNotMatch(workflow, /\npull_request:/);
   assert.match(workflow, /environment: firebase-homologation/);
   assert.match(workflow, /google-github-actions\/auth@c200f3691d83b41bf9bbd8638997a462592937ed/);
@@ -17,8 +19,9 @@ test("CMEK HML workflow is manual-only and protected", () => {
   assert.match(workflow, /APPLY_AURORA_CMEK_HML/);
   assert.match(workflow, /RESTORE_AURORA_CMEK_HML/);
   assert.match(workflow, /TEST_AURORA_CMEK_KEY_FAILURE_HML/);
-  assert.match(workflow, /cmek_access_confirmed/);
-  assert.match(workflow, /AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED/);
+  assert.match(workflow, /productionMutation==false/);
+  assert.match(workflow, /clinicalSensitiveEnabled==false/);
+  assert.match(workflow, /realDataAllowed==false/);
 });
 
 test("CMEK HML policy forbids production, clinical data and destruction", () => {
@@ -28,6 +31,8 @@ test("CMEK HML policy forbids production, clinical data and destruction", () => 
   assert.equal(policy.realDataAllowed, false);
   assert.equal(policy.destructiveOperationsAllowed, false);
   assert.equal(policy.keyDestructionAllowed, false);
+  assert.equal(policy.firestoreCmekFeatureAccessRequired, false);
+  assert.equal(policy.firestoreCmekFeatureAccessState, "RUNTIME_VERIFIED_BY_DATABASE_CREATE_OR_EXISTING_CMEK_DATABASE");
   assert.equal(policy.projectId, "wmgj-hml-jfn-20260927");
   assert.equal(policy.databaseId, "aurora-hml-cmek");
   assert.equal(policy.location, "southamerica-east1");
@@ -48,9 +53,9 @@ test("CMEK HML script prepares guarded database, backup, restore and reversible 
     "kms versions disable",
     "kms versions enable",
     "trap reenable",
+    "AURORA_FIRESTORE_CMEK_RUNTIME_VERIFIED_CREATE",
     "AURORA_CMEK_KEY_FAILURE_PENDING_PROPAGATION",
-    "AURORA_CMEK_HML_RESTORE_VERIFIED",
-    "BLOCKED_FIRESTORE_CMEK_FEATURE_ACCESS_NOT_CONFIRMED"
+    "AURORA_CMEK_HML_RESTORE_VERIFIED"
   ]) assert.ok(script.includes(required), required);
 
   for (const forbidden of [
