@@ -3,10 +3,11 @@
   "confirmation": "DEPLOY_HOMOLOGATION",
   "projectId": "wmgj-hml-jfn-20260927",
   "authorizedScope": "PR70_FIREBASE_NATIVE_DOCUMENTS",
-  "expectedSourceSha": "ee378f985f69113866d7b72a49e0628bb5ed73ca",
+  "expectedSourceSha": "245fdeed1a0bc5abc8f8cd89a2e5def1a1b7ead7",
   "sourceMutation": false,
   "productionMutation": false,
   "clinicalSensitiveEnabled": false,
   "requestedAt": "2026-10-01",
-  "requestReason": "PR70_FIREBASE_NATIVE_WORKFLOW_CORRECTED"
+  "requestReason": "RETRY_HML_AFTER_STALE_PROTECTED_RUN",
+  "supersedesRunId": 36895304509
 }
