@@ -327,12 +327,18 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
 
 const REASON_CODES = new Set(["DATA_DIVERGENCE", "SLA_BREACH", "MISSING_EVIDENCE", "AUDIT_FINDING", "MANUAL_REVIEW"]);
 const RESOLUTION_CODES = new Set(["EVIDENCE_CONFIRMED", "SOURCE_CORRECTED", "FALSE_POSITIVE", "ESCALATED"]);
-const TARGET_TYPES = new Set(["invoice", "bankTransaction", "sourceDocument", "reconciliation", "auditFinding"]);
+const TARGET_TYPES = new Set(["invoice", "bankTransaction", "sourceDocument", "reconciliation", "auditFinding", "managementInput"]);
 
 export type ActionCommand =
-  | { type: "CREATE_REVIEW"; targetType: string; targetId: string; reasonCode: string; riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; dueAt: string; competence: string }
+  | { type: "CREATE_REVIEW"; targetType: string; targetId: string; reasonCode: string; riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; dueAt: string; competence: string; title?: string; details?: string }
   | { type: "ACKNOWLEDGE"; actionId: string; expectedRevision: number }
   | { type: "RESOLVE"; actionId: string; expectedRevision: number; resolutionCode: string; evidenceRefs: string[] };
+
+function safeOperationalText(value: unknown, maxLength: number): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > 0 && normalized.length <= maxLength ? normalized : null;
+}
 
 function safeEvidenceRefs(value: unknown): string[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > 20) return null;
@@ -350,9 +356,22 @@ export function parseActionCommand(value: unknown): ActionCommand | null {
     const riskLevel = typeof body.riskLevel === "string" ? body.riskLevel : "";
     const dueAt = typeof body.dueAt === "string" ? body.dueAt : "";
     const competence = typeof body.competence === "string" ? body.competence : "";
+    const title = safeOperationalText(body.title, 120);
+    const details = safeOperationalText(body.details, 1000);
     if (!TARGET_TYPES.has(targetType) || !/^[A-Za-z0-9._:-]{1,160}$/.test(targetId) || !REASON_CODES.has(reasonCode)) return null;
     if (!["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(riskLevel) || !Number.isFinite(Date.parse(dueAt)) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(competence)) return null;
-    return { type: "CREATE_REVIEW", targetType, targetId, reasonCode, riskLevel: riskLevel as "LOW" | "MEDIUM" | "HIGH" | "CRITICAL", dueAt, competence };
+    if (targetType === "managementInput" && !title) return null;
+    return {
+      type: "CREATE_REVIEW",
+      targetType,
+      targetId,
+      reasonCode,
+      riskLevel: riskLevel as "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
+      dueAt,
+      competence,
+      ...(title ? { title } : {}),
+      ...(details ? { details } : {})
+    };
   }
   const actionId = typeof body.actionId === "string" ? body.actionId.trim() : "";
   const expectedRevision = body.expectedRevision;
