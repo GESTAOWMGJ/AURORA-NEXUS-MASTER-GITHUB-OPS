@@ -104,7 +104,7 @@ export function validateEvent(input: unknown, rawBytes: number): ValidationResul
   const actor = isObject(input.actor) ? input.actor : {};
   const source = isObject(input.source) ? input.source : {};
   const actorTypes = ["SYSTEM", "USER", "AI"];
-  const sourceSystems = ["GMAIL", "DRIVE", "SHEETS", "APPS_SCRIPT", "MANUAL"];
+  const sourceSystems = ["GMAIL", "DRIVE", "SHEETS", "APPS_SCRIPT", "MANUAL", "MV", "TASY", "ERP"];
   if (!actorTypes.includes(String(actor.type || ""))) errors.push("actor.type inválido");
   if (!sourceSystems.includes(String(source.system || ""))) errors.push("source.system inválido");
   requiredString(actor.id, "actor.id", errors, 256);
