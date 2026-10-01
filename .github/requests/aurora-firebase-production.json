@@ -5,9 +5,10 @@
   "region": "southamerica-east1",
   "organizationId": "wmgj",
   "deploymentStage": "COLD_PRODUCTION",
-  "expectedSourceSha": "57d9058082521b82415a37310b327f9ff637e76f",
+  "expectedSourceSha": "7cb5df59fc1c58dcc6ac2f9bdf6f79ddd5e0b964",
   "productionMutation": false,
   "sourceMutation": false,
   "clinicalSensitiveEnabled": false,
-  "requestedAt": "2026-10-01"
+  "requestedAt": "2026-10-01",
+  "requestReason": "BOOTSTRAP_WIF_FIXED_PR78"
 }
