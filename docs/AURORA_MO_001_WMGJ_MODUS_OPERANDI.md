@@ -452,7 +452,7 @@ A instalação do AURORA deve provisionar um registro de fontes documentais por 
 - diagnóstico de acessibilidade;
 - isolamento por organização.
 
-O modo inicial implementado é `DRIVE_FOLDER`: exportações documentais do MV, TASY ou outro ERP são direcionadas/sincronizadas para pastas autorizadas e o mesmo pipeline canônico as acompanha continuamente. Um conector indisponível não derruba os demais.
+Há dois modos canônicos implementados: `DRIVE_FOLDER`, para exportações/sincronizações documentais em pastas autorizadas; e `AURORA_INTEGRATION_API`, para push server-to-server de fatos documentais estruturados por MV, TASY ou outro ERP usando chave Aurora com escopo `documents.ingest`. O endpoint direto não aceita narrativa bruta, PHI ou campos arbitrários. Ambos terminam no mesmo `sourceDocument` canônico do Firebase. Um conector indisponível não derruba os demais.
 
 A vigilância deve procurar pelo menos:
 
@@ -482,6 +482,6 @@ DETECTAR NO FIREBASE
 → REUTILIZAR REGRA VALIDADA
 ```
 
-A aprendizagem orgânica não fecha pendência por inferência. Somente resolução validada com evidência pode virar `REWORK`, `VALIDATED_DECISION`, `SECTOR_NEED` ou outro sinal elegível. Ferramentas promovidas continuam limitadas por escopo, revisão, teste, rollback e proibição de mutação autônoma do sistema-fonte.
+A aprendizagem orgânica não fecha pendência por inferência. Somente resolução validada com evidência pode virar `REWORK`, `VALIDATED_DECISION`, `SECTOR_NEED` ou outro sinal elegível. Pendências criadas pelo watchdog carregam metadados orgânicos controlados; após resolução humana válida, a observação correspondente é registrada automaticamente e de forma idempotente no checkpoint AURORA-ORG-001, sem uma segunda consulta à origem. Ferramentas promovidas continuam limitadas por escopo, revisão, teste, rollback e proibição de mutação autônoma do sistema-fonte.
 
 Essa vigilância é complementar aos módulos já existentes de faturamento, glosa, reconciliação, SLA, governança e auditoria; não cria produto, banco ou motor paralelo.
