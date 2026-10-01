@@ -45,3 +45,8 @@ Cada entrega deve separar especificação, código, testes locais, CI, teste com
 AURORA-SEC-001 governa criptografia, IAM, secrets, supply chain, privacidade, incidentes e market readiness. HML sem dado sensível pode usar criptografia padrão do provedor; persistência de CLINICAL_SENSITIVE exige estratégia de CMEK e criptografia de aplicação homologadas conforme a habilidade. Banco Firestore existente com criptografia Google-managed não deve ser tratado como convertível in-place para CMEK.
 
 Toda entrega deve separar SPECIFIED, IMPLEMENTED, TESTED, CI_VERIFIED, HML_VERIFIED, PRODUCTION_VERIFIED, AUDITED_INDEPENDENTLY e CERTIFIED. Nunca vender certificação, conformidade ou segurança de produção por inferência a partir de código ou CI.
+
+
+### Pré-requisitos para dado pessoal sensível e CMEK
+
+Mudanças que envolvam Firestore CMEK, KMS, dados pessoais reais, dados clínicos, DPA, incidentes ou liberação comercial devem ler o pacote AURORA-SEC-002 (`firebase-migration/docs/30-37` e `policy/cmek-hml-baseline-v1.json`). Banco CMEK deve nascer separado em HML; não converter nem apagar o banco `(default)`. `CLINICAL_SENSITIVE` permanece bloqueado por ausência de qualquer evidência obrigatória.
