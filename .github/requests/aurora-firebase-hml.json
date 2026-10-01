@@ -2,7 +2,7 @@
   "requestVersion": 1,
   "confirmation": "DEPLOY_HOMOLOGATION",
   "projectId": "wmgj-hml-jfn-20260927",
-  "authorizedScope": "PR70_FIREBASE_NATIVE_DOCUMENTS",
+  "authorizedScope": "PR70_FIREBASE_NATIVE_DOCUMENTS_RUNTIME_V2",
   "expectedSourceSha": "f647f182f3e2c5ccce49d750f41c40eb374588a2",
   "sourceMutation": false,
   "productionMutation": false,
