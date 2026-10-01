@@ -1,0 +1,11 @@
+{
+  "requestVersion": 1,
+  "confirmation": "DEPLOY_HOMOLOGATION",
+  "projectId": "wmgj-hml-jfn-20260927",
+  "authorizedScope": "PR72_APP_PRIMARY_INPUT",
+  "expectedSourceSha": "e4794e50fb65d6fde0881557621b40198847f4ca",
+  "sourceMutation": false,
+  "productionMutation": false,
+  "clinicalSensitiveEnabled": false,
+  "requestedAt": "2026-10-01"
+}
