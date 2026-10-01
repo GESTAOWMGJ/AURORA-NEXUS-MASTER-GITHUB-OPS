@@ -1,7 +1,7 @@
 ---
 name: aurora-nexus-continuous-dev
 description: Desenvolvimento contínuo verificável do AURORA NEXUS até versão final vendável. Cada solicitação relevante vira incremento versionado com patch, testes, evidência, progresso e próximo gate.
-version: 1.1.0
+version: 1.2.0
 code: AURORA-DEV-001
 ---
 
@@ -41,6 +41,10 @@ Para toda solicitação de produto, engenharia, gestão, auditoria, interface, i
 12. Para toda divergência financeira ou operacional, preservar fato, fonte, evidência, impacto, responsável, SLA, aging, próxima ação e residual.
 13. Nunca converter produção em receita, faturamento em recebimento, saldo em lucro ou ausência de evidência em zero.
 14. Quando uma prática WMGJ provar valor, promovê-la por AURORA-ORG-001: evidência → padrão → teste → revisão humana → piloto → medição → promoção/rollback.
+15. Executar auditoria técnica semanal usando a ponta real da `main` e janela móvel de 7 dias.
+16. Verificar sintaxe, funções/fontes duplicadas, segredos, mudanças e testes/CI sem expor conteúdo sensível.
+17. Limitar o relatório a no máximo 3 prioridades materiais entre segurança/integridade, falha de algoritmo e custo/eficiência, cada uma com evidência e próximo passo verificável.
+18. Nunca reutilizar CI verde de SHA/base vencidos como liberação: reconciliar com a `main` corrente e revalidar o SHA final antes de sair de draft; correções permanecem em branch/PR draft, sem merge ou deploy automático.
 
 ## Estratégia de independência de IA externa
 
