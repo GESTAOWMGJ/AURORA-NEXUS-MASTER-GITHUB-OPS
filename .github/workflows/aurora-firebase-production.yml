@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - ".github/requests/aurora-firebase-production.json"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,15 +18,15 @@ concurrency:
 
 jobs:
   provision:
-    name: Create isolated cold-production Firebase project
+    name: Complete isolated cold-production Firebase setup
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # Bootstrap only: this protected HML environment currently owns the validated\n    # GitHub→GCP WIF variables. The target project remains strictly production.\n    environment: firebase-homologation
+    environment: firebase-production
     env:
       REQUEST_FILE: .github/requests/aurora-firebase-production.json
-      HML_PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
-      WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
-      PROVISION_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      APPROVED_PROJECT: ${{ vars.FIREBASE_PROD_PROJECT_ID }}
+      WIF_PROVIDER: ${{ vars.GCP_PROD_WIF_PROVIDER }}
+      PROVISION_SERVICE_ACCOUNT: ${{ vars.GCP_PROD_DEPLOY_SERVICE_ACCOUNT }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,92 +58,35 @@ jobs:
           test "$current_main" = "$GITHUB_SHA"
           project_id="$(jq -r '.projectId' "$REQUEST_FILE")"
           region="$(jq -r '.region' "$REQUEST_FILE")"
+          test -n "$APPROVED_PROJECT"
+          test "$project_id" = "$APPROVED_PROJECT"
           echo "project_id=$project_id" >> "$GITHUB_OUTPUT"
           echo "region=$region" >> "$GITHUB_OUTPUT"
 
       - uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
-          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_PROD_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_PROD_DEPLOY_SERVICE_ACCOUNT }}
 
       - uses: google-github-actions/setup-gcloud@v2
         with:
           version: "548.0.0"
 
-      - name: Verify cloud identity and billing source
-        id: billing
+      - name: Verify pre-bootstrapped production identity and project
         env:
           PROJECT_ID: ${{ steps.request.outputs.project_id }}
         run: |
           set -euo pipefail
-          test -n "$HML_PROJECT_ID"
-          test "$PROJECT_ID" != "$HML_PROJECT_ID"
+          test -n "$APPROVED_PROJECT"
+          test "$PROJECT_ID" = "$APPROVED_PROJECT"
+          test "$PROJECT_ID" != "wmgj-hml-jfn-20260927"
           test "$PROJECT_ID" != "wmgj-ops"
           case "$PROJECT_ID" in aurora-nexus-prod-*) ;; *) exit 41 ;; esac
+          test -n "$WIF_PROVIDER"
+          test -n "$PROVISION_SERVICE_ACCOUNT"
           active_account="$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')"
-          test -n "$active_account"
           test "$active_account" = "$PROVISION_SERVICE_ACCOUNT"
-          billing_resource="$(gcloud billing projects describe "$HML_PROJECT_ID" --format='value(billingAccountName)')"
-          test -n "$billing_resource"
-          billing_id="${billing_resource##*/}"
-          [[ "$billing_id" =~ ^[A-Fa-f0-9-]{6,64}$ ]]
-          echo "billing_id=$billing_id" >> "$GITHUB_OUTPUT"
-
-      - name: Create production project and attach billing
-        env:
-          PROJECT_ID: ${{ steps.request.outputs.project_id }}
-          BILLING_ID: ${{ steps.billing.outputs.billing_id }}
-        run: |
-          set -euo pipefail
-          if gcloud projects describe "$PROJECT_ID" --format='value(projectId)' >/dev/null 2>&1; then
-            test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectId)')" = "$PROJECT_ID"
-          else
-            gcloud projects create "$PROJECT_ID" --name="Aurora Nexus Production" --quiet
-          fi
-          gcloud billing projects link "$PROJECT_ID" --billing-account "$BILLING_ID" --quiet
-          gcloud projects update "$PROJECT_ID"             --update-labels='environment=production,system=aurora-nexus,data_scope=nonclinical,managed_by=jfn,deployment_stage=cold'             --quiet >/dev/null
-
-      - name: Create dedicated production deploy identity
-        env:
-          PROJECT_ID: ${{ steps.request.outputs.project_id }}
-        run: |
-          set -euo pipefail
-          prod_sa_name="aurora-prod-deploy"
-          prod_sa="${prod_sa_name}@${PROJECT_ID}.iam.gserviceaccount.com"
-          gcloud iam service-accounts describe "$prod_sa" --project "$PROJECT_ID" >/dev/null 2>&1 \
-            || gcloud iam service-accounts create "$prod_sa_name" \
-              --display-name="Aurora Nexus Production Deploy" \
-              --project "$PROJECT_ID" --quiet
-          for role in \
-            roles/firebase.admin \
-            roles/datastore.owner \
-            roles/cloudfunctions.admin \
-            roles/run.admin \
-            roles/artifactregistry.admin \
-            roles/secretmanager.admin \
-            roles/cloudscheduler.admin \
-            roles/eventarc.admin \
-            roles/pubsub.admin \
-            roles/serviceusage.serviceUsageAdmin \
-            roles/iam.serviceAccountUser; do
-            gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-              --member="serviceAccount:$prod_sa" \
-              --role="$role" \
-              --condition=None \
-              --quiet >/dev/null
-          done
-          provider_project_number="$(cut -d/ -f2 <<<"$WIF_PROVIDER")"
-          provider_pool="$(cut -d/ -f6 <<<"$WIF_PROVIDER")"
-          [[ "$provider_project_number" =~ ^[0-9]+$ ]]
-          [[ "$provider_pool" =~ ^[A-Za-z0-9_-]{2,128}$ ]]
-          principal="principalSet://iam.googleapis.com/projects/${provider_project_number}/locations/global/workloadIdentityPools/${provider_pool}/attribute.repository/${GITHUB_REPOSITORY}"
-          gcloud iam service-accounts add-iam-policy-binding "$prod_sa" \
-            --project "$PROJECT_ID" \
-            --role="roles/iam.workloadIdentityUser" \
-            --member="$principal" \
-            --quiet >/dev/null
-          echo "AURORA_PROD_DEPLOY_SERVICE_ACCOUNT=$prod_sa"
-          echo "AURORA_PROD_WIF_PROVIDER_CONFIGURED=true"
+          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectId)')" = "$PROJECT_ID"
 
       - name: Enable production platform APIs
         env:
@@ -188,34 +132,16 @@ jobs:
           test "$(jq -r '.deleteProtectionState // empty' <<<"$db_json")" = "DELETE_PROTECTION_ENABLED"
           test "$(jq -r '.pointInTimeRecoveryEnablement // empty' <<<"$db_json")" = "POINT_IN_TIME_RECOVERY_ENABLED"
 
-      - name: Provision isolated application secrets
+      - name: Verify isolated production secrets
         env:
           PROJECT_ID: ${{ steps.request.outputs.project_id }}
         run: |
           set -euo pipefail
-          umask 077
-          temp="$(mktemp -d "${RUNNER_TEMP}/aurora-prod-secrets.XXXXXX")"
-          cleanup(){ find "$temp" -type f -delete; rmdir "$temp"; }
-          trap cleanup EXIT
-          for name in AURORA_NEXUS_ALLOWED_EMAILS AURORA_NEXUS_CSRF_HMAC_KEY WMGJ_INGEST_HMAC_KEYRING; do
-            gcloud secrets describe "$name" --project "$PROJECT_ID" >/dev/null 2>&1               || gcloud secrets create "$name" --project "$PROJECT_ID" --replication-policy=automatic --quiet >/dev/null
+          for secret in AURORA_NEXUS_ALLOWED_EMAILS AURORA_NEXUS_CSRF_HMAC_KEY WMGJ_INGEST_HMAC_KEYRING; do
+            gcloud secrets describe "$secret" --project "$PROJECT_ID" --format='value(name)' >/dev/null
+            latest="$(gcloud secrets versions describe latest --secret "$secret" --project "$PROJECT_ID" --format='value(state)')"
+            test "$latest" = "ENABLED"
           done
-          gcloud secrets versions access latest             --secret AURORA_NEXUS_ALLOWED_EMAILS             --project "$HML_PROJECT_ID"             --out-file="$temp/allowed-emails"
-          test -s "$temp/allowed-emails"
-          node -e '
-            const fs=require("node:fs");
-            const xs=fs.readFileSync(process.argv[1],"utf8").split(/[\s,;]+/).filter(Boolean);
-            process.exit(xs.length>0 && xs.every(x=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x))?0:1);
-          ' "$temp/allowed-emails"
-          gcloud secrets versions add AURORA_NEXUS_ALLOWED_EMAILS             --project "$PROJECT_ID" --data-file="$temp/allowed-emails" --quiet >/dev/null
-          openssl rand -hex 32 > "$temp/csrf"
-          gcloud secrets versions add AURORA_NEXUS_CSRF_HMAC_KEY             --project "$PROJECT_ID" --data-file="$temp/csrf" --quiet >/dev/null
-          hmac_secret="$(openssl rand -hex 32)"
-          jq -n --arg secret "$hmac_secret"             '{"apps-script-prod-cold-20261001":{active:false,secret:$secret,orgIds:["wmgj"],entityTypes:["sourceDocument","invoice","bankTransaction","gloss","reconciliation"]}}'             > "$temp/keyring.json"
-          unset hmac_secret
-          gcloud secrets versions add WMGJ_INGEST_HMAC_KEYRING             --project "$PROJECT_ID" --data-file="$temp/keyring.json" --quiet >/dev/null
-          cleanup
-          trap - EXIT
 
       - name: Initialize cold-production organization guardrails
         env:
@@ -240,7 +166,6 @@ jobs:
           REGION: ${{ steps.request.outputs.region }}
         run: |
           set -euo pipefail
-          test "$(gcloud billing projects describe "$PROJECT_ID" --format='value(billingEnabled)')" = "True"
           db_json="$(gcloud firestore databases describe --database='(default)' --project "$PROJECT_ID" --format=json)"
           test "$(jq -r '.locationId // empty' <<<"$db_json")" = "$REGION"
           test "$(jq -r '.deleteProtectionState // empty' <<<"$db_json")" = "DELETE_PROTECTION_ENABLED"
@@ -262,7 +187,7 @@ jobs:
             test "$latest" = "ENABLED"
           done
           prod_sa="aurora-prod-deploy@${PROJECT_ID}.iam.gserviceaccount.com"
-          gcloud iam service-accounts describe "$prod_sa" --project "$PROJECT_ID" --format='value(email)' | grep -Fx "$prod_sa" >/dev/null
+          test "$PROVISION_SERVICE_ACCOUNT" = "$prod_sa"
           echo "AURORA_PRODUCTION_PROJECT_CREATED=$PROJECT_ID"
           echo "AURORA_PRODUCTION_STAGE=COLD_PRODUCTION"
           echo "AURORA_PRODUCTION_DEPLOY_IDENTITY=$prod_sa"
