@@ -1,11 +1,23 @@
 ---
 name: aurora-nexus-continuous-dev
 description: Desenvolvimento contínuo verificável do AURORA NEXUS até versão final vendável. Cada solicitação relevante vira incremento versionado com patch, testes, evidência, progresso e próximo gate.
-version: 1.0.0
+version: 1.1.0
 code: AURORA-DEV-001
 ---
 
 # AURORA NEXUS — Desenvolvimento Contínuo Verificável
+
+## Fonte canônica do modus operandi
+
+Antes de qualquer alteração relevante em WMGJ/AURORA, ler `docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md`.
+
+AURORA-MO-001 incorpora os workflows e automações reais da WMGJ como matriz operacional do AURORA NEXUS. WMGJ continua sendo tenant-piloto e fonte de aprendizado; não pode virar dependência estrutural nem conjunto de regras hard-coded do produto.
+
+O ciclo obrigatório é:
+
+`OBSERVAR → INGESTAR → COMPROVAR → CONFRONTAR → DETECTAR → PRIORIZAR → AGIR → VALIDAR → MEDIR → APRENDER → REUTILIZAR`.
+
+A regra de pendências é ativa: divergência, glosa, documento faltante, faturamento, recebimento, repasse ou SLA permanece em ciclo até fechamento comprovado.
 
 ## Finalidade
 
@@ -25,6 +37,10 @@ Para toda solicitação de produto, engenharia, gestão, auditoria, interface, i
 8. Não declarar conclusão por existência de código.
 9. Não contornar gates de segurança, recuperação, login, MFA, proveniência ou rollback.
 10. Informar o próximo incremento de maior valor para aproximar `1.0.0` GA.
+11. Reutilizar primeiro os workflows WMGJ/AURORA existentes; criar fluxo novo somente quando a capacidade não couber na arquitetura atual.
+12. Para toda divergência financeira ou operacional, preservar fato, fonte, evidência, impacto, responsável, SLA, aging, próxima ação e residual.
+13. Nunca converter produção em receita, faturamento em recebimento, saldo em lucro ou ausência de evidência em zero.
+14. Quando uma prática WMGJ provar valor, promovê-la por AURORA-ORG-001: evidência → padrão → teste → revisão humana → piloto → medição → promoção/rollback.
 
 ## Estratégia de independência de IA externa
 

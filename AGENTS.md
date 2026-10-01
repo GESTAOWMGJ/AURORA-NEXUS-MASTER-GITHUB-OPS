@@ -1,5 +1,15 @@
 # AURORA NEXUS — modus operandi do repositório
 
+## Fonte mestre operacional
+
+Antes de qualquer alteração em operação, automação, faturamento, auditoria, ingestão, workflow, SLA, dashboard ou governança, ler `docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md` e `skills/aurora-nexus-continuous-dev/SKILL.md`.
+
+`AURORA-MO-001` é a fonte canônica do aprendizado operacional WMGJ incorporado ao AURORA NEXUS. Reutilizar os fluxos existentes antes de criar novos componentes. WMGJ é tenant-piloto e matriz de referência, não dependência estrutural.
+
+Ciclo mestre: `OBSERVAR → INGESTAR → COMPROVAR → CONFRONTAR → DETECTAR → PRIORIZAR → AGIR → VALIDAR → MEDIR → APRENDER → REUTILIZAR`.
+
+Pendências materiais permanecem ativas até fechamento comprovado. Diferenças são exceções rastreáveis, nunca correções silenciosas.
+
 Antes de alterar onboarding, instaladores, aprendizagem operacional ou composição de ferramentas, ler `skills/aurora-nexus-organic/SKILL.md`, `firebase-migration/docs/18-integracao-organica-1.1.0-hml.md`, `desktop/README.md` e as políticas existentes em `firebase-migration/policy/`.
 
 AURORA NEXUS é o sistema-mãe JFN-AUD-GOV-001. Preservar M01–M10, JFN-AUD-FAT-001/M03.1, histórico e WMGJ Operação como piloto. A habilidade AURORA-ORG-001 é uma extensão, não outro produto ou banco.
