@@ -149,6 +149,7 @@ function wmgjFirestoreSourceSystem_(value) {
 }
 
 function wmgjFirestoreAmountCents_(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
   var amount = Number(value);
   if (!isFinite(amount) || amount < 0) return null;
   var cents = Math.round(amount * 100);
@@ -167,9 +168,13 @@ function wmgjFirestoreNativeSnapshot_(classification, context) {
     && extractionMethod !== 'metadata_fallback'
     && extractionMethod !== 'drive_api_indisponivel';
   var amountCents = wmgjFirestoreAmountCents_(classification.valor_total);
+  var rawCount = classification.atendimentos;
+  var count = rawCount === null || rawCount === undefined || String(rawCount).trim() === '' ? null : Number(rawCount);
+  if (!Number.isSafeInteger(count) || count < 0) count = null;
   var missing = 0;
   if (['financeiro', 'glosa', 'produtividade'].indexOf(category) >= 0 && !competence) missing++;
   if (['financeiro', 'glosa'].indexOf(category) >= 0 && amountCents === null) missing++;
+  if (category === 'produtividade' && count === null) missing++;
 
   var fragility = 'NONE';
   if (!extractionComplete) fragility = 'DEGRADED_EXTRACTION';
@@ -187,9 +192,9 @@ function wmgjFirestoreNativeSnapshot_(classification, context) {
     extractionComplete: extractionComplete,
     classificationSource: classificationSource,
     externalAiUsed: externalAiUsed,
-    nativeReady: extractionComplete && confidence >= 0.6,
-    sourceIndependent: extractionComplete,
-    externalFetchRequired: !extractionComplete,
+    nativeReady: extractionComplete && confidence >= 0.6 && missing === 0,
+    sourceIndependent: extractionComplete && confidence >= 0.6 && missing === 0,
+    externalFetchRequired: !(extractionComplete && confidence >= 0.6 && missing === 0),
     originSystem: wmgjFirestoreSourceSystem_(context.sourceSystem),
     originConnector: String(context.originConnector || 'DRIVE_FOLDER').slice(0, 64),
     documentFragility: fragility,
@@ -197,8 +202,7 @@ function wmgjFirestoreNativeSnapshot_(classification, context) {
     flowStage: 'FIREBASE_CANONICALIZED'
   };
   if (amountCents !== null) snapshot.amountCents = amountCents;
-  var count = Number(classification.atendimentos);
-  if (Number.isSafeInteger(count) && count >= 0) snapshot.count = count;
+  if (count !== null) snapshot.count = count;
   if (classification.sla_due_at && Number.isFinite(Date.parse(String(classification.sla_due_at)))) {
     snapshot.slaDueAt = new Date(String(classification.sla_due_at)).toISOString();
   }
