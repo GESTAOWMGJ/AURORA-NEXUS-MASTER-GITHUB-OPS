@@ -465,7 +465,7 @@ function classificarDocumentoFallbackLocalWMGJ_V1_(texto, file) {
   var valor = extrairValorMonetarioWMGJ_V1_(texto);
   var atendimentos = extrairNumeroAtendimentosWMGJ_V1_(texto);
   var competencia = extrairCompetenciaWMGJ_V1_(texto);
-  var confianca = categoria !== "outro" ? 0.78 : (valor > 0 || atendimentos > 0 ? 0.68 : 0.4);
+  var confianca = categoria !== "outro" ? 0.78 : ((Number(valor) > 0 || Number(atendimentos) > 0) ? 0.68 : 0.4);
 
   return {
     categoria: categoria,
@@ -491,7 +491,7 @@ function classificarDocumentoFallbackLocalWMGJ_V1_(texto, file) {
 
 function extrairValorMonetarioWMGJ_V1_(texto) {
   var match = String(texto || "").match(/R\$\s*([0-9\.]+,[0-9]{2})/i);
-  if (!match) return 0;
+  if (!match) return null;
   var normalizado = match[1].replace(/\./g, "").replace(",", ".");
   var valor = Number(normalizado);
   return isNaN(valor) ? 0 : valor;
@@ -500,7 +500,7 @@ function extrairValorMonetarioWMGJ_V1_(texto) {
 function extrairNumeroAtendimentosWMGJ_V1_(texto) {
   var t = String(texto || "");
   var match = t.match(/(\d{1,6})\s+atendimentos?/i) || t.match(/atendimentos?\D+(\d{1,6})/i);
-  if (!match) return 0;
+  if (!match) return null;
   var n = Number(match[1]);
   return isNaN(n) ? 0 : n;
 }
