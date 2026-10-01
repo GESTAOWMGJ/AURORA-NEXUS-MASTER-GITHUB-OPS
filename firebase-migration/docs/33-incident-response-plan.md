@@ -111,7 +111,7 @@ DETECTAR → TRIAR → CLASSIFICAR → CONTER → PRESERVAR EVIDÊNCIA
 
 ## 7. Comunicação regulatória LGPD
 
-O controlador avalia se o incidente pode acarretar risco ou dano relevante aos titulares. Nos casos comunicáveis, a Resolução CD/ANPD nº 15/2024 estabelece comunicação à ANPD e aos titulares pelo controlador nos termos e prazos aplicáveis; o processo interno do AURORA deve produzir informação suficiente sem demora.
+O controlador avalia se o incidente pode acarretar risco ou dano relevante aos titulares. Nos casos comunicáveis, a Resolução CD/ANPD nº 15/2024 estabelece, como regra geral, comunicação à ANPD e aos titulares pelo controlador em até três dias úteis contados do conhecimento de que o incidente afetou dados pessoais, ressalvada legislação específica e regras de prazo diferenciado aplicáveis. O processo interno do AURORA deve produzir informação suficiente sem demora.
 
 **SLA interno do operador:** notificar o controlador de incidente material confirmado ou razoavelmente suspeito em até 24 horas da ciência, salvo prazo contratual menor, para não consumir o prazo regulatório do controlador.
 
