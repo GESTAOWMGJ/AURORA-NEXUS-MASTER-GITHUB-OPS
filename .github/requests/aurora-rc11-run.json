@@ -1,0 +1,16 @@
+{
+  "requestVersion": 3,
+  "confirmation": "RUN_RC11_HML",
+  "projectId": "wmgj-hml-jfn-20260927",
+  "sourceDatabase": "(default)",
+  "competence": "2026-05",
+  "sample": {
+    "invoiceNumber": "8",
+    "expectedPairCount": 2
+  },
+  "productionMutation": false,
+  "clinicalSensitiveEnabled": false,
+  "sourceMutation": false,
+  "requestedAt": "2026-09-30",
+  "restoreDatabasePrefix": "rc11-restore"
+}

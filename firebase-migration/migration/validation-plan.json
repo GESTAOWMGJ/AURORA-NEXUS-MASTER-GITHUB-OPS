@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "gates": [
+    { "id": "COUNTS", "description": "contagem por aba e coleção", "tolerance": 0 },
+    { "id": "FINANCIAL_TOTALS", "description": "receitas, despesas, impostos, glosas e saldos", "tolerance": "definida e aprovada por competência" },
+    { "id": "COMPETENCE", "description": "assistencial, fiscal, caixa e contábil preservadas", "tolerance": 0 },
+    { "id": "INVOICE_CHAIN", "description": "notas substituídas e ativas ligadas", "tolerance": 0 },
+    { "id": "EVIDENCE", "description": "100% dos registros críticos com fonte e hash", "tolerance": 0 },
+    { "id": "WORKFLOW", "description": "bloqueios e revisão humana preservados", "tolerance": 0 },
+    { "id": "SECURITY", "description": "isolamento entre tenants e negação não autenticada", "tolerance": 0 },
+    { "id": "RUNTIME", "description": "idempotência, retry, dead-letter e watchdog testados", "tolerance": 0 }
+  ],
+  "cutoverRequirement": "dois fechamentos completos em paralelo sem divergência material"
+}

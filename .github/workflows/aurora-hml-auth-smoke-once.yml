@@ -1,0 +1,99 @@
+name: Aurora HML Auth Smoke Once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/aurora-hml-auth-smoke-once.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  smoke:
+    name: HML authenticated smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: firebase-homologation
+    steps:
+      - name: Authenticate to HML with WIF
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Configure gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: "548.0.0"
+          project_id: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+
+      - name: Validate HML login and organic runtime
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+          SMOKE_UID: ${{ vars.FIREBASE_HML_SMOKE_UID }}
+          SMOKE_EMAIL: ${{ vars.FIREBASE_HML_SMOKE_EMAIL }}
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = "wmgj-hml-jfn-20260927"
+          test -n "$DEPLOY_SERVICE_ACCOUNT"
+          test -n "$SMOKE_UID"
+          test -n "$SMOKE_EMAIL"
+
+          base="https://${PROJECT_ID}.web.app"
+          shell="$(curl --fail --silent --show-error --max-time 30 "$base/")"
+          grep -Fq "Ambiente privado" <<<"$shell"
+          if grep -Fq "Operação WMGJ" <<<"$shell"; then
+            echo "ANONYMOUS_PRIVATE_DATA_EXPOSED"
+            exit 80
+          fi
+
+          tmp="$(mktemp -d)"
+          trap 'find "$tmp" -type f -delete; rmdir "$tmp"' EXIT
+
+          code="$(curl --silent --show-error --max-time 30 -H 'Accept: application/json' -o "$tmp/anon.json" -w '%{http_code}' "$base/api/bootstrap")"
+          test "$code" = "401"
+          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$tmp/anon.json" >/dev/null
+
+          access_token="$(gcloud auth print-access-token)"
+          apps_json="$(curl --fail --silent --show-error --max-time 30 -H "Authorization: Bearer ${access_token}" "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/webApps?pageSize=100")"
+          app_name="$(jq -r '[.apps[]? | select(.state == "ACTIVE")] | first | .name // empty' <<<"$apps_json")"
+          test -n "$app_name"
+          web_config="$(curl --fail --silent --show-error --max-time 30 -H "Authorization: Bearer ${access_token}" "https://firebase.googleapis.com/v1beta1/${app_name}/config")"
+          api_key="$(jq -r '.apiKey // empty' <<<"$web_config")"
+          test -n "$api_key"
+
+          now="$(date +%s)"
+          exp="$((now + 3000))"
+          jq -nc --arg iss "$DEPLOY_SERVICE_ACCOUNT" --arg sub "$DEPLOY_SERVICE_ACCOUNT" --arg uid "$SMOKE_UID" --arg aud "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit" --argjson iat "$now" --argjson exp "$exp" '{iss:$iss,sub:$sub,aud:$aud,iat:$iat,exp:$exp,uid:$uid}' > "$tmp/claims.json"
+          gcloud iam service-accounts sign-jwt "$tmp/claims.json" "$tmp/custom.jwt" --iam-account "$DEPLOY_SERVICE_ACCOUNT" --project "$PROJECT_ID" >/dev/null
+
+          jq -nc --arg token "$(cat "$tmp/custom.jwt")" '{token:$token,returnSecureToken:true}' > "$tmp/auth.json"
+          auth_code="$(curl --silent --show-error --max-time 30 -H 'Content-Type: application/json' --data-binary @"$tmp/auth.json" -o "$tmp/auth-out.json" -w '%{http_code}' "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${api_key}")"
+          if [ "$auth_code" != "200" ]; then
+            echo "CUSTOM_TOKEN_HTTP=$auth_code"
+            jq -r '.error.message // "CUSTOM_TOKEN_AUTH_FAILED"' "$tmp/auth-out.json"
+            exit 71
+          fi
+
+          id_token="$(jq -r '.idToken // empty' "$tmp/auth-out.json")"
+          local_id="$(jq -r '.localId // empty' "$tmp/auth-out.json")"
+          test -n "$id_token"
+          test "$local_id" = "$SMOKE_UID"
+
+          jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$tmp/session.json"
+          curl --fail --silent --show-error --max-time 30 -X POST -H 'Content-Type: application/json' -H "Origin: ${base}" -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$tmp/cookies.txt" --data-binary @"$tmp/session.json" -o /dev/null "$base/__sessionLogin"
+
+          curl --fail --silent --show-error --max-time 30 --cookie "$tmp/cookies.txt" -o "$tmp/private.html" "$base/"
+          grep -Fq "Operação WMGJ" "$tmp/private.html"
+
+          curl --fail --silent --show-error --max-time 30 -H 'Accept: application/json' --cookie "$tmp/cookies.txt" -o "$tmp/bootstrap.json" "$base/api/bootstrap"
+          jq -e --arg email "$SMOKE_EMAIL" '.ok == true and .environment == "HOMOLOGATION" and .mode == "SHADOW" and .organization.id == "wmgj" and .member.email == $email' "$tmp/bootstrap.json" >/dev/null
+
+          curl --fail --silent --show-error --max-time 30 -H 'Accept: application/json' --cookie "$tmp/cookies.txt" -o "$tmp/organic.json" "$base/organic?format=json"
+          jq -e '.ok == true and .environment == "HOMOLOGATION" and .mode == "SHADOW" and .enabled == true and (.sectors | index("AUDIT")) != null and (.sectors | index("FINANCE")) != null' "$tmp/organic.json" >/dev/null
+
+          echo "AURORA_HML_AUTH_SMOKE=PASS"

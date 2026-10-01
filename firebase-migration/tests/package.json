@@ -1,0 +1,17 @@
+{
+  "name": "wmgj-firestore-rule-tests",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test firestore.rules.test.mjs",
+    "test:rules": "firebase emulators:exec --config ../firebase.json --project wmgj-firestore-rules-test --only firestore \"node --test firestore.rules.test.mjs\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.2",
+    "firebase": "12.18.0",
+    "firebase-tools": "15.28.1"
+  }
+}

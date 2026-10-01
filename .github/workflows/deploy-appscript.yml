@@ -1,0 +1,129 @@
+name: Deploy Apps Script WMGJ
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**/*.gs'
+      - 'tools/**/*.js'
+      - 'appsscript.json'
+      - '.github/workflows/deploy-appscript.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Push code to Google Apps Script
+    runs-on: ubuntu-latest
+    env:
+      APPS_SCRIPT_ID: 1_fQPqaq0EjaugyIF6jyuENDhJ2c2oTFm1kC-wdjmfaDqyRzy_uqwtiSW
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Audit Apps Script source boundaries
+        run: node tools/audit-appscript.js
+
+      - name: Install clasp
+        run: npm install -g @google/clasp
+
+      - name: Validate required credentials
+        run: |
+          test -n "$APPS_SCRIPT_ID" || (echo "Missing APPS_SCRIPT_ID" && exit 1)
+          test -n '${{ secrets.CLASPRC_JSON }}' || (echo "Missing CLASPRC_JSON secret" && exit 1)
+
+      - name: Configure clasp credentials
+        run: |
+          cat > ~/.clasprc.json <<'EOF'
+          ${{ secrets.CLASPRC_JSON }}
+          EOF
+
+      - name: Prepare Apps Script project files
+        run: |
+          mkdir -p build-appscript
+          cp appsscript.json build-appscript/appsscript.json
+          cp src/*.gs build-appscript/
+          cat > build-appscript/.clasp.json <<EOF
+          {
+            "scriptId": "$APPS_SCRIPT_ID",
+            "rootDir": "."
+          }
+          EOF
+
+      - name: Push to Apps Script
+        working-directory: build-appscript
+        run: clasp push --force
+
+      - name: Create Apps Script version
+        working-directory: build-appscript
+        run: clasp version "GitHub Actions deploy $GITHUB_SHA" || true
+
+      - name: Verify deployed source
+        run: |
+          mkdir -p verify-appscript
+          cat > verify-appscript/.clasp.json <<EOF
+          {
+            "scriptId": "$APPS_SCRIPT_ID",
+            "rootDir": "."
+          }
+          EOF
+          cd verify-appscript
+          clasp pull
+          grep -R "v1.2.0-gemini-api-validada" .
+          grep -R "diagnosticarSincronizacaoRepositorioWMGJ" .
+          grep -R "wmgjFirestoreDiagnostico" .
+          grep -R "auroraRc11DryRunAmostra" .
+
+      - name: Validate API security gate
+        working-directory: build-appscript
+        run: clasp run auditarSegurancaApiWMGJ
+
+      - name: Validate status sheet write
+        working-directory: build-appscript
+        run: clasp run validarRegistroStatusAutomacaoWMGJ
+
+      - name: Audit and organize Apps Script
+        working-directory: build-appscript
+        run: clasp run auditarOrganizarAppsScriptWMGJ || true
+
+      - name: Diagnose Apps Script automation
+        working-directory: build-appscript
+        run: clasp run diagnosticarAutomacaoAppsScriptWMGJ || true
+
+      - name: Diagnose financial dashboard
+        working-directory: build-appscript
+        run: clasp run diagnosticarDashboardFinanceiroWMGJ
+
+      - name: Update financial dashboard
+        working-directory: build-appscript
+        run: clasp run atualizarDashboardFinanceiro
+
+      - name: Diagnose Gmail fiscal financial orchestrator
+        working-directory: build-appscript
+        run: clasp run diagnosticarOrquestradorGmailFiscalFinanceiroWMGJ
+
+      - name: Run Gmail based fiscal financial extraction cycle
+        working-directory: build-appscript
+        run: clasp run rodarCicloCompletoGmailFiscalFinanceiroWMGJ_Teste20
+
+      - name: Diagnose Gmail dashboard robot
+        working-directory: build-appscript
+        run: clasp run diagnosticarRoboGmailDashboardWMGJ
+
+      - name: Run Gmail dashboard robot controlled test
+        working-directory: build-appscript
+        run: clasp run rodarRoboGmailDashboardWMGJ_Teste20
+
+      - name: Install Apps Script automation trigger
+        working-directory: build-appscript
+        run: clasp run instalarGatilhoAutomacaoWMGJ
+
+      - name: Final Apps Script automation diagnosis
+        working-directory: build-appscript
+        run: clasp run diagnosticarAutomacaoAppsScriptWMGJ || true

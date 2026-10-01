@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hospital Account Projection",
+  "type": "object",
+  "required": [
+    "orgId", "facilityId", "accountKey", "competence", "payerType",
+    "workflowState", "riskLevel", "evidenceRefs"
+  ],
+  "properties": {
+    "orgId": { "type": "string" },
+    "facilityId": { "type": "string" },
+    "accountKey": { "type": "string" },
+    "competence": { "type": "string", "pattern": "^\\d{4}-(0[1-9]|1[0-2])$" },
+    "payerType": { "enum": ["SUS", "HEALTH_PLAN", "PRIVATE", "OTHER"] },
+    "authorizationRefs": { "type": "array", "items": { "type": "string" } },
+    "billingItemRefs": { "type": "array", "items": { "type": "string" } },
+    "grossAmount": { "type": "number" },
+    "approvedAmount": { "type": "number" },
+    "glossAmount": { "type": "number" },
+    "workflowState": { "type": "string" },
+    "riskLevel": { "type": "string" },
+    "evidenceRefs": { "type": "array", "items": { "type": "string" } }
+  }
+}

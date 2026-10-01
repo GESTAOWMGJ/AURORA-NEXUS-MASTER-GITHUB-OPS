@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "1.0.0",
+  "updatedAt": "2026-08-18T21:30:00-03:00",
+  "domain": "drjoaodefreitas.com.br",
+  "registrar": "Registro.br",
+  "tenantId": "CONSULTORIO_JOAO_NETO",
+  "subscription": {
+    "provider": "Google Workspace",
+    "sku": "Business Starter",
+    "status": "AWAITING_OWNER_SIGNUP_AND_BILLING",
+    "licensedUsersTarget": 1,
+    "billingOwnerActionRequired": true
+  },
+  "identity": {
+    "primaryLicensedUser": {
+      "primaryEmail": "joao@drjoaodefreitas.com.br",
+      "displayName": "Dr. João de Freitas",
+      "roles": ["SUPER_ADMIN_INITIAL", "DAILY_OPERATOR_INITIAL"]
+    },
+    "aliases": [
+      "contato@drjoaodefreitas.com.br",
+      "agendamento@drjoaodefreitas.com.br",
+      "financeiro@drjoaodefreitas.com.br",
+      "privacidade@drjoaodefreitas.com.br",
+      "admin@drjoaodefreitas.com.br"
+    ],
+    "futureLicensedUsers": [],
+    "futureGroups": []
+  },
+  "dnsDesiredState": {
+    "verification": {
+      "type": "TXT",
+      "host": "@",
+      "value": "PENDING_GOOGLE_WORKSPACE_UNIQUE_TOKEN",
+      "applyOnlyAfterGoogleGeneratesToken": true
+    },
+    "mailExchange": {
+      "type": "MX",
+      "host": "@",
+      "priority": 1,
+      "value": "smtp.google.com.",
+      "applyAfterDomainVerification": true
+    },
+    "spf": {
+      "type": "TXT",
+      "host": "@",
+      "value": "v=spf1 include:_spf.google.com ~all",
+      "applyAfterGmailActivation": true
+    },
+    "dkim": {
+      "type": "TXT",
+      "host": "google._domainkey",
+      "value": "PENDING_2048_BIT_KEY_GENERATED_IN_ADMIN_CONSOLE",
+      "applyAfterGmailActivation": true
+    },
+    "dmarcPilot": {
+      "type": "TXT",
+      "host": "_dmarc",
+      "value": "v=DMARC1; p=none; rua=mailto:privacidade@drjoaodefreitas.com.br; adkim=s; aspf=s; pct=100",
+      "applyAfterSpfAndDkimValidation": true,
+      "progression": ["p=none", "p=quarantine", "p=reject"]
+    }
+  },
+  "website": {
+    "productionDomain": "drjoaodefreitas.com.br",
+    "wwwRedirect": "www.drjoaodefreitas.com.br",
+    "hostingTarget": "Vercel",
+    "status": "AWAITING_VERCEL_CONNECTION_AND_DEPLOYMENT"
+  },
+  "automation": {
+    "repository": "GESTAOWMGJ/automacao-gestao-wmgj",
+    "workflow": ".github/workflows/provision-google-workspace.yml",
+    "provisioner": "tools/google-workspace/provision.mjs",
+    "executionMode": "IDEMPOTENT_AFTER_WORKSPACE_TENANT_EXISTS",
+    "purchaseAutomation": false,
+    "dnsBrowserAutomation": "AWAITING_BROWSER_CONNECTOR_AND_OWNER_SESSION"
+  },
+  "securityGates": [
+    "Owner completes Google signup and billing",
+    "Owner remains present for account recovery and payment authentication",
+    "Domain verification token is copied from Google Admin",
+    "No password, card data, API token or recovery code is committed to GitHub",
+    "Provisioning workflow uses protected GitHub environment approval",
+    "SPF and DKIM are validated before DMARC enforcement"
+  ]
+}

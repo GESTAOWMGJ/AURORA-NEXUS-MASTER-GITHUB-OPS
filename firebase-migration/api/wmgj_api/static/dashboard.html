@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0b4d4a">
+    <meta
+      name="wmgj-dashboard-endpoint"
+      content="/v1/organizations/{orgId}/dashboards/operational"
+    >
+    <title>WMGJ · Painel de homologação</title>
+    <link rel="stylesheet" href="/assets/dashboard.css">
+    <script src="/assets/dashboard.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#conteudo-principal">Ir para o conteúdo principal</a>
+
+    <header class="command-bar" aria-labelledby="page-title">
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">W</span>
+        <div>
+          <p class="eyebrow">Centro de controle · homologação</p>
+          <h1 id="page-title">Operação WMGJ sob evidência</h1>
+        </div>
+      </div>
+
+      <div class="environment-cluster" aria-label="Estado do ambiente">
+        <span class="environment-badge" id="environment-badge">Homologação</span>
+        <span class="auth-badge" id="auth-badge">Autenticação pendente</span>
+      </div>
+
+      <form class="scope-form" id="scope-form" aria-label="Escopo do painel">
+        <label>
+          <span>Organização</span>
+          <input
+            id="org-input"
+            name="org"
+            pattern="[a-z0-9][a-z0-9_-]{1,63}"
+            maxlength="64"
+            autocomplete="off"
+            spellcheck="false"
+            inputmode="text"
+            required
+          >
+        </label>
+        <label>
+          <span>Competência</span>
+          <input id="competence-input" name="competence" type="month" required>
+        </label>
+        <button class="button button-primary" type="submit">Aplicar escopo</button>
+        <button class="button button-secondary" id="refresh-button" type="button">Atualizar leitura</button>
+      </form>
+
+      <p class="command-status" id="command-status" role="status" aria-live="polite">
+        Aguardando uma leitura autorizada.
+      </p>
+    </header>
+
+    <main id="conteudo-principal" tabindex="-1">
+      <section class="demo-banner" id="demo-banner" aria-labelledby="demo-title" hidden>
+        <strong id="demo-title">Modo demonstração — dados integralmente sintéticos</strong>
+        <span>Nenhum valor desta tela representa a operação real, paciente, profissional ou instituição.</span>
+      </section>
+
+      <section class="trust-strip" aria-labelledby="trust-title">
+        <div class="section-intro trust-intro">
+          <p class="eyebrow">Confiabilidade da leitura</p>
+          <h2 id="trust-title">Estado composto, sem ocultar limitações</h2>
+          <p id="scope-summary">Organização e competência ainda não carregadas.</p>
+        </div>
+
+        <article class="status-card" id="transport-card" data-tone="neutral">
+          <span>Transporte</span>
+          <strong id="transport-value">Aguardando</strong>
+          <small id="transport-note">Sem conexão iniciada</small>
+        </article>
+        <article class="status-card" id="freshness-card" data-tone="neutral">
+          <span>Frescor</span>
+          <strong id="freshness-value">Desconhecido</strong>
+          <small id="freshness-note">Sem snapshot</small>
+        </article>
+        <article class="status-card" id="completeness-card" data-tone="neutral">
+          <span>Completude</span>
+          <strong id="completeness-value">Desconhecida</strong>
+          <small id="completeness-note">Sem dados validados</small>
+        </article>
+        <article class="status-card" id="severity-card" data-tone="neutral">
+          <span>Severidade operacional</span>
+          <strong id="severity-value">Desconhecida</strong>
+          <small id="severity-note">Sem inferência local</small>
+        </article>
+      </section>
+
+      <section class="gate-panel" id="gate-panel" aria-labelledby="gate-title">
+        <span class="gate-icon" aria-hidden="true">⌁</span>
+        <div>
+          <p class="eyebrow">Acesso protegido</p>
+          <h2 id="gate-title">Autenticação ainda não fornecida</h2>
+          <p id="gate-detail">
+            A futura camada de login deverá fornecer Firebase ID Token e App Check apenas em
+            memória. Nenhum dado operacional será solicitado enquanto um deles estiver ausente.
+          </p>
+        </div>
+      </section>
+
+      <div id="dashboard-content" hidden>
+        <section class="panel alerts-panel" id="alerts-section" aria-labelledby="alerts-title">
+          <div class="section-intro">
+            <p class="eyebrow">Prioridade de leitura</p>
+            <h2 id="alerts-title">Alertas que exigem atenção</h2>
+            <p>Ordenados por risco; nenhuma ação mutável está disponível nesta homologação.</p>
+          </div>
+          <ol class="alerts-list" id="alerts-list"></ol>
+          <p class="empty-message" id="alerts-empty" role="status" hidden>
+            Nenhum alerta no escopo atual.
+          </p>
+        </section>
+
+        <div class="dashboard-grid">
+          <section class="panel pipeline-panel" aria-labelledby="pipeline-title">
+            <div class="section-intro panel-heading">
+              <div>
+                <p class="eyebrow">Fluxo operacional</p>
+                <h2 id="pipeline-title">Pipeline da competência</h2>
+                <p>Valores absolutos permanecem visíveis; barras são apenas apoio visual.</p>
+              </div>
+              <div class="headline-metric">
+                <span>Total no escopo</span>
+                <strong id="pipeline-total">—</strong>
+              </div>
+            </div>
+            <div class="metric-bars" id="pipeline-bars" aria-label="Distribuição do pipeline"></div>
+            <p class="panel-note" id="pipeline-note"></p>
+          </section>
+
+          <section class="panel financial-panel" aria-labelledby="financial-title">
+            <div class="section-intro">
+              <p class="eyebrow">Financeiro agregado</p>
+              <h2 id="financial-title">Posição da competência</h2>
+              <p>Resumo para conferência; não constitui fechamento ou reconhecimento definitivo.</p>
+            </div>
+            <dl class="metric-list" id="financial-metrics">
+              <div>
+                <dt>Faturado</dt>
+                <dd id="billed-amount">—</dd>
+              </div>
+              <div>
+                <dt>Recebido</dt>
+                <dd id="received-amount">—</dd>
+              </div>
+              <div>
+                <dt>Pendente</dt>
+                <dd id="pending-amount">—</dd>
+              </div>
+              <div id="reconciliation-row">
+                <dt>Diferença de conciliação</dt>
+                <dd id="reconciliation-difference">—</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="panel audit-panel" aria-labelledby="audit-title">
+            <div class="section-intro">
+              <p class="eyebrow">Auditoria e governança</p>
+              <h2 id="audit-title">Pendências por evidência</h2>
+              <p>Contagens agregadas, sem conteúdo clínico ou documento-fonte.</p>
+            </div>
+            <dl class="audit-grid" id="audit-metrics">
+              <div>
+                <dt>Achados abertos</dt>
+                <dd id="open-findings">—</dd>
+              </div>
+              <div data-tone="danger">
+                <dt>Achados críticos</dt>
+                <dd id="critical-findings">—</dd>
+              </div>
+              <div data-tone="warning">
+                <dt>Ações vencidas</dt>
+                <dd id="overdue-actions">—</dd>
+              </div>
+              <div>
+                <dt>Lacunas de evidência</dt>
+                <dd id="evidence-gaps">—</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="panel sources-panel" aria-labelledby="sources-title">
+            <div class="section-intro">
+              <p class="eyebrow">Cobertura das fontes</p>
+              <h2 id="sources-title">Origem e última leitura válida</h2>
+              <p>A ausência de uma fonte é exibida como parcial ou inválida, nunca como zero.</p>
+            </div>
+            <ul class="sources-list" id="sources-list"></ul>
+            <p class="empty-message" id="sources-empty" role="status" hidden>
+              Nenhuma fonte declarada pelo snapshot.
+            </p>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <footer class="page-footer">
+      <span>WMGJ · Dashboard somente leitura</span>
+      <span id="footer-state">Sem dados carregados · sem cache persistente</span>
+    </footer>
+  </body>
+</html>

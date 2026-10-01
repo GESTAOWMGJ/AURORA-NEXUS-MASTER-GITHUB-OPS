@@ -1,0 +1,27 @@
+{
+  "name": "wmgj-firestore-functions",
+  "private": true,
+  "main": "lib/entry.js",
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "serve": "npm run build && firebase emulators:start --only functions,firestore,auth,hosting",
+    "deploy": "firebase deploy --only functions,hosting",
+    "deploy:functions": "firebase deploy --only functions",
+    "deploy:hosting": "firebase deploy --only hosting",
+    "logs": "firebase functions:log"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.5.0",
+    "firebase-functions": "^7.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0"
+  }
+}

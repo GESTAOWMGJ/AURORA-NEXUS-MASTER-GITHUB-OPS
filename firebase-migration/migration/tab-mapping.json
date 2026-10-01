@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "sourceSpreadsheet": "WMGJ_BASE_MESTRE_OPERACIONAL_FINANCEIRA",
+  "nonDestructive": true,
+  "sheets": {
+    "01_CADASTRO_ARQUIVOS": { "entityType": "sourceDocument", "collection": "sourceDocuments" },
+    "02_PRODUTIVIDADE_MENSAL": { "entityType": "productivityRecord", "collection": "productivityRecords" },
+    "03_PRODUTIVIDADE_MEDICO": { "entityType": "productivityRecord", "collection": "productivityRecords" },
+    "04_CENTRO_CUSTOS": { "entityType": "financialEntry", "collection": "financialEntries" },
+    "05_FINANCEIRO_MENSAL": { "entityType": "financialEntry", "collection": "financialEntries" },
+    "06_NFS_E": {
+      "entityType": "invoice",
+      "collection": "invoices",
+      "specialRules": [
+        "preserve substitution chain",
+        "separate assistential and fiscal competence"
+      ]
+    },
+    "07_ESCALA": { "entityType": "shift", "collection": "shifts" },
+    "07_IMPOSTOS": { "entityType": "taxObligation", "collection": "taxObligations" },
+    "08_EXTRATOS_BRADESCO": { "entityType": "bankTransaction", "collection": "bankTransactions" },
+    "08_CONTRATOS_E_ATAS": { "entityType": "contract", "collection": "contracts" },
+    "13_CONTROLE_PIPELINE": { "entityType": "runtimeCheckpoint", "collection": "runtimeCheckpoints" },
+    "14_MEMORIA_BASE_DOCUMENTOS": { "entityType": "sourceDocument", "collection": "sourceDocuments" },
+    "15_FILA_PROCESSAMENTO": { "entityType": "runtimeCheckpoint", "collection": "runtimeCheckpoints" },
+    "21_GMAIL_INDEXACAO_FATURAMENTO": {
+      "entityType": "sourceDocument",
+      "collection": "sourceDocuments",
+      "requiresPreclean": true
+    },
+    "42_CHECKPOINT_OPERACIONAL": { "entityType": "runtimeCheckpoint", "collection": "runtimeCheckpoints" }
+  }
+}

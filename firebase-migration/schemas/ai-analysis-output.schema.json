@@ -1,0 +1,139 @@
+{
+  "$defs": {
+    "AiFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "confidenceSignal": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidencesignal",
+          "type": "number"
+        },
+        "evidenceRefs": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "Evidencerefs",
+          "type": "array"
+        },
+        "rationale": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        },
+        "riskLevel": {
+          "$ref": "#/$defs/RiskLevel"
+        },
+        "ruleRefs": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Rulerefs",
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "rationale",
+        "riskLevel",
+        "evidenceRefs",
+        "confidenceSignal"
+      ],
+      "title": "AiFinding",
+      "type": "object"
+    },
+    "RiskLevel": {
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "CRITICAL"
+      ],
+      "title": "RiskLevel",
+      "type": "string"
+    }
+  },
+  "$id": "https://wmgj.example/schemas/ai-analysis-output.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "abstained": {
+      "title": "Abstained",
+      "type": "boolean"
+    },
+    "executiveSummary": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Executivesummary",
+      "type": "string"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/AiFinding"
+      },
+      "maxItems": 30,
+      "title": "Findings",
+      "type": "array"
+    },
+    "limitations": {
+      "items": {
+        "maxLength": 1000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 30,
+      "title": "Limitations",
+      "type": "array"
+    },
+    "missingEvidence": {
+      "items": {
+        "maxLength": 1000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 30,
+      "title": "Missingevidence",
+      "type": "array"
+    },
+    "needsHumanReview": {
+      "const": true,
+      "title": "Needshumanreview",
+      "type": "boolean"
+    },
+    "recommendedActions": {
+      "items": {
+        "maxLength": 1000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 30,
+      "title": "Recommendedactions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "executiveSummary",
+    "abstained",
+    "findings",
+    "missingEvidence",
+    "recommendedActions",
+    "limitations",
+    "needsHumanReview"
+  ],
+  "title": "AiStructuredOutput",
+  "type": "object"
+}

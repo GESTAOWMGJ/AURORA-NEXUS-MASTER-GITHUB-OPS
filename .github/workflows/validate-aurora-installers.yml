@@ -1,0 +1,72 @@
+name: Validate Aurora Installers
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'aurora-coletor/aurora_onboarding.py'
+      - 'aurora-coletor/aurora_organic.py'
+      - 'aurora-coletor/tests/test_organic.py'
+      - 'skills/aurora-nexus-organic/**'
+      - 'AGENTS.md'
+      - 'firebase-migration/functions/src/auroraDownloads.ts'
+      - 'firebase-migration/functions/src/auroraAuthGate.ts'
+      - 'firebase-migration/functions/test/aurora-downloads.test.ts'
+      - '.github/workflows/validate-aurora-installers.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: aurora-installers-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build-hml:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7 verified 2026-09-28
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: stable
+          cache: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Organic proposal tests with synthetic verification only
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/aurora-hml-installers"
+          python3 -m unittest discover -s aurora-coletor/tests -p test_organic.py -v 2>&1 | tee "${RUNNER_TEMP}/aurora-hml-installers/organic-tests.txt"
+      - name: Installer unit tests and isolated package build
+        run: |
+          set -euo pipefail
+          python3 desktop/build_installers.py --output "${RUNNER_TEMP}/aurora-hml-installers" 2>&1 | tee "${RUNNER_TEMP}/aurora-hml-installers/packaging-tests.txt"
+      - name: Private download authorization and integrity tests
+        run: |
+          set -euo pipefail
+          node --experimental-strip-types --test firebase-migration/functions/test/aurora-downloads.test.ts 2>&1 | tee "${RUNNER_TEMP}/aurora-hml-installers/download-tests.txt"
+      - name: Capture exact source and toolchain for restricted review
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD > "${RUNNER_TEMP}/aurora-hml-installers/source-commit.txt"
+          go version > "${RUNNER_TEMP}/aurora-hml-installers/build-environment.txt"
+          python3 --version >> "${RUNNER_TEMP}/aurora-hml-installers/build-environment.txt"
+          node --version >> "${RUNNER_TEMP}/aurora-hml-installers/build-environment.txt"
+          git archive --format=zip HEAD desktop/build_installers.py aurora-coletor/aurora_onboarding.py aurora-coletor/aurora_organic.py aurora-coletor/tests/test_organic.py skills/aurora-nexus-organic/SKILL.md AGENTS.md > "${RUNNER_TEMP}/aurora-hml-installers/AURORA-NEXUS-source-review.zip"
+      - name: Retain authenticated review artifacts only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aurora-hml-organic-${{ github.run_id }}
+          path: ${{ runner.temp }}/aurora-hml-installers/
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: false
+      - name: Record scope of validation
+        run: |
+          echo 'HML clients built and synthetic tests passed. No Firebase deployment, authenticated event integration, user-device installation, signing, notarization or portal publication performed. No database created.' >> "$GITHUB_STEP_SUMMARY"

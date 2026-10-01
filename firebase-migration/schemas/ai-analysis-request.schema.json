@@ -1,0 +1,113 @@
+{
+  "$defs": {
+    "AiTaskType": {
+      "enum": [
+        "DOCUMENT_CLASSIFICATION",
+        "AUDIT_FINDING_DRAFT",
+        "RECONCILIATION_REVIEW",
+        "CLINICAL_AUDIT_DRAFT"
+      ],
+      "title": "AiTaskType",
+      "type": "string"
+    },
+    "EvidenceItem": {
+      "additionalProperties": false,
+      "properties": {
+        "evidenceRef": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Evidenceref",
+          "type": "string"
+        },
+        "fact": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Fact",
+          "type": "string"
+        },
+        "observedAt": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observedat"
+        },
+        "sourceType": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Sourcetype",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidenceRef",
+        "fact",
+        "sourceType"
+      ],
+      "title": "EvidenceItem",
+      "type": "object"
+    },
+    "Sensitivity": {
+      "enum": [
+        "PUBLIC",
+        "INTERNAL",
+        "RESTRICTED",
+        "CLINICAL_SENSITIVE"
+      ],
+      "title": "Sensitivity",
+      "type": "string"
+    }
+  },
+  "$id": "https://wmgj.example/schemas/ai-analysis-request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "dataMinimized": {
+      "const": true,
+      "title": "Dataminimized",
+      "type": "boolean"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/EvidenceItem"
+      },
+      "maxItems": 50,
+      "minItems": 1,
+      "title": "Evidence",
+      "type": "array"
+    },
+    "humanReviewRequired": {
+      "const": true,
+      "title": "Humanreviewrequired",
+      "type": "boolean"
+    },
+    "purpose": {
+      "maxLength": 512,
+      "minLength": 8,
+      "title": "Purpose",
+      "type": "string"
+    },
+    "sensitivity": {
+      "$ref": "#/$defs/Sensitivity"
+    },
+    "taskType": {
+      "$ref": "#/$defs/AiTaskType"
+    }
+  },
+  "required": [
+    "taskType",
+    "purpose",
+    "sensitivity",
+    "dataMinimized",
+    "humanReviewRequired",
+    "evidence"
+  ],
+  "title": "AiAnalysisRequest",
+  "type": "object"
+}

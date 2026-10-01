@@ -1,0 +1,514 @@
+name: Deploy Aurora Firebase Homologation
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Firebase homologation project ID (must equal repository variable)"
+        required: true
+        type: string
+      deploy_confirmation:
+        description: "Type DEPLOY_HOMOLOGATION to deploy; any other value validates only"
+        required: true
+        default: "VALIDATE_ONLY"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-firebase-homologation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate exact main candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      candidate_sha: ${{ steps.pin-candidate.outputs.sha }}
+    steps:
+      - name: Require dispatch from main
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$GITHUB_SHA" = "$CANDIDATE_SHA"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: Pin immutable candidate to current main
+        id: pin-candidate
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "$CANDIDATE_SHA"
+          printf 'sha=%s\n' "$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: firebase-migration/functions/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.33"
+          enable-cache: true
+          cache-dependency-glob: firebase-migration/api/uv.lock
+      - name: Validate full Firebase and API contract suite
+        env:
+          WMGJ_FIREBASE_TEST_PROJECT_ID: wmgj-firestore-rules-test
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          bash firebase-migration/scripts/bootstrap-homologacao.sh
+          npm --prefix firebase-migration/functions audit --omit=dev --audit-level=high
+          cd firebase-migration/api
+          uv sync --locked --dev
+          uv run pytest
+          uv run python scripts/run_evals.py
+          node --check wmgj_api/static/dashboard.js
+          node --test tests/static/dashboard_static.test.mjs
+      - name: Validate target and deployment scope
+        env:
+          REQUESTED_PROJECT: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$APPROVED_PROJECT"
+          test "$REQUESTED_PROJECT" = "$APPROVED_PROJECT"
+          case "$REQUESTED_PROJECT" in wmgj-hml-jfn-*) ;; *) exit 41 ;; esac
+          case "$REQUESTED_PROJECT" in *prod*|*production*|*live*|*principal*) exit 42 ;; esac
+          node -e 'JSON.parse(require("fs").readFileSync("firebase-migration/firebase.json","utf8"))'
+
+  deploy:
+    name: Deploy with protected environment
+    if: ${{ inputs.deploy_confirmation == 'DEPLOY_HOMOLOGATION' }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: firebase-homologation
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Require the validated main candidate
+        env:
+          VALIDATED_SHA: ${{ needs.validate.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test -n "$VALIDATED_SHA"
+          test "$GITHUB_SHA" = "$VALIDATED_SHA"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: Reconfirm immutable main immediately before deploy
+        env:
+          VALIDATED_SHA: ${{ needs.validate.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$VALIDATED_SHA"
+          git fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: firebase-migration/functions/package-lock.json
+      - name: Build exact commit before cloud authentication
+        working-directory: firebase-migration/functions
+        run: |
+          set -euo pipefail
+          test "$(git -C ../.. rev-parse HEAD)" = "$GITHUB_SHA"
+          npm ci
+          npm test
+          npm run build
+          npm audit --omit=dev --audit-level=high
+      - name: Require protected deployment configuration
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+          SMOKE_UID: ${{ vars.FIREBASE_HML_SMOKE_UID }}
+          SMOKE_EMAIL: ${{ vars.FIREBASE_HML_SMOKE_EMAIL }}
+        run: |
+          set -euo pipefail
+          test -n "$APPROVED_PROJECT"
+          test "$PROJECT_ID" = "$APPROVED_PROJECT"
+          case "$PROJECT_ID" in wmgj-hml-jfn-*) ;; *) exit 41 ;; esac
+          case "$PROJECT_ID" in *prod*|*production*|*live*|*principal*) exit 42 ;; esac
+          test -n "$WIF_PROVIDER"
+          test -n "$DEPLOY_SERVICE_ACCOUNT"
+          [[ "$SMOKE_UID" =~ ^[A-Za-z0-9_-]{6,128}$ ]]
+          [[ "$SMOKE_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: "548.0.0"
+          project_id: ${{ inputs.project_id }}
+      - name: Preflight protected homologation resources
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+          SMOKE_UID: ${{ vars.FIREBASE_HML_SMOKE_UID }}
+          SMOKE_EMAIL: ${{ vars.FIREBASE_HML_SMOKE_EMAIL }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$PROJECT_ID" = "$APPROVED_PROJECT"
+          active_account="$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')"
+          test "$active_account" = "$DEPLOY_SERVICE_ACCOUNT"
+
+          umask 077
+          secrets_dir="$(mktemp -d "${RUNNER_TEMP}/aurora-secret-preflight.XXXXXX")"
+          cleanup_secret_preflight() {
+            find "$secrets_dir" -type f -delete
+            rmdir "$secrets_dir"
+          }
+          trap cleanup_secret_preflight EXIT
+          for secret in AURORA_NEXUS_ALLOWED_EMAILS AURORA_NEXUS_CSRF_HMAC_KEY; do
+            gcloud secrets describe "$secret" --project "$PROJECT_ID" --format='value(name)' >/dev/null
+            latest_version_json="$(
+              gcloud secrets versions describe latest \
+                --secret "$secret" \
+                --project "$PROJECT_ID" \
+                --format=json
+            )"
+            test "$(jq -r '.state // empty' <<<"$latest_version_json")" = "ENABLED"
+            version_name="$(jq -r '.name // empty' <<<"$latest_version_json")"
+            test -n "$version_name"
+            version_id="${version_name##*/}"
+            [[ "$version_id" =~ ^[0-9]+$ ]]
+            secret_file="$secrets_dir/$secret"
+            gcloud secrets versions access "$version_id" \
+              --secret "$secret" \
+              --project "$PROJECT_ID" \
+              --out-file="$secret_file"
+            test -s "$secret_file"
+
+            case "$secret" in
+              AURORA_NEXUS_ALLOWED_EMAILS)
+                node -e '
+                  const fs = require("node:fs");
+                  const values = fs.readFileSync(process.argv[1], "utf8").split(/[\s,;]+/).filter(Boolean);
+                  process.exit(values.some((value) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) ? 0 : 1);
+                ' "$secret_file"
+                ;;
+              AURORA_NEXUS_CSRF_HMAC_KEY)
+                grep -Eq '^[A-Fa-f0-9]{64}$' "$secret_file"
+                ;;
+              *)
+                exit 49
+                ;;
+            esac
+          done
+
+          node -e '
+            const fs = require("node:fs");
+            const allowed = fs.readFileSync(process.argv[1], "utf8")
+              .split(/[\s,;]+/).map((value) => value.trim().toLowerCase()).filter(Boolean);
+            const email = process.argv[2].trim().toLowerCase();
+            process.exit(email && allowed.includes(email) ? 0 : 1);
+          ' "$secrets_dir/AURORA_NEXUS_ALLOWED_EMAILS" "$SMOKE_EMAIL"
+          smoke_uid="$SMOKE_UID"
+          cleanup_secret_preflight
+          trap - EXIT
+
+          db_json="$(gcloud firestore databases describe --database='(default)' --project "$PROJECT_ID" --format=json)"
+          test "$(jq -r '.locationId // empty' <<<"$db_json")" = "southamerica-east1"
+          test "$(jq -r '.deleteProtectionState // empty' <<<"$db_json")" = "DELETE_PROTECTION_ENABLED"
+
+          access_token="$(gcloud auth print-access-token)"
+          test -n "$access_token"
+          org_url="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj"
+          org_json="$(curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer ${access_token}" \
+            "$org_url")"
+          jq -e '
+            .fields.active.booleanValue == true and
+            .fields.environment.stringValue == "HOMOLOGATION" and
+            .fields.projectionEnabled.booleanValue == false and
+            .fields.projectionMode.stringValue == "SHADOW" and
+            .fields.organicEnabled.booleanValue == true and
+            ([.fields.organicSectors.arrayValue.values[]?.stringValue] | index("AUDIT")) != null and
+            ([.fields.organicSectors.arrayValue.values[]?.stringValue] | index("FINANCE")) != null and
+            .fields.clinicalSensitiveEnabled.booleanValue == false and
+            .fields.productionMutation.booleanValue == false and
+            .fields.sourceMutation.booleanValue == false
+          ' <<<"$org_json" >/dev/null
+
+          smoke_uid_path="$(node -p 'encodeURIComponent(process.argv[1])' "$smoke_uid")"
+          member_json="$(curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer ${access_token}" \
+            "${org_url}/members/${smoke_uid_path}")"
+          member_role="$(jq -r '.fields.role.stringValue // empty' <<<"$member_json")"
+          jq -e --arg role "$member_role" '
+            .fields.active.booleanValue == true and
+            .fields.allFacilities.booleanValue == true and
+            (
+              (["platform_admin", "org_admin", "director", "auditor", "operator", "finance", "viewer"] |
+                index($role)) != null or
+              ([.fields.permissions.arrayValue.values[]?.stringValue] |
+                index("dashboard.read")) != null
+            )
+          ' <<<"$member_json" >/dev/null
+
+          # First HML deploy stays recovery-safe without creating a parallel
+          # Firestore database. No operational source data is allowed yet.
+          # Recovery requires PITR plus a recent READY managed backup.
+          # A real restore rehearsal remains mandatory before real ingestion
+          # or promotion of Firebase as an operational source.
+          test "$(jq -r '.pointInTimeRecoveryEnablement // empty' <<<"$db_json")" = "POINT_IN_TIME_RECOVERY_ENABLED"
+
+          schedules_json="$(gcloud firestore backups schedules list \
+            --database='(default)' --project "$PROJECT_ID" --format=json)"
+          jq -e 'type == "array" and length >= 1' <<<"$schedules_json" >/dev/null
+
+          backups_json="$(gcloud firestore backups list --project "$PROJECT_ID" --format=json)"
+          backup_resource="$(jq -r --arg source "projects/${PROJECT_ID}/databases/(default)" '
+            [.[] | select(.state == "READY" and .database == $source)]
+            | sort_by(.snapshotTime // "")
+            | last
+            | .name // empty
+          ' <<<"$backups_json")"
+          if [ -n "$backup_resource" ]; then
+            backup_json="$(curl --fail --silent --show-error --max-time 30 \
+              -H "Authorization: Bearer ${access_token}" \
+              "https://firestore.googleapis.com/v1/${backup_resource}")"
+            jq -e --arg name "$backup_resource" --arg source "projects/${PROJECT_ID}/databases/(default)" '
+              .name == $name and
+              .database == $source and
+              .state == "READY" and
+              ((.snapshotTime // "") | length > 0) and
+              ((.expireTime // "") | length > 0)
+            ' <<<"$backup_json" >/dev/null
+          else
+            echo "No READY managed backup yet; bootstrap allowed only for an operationally empty HML database."
+          fi
+
+          collections_json="$(curl --fail --silent --show-error --max-time 30 \
+            -X POST \
+            -H "Authorization: Bearer ${access_token}" \
+            -H 'Content-Type: application/json' \
+            --data '{"pageSize":100}' \
+            "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:listCollectionIds")"
+          jq -e '
+            ([.collectionIds[]? | select(. != "organizations")] | length) == 0
+          ' <<<"$collections_json" >/dev/null
+      - name: Deploy Functions, Hosting, Rules and indexes
+        working-directory: firebase-migration
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          VALIDATED_SHA: ${{ needs.validate.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$PROJECT_ID" = "$APPROVED_PROJECT"
+          test "$GITHUB_SHA" = "$VALIDATED_SHA"
+          test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
+          git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,hosting,firestore:rules,firestore:indexes --non-interactive
+      - name: Smoke test private shell and deployed functions
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+        run: |
+          set -euo pipefail
+          functions="$(npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json)"
+          jq -e --argjson expected '[
+            "runtimeWatchdog",
+            "runtimeHealth",
+            "auroraNexusAuthGate",
+            "auroraNexusSessionLogin",
+            "auroraNexusSessionLogout",
+            "auroraNexusBootstrap",
+            "auroraNexusNativeInsight",
+            "auroraNexusAction",
+            "auroraNexusRefresh",
+            "auroraNexusProjectionEngine",
+            "auroraNexusOrganic"
+          ]' '
+            (.result // .functions // []) as $functions |
+            [$functions[] | (.id // .name // "") | split("/")[-1]] | sort == ($expected | sort)
+          ' <<<"$functions" >/dev/null
+          shell="$(curl --fail --silent --show-error --max-time 30 "https://${PROJECT_ID}.web.app/")"
+          grep -Fq "Ambiente privado" <<<"$shell"
+          if grep -Fq "Operação WMGJ" <<<"$shell"; then
+            echo "Protected shell was exposed without login" >&2
+            exit 90
+          fi
+          negative_response="$(mktemp "${RUNNER_TEMP}/aurora-negative-smoke.XXXXXX.json")"
+          trap 'rm -f "$negative_response"' EXIT
+          bootstrap_status="$(curl --silent --show-error --max-time 30 \
+            -H 'Accept: application/json' \
+            --output "$negative_response" \
+            --write-out '%{http_code}' \
+            "https://${PROJECT_ID}.web.app/api/bootstrap")"
+          test "$bootstrap_status" = "401"
+          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+          native_status="$(curl --silent --show-error --max-time 30 \
+            -H 'Accept: application/json' \
+            --output "$negative_response" \
+            --write-out '%{http_code}' \
+            "https://${PROJECT_ID}.web.app/api/native-insight?intent=EXECUTIVE")"
+          test "$native_status" = "401"
+          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+          organic_status="$(curl --silent --show-error --max-time 30 \
+            -H 'Accept: application/json' \
+            --output "$negative_response" \
+            --write-out '%{http_code}' \
+            "https://${PROJECT_ID}.web.app/organic?format=json")"
+          test "$organic_status" = "401"
+          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+      - name: Authenticated smoke test without stored password
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+          SMOKE_UID: ${{ vars.FIREBASE_HML_SMOKE_UID }}
+          SMOKE_EMAIL: ${{ vars.FIREBASE_HML_SMOKE_EMAIL }}
+        run: |
+          set -euo pipefail
+          [[ "$SMOKE_UID" =~ ^[A-Za-z0-9_-]{6,128}$ ]]
+          [[ "$SMOKE_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]
+          umask 077
+          smoke_dir="$(mktemp -d "${RUNNER_TEMP}/aurora-auth-smoke.XXXXXX")"
+          claims_file="$smoke_dir/custom-token-claims.json"
+          custom_token_file="$smoke_dir/custom-token.jwt"
+          auth_payload="$smoke_dir/auth-payload.json"
+          auth_response="$smoke_dir/auth-response.json"
+          session_payload="$smoke_dir/session-payload.json"
+          cookie_jar="$smoke_dir/cookies.txt"
+          private_shell="$smoke_dir/private-shell.html"
+          bootstrap_response="$smoke_dir/bootstrap.json"
+          native_response="$smoke_dir/native.json"
+          organic_response="$smoke_dir/organic.json"
+          cleanup() {
+            find "$smoke_dir" -type f -delete
+            rmdir "$smoke_dir"
+          }
+          trap cleanup EXIT
+
+          access_token="$(gcloud auth print-access-token)"
+          apps_json="$(curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer ${access_token}" \
+            "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/webApps?pageSize=100")"
+          app_name="$(jq -r '
+            [.apps[]? | select(.state == "ACTIVE")] | first | .name // empty
+          ' <<<"$apps_json")"
+          test -n "$app_name"
+          web_config="$(curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer ${access_token}" \
+            "https://firebase.googleapis.com/v1beta1/${app_name}/config")"
+          api_key="$(jq -r '.apiKey // empty' <<<"$web_config")"
+          [[ "$api_key" =~ ^[A-Za-z0-9_-]{20,200}$ ]]
+
+          now="$(date +%s)"
+          exp="$((now + 3000))"
+          jq -nc \
+            --arg iss "$DEPLOY_SERVICE_ACCOUNT" \
+            --arg sub "$DEPLOY_SERVICE_ACCOUNT" \
+            --arg uid "$SMOKE_UID" \
+            --arg aud "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit" \
+            --argjson iat "$now" \
+            --argjson exp "$exp" \
+            '{iss:$iss,sub:$sub,aud:$aud,iat:$iat,exp:$exp,uid:$uid}' > "$claims_file"
+          gcloud iam service-accounts sign-jwt "$claims_file" "$custom_token_file" \
+            --iam-account "$DEPLOY_SERVICE_ACCOUNT" \
+            --project "$PROJECT_ID" >/dev/null
+          custom_token="$(cat "$custom_token_file")"
+          test -n "$custom_token"
+
+          jq -nc --arg token "$custom_token" '{token:$token,returnSecureToken:true}' > "$auth_payload"
+          curl --fail --silent --show-error --max-time 30 \
+            -H 'Content-Type: application/json' \
+            --data-binary @"$auth_payload" \
+            --output "$auth_response" \
+            "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${api_key}"
+          id_token="$(jq -r '.idToken // empty' "$auth_response")"
+          local_id="$(jq -r '.localId // empty' "$auth_response")"
+          test -n "$id_token"
+          test "$local_id" = "$SMOKE_UID"
+
+          base_url="https://${PROJECT_ID}.web.app"
+          jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$session_payload"
+          curl --fail --silent --show-error --max-time 30 \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            -H "Origin: ${base_url}" \
+            -H 'Sec-Fetch-Site: same-origin' \
+            --cookie-jar "$cookie_jar" \
+            --data-binary @"$session_payload" \
+            --output /dev/null \
+            "${base_url}/__sessionLogin"
+          curl --fail --silent --show-error --max-time 30 \
+            --cookie "$cookie_jar" \
+            --output "$private_shell" \
+            "${base_url}/"
+          grep -Fq "Operação WMGJ" "$private_shell"
+          if grep -Fq "Ambiente privado" "$private_shell"; then
+            echo "Authenticated smoke remained on the login shell" >&2
+            exit 91
+          fi
+          curl --fail --silent --show-error --max-time 30 \
+            -H 'Accept: application/json' \
+            --cookie "$cookie_jar" \
+            --output "$bootstrap_response" \
+            "${base_url}/api/bootstrap"
+          jq -e --arg email "$SMOKE_EMAIL" '
+            .ok == true and
+            .environment == "HOMOLOGATION" and
+            .mode == "SHADOW" and
+            .organization.id == "wmgj" and
+            .member.email == $email
+          ' "$bootstrap_response" >/dev/null
+          jq -e '
+            .release.productVersion == "1.0.0-rc.1" and
+            (.release.engineeringReadinessPercent | type) == "number"
+          ' "$bootstrap_response" >/dev/null
+          curl --fail --silent --show-error --max-time 30 \
+            -H 'Accept: application/json' \
+            --cookie "$cookie_jar" \
+            --output "$native_response" \
+            "${base_url}/api/native-insight?intent=EXECUTIVE"
+          jq -e '
+            .ok == true and
+            .environment == "HOMOLOGATION" and
+            .mode == "SHADOW" and
+            .insight.engine == "AURORA_NATIVE_INTELLIGENCE" and
+            .insight.mode == "NATIVE_DETERMINISTIC" and
+            .insight.externalProviderUsed == false
+          ' "$native_response" >/dev/null
+          curl --fail --silent --show-error --max-time 30 \
+            -H 'Accept: application/json' \
+            --cookie "$cookie_jar" \
+            --output "$organic_response" \
+            "${base_url}/organic?format=json"
+          jq -e '
+            .ok == true and
+            .environment == "HOMOLOGATION" and
+            .mode == "SHADOW" and
+            .enabled == true and
+            (.sectors | index("AUDIT")) != null and
+            (.sectors | index("FINANCE")) != null
+          ' "$organic_response" >/dev/null

@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wmgj.example/schemas/ai-run.schema.json",
+  "title": "WMGJ Auditable AI Run",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "runId", "orgId", "provider", "status", "reviewState",
+    "model", "promptVersion", "rulesetVersion", "sensitivity", "evidenceRefs",
+    "inputHash", "createdAt", "revision"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "orgId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
+    "provider": { "const": "openai" },
+    "status": {
+      "enum": ["PROCESSING", "COMPLETED_PENDING_REVIEW", "REFUSED", "INCOMPLETE", "FAILED"]
+    },
+    "reviewState": {
+      "enum": ["PENDING", "APPROVED", "REJECTED", "REVISION_REQUESTED"]
+    },
+    "model": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "promptVersion": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "rulesetVersion": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "sensitivity": { "enum": ["PUBLIC", "INTERNAL", "RESTRICTED", "CLINICAL_SENSITIVE"] },
+    "evidenceRefs": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+    },
+    "inputHash": { "$ref": "#/$defs/sha256" },
+    "outputHash": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+    "responseId": { "type": ["string", "null"], "maxLength": 256 },
+    "requestId": { "type": ["string", "null"], "maxLength": 256 },
+    "latencyMs": { "type": ["integer", "null"], "minimum": 0 },
+    "result": {
+      "oneOf": [
+        { "$ref": "#/$defs/structuredOutput" },
+        { "type": "null" }
+      ]
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "failedAt": { "type": "string", "format": "date-time" },
+    "reviewedAt": { "type": "string", "format": "date-time" },
+    "reviewerUid": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "revision": { "type": "integer", "minimum": 1 },
+    "duplicate": { "type": "boolean" },
+    "actorUid": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "idempotencyKeyHash": { "$ref": "#/$defs/sha256" },
+    "requestHash": { "$ref": "#/$defs/sha256" },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "total_tokens": { "type": "integer", "minimum": 0 },
+        "input_tokens_details": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cached_tokens": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "output_tokens_details": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reasoning_tokens": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "status": { "const": "COMPLETED_PENDING_REVIEW" } },
+        "required": ["status"]
+      },
+      "then": {
+        "required": ["outputHash", "result"],
+        "properties": {
+          "outputHash": { "$ref": "#/$defs/sha256" },
+          "result": { "$ref": "#/$defs/structuredOutput" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "reviewState": { "enum": ["APPROVED", "REJECTED", "REVISION_REQUESTED"] } },
+        "required": ["reviewState"]
+      },
+      "then": {
+        "required": ["reviewerUid", "reviewedAt"],
+        "properties": {
+          "reviewerUid": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "reviewedAt": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "rationale", "riskLevel", "evidenceRefs", "ruleRefs", "confidenceSignal"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "rationale": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "riskLevel": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        "evidenceRefs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "ruleRefs": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "type": "string", "minLength": 1, "maxLength": 256 }
+        },
+        "confidenceSignal": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "structuredOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executiveSummary", "abstained", "findings", "missingEvidence",
+        "recommendedActions", "limitations", "needsHumanReview"
+      ],
+      "properties": {
+        "executiveSummary": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "abstained": { "type": "boolean" },
+        "findings": {
+          "type": "array",
+          "maxItems": 30,
+          "items": { "$ref": "#/$defs/finding" }
+        },
+        "missingEvidence": {
+          "type": "array",
+          "maxItems": 30,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        },
+        "recommendedActions": {
+          "type": "array",
+          "maxItems": 30,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        },
+        "limitations": {
+          "type": "array",
+          "maxItems": 30,
+          "items": { "type": "string", "minLength": 1, "maxLength": 1000 }
+        },
+        "needsHumanReview": { "const": true }
+      }
+    }
+  }
+}

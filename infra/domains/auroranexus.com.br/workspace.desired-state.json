@@ -1,0 +1,90 @@
+{
+  "schemaVersion": "1.0.0",
+  "updatedAt": "2026-09-26",
+  "product": "AURORA NEXUS",
+  "domain": "auroranexus.com.br",
+  "registrar": "Registro.br",
+  "tenantId": "AURORA_NEXUS",
+  "status": "PROPOSED_CANONICAL_PENDING_OWNER_CONFIRMATION",
+  "ownerContext": {
+    "legalOwnerCandidate": "JF NETO SERVICOS MEDICOS LTDA",
+    "operationalUse": "B2B healthcare auditing, consulting, traceability and governance platform",
+    "notes": [
+      "Keep this product domain separate from the clinic domain drjoaodefreitas.com.br.",
+      "Do not use registered trademark symbol until formal trademark grant."
+    ]
+  },
+  "identity": {
+    "proposedPrimaryLicensedUser": {
+      "primaryEmail": "joao@auroranexus.com.br",
+      "displayName": "Joao de Freitas Neto",
+      "roles": [
+        "SUPER_ADMIN_INITIAL",
+        "PRODUCT_OWNER",
+        "DAILY_OPERATOR_INITIAL"
+      ],
+      "status": "PENDING_WORKSPACE_CREATION_OR_ALIAS_CONFIRMATION"
+    },
+    "aliases": [
+      "admin@auroranexus.com.br",
+      "contato@auroranexus.com.br",
+      "suporte@auroranexus.com.br",
+      "operacao@auroranexus.com.br",
+      "financeiro@auroranexus.com.br",
+      "privacidade@auroranexus.com.br"
+    ],
+    "futureGroups": [
+      "gestores@auroranexus.com.br",
+      "auditoria@auroranexus.com.br",
+      "clientes@auroranexus.com.br"
+    ]
+  },
+  "dnsDesiredState": {
+    "verification": {
+      "type": "TXT",
+      "host": "@",
+      "value": "PENDING_PROVIDER_UNIQUE_TOKEN",
+      "applyOnlyAfterProviderGeneratesToken": true,
+      "commitRealTokenToGit": false
+    },
+    "mailExchange": {
+      "type": "MX",
+      "host": "@",
+      "priority": 1,
+      "value": "smtp.google.com.",
+      "applyAfterDomainVerification": true
+    },
+    "spf": {
+      "type": "TXT",
+      "host": "@",
+      "value": "v=spf1 include:_spf.google.com ~all",
+      "applyAfterGmailActivation": true
+    },
+    "dkim": {
+      "type": "TXT",
+      "host": "google._domainkey",
+      "value": "PENDING_2048_BIT_KEY_GENERATED_IN_ADMIN_CONSOLE",
+      "applyAfterGmailActivation": true,
+      "commitRealKeyToGit": false
+    },
+    "dmarcPilot": {
+      "type": "TXT",
+      "host": "_dmarc",
+      "value": "v=DMARC1; p=none; rua=mailto:privacidade@auroranexus.com.br; adkim=s; aspf=s; pct=100",
+      "applyAfterSpfAndDkimValidation": true,
+      "progression": [
+        "p=none",
+        "p=quarantine",
+        "p=reject"
+      ]
+    }
+  },
+  "securityGates": [
+    "Owner confirms domain registration or purchase in Registro.br",
+    "Owner remains present for account recovery and billing authentication",
+    "Provider verification token is copied manually from the official console",
+    "No password, card data, API token, DKIM private material or recovery code is committed to GitHub",
+    "SPF and DKIM are validated before DMARC enforcement",
+    "Production email is not advertised before delivery tests succeed"
+  ]
+}

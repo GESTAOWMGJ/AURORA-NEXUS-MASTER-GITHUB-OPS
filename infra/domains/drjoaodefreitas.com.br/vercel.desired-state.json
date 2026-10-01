@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "1.0.0",
+  "updatedAt": "2026-08-18T21:45:00-03:00",
+  "project": {
+    "name": "drjoaodefreitas-site",
+    "provider": "Vercel",
+    "gitRepository": "GESTAOWMGJ/automacao-gestao-wmgj",
+    "productionBranch": "main",
+    "rootDirectory": "site-drjoaodefreitas",
+    "frameworkPreset": "Other",
+    "buildCommand": null,
+    "outputDirectory": null,
+    "installCommand": null,
+    "automaticGitDeployments": true
+  },
+  "domains": [
+    {
+      "name": "drjoaodefreitas.com.br",
+      "role": "primary",
+      "status": "AWAITING_PROJECT_CONNECTION"
+    },
+    {
+      "name": "www.drjoaodefreitas.com.br",
+      "role": "redirect-to-primary",
+      "status": "AWAITING_PROJECT_CONNECTION"
+    }
+  ],
+  "deploymentGates": {
+    "sourceValidated": true,
+    "staticAssetValidation": true,
+    "formsDisabled": true,
+    "analyticsDisabled": true,
+    "clinicalDataCollectionDisabled": true,
+    "definitiveBrandAssetsImported": false,
+    "vercelConnectorInstalled": false,
+    "registrarDnsSessionAvailable": false
+  },
+  "nextActions": [
+    "Connect Vercel account",
+    "Import GitHub repository",
+    "Set root directory to site-drjoaodefreitas",
+    "Deploy preview",
+    "Add apex and www domains",
+    "Copy only Vercel-provided DNS values to Registro.br",
+    "Validate HTTPS and redirect"
+  ]
+}

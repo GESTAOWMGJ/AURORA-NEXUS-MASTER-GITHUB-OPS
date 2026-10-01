@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "aurora.collector.identity.registry.v1",
+  "environment": "homologation",
+  "destination": {
+    "name": "aurora-nexus-hml-synthetic",
+    "endpoint": "https://api.auroranexus.com.br/coletor",
+    "mode": "synthetic-homologation",
+    "productionEnabled": false
+  },
+  "identities": [
+    {
+      "identityId": "aurora-collector-wmgj-hml-001",
+      "org": "wmgj",
+      "facility": "WMGJ",
+      "active": false,
+      "expiresAt": "PENDING_ADMIN_APPROVED_EXPIRATION",
+      "credentialSha256": "PENDING_ADMIN_GENERATED_SHA256",
+      "canSubmitBatches": true,
+      "canReview": false,
+      "canApprove": false,
+      "mfaRequiredForHumanReview": true,
+      "notes": "Do not commit real credential hashes in public repositories. Store the real hash in the approved backend secret store or identity table."
+    }
+  ],
+  "revocation": {
+    "method": "set active=false or remove credentialSha256",
+    "effect": "collector requests return 401/403 and local cycle stops"
+  },
+  "rotation": {
+    "method": "administrator generates a new credential, updates server hash, and updates the service-account secret",
+    "tokenStorage": "AURORA_COLLECTOR_TOKEN in the service environment only"
+  }
+}

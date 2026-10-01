@@ -1,0 +1,27 @@
+[project]
+name = "wmgj-control-plane"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.141.1",
+    "firebase-admin>=7.5.0",
+    "google-cloud-firestore>=2.29.0",
+    "openai>=3.3.1",
+    "pydantic-settings>=2.15.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "jsonschema>=4.26.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.fastapi]
+entrypoint = "wmgj_api.app:app"

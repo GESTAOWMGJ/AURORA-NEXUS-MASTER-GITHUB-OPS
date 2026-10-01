@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wmgj.example/schemas/ingestion-event.schema.json",
+  "title": "WMGJ Generic Firestore Ingestion Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "eventId", "eventType", "orgId", "occurredAt", "sourceVersion",
+    "idempotencyKey", "entityType", "entityKey", "actor", "source",
+    "workflowState", "reviewState", "riskLevel", "sensitivity", "record"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "eventId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "eventType": {
+      "enum": ["ENTITY_UPSERT", "DOCUMENT_UPSERT", "RUNTIME_CHECKPOINT", "AI_RUN_RECORDED"]
+    },
+    "orgId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "sourceVersion": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "entityType": {
+      "enum": [
+        "sourceDocument", "runtimeCheckpoint", "professional", "shift",
+        "productivityRecord", "contract", "contractRule", "invoice",
+        "bankTransaction", "financialEntry", "taxObligation", "reconciliation",
+        "monthlyClosing", "actionItem", "hospitalAccount", "authorization",
+        "billingItem", "gloss", "appeal", "opmeItem", "qualityIndicator",
+        "auditFinding", "aiRun"
+      ]
+    },
+    "entityKey": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "source"],
+      "properties": {
+        "type": { "enum": ["SYSTEM", "USER", "AI"] },
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "source": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system", "sourceId"],
+      "properties": {
+        "system": { "enum": ["GMAIL", "DRIVE", "SHEETS", "APPS_SCRIPT", "MANUAL"] },
+        "sourceId": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "parentId": { "type": "string", "maxLength": 512 },
+        "fileName": { "type": "string", "maxLength": 512 },
+        "mimeType": { "type": "string", "maxLength": 256 },
+        "url": { "type": "string", "maxLength": 2048 },
+        "contentHash": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+        "hashMethod": {
+          "enum": ["content_sha256", "metadata_sha256_fallback", "row_sha256"]
+        }
+      }
+    },
+    "workflowState": {
+      "enum": [
+        "RECEIVED", "QUEUED", "CLASSIFIED", "EXTRACTED", "NORMALIZED",
+        "PENDING_EVIDENCE", "PENDING_HUMAN_REVIEW", "BLOCKED", "VALIDATED",
+        "CLOSED", "FAILED", "DEAD_LETTER"
+      ]
+    },
+    "reviewState": { "enum": ["NOT_REQUIRED", "PENDING"] },
+    "riskLevel": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+    "sensitivity": { "enum": ["PUBLIC", "INTERNAL", "RESTRICTED"] },
+    "competence": { "type": "string", "pattern": "^$|^\\d{4}-(0[1-9]|1[0-2])$" },
+    "documentType": { "type": "string", "maxLength": 128 },
+    "record": { "type": "object" },
+    "metadata": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "eventType": { "const": "DOCUMENT_UPSERT" } },
+        "required": ["eventType"]
+      },
+      "then": { "properties": { "entityType": { "const": "sourceDocument" } } }
+    },
+    {
+      "if": {
+        "properties": { "eventType": { "const": "RUNTIME_CHECKPOINT" } },
+        "required": ["eventType"]
+      },
+      "then": { "properties": { "entityType": { "const": "runtimeCheckpoint" } } }
+    },
+    {
+      "if": {
+        "properties": { "eventType": { "const": "AI_RUN_RECORDED" } },
+        "required": ["eventType"]
+      },
+      "then": { "properties": { "entityType": { "const": "aiRun" } } }
+    },
+    {
+      "if": {
+        "properties": { "entityType": { "const": "aiRun" } },
+        "required": ["entityType"]
+      },
+      "then": { "properties": { "eventType": { "const": "AI_RUN_RECORDED" } } }
+    },
+    {
+      "if": {
+        "properties": {
+          "entityType": { "enum": ["monthlyClosing", "reconciliation", "hospitalAccount"] }
+        },
+        "required": ["entityType"]
+      },
+      "then": {
+        "not": {
+          "properties": { "workflowState": { "const": "CLOSED" } },
+          "required": ["workflowState"]
+        }
+      }
+    }
+  ]
+}

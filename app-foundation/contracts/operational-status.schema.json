@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wmgj.local/schemas/operational-status.schema.json",
+  "title": "WMGJ Operational Status",
+  "type": "object",
+  "required": ["status", "ultimaExecucao", "pipeline", "auditoria", "acoesDisponiveis"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["OK", "ATENCAO", "ERRO"]
+    },
+    "ultimaExecucao": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "pipeline": {
+      "type": "object",
+      "required": ["pendentes", "processando", "processados", "duplicados", "erros", "revisaoHumana"],
+      "properties": {
+        "pendentes": { "type": "integer", "minimum": 0 },
+        "processando": { "type": "integer", "minimum": 0 },
+        "processados": { "type": "integer", "minimum": 0 },
+        "duplicados": { "type": "integer", "minimum": 0 },
+        "erros": { "type": "integer", "minimum": 0 },
+        "revisaoHumana": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "auditoria": {
+      "type": "object",
+      "required": ["ok", "erros", "avisos"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "erros": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "avisos": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "acoesDisponiveis": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "diagnosticar",
+          "processarFila",
+          "reprocessarErros",
+          "auditarCodigo",
+          "validarStatus",
+          "abrirRevisao",
+          "marcarRevisado"
+        ]
+      }
+    }
+  },
+  "additionalProperties": false
+}

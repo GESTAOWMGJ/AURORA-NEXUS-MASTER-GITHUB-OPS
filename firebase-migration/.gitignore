@@ -1,0 +1,16 @@
+node_modules/
+lib/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+.env
+.env.*
+!.env.example
+.firebaserc
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+*.local
+.DS_Store

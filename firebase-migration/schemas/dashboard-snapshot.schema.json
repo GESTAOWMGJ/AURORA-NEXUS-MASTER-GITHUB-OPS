@@ -1,0 +1,833 @@
+{
+  "$defs": {
+    "AuditMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "criticalFindings": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Criticalfindings"
+        },
+        "evidenceGaps": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidencegaps"
+        },
+        "openFindings": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Openfindings"
+        },
+        "overdueActions": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overdueactions"
+        }
+      },
+      "title": "AuditMetrics",
+      "type": "object"
+    },
+    "CompletenessState": {
+      "enum": [
+        "COMPLETE",
+        "PARTIAL",
+        "EMPTY",
+        "INVALID"
+      ],
+      "title": "CompletenessState",
+      "type": "string"
+    },
+    "DashboardAlert": {
+      "additionalProperties": false,
+      "properties": {
+        "alertId": {
+          "title": "Alertid",
+          "type": "string"
+        },
+        "createdAt": {
+          "format": "date-time",
+          "title": "Createdat",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "evidenceRefs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidencerefs",
+          "type": "array"
+        },
+        "severity": {
+          "$ref": "#/$defs/RiskLevel"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "alertId",
+        "severity",
+        "title",
+        "detail",
+        "createdAt"
+      ],
+      "title": "DashboardAlert",
+      "type": "object"
+    },
+    "DashboardCoverage": {
+      "additionalProperties": false,
+      "properties": {
+        "evidencePercent": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Evidencepercent"
+        },
+        "reconciliationPercent": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Reconciliationpercent"
+        }
+      },
+      "required": [
+        "evidencePercent",
+        "reconciliationPercent"
+      ],
+      "title": "DashboardCoverage",
+      "type": "object"
+    },
+    "DashboardDataQuality": {
+      "additionalProperties": false,
+      "properties": {
+        "complete": {
+          "const": true,
+          "title": "Complete",
+          "type": "boolean"
+        },
+        "invalidFinancialRecords": {
+          "const": 0,
+          "title": "Invalidfinancialrecords",
+          "type": "integer"
+        },
+        "sourcePresent": {
+          "const": true,
+          "title": "Sourcepresent",
+          "type": "boolean"
+        },
+        "validFinancialRecords": {
+          "minimum": 0,
+          "title": "Validfinancialrecords",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "complete",
+        "sourcePresent",
+        "invalidFinancialRecords",
+        "validFinancialRecords"
+      ],
+      "title": "DashboardDataQuality",
+      "type": "object"
+    },
+    "DashboardEngine": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "SHADOW",
+          "title": "Mode",
+          "type": "string"
+        },
+        "name": {
+          "const": "aurora-projection",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "const": 2,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "mode"
+      ],
+      "title": "DashboardEngine",
+      "type": "object"
+    },
+    "DashboardFinancialCents": {
+      "additionalProperties": false,
+      "properties": {
+        "glossCents": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Glosscents"
+        },
+        "invoicedCents": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Invoicedcents"
+        },
+        "outstandingCents": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Outstandingcents"
+        },
+        "receivedCents": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Receivedcents"
+        }
+      },
+      "required": [
+        "invoicedCents",
+        "receivedCents",
+        "glossCents",
+        "outstandingCents"
+      ],
+      "title": "DashboardFinancialCents",
+      "type": "object"
+    },
+    "DashboardModule": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "enum": [
+            "M01",
+            "M02",
+            "M03",
+            "M04",
+            "M05",
+            "M06",
+            "M07",
+            "M08",
+            "M09",
+            "M10"
+          ],
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "status": {
+          "const": "LEARNING",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "status"
+      ],
+      "title": "DashboardModule",
+      "type": "object"
+    },
+    "DashboardOperations": {
+      "additionalProperties": false,
+      "properties": {
+        "openActions": {
+          "minimum": 0,
+          "title": "Openactions",
+          "type": "integer"
+        },
+        "openFindings": {
+          "minimum": 0,
+          "title": "Openfindings",
+          "type": "integer"
+        },
+        "overdueActions": {
+          "minimum": 0,
+          "title": "Overdueactions",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "openActions",
+        "overdueActions",
+        "openFindings"
+      ],
+      "title": "DashboardOperations",
+      "type": "object"
+    },
+    "DashboardSampleSizes": {
+      "additionalProperties": false,
+      "properties": {
+        "actionItems": {
+          "minimum": 0,
+          "title": "Actionitems",
+          "type": "integer"
+        },
+        "auditFindings": {
+          "minimum": 0,
+          "title": "Auditfindings",
+          "type": "integer"
+        },
+        "bankTransactions": {
+          "minimum": 0,
+          "title": "Banktransactions",
+          "type": "integer"
+        },
+        "glosses": {
+          "minimum": 0,
+          "title": "Glosses",
+          "type": "integer"
+        },
+        "invoices": {
+          "minimum": 0,
+          "title": "Invoices",
+          "type": "integer"
+        },
+        "reconciliations": {
+          "minimum": 0,
+          "title": "Reconciliations",
+          "type": "integer"
+        },
+        "sourceDocuments": {
+          "minimum": 0,
+          "title": "Sourcedocuments",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "invoices",
+        "bankTransactions",
+        "glosses",
+        "actionItems",
+        "sourceDocuments",
+        "reconciliations",
+        "auditFindings"
+      ],
+      "title": "DashboardSampleSizes",
+      "type": "object"
+    },
+    "FinancialMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "billedAmount": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Billedamount"
+        },
+        "currency": {
+          "const": "BRL",
+          "default": "BRL",
+          "title": "Currency",
+          "type": "string"
+        },
+        "pendingAmount": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pendingamount"
+        },
+        "receivedAmount": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Receivedamount"
+        },
+        "reconciliationDifference": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reconciliationdifference"
+        }
+      },
+      "title": "FinancialMetrics",
+      "type": "object"
+    },
+    "FreshnessState": {
+      "enum": [
+        "FRESH",
+        "DELAYED",
+        "STALE",
+        "UNKNOWN"
+      ],
+      "title": "FreshnessState",
+      "type": "string"
+    },
+    "OperationalSeverity": {
+      "enum": [
+        "NOMINAL",
+        "ATTENTION",
+        "BLOCKED",
+        "UNKNOWN"
+      ],
+      "title": "OperationalSeverity",
+      "type": "string"
+    },
+    "PipelineMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "deadLetter": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deadletter"
+        },
+        "duplicateEvents": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duplicateevents"
+        },
+        "failed": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failed"
+        },
+        "pendingHumanReview": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pendinghumanreview"
+        },
+        "processing": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Processing"
+        },
+        "queued": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Queued"
+        },
+        "total": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total"
+        },
+        "validated": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Validated"
+        }
+      },
+      "title": "PipelineMetrics",
+      "type": "object"
+    },
+    "RiskLevel": {
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH",
+        "CRITICAL"
+      ],
+      "title": "RiskLevel",
+      "type": "string"
+    },
+    "SourceState": {
+      "additionalProperties": false,
+      "properties": {
+        "completeness": {
+          "$ref": "#/$defs/CompletenessState"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "expectedCadenceSeconds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expectedcadenceseconds"
+        },
+        "freshness": {
+          "$ref": "#/$defs/FreshnessState",
+          "default": "UNKNOWN"
+        },
+        "lastSuccessAt": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lastsuccessat"
+        },
+        "missing": {
+          "default": false,
+          "title": "Missing",
+          "type": "boolean"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "staleAfterSeconds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Staleafterseconds"
+        }
+      },
+      "required": [
+        "source",
+        "completeness"
+      ],
+      "title": "SourceState",
+      "type": "object"
+    }
+  },
+  "$id": "https://wmgj.example/schemas/dashboard-snapshot.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "alerts": {
+      "items": {
+        "$ref": "#/$defs/DashboardAlert"
+      },
+      "maxItems": 50,
+      "title": "Alerts",
+      "type": "array"
+    },
+    "asOf": {
+      "format": "date-time",
+      "title": "Asof",
+      "type": "string"
+    },
+    "audit": {
+      "$ref": "#/$defs/AuditMetrics"
+    },
+    "competence": {
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+      "title": "Competence",
+      "type": "string"
+    },
+    "completeness": {
+      "$ref": "#/$defs/CompletenessState"
+    },
+    "coverage": {
+      "$ref": "#/$defs/DashboardCoverage"
+    },
+    "dataQuality": {
+      "$ref": "#/$defs/DashboardDataQuality"
+    },
+    "engine": {
+      "$ref": "#/$defs/DashboardEngine"
+    },
+    "facilityId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Facilityid"
+    },
+    "financial": {
+      "$ref": "#/$defs/FinancialMetrics"
+    },
+    "financialCents": {
+      "$ref": "#/$defs/DashboardFinancialCents"
+    },
+    "generatedAt": {
+      "format": "date-time",
+      "title": "Generatedat",
+      "type": "string"
+    },
+    "modules": {
+      "items": {
+        "$ref": "#/$defs/DashboardModule"
+      },
+      "maxItems": 10,
+      "minItems": 10,
+      "title": "Modules",
+      "type": "array"
+    },
+    "operations": {
+      "$ref": "#/$defs/DashboardOperations"
+    },
+    "orgId": {
+      "title": "Orgid",
+      "type": "string"
+    },
+    "pipeline": {
+      "$ref": "#/$defs/PipelineMetrics"
+    },
+    "policyVersion": {
+      "title": "Policyversion",
+      "type": "string"
+    },
+    "sampleSizes": {
+      "$ref": "#/$defs/DashboardSampleSizes"
+    },
+    "sanitized": {
+      "const": true,
+      "title": "Sanitized",
+      "type": "boolean"
+    },
+    "schemaVersion": {
+      "const": 2,
+      "title": "Schemaversion",
+      "type": "integer"
+    },
+    "sensitivity": {
+      "const": "INTERNAL",
+      "title": "Sensitivity",
+      "type": "string"
+    },
+    "severity": {
+      "$ref": "#/$defs/OperationalSeverity"
+    },
+    "snapshotId": {
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "title": "Snapshotid",
+      "type": "string"
+    },
+    "sourceHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sourcehash",
+      "type": "string"
+    },
+    "sourceLimit": {
+      "const": 1000,
+      "title": "Sourcelimit",
+      "type": "integer"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/SourceState"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "state": {
+      "const": "SHADOW",
+      "title": "State",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "orgId",
+    "competence",
+    "generatedAt",
+    "asOf",
+    "policyVersion",
+    "completeness",
+    "severity",
+    "pipeline",
+    "financial",
+    "audit",
+    "sources",
+    "alerts",
+    "sanitized",
+    "sensitivity",
+    "state",
+    "financialCents",
+    "operations",
+    "coverage",
+    "sampleSizes",
+    "dataQuality",
+    "modules",
+    "engine",
+    "sourceLimit",
+    "sourceHash",
+    "snapshotId"
+  ],
+  "title": "DashboardSnapshot",
+  "type": "object"
+}
