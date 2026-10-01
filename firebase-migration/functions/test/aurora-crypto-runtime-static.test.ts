@@ -31,7 +31,7 @@ test("HML crypto workflow requires explicit request and preserves non-production
   assert.match(workflow, /push:[\s\S]*branches: \[main\][\s\S]*aurora-crypto-hml\.json/);
   assert.doesNotMatch(workflow, /pull_request:/);
   assert.match(workflow, /environment: firebase-homologation/);
-  assert.match(workflow, /google-github-actions\/auth@v2/);
+  assert.match(workflow, /google-github-actions\/auth@c200f3691d83b41bf9bbd8638997a462592937ed/);
   assert.match(workflow, /cloudkms\.googleapis\.com/);
   assert.match(workflow, /roles\/cloudkms\.cryptoKeyEncrypterDecrypter/);
   assert.match(workflow, /functions:auroraNexusCryptoSelfTest,hosting/);

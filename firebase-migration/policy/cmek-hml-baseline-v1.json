@@ -1,0 +1,39 @@
+{
+  "id": "AURORA-SEC-002-CMEK-HML",
+  "version": "1.0.0",
+  "status": "PREPARED_NOT_APPLIED",
+  "projectId": "wmgj-hml-jfn-20260927",
+  "databaseId": "aurora-hml-cmek",
+  "location": "southamerica-east1",
+  "edition": "standard",
+  "type": "firestore-native",
+  "keyRing": "aurora-hml-firestore",
+  "cryptoKey": "aurora-firestore-cmek",
+  "rotationDays": 90,
+  "protectionLevel": "software",
+  "deleteProtection": true,
+  "pitr": true,
+  "backup": {
+    "recurrence": "daily",
+    "retention": "14d"
+  },
+  "restoreDatabasePrefix": "aurora-hml-restore-",
+  "productionMutation": false,
+  "clinicalSensitiveEnabled": false,
+  "realDataAllowed": false,
+  "destructiveOperationsAllowed": false,
+  "keyDestructionAllowed": false,
+  "keyFailureTest": {
+    "allowedEnvironment": "HOMOLOGATION",
+    "action": "TEMPORARY_DISABLE_ENABLE_ONLY",
+    "requireExactConfirmation": "TEST_AURORA_CMEK_KEY_FAILURE_HML",
+    "destroyForbidden": true,
+    "recoveryRequired": true
+  },
+  "applyConfirmation": "APPLY_AURORA_CMEK_HML",
+  "restoreConfirmation": "RESTORE_AURORA_CMEK_HML",
+  "firestoreCmekFeatureAccessRequired": false,
+  "firestoreCmekFeatureAccessState": "RUNTIME_VERIFIED_BY_DATABASE_CREATE_OR_EXISTING_CMEK_DATABASE",
+  "sameLocationKmsRequired": true,
+  "serviceAgentRole": "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+}

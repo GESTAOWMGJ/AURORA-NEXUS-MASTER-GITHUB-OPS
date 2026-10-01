@@ -9,6 +9,19 @@ on:
       - "firebase-migration/functions/src/entry.ts"
       - "firebase-migration/functions/test/aurora-crypto-envelope.test.ts"
       - "firebase-migration/functions/test/aurora-crypto-runtime-static.test.ts"
+      - "firebase-migration/functions/test/aurora-cmek-hml-static.test.ts"
+      - "firebase-migration/policy/cmek-hml-baseline-v1.json"
+      - "firebase-migration/scripts/validate-cmek-hml-baseline.mjs"
+      - "firebase-migration/scripts/aurora-cmek-hml.sh"
+      - "firebase-migration/docs/30-threat-model.md"
+      - "firebase-migration/docs/31-lgpd-ropa.md"
+      - "firebase-migration/docs/32-security-risk-register.md"
+      - "firebase-migration/docs/33-incident-response-plan.md"
+      - "firebase-migration/docs/34-dpa-template-lgpd.md"
+      - "firebase-migration/docs/35-firestore-cmek-hml-spec.md"
+      - "firebase-migration/docs/36-vulnerability-consolidated-report.md"
+      - "firebase-migration/docs/37-clinical-sensitive-release-gate.md"
+      - ".github/workflows/aurora-cmek-hml.yml"
       - "firebase-migration/schemas/crypto-envelope.v1.schema.json"
       - "firebase-migration/policy/security-baseline-v1.json"
       - "firebase-migration/docs/2*-crypto-*.md"
@@ -25,6 +38,19 @@ on:
       - "firebase-migration/functions/src/auroraAccess.ts"
       - "firebase-migration/functions/src/entry.ts"
       - "firebase-migration/functions/test/aurora-crypto-envelope.test.ts"
+      - "firebase-migration/functions/test/aurora-cmek-hml-static.test.ts"
+      - "firebase-migration/policy/cmek-hml-baseline-v1.json"
+      - "firebase-migration/scripts/validate-cmek-hml-baseline.mjs"
+      - "firebase-migration/scripts/aurora-cmek-hml.sh"
+      - "firebase-migration/docs/30-threat-model.md"
+      - "firebase-migration/docs/31-lgpd-ropa.md"
+      - "firebase-migration/docs/32-security-risk-register.md"
+      - "firebase-migration/docs/33-incident-response-plan.md"
+      - "firebase-migration/docs/34-dpa-template-lgpd.md"
+      - "firebase-migration/docs/35-firestore-cmek-hml-spec.md"
+      - "firebase-migration/docs/36-vulnerability-consolidated-report.md"
+      - "firebase-migration/docs/37-clinical-sensitive-release-gate.md"
+      - ".github/workflows/aurora-cmek-hml.yml"
       - "firebase-migration/schemas/crypto-envelope.v1.schema.json"
       - "firebase-migration/policy/security-baseline-v1.json"
       - "firebase-migration/firebase.json"
@@ -57,7 +83,7 @@ jobs:
 
       - name: Run cryptographic regression tests
         working-directory: firebase-migration/functions
-        run: node --import tsx --test test/aurora-crypto-envelope.test.ts test/aurora-crypto-runtime-static.test.ts
+        run: node --import tsx --test test/aurora-crypto-envelope.test.ts test/aurora-crypto-runtime-static.test.ts test/aurora-cmek-hml-static.test.ts
 
       - name: Validate versioned crypto JSON
         run: |
@@ -67,6 +93,7 @@ jobs:
           for (const path of [
             "firebase-migration/schemas/crypto-envelope.v1.schema.json",
             "firebase-migration/policy/security-baseline-v1.json",
+            "firebase-migration/policy/cmek-hml-baseline-v1.json",
             "firebase-migration/firebase.json"
           ]) JSON.parse(fs.readFileSync(path, "utf8"));
           const policy = JSON.parse(fs.readFileSync("firebase-migration/policy/security-baseline-v1.json", "utf8"));
@@ -75,6 +102,8 @@ jobs:
           if (policy.applicationLayerEncryption?.failClosed !== true) throw new Error("CRYPTO_POLICY_FAIL_CLOSED_REQUIRED");
           console.log("AURORA_CRYPTO_POLICY_OK");
           NODE
+          node firebase-migration/scripts/validate-cmek-hml-baseline.mjs
+          bash -n firebase-migration/scripts/aurora-cmek-hml.sh
 
       - name: Enforce crypto implementation invariants
         run: |
@@ -95,11 +124,14 @@ jobs:
       - name: Confirm market documentation package
         run: |
           set -euo pipefail
-          for path in             firebase-migration/docs/23-crypto-key-management-policy.md             firebase-migration/docs/24-cryptographic-architecture-and-pqc-roadmap.md             firebase-migration/docs/25-crypto-hml-deployment-runbook.md             firebase-migration/docs/26-crypto-evidence-register.md             firebase-migration/docs/27-security-questionnaire-cryptography.md             firebase-migration/docs/28-lgpd-cryptography-control-mapping.md
+          for path in             firebase-migration/docs/23-crypto-key-management-policy.md             firebase-migration/docs/24-cryptographic-architecture-and-pqc-roadmap.md             firebase-migration/docs/25-crypto-hml-deployment-runbook.md             firebase-migration/docs/26-crypto-evidence-register.md             firebase-migration/docs/27-security-questionnaire-cryptography.md             firebase-migration/docs/28-lgpd-cryptography-control-mapping.md             firebase-migration/docs/30-threat-model.md             firebase-migration/docs/31-lgpd-ropa.md             firebase-migration/docs/32-security-risk-register.md             firebase-migration/docs/33-incident-response-plan.md             firebase-migration/docs/34-dpa-template-lgpd.md             firebase-migration/docs/35-firestore-cmek-hml-spec.md             firebase-migration/docs/36-vulnerability-consolidated-report.md             firebase-migration/docs/37-clinical-sensitive-release-gate.md
           do
             test -s "$path"
           done
           grep -Fq 'ML-KEM' firebase-migration/docs/24-cryptographic-architecture-and-pqc-roadmap.md
           grep -Fq 'CLINICAL_SENSITIVE' firebase-migration/docs/23-crypto-key-management-policy.md
           grep -Fq 'art. 46' firebase-migration/docs/28-lgpd-cryptography-control-mapping.md
+          grep -Fq 'STRIDE' firebase-migration/docs/30-threat-model.md
+          grep -Fq 'CONTROLADOR_DEVE_DECLARAR' firebase-migration/docs/31-lgpd-ropa.md
+          grep -Fq 'BLOCKED' firebase-migration/docs/37-clinical-sensitive-release-gate.md
           echo "AURORA_CRYPTO_DOCUMENTATION_OK"

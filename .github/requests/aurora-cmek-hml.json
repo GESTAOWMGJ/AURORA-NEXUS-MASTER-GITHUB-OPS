@@ -1,0 +1,10 @@
+{
+  "requestId": "AURORA-CMEK-HML-20261001-PLAN-001",
+  "mode": "plan",
+  "confirmation": "",
+  "projectId": "wmgj-hml-jfn-20260927",
+  "databaseId": "aurora-hml-cmek",
+  "productionMutation": false,
+  "clinicalSensitiveEnabled": false,
+  "realDataAllowed": false
+}

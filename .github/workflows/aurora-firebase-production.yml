@@ -28,7 +28,7 @@ jobs:
       WIF_PROVIDER: ${{ vars.GCP_PROD_WIF_PROVIDER }}
       PROVISION_SERVICE_ACCOUNT: ${{ vars.GCP_PROD_DEPLOY_SERVICE_ACCOUNT }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned 2026-10-01
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -63,12 +63,12 @@ jobs:
           echo "project_id=$project_id" >> "$GITHUB_OUTPUT"
           echo "region=$region" >> "$GITHUB_OUTPUT"
 
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2 pinned 2026-10-01
         with:
           workload_identity_provider: ${{ vars.GCP_PROD_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_PROD_DEPLOY_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2 pinned 2026-10-01
         with:
           version: "548.0.0"
 

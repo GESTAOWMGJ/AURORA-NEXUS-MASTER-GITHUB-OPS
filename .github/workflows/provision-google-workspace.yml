@@ -1,16 +1,15 @@
-name: Provision Google Workspace aliases
+name: Google Workspace aliases — offline plan only
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Plan only or apply desired state"
+        description: "Safe mode; CI cannot use legacy DWD JSON credentials"
         required: true
-        default: plan
+        default: offline-plan
         type: choice
         options:
-          - plan
-          - apply
+          - offline-plan
 
 permissions:
   contents: read
@@ -20,7 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  provision:
+  plan:
     runs-on: ubuntu-latest
     environment: google-workspace-production
     defaults:
@@ -28,10 +27,10 @@ jobs:
         working-directory: tools/google-workspace
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned 2026-10-01
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6 pinned 2026-10-01
         with:
           node-version: "22"
           package-manager-cache: false
@@ -39,27 +38,11 @@ jobs:
       - name: Install dependencies
         run: npm install --omit=dev
 
-      - name: Validate required secrets
+      - name: Render desired-state plan without Google credentials
         env:
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          GOOGLE_ADMIN_IMPERSONATE: ${{ secrets.GOOGLE_ADMIN_IMPERSONATE }}
-        run: |
-          test -n "$GOOGLE_SERVICE_ACCOUNT_JSON" || (echo "Missing GOOGLE_SERVICE_ACCOUNT_JSON" && exit 1)
-          test -n "$GOOGLE_ADMIN_IMPERSONATE" || (echo "Missing GOOGLE_ADMIN_IMPERSONATE" && exit 1)
-
-      - name: Plan desired state
-        env:
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          GOOGLE_ADMIN_IMPERSONATE: ${{ secrets.GOOGLE_ADMIN_IMPERSONATE }}
           WORKSPACE_DOMAIN: drjoaodefreitas.com.br
           WORKSPACE_PRIMARY_USER: joao@drjoaodefreitas.com.br
-        run: node provision.mjs --plan
+        run: node provision.mjs --offline-plan
 
-      - name: Apply desired state
-        if: ${{ inputs.mode == 'apply' }}
-        env:
-          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          GOOGLE_ADMIN_IMPERSONATE: ${{ secrets.GOOGLE_ADMIN_IMPERSONATE }}
-          WORKSPACE_DOMAIN: drjoaodefreitas.com.br
-          WORKSPACE_PRIMARY_USER: joao@drjoaodefreitas.com.br
-        run: node provision.mjs --apply
+      - name: Confirm offline-only CI gate
+        run: echo "GOOGLE_WORKSPACE_CI_KEYLESS_GATE=ENFORCED"

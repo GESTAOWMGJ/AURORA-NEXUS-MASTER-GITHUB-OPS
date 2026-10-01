@@ -74,9 +74,13 @@ if ($LASTEXITCODE -ne 0) {
   if ($LASTEXITCODE -ne 0) { throw "Production deploy service account creation failed" }
 }
 
-$roles = @(
+$requiredProjectRoles = @(
   "roles/firebase.admin",
   "roles/datastore.owner",
+  "roles/secretmanager.viewer",
+  "roles/serviceusage.serviceUsageAdmin"
+)
+$legacyBroadProjectRoles = @(
   "roles/cloudfunctions.admin",
   "roles/run.admin",
   "roles/artifactregistry.admin",
@@ -84,10 +88,12 @@ $roles = @(
   "roles/cloudscheduler.admin",
   "roles/eventarc.admin",
   "roles/pubsub.admin",
-  "roles/serviceusage.serviceUsageAdmin",
   "roles/iam.serviceAccountUser"
 )
-foreach ($role in $roles) {
+foreach ($role in $legacyBroadProjectRoles) {
+  & gcloud projects remove-iam-policy-binding $ProductionProjectId --member="serviceAccount:$serviceAccount" --role=$role --condition=None --quiet 2>$null | Out-Null
+}
+foreach ($role in $requiredProjectRoles) {
   & gcloud projects add-iam-policy-binding $ProductionProjectId --member="serviceAccount:$serviceAccount" --role=$role --condition=None --quiet | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "IAM binding failed for $role" }
 }
@@ -100,18 +106,32 @@ if ($LASTEXITCODE -ne 0) {
   if ($LASTEXITCODE -ne 0) { throw "WIF pool creation failed" }
 }
 
+$productionWorkflowRef = "$Repository/.github/workflows/aurora-firebase-production.yml@refs/heads/main"
+$attributeMapping = "google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref,attribute.environment=assertion.environment,attribute.job_workflow_ref=assertion.job_workflow_ref"
+$attributeCondition = "assertion.repository=='$Repository' && assertion.ref=='refs/heads/main' && assertion.environment=='$Environment' && assertion.job_workflow_ref=='$productionWorkflowRef'"
+
 & gcloud iam workload-identity-pools providers describe $provider --project $ProductionProjectId --location global --workload-identity-pool $pool 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
   & gcloud iam workload-identity-pools providers create-oidc $provider `
     --project $ProductionProjectId `
     --location global `
     --workload-identity-pool $pool `
-    --display-name="GitHub GESTAOWMGJ Aurora" `
+    --display-name="GitHub GESTAOWMGJ Aurora Production" `
     --issuer-uri="https://token.actions.githubusercontent.com" `
-    --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" `
-    --attribute-condition="assertion.repository=='$Repository' && assertion.ref=='refs/heads/main'" `
+    --attribute-mapping=$attributeMapping `
+    --attribute-condition=$attributeCondition `
     --quiet | Out-Null
   if ($LASTEXITCODE -ne 0) { throw "WIF provider creation failed" }
+} else {
+  & gcloud iam workload-identity-pools providers update-oidc $provider `
+    --project $ProductionProjectId `
+    --location global `
+    --workload-identity-pool $pool `
+    --issuer-uri="https://token.actions.githubusercontent.com" `
+    --attribute-mapping=$attributeMapping `
+    --attribute-condition=$attributeCondition `
+    --quiet | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "WIF provider hardening failed" }
 }
 
 $providerResource = (& gcloud iam workload-identity-pools providers describe $provider --project $ProductionProjectId --location global --workload-identity-pool $pool --format="value(name)").Trim()
@@ -119,7 +139,7 @@ $projectNumber = (& gcloud projects describe $ProductionProjectId --format="valu
 if ($providerResource -notmatch "^projects/[0-9]+/locations/global/workloadIdentityPools/") { throw "Invalid WIF provider resource" }
 if ($projectNumber -notmatch "^[0-9]+$") { throw "Invalid production project number" }
 
-$principal = "principalSet://iam.googleapis.com/projects/$projectNumber/locations/global/workloadIdentityPools/$pool/attribute.repository/$Repository"
+$principal = "principalSet://iam.googleapis.com/projects/$projectNumber/locations/global/workloadIdentityPools/$pool/attribute.environment/$Environment"
 & gcloud iam service-accounts add-iam-policy-binding $serviceAccount --project $ProductionProjectId --role="roles/iam.workloadIdentityUser" --member=$principal --quiet | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "WIF service account binding failed" }
 
@@ -162,7 +182,7 @@ $reviewerId = (& gh api user --jq ".id").Trim()
 if ($reviewerId -notmatch "^[0-9]+$") { throw "Could not resolve GitHub reviewer id" }
 $environmentPayload = @{
   wait_timer = 0
-  prevent_self_review = $false
+  prevent_self_review = $true
   reviewers = @(@{ type = "User"; id = [int64]$reviewerId })
 } | ConvertTo-Json -Depth 6
 $environmentPayload | & gh api --method PUT "repos/$Repository/environments/$Environment" --input - | Out-Null
