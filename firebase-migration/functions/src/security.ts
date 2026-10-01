@@ -5,6 +5,7 @@ export const HMAC_CLOCK_SKEW_SECONDS = 300;
 
 const KEY_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/;
 const NONCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/;
+const HMAC_SECRET_HEX_PATTERN = /^[a-f0-9]{64}$/i;
 
 export interface HmacV2Headers {
   signatureVersion: string;
@@ -69,7 +70,9 @@ export function canonicalHmacV2Payload(rawBody: Buffer, headers: HmacV2Headers):
 }
 
 export function signHmacV2(rawBody: Buffer, headers: HmacV2Headers, secret: string): string {
-  return createHmac("sha256", secret)
+  const key = decodeHmacSecret(secret);
+  if (!key) throw new Error("HMAC_SECRET_INVALID");
+  return createHmac("sha256", key)
     .update(canonicalHmacV2Payload(rawBody, headers))
     .digest("hex");
 }
@@ -98,7 +101,7 @@ export function parseHmacKeyring(raw: string): Record<string, HmacKeyEntry> {
     if (
       typeof value.active !== "boolean" ||
       typeof secret !== "string" ||
-      secret.length < 32 ||
+      !decodeHmacSecret(secret) ||
       !isNonEmptyStringArray(orgIds) ||
       !isNonEmptyStringArray(entityTypes)
     ) {
@@ -176,6 +179,12 @@ export function verifyHmacV2(
       entityTypes: [...key.entityTypes]
     }
   };
+}
+
+function decodeHmacSecret(secret: string): Buffer | null {
+  if (!HMAC_SECRET_HEX_PATTERN.test(secret)) return null;
+  const key = Buffer.from(secret, "hex");
+  return key.length === 32 ? key : null;
 }
 
 function normalizeContentType(value: string | undefined): string {

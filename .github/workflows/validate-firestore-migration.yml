@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "firebase-migration/**"
+      - "app-foundation/contracts/**"
       - ".github/workflows/validate-firestore-migration.yml"
       - ".github/workflows/deploy-aurora-firebase.yml"
   push:
@@ -12,6 +13,7 @@ on:
       - feat/firestore-migration-foundation-20260826
     paths:
       - "firebase-migration/**"
+      - "app-foundation/contracts/**"
       - ".github/workflows/validate-firestore-migration.yml"
       - ".github/workflows/deploy-aurora-firebase.yml"
   workflow_dispatch:
@@ -95,7 +97,8 @@ jobs:
             "firebase-migration/tests/package-lock.json",
             "firebase-migration/policy/aurora-nexus-source-2.3.0.json",
             "firebase-migration/policy/aurora-nexus-policy.sanitized.json",
-            "firebase-migration/policy/manifest.json"
+            "firebase-migration/policy/manifest.json",
+            "firebase-migration/policy/security-baseline-v1.json"
           ];
           for (const file of files) {
             JSON.parse(fs.readFileSync(file, "utf8"));
@@ -105,6 +108,7 @@ jobs:
 
           echo '9a8f7f291be65c0ef1feba043592452b77bef03e965198ca451f0044703a6d8f  firebase-migration/policy/aurora-nexus-source-2.3.0.json' | sha256sum -c -
           echo '077e7cbf4c60e578dee971ce5af5f847c773ba35c7b8beb020caa7cb6af971a7  firebase-migration/policy/aurora-nexus-policy.sanitized.json' | sha256sum -c -
+          node firebase-migration/scripts/validate-security-baseline.mjs | grep -F 'AURORA_SECURITY_BASELINE_OK'
 
       - name: Build Functions and run Security Rules tests
         env:
