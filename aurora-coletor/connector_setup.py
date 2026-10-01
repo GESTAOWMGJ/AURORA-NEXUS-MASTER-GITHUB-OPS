@@ -158,8 +158,8 @@ def redacted_secret_inventory(secrets_map: dict[str, str]) -> dict[str, dict[str
     return {
         _safe_env_name(key): {
             "configured": bool(value),
-            "sha256": sha256_text(value) if value else None,
             "valueStoredInManifest": False,
+            "fingerprintStored": False,
         }
         for key, value in sorted(secrets_map.items())
     }
