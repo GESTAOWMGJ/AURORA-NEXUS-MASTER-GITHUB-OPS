@@ -215,12 +215,21 @@ export const auroraNexusNativeInsight = onRequest(
       res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_SNAPSHOT_REQUIRED" });
       return;
     }
-    const rawProjection = {
-      ...snapshot.data(),
-      generatedAt: snapshot.data()?.generatedAt?.toDate?.().toISOString?.() ?? null
+    const snapshotData = snapshot.data() ?? {};
+    const generatedAtValue = snapshotData.generatedAt;
+    const generatedAt = generatedAtValue
+      && typeof generatedAtValue === "object"
+      && "toDate" in generatedAtValue
+      && typeof (generatedAtValue as { toDate?: unknown }).toDate === "function"
+        ? (generatedAtValue as { toDate(): Date }).toDate().toISOString()
+        : null;
+    const rawProjection: Record<string, unknown> = {
+      ...snapshotData,
+      generatedAt
     };
-    const nativeDataPlane = rawProjection.nativeDataPlane && typeof rawProjection.nativeDataPlane === "object"
-      ? rawProjection.nativeDataPlane as Record<string, unknown>
+    const nativeDataPlaneValue = rawProjection["nativeDataPlane"];
+    const nativeDataPlane = nativeDataPlaneValue && typeof nativeDataPlaneValue === "object" && !Array.isArray(nativeDataPlaneValue)
+      ? nativeDataPlaneValue as Record<string, unknown>
       : {};
     if (nativeDataPlane.storage !== "FIRESTORE" || nativeDataPlane.sourceAccessDuringInference !== false) {
       res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_CONTRACT_REQUIRED" });
