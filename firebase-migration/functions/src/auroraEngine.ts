@@ -149,7 +149,7 @@ function documentIntelligenceMetrics(
   const origins: Record<string, number> = {};
 
   for (const item of docs) {
-    const origin = normalized(item.originSystem ?? item.origin_system ?? item.source?.toString?.() ?? "UNKNOWN") || "UNKNOWN";
+    const origin = normalized(item.originSystem ?? item.origin_system ?? "UNKNOWN") || "UNKNOWN";
     origins[origin] = (origins[origin] ?? 0) + 1;
 
     const ready = booleanField(item, "nativeReady", "native_ready");
