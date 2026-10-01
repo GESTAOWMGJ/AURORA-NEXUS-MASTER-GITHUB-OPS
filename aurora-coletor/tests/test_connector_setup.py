@@ -17,6 +17,7 @@ class ConnectorSetupTest(unittest.TestCase):
         issued = c.issue_aurora_api_key("wmgj", "tasy")
         self.assertTrue(issued.api_key.startswith("anx_ik_"))
         self.assertEqual(len(issued.sha256), 64)
+        self.assertIn("documents.ingest", issued.scopes)
         self.assertNotIn(issued.api_key, json.dumps({
             "keyId": issued.key_id, "sha256": issued.sha256, "expiresAt": issued.expires_at
         }))
@@ -62,6 +63,8 @@ class ConnectorSetupTest(unittest.TestCase):
         self.assertEqual(manifest["nativeDataPlane"]["storage"], "FIRESTORE")
         self.assertFalse(manifest["nativeDataPlane"]["sourceAccessRequiredAfterIngest"])
         self.assertFalse(manifest["nativeDataPlane"]["externalAiFallbackDefault"])
+        self.assertEqual(manifest["documentInputs"]["canonicalApiPath"], "/api/integration/documents")
+        self.assertEqual(manifest["documentInputs"]["requiredApiScope"], "documents.ingest")
 
     def test_document_source_rejects_unknown_system_and_invalid_sla(self):
         with self.assertRaises(c.ConnectorSetupError):
