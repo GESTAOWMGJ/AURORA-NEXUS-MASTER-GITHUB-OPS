@@ -480,42 +480,48 @@ function enfileirarArquivosEntradaWMGJ_V3(limite) {
     var slaMinutes = Number(source.slaMinutes || 1440);
     if (!folderId) continue;
 
-    var pasta = DriveApp.getFolderById(folderId);
-    var arquivos = pasta.getFiles();
-    var stats = { sourceId: sourceId, system: system, folderId: folderId, lidos: 0, enfileirados: 0, duplicados: 0 };
+    var stats = { sourceId: sourceId, system: system, folderId: folderId, lidos: 0, enfileirados: 0, duplicados: 0, accessible: false, error: "" };
+    try {
+      var pasta = DriveApp.getFolderById(folderId);
+      var arquivos = pasta.getFiles();
+      stats.accessible = true;
 
-    while (arquivos.hasNext() && lidos < max) {
-      var file = arquivos.next();
-      lidos++;
-      stats.lidos++;
+      while (arquivos.hasNext() && lidos < max) {
+        var file = arquivos.next();
+        lidos++;
+        stats.lidos++;
 
-      var id = file.getId();
-      var nome = file.getName();
-      var mime = file.getMimeType();
-      var hash = gerarHashArquivoWMGJ_(file);
+        var id = file.getId();
+        var nome = file.getName();
+        var mime = file.getMimeType();
+        var hash = gerarHashArquivoWMGJ_(file);
 
-      if (idsNaFila[id] || documentoJaProcessadoWMGJ_(id, hash)) {
-        duplicados++;
-        stats.duplicados++;
-        continue;
+        if (idsNaFila[id] || documentoJaProcessadoWMGJ_(id, hash)) {
+          duplicados++;
+          stats.duplicados++;
+          continue;
+        }
+
+        fila.appendRow([
+          new Date(),
+          system,
+          id,
+          nome,
+          mime,
+          "PENDENTE",
+          0,
+          "PROCESSAR_ARQUIVO_V3",
+          "",
+          "Fonte=" + sourceId + "; SLA_MIN=" + slaMinutes + "; monitoramento contínuo"
+        ]);
+
+        idsNaFila[id] = true;
+        enfileirados++;
+        stats.enfileirados++;
       }
-
-      fila.appendRow([
-        new Date(),
-        system,
-        id,
-        nome,
-        mime,
-        "PENDENTE",
-        0,
-        "PROCESSAR_ARQUIVO_V3",
-        "",
-        "Fonte=" + sourceId + "; SLA_MIN=" + slaMinutes + "; monitoramento contínuo"
-      ]);
-
-      idsNaFila[id] = true;
-      enfileirados++;
-      stats.enfileirados++;
+    } catch (sourceError) {
+      stats.error = sourceError && sourceError.message ? String(sourceError.message).slice(0, 180) : "SOURCE_UNAVAILABLE";
+      registrarLogWMGJ_("ALERTA", "enfileirarArquivosEntradaWMGJ_V3", system, JSON.stringify({ sourceId: sourceId, folderId: folderId, error: stats.error }));
     }
     sourceStats.push(stats);
   }
@@ -528,7 +534,8 @@ function enfileirarArquivosEntradaWMGJ_V3(limite) {
     lidos: lidos,
     enfileirados: enfileirados,
     duplicados: duplicados,
-    sources: sourceStats
+    sources: sourceStats,
+    unavailableSources: sourceStats.filter(function(item) { return item.accessible !== true; }).length
   };
 }
 
