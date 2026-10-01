@@ -115,6 +115,10 @@ function countWhere(records: Array<Record<string, unknown>>, predicate: (item: R
   return records.reduce((total, item) => total + (predicate(item) ? 1 : 0), 0);
 }
 
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function epochMillis(value: unknown): number {
   if (typeof value === "string") return Date.parse(value);
   if (value && typeof value === "object" && "toDate" in value && typeof (value as { toDate?: unknown }).toDate === "function") {
