@@ -60,7 +60,13 @@ export function parseIntegrationDocumentPayload(value: unknown): IntegrationDocu
   const missingFieldsCount = optionalNonNegativeInteger(raw.missingFieldsCount);
   const sourceVersion = raw.sourceVersion;
 
-  if (!SYSTEMS.has(sourceSystem) || !ID_RE.test(externalDocumentId)) return null;
+  const idLower = externalDocumentId.toLowerCase();
+  if (
+    !SYSTEMS.has(sourceSystem)
+    || !ID_RE.test(externalDocumentId)
+    || /(cpf|cns|paciente|patient|beneficiario|prontuario|medical[-_.:]?record)/.test(idLower)
+    || /\d{3}\.\d{3}\.\d{3}-\d{2}/.test(externalDocumentId)
+  ) return null;
   if (!Number.isSafeInteger(sourceVersion) || Number(sourceVersion) < 1) return null;
   if (!occurredAt || !TYPES.has(documentType) || !WORKFLOW.has(workflowState) || !FRAGILITY.has(documentFragility)) return null;
   if (competence === undefined || slaDueAt === undefined || amountCents === undefined || count === undefined || missingFieldsCount === undefined) return null;
