@@ -9,8 +9,8 @@ const fail = (message) => {
 };
 
 if (policy.id !== "AURORA-SEC-001") fail("unexpected id");
-if (policy.version !== "1.0.0") fail("unexpected version");
-if (policy.status !== "DRAFT_POLICY_VALIDATED_IN_CI") fail("policy status must not claim implementation enforcement");
+if (policy.version !== "1.1.0") fail("unexpected version");
+if (policy.status !== "IMPLEMENTED_PENDING_HML_KMS_EVIDENCE") fail("policy status must separate implementation from HML evidence");
 if (policy.transport?.minimumTls !== "1.2") fail("TLS minimum must be 1.2");
 if (policy.transport?.preferredTls !== "1.3") fail("TLS preferred must be 1.3");
 if (policy.integrity?.hmacMinimumSecretBits < 256) fail("HMAC secret floor must be >=256 bits");
@@ -26,6 +26,13 @@ if (policy.applicationLayerEncryption?.algorithm !== "AES-256-GCM") fail("field 
 if (policy.applicationLayerEncryption?.dekBits !== 256) fail("DEK must be 256 bits");
 if (policy.applicationLayerEncryption?.nonceBits !== 96) fail("GCM nonce must be 96 bits");
 if (policy.applicationLayerEncryption?.keyWrapping !== "CLOUD_KMS_KEK") fail("DEK wrapping must use Cloud KMS");
+if (policy.applicationLayerEncryption?.implementationState !== "IMPLEMENTED") fail("field encryption implementation state missing");
+if (policy.applicationLayerEncryption?.kmsAuthentication !== "WORKLOAD_IDENTITY_METADATA_ADC") fail("KMS must use workload identity/ADC");
+if (policy.applicationLayerEncryption?.failClosed !== true) fail("crypto must fail closed");
+if (policy.applicationLayerEncryption?.plaintextOrDekLoggingAllowed !== false) fail("plaintext/DEK logging must be forbidden");
+if (policy.keyManagement?.rawKekExportAllowed !== false) fail("raw KEK export must be forbidden");
+if (policy.keyManagement?.rawDekPersistenceAllowed !== false) fail("raw DEK persistence must be forbidden");
+if (policy.keyManagement?.cryptographicAgilityRequired !== true) fail("crypto agility must be required");
 if (policy.atRest?.existingGoogleEncryptedDatabaseConvertibleToCmek !== false) fail("existing Firestore must not be treated as CMEK-convertible");
 if (policy.atRest?.destructiveRecreateAuthorized !== false) fail("baseline must not authorize destructive DB recreation");
 if (policy.keyManagement?.persistentServiceAccountJsonAllowed !== false) fail("persistent service-account JSON must be forbidden");
@@ -42,6 +49,11 @@ for (const gate of ["PITR","READY_BACKUP","RESTORE_TEST_BEFORE_CUTOVER","SECURIT
   if (!gates.has(gate)) fail(`database gate missing: ${gate}`);
 }
 
-if ((policy.requiredMarketDocuments || []).length < 20) fail("market-readiness evidence pack is incomplete");
+if ((policy.requiredMarketDocuments || []).length < 25) fail("market-readiness evidence pack is incomplete");
+
+const pqc = new Set(policy.postQuantumReadiness?.standardizedAlgorithms || []);
+for (const algorithm of ["ML-KEM","ML-DSA","SLH-DSA"]) {
+  if (!pqc.has(algorithm)) fail(`PQC roadmap missing: ${algorithm}`);
+}
 
 console.log("AURORA_SECURITY_BASELINE_OK");

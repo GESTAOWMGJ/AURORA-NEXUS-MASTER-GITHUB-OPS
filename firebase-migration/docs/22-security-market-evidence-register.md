@@ -9,6 +9,8 @@
 - COMPLETE_VERIFIED — evidência atual e verificável.
 - PARTIAL — existe material, mas faltam aprovação, escopo ou prova operacional.
 - SPECIFIED — requisito definido, ainda não implantado.
+- IMPLEMENTED — controle existe em código, ainda sem prova operacional HML.
+- HML_VERIFIED — controle comprovado em homologação com evidência rastreável.
 - MISSING — artefato ainda não localizado/criado.
 - EXTERNAL_REQUIRED — depende de terceiro/auditoria/autoridade.
 
@@ -20,7 +22,7 @@
 | Inventário de ativos e dados | PARTIAL | docs de inventário/migração | inventário de ativos, owners e criticidade |
 | Política de Segurança da Informação | PARTIAL | docs 06, 09, 13 + AURORA-SEC-001 | aprovação corporativa/versionamento |
 | Política de Controle de Acesso | PARTIAL | Security Rules, membership, RBAC | revisão formal periódica + matriz de acesso |
-| Política de Criptografia e Chaves | PARTIAL | política CI-validada; HMAC implementado; AES/KMS/CMEK ainda não implantados | KMS/CMEK/envelope encryption homologados |
+| Política de Criptografia e Chaves | IMPLEMENTED | docs 23–28; AES-256-GCM envelope + KMS adapter + testes; KMS real ainda depende do gate HML | provisionar KMS e executar self-test MFA |
 | Secure SDLC | PARTIAL | AURORA-DEV-001 + workflows | política formal + métricas |
 | Vulnerability/Patch Management | PARTIAL | CodeQL ativo; `npm audit --omit=dev --audit-level=high` cobre Functions; ruleset de bloqueio ainda não comprovado | ampliar cobertura + ruleset + SLA/exceções |
 | Threat model | MISSING | — | STRIDE/abuse cases por trust boundary |
@@ -46,7 +48,7 @@
 | Revisão de acesso | MISSING | — | periodicidade, owner e primeira revisão |
 | Change/release management | PARTIAL | Release Cockpit/AURORA-DEV-001 | aprovação formal e trilha por release |
 | SLA/SLO/Suporte | MISSING | — | disponibilidade, resposta e suporte |
-| Security questionnaire pack | MISSING | — | questionário padrão para clientes |
+| Security questionnaire pack | PARTIAL | `docs/27-security-questionnaire-cryptography.md` cobre criptografia; pack corporativo ainda incompleto | consolidar questionário geral |
 | Trust Center / dossiê | MISSING | — | publicar apenas evidência comprovada |
 | ISO/IEC 27001 | EXTERNAL_REQUIRED | não certificada | projeto ISMS + auditoria independente |
 | ISO/IEC 27701 | EXTERNAL_REQUIRED | não certificada | projeto PIMS + auditoria independente |
