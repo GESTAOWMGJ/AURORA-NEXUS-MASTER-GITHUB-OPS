@@ -162,10 +162,12 @@ export async function syncDocumentGovernance(orgId = DEFAULT_ORG_ID, now = new D
     throw new Error("DOCUMENT_WATCH_SOURCE_LIMIT_EXCEEDED");
   }
 
-  const candidates = snapshot.docs
-    .map((doc) => ({ doc, assessment: assessDocumentWatch(doc.id, doc.data(), now) }))
-    .filter((item): item is { doc: typeof snapshot.docs[number]; assessment: DocumentWatchAssessment } => item.assessment !== null)
-    .slice(0, DOCUMENT_WRITE_LIMIT);
+  const candidates: Array<{ doc: (typeof snapshot.docs)[number]; assessment: DocumentWatchAssessment }> = [];
+  for (const doc of snapshot.docs) {
+    const assessment = assessDocumentWatch(doc.id, doc.data(), now);
+    if (assessment) candidates.push({ doc, assessment });
+    if (candidates.length >= DOCUMENT_WRITE_LIMIT) break;
+  }
 
   if (candidates.length === 0) {
     return { ok: true, orgId, scanned: snapshot.size, issues: 0, changed: 0, partial: false };
