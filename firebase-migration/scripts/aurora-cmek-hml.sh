@@ -35,6 +35,10 @@ active_account() {
   gcloud auth list --filter='status:ACTIVE' --format='value(account)' | head -n1
 }
 
+billing_enabled() {
+  gcloud billing projects describe "$PROJECT_ID" --format='value(billingEnabled)' 2>/dev/null || true
+}
+
 project_number() {
   gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)'
 }
@@ -47,6 +51,21 @@ service_agent() {
 
 describe_db() {
   gcloud firestore databases describe --project "$PROJECT_ID" --database "$DB_ID" --format=json
+}
+
+require_apply_gates() {
+  test "${AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED:-NO}" = "YES" || {
+    echo "BLOCKED_FIRESTORE_CMEK_PROVIDER_ACCESS_NOT_CONFIRMED" >&2
+    exit 9
+  }
+  test "$(billing_enabled)" = "True" || {
+    echo "BLOCKED_BILLING_NOT_ENABLED" >&2
+    exit 8
+  }
+  test -n "$(active_account)" || {
+    echo "BLOCKED_NO_GCLOUD_IDENTITY" >&2
+    exit 11
+  }
 }
 
 plan() {
@@ -64,9 +83,12 @@ plan() {
   echo "realDataAllowed=false"
   echo "destructiveOperationsAllowed=false"
   echo "keyDestructionAllowed=false"
+  echo "cmekProviderAccessConfirmed=${AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED:-NO}"
   if gcloud projects describe "$PROJECT_ID" >/dev/null 2>&1; then
     echo "projectReachable=true"
     echo "activeAccount=$(active_account)"
+    billing="$(billing_enabled)"
+    echo "billingEnabled=${billing:-UNKNOWN}"
     gcloud firestore databases describe --project "$PROJECT_ID" --database "$DB_ID" --format='value(name)' >/dev/null 2>&1       && echo "databaseAlreadyExists=true" || echo "databaseAlreadyExists=false"
     gcloud kms keys describe "$KEY" --project "$PROJECT_ID" --location "$LOCATION" --keyring "$KEYRING" --format='value(name)' >/dev/null 2>&1       && echo "kmsKeyAlreadyExists=true" || echo "kmsKeyAlreadyExists=false"
   else
@@ -78,7 +100,7 @@ apply() {
   test "${AURORA_CMEK_CONFIRMATION:-}" = "APPLY_AURORA_CMEK_HML" || {
     echo "BLOCKED_CONFIRMATION" >&2; exit 10;
   }
-  test -n "$(active_account)" || { echo "BLOCKED_NO_GCLOUD_IDENTITY" >&2; exit 11; }
+  require_apply_gates
 
   gcloud services enable firestore.googleapis.com cloudkms.googleapis.com --project "$PROJECT_ID" --quiet
   gcloud beta services identity create --service=firestore.googleapis.com --project "$PROJECT_ID" >/dev/null
@@ -131,6 +153,7 @@ restore_test() {
   test "${AURORA_CMEK_CONFIRMATION:-}" = "RESTORE_AURORA_CMEK_HML" || {
     echo "BLOCKED_CONFIRMATION" >&2; exit 20;
   }
+  require_apply_gates
   backup_json="$(gcloud firestore backups list --project "$PROJECT_ID" --format=json)"
   source="projects/${PROJECT_ID}/databases/${DB_ID}"
   backup="$(jq -r --arg source "$source" '[.[] | select(.state=="READY" and .database==$source)] | sort_by(.snapshotTime // .createTime // "") | last | .name // empty' <<<"$backup_json")"
@@ -161,6 +184,7 @@ key_failure_test() {
   test "${AURORA_CMEK_CONFIRMATION:-}" = "TEST_AURORA_CMEK_KEY_FAILURE_HML" || {
     echo "BLOCKED_CONFIRMATION" >&2; exit 30;
   }
+  require_apply_gates
   db_json="$(describe_db)"
   version_resource="$(jq -r '.cmekConfig.activeKeyVersion[0] // empty' <<<"$db_json")"
   test -n "$version_resource" || { echo "BLOCKED_NO_ACTIVE_KEY_VERSION" >&2; exit 31; }
