@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
 
+export type CanonicalIntegrationDocument = {
+  id: string;
+  sourceIdHash: string;
+  canonicalSnapshotHash: string;
+  facts: Record<string, unknown>;
+};
+
 export type IntegrationDocumentPayload = {
   sourceSystem: "MV" | "TASY" | "ERP";
   externalDocumentId: string;
@@ -64,6 +71,7 @@ export function parseIntegrationDocumentPayload(value: unknown): IntegrationDocu
   if (
     !SYSTEMS.has(sourceSystem)
     || !ID_RE.test(externalDocumentId)
+    || !/[A-Za-z]/.test(externalDocumentId)
     || /(cpf|cns|paciente|patient|beneficiario|prontuario|medical[-_.:]?record)/.test(idLower)
     || /\d{3}\.\d{3}\.\d{3}-\d{2}/.test(externalDocumentId)
   ) return null;
@@ -72,7 +80,13 @@ export function parseIntegrationDocumentPayload(value: unknown): IntegrationDocu
   if (competence === undefined || slaDueAt === undefined || amountCents === undefined || count === undefined || missingFieldsCount === undefined) return null;
   if (typeof raw.nativeReady !== "boolean" || typeof raw.sourceIndependent !== "boolean") return null;
   if (raw.sourceIndependent && !raw.nativeReady) return null;
-  if (raw.nativeReady && documentFragility === "DEGRADED_EXTRACTION") return null;
+  if (raw.nativeReady && (documentFragility !== "NONE" || (missingFieldsCount ?? 0) > 0)) return null;
+  const requiredFactsPresent = (
+    !["FINANCIAL", "GLOSS"].includes(documentType) || (competence !== null && amountCents !== null)
+  ) && (
+    documentType !== "PRODUCTION" || (competence !== null && count !== null)
+  );
+  if (raw.nativeReady && !requiredFactsPresent) return null;
 
   return {
     sourceSystem: sourceSystem as IntegrationDocumentPayload["sourceSystem"],
@@ -95,7 +109,7 @@ export function parseIntegrationDocumentPayload(value: unknown): IntegrationDocu
 export function canonicalIntegrationDocument(
   orgId: string,
   payload: IntegrationDocumentPayload
-): Record<string, unknown> {
+): CanonicalIntegrationDocument {
   const sourceIdHash = createHash("sha256")
     .update(`${orgId}:${payload.sourceSystem}:${payload.externalDocumentId}`)
     .digest("hex");
