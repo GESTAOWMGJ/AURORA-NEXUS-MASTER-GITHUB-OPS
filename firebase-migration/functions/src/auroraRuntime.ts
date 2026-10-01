@@ -42,6 +42,13 @@ function safeString(value: unknown, max = 256): string | null {
   return normalized.length > 0 && normalized.length <= max ? normalized : null;
 }
 
+function timestampIso(value: unknown): string | null {
+  if (value && typeof value === "object" && "toDate" in value && typeof (value as { toDate?: unknown }).toDate === "function") {
+    return (value as { toDate(): Date }).toDate().toISOString();
+  }
+  return typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null;
+}
+
 function publicAction(id: string, data: Record<string, unknown>): Record<string, unknown> | null {
   const targetType = safeString(data.targetType, 64);
   const targetId = safeString(data.targetId, 160);
@@ -50,13 +57,15 @@ function publicAction(id: string, data: Record<string, unknown>): Record<string,
   const status = safeString(data.status, 32);
   const revision = data.revision;
   if (!targetType || !targetId || !reasonCode || !riskLevel || !status || !Number.isSafeInteger(revision)) return null;
-  if (!["invoice", "bankTransaction", "sourceDocument", "reconciliation", "auditFinding"].includes(targetType)) return null;
+  if (!["invoice", "bankTransaction", "sourceDocument", "reconciliation", "auditFinding", "managementInput"].includes(targetType)) return null;
   if (!["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(riskLevel)) return null;
-  if (!["OPEN", "ACKNOWLEDGED"].includes(status)) return null;
-  const dueAt = data.dueAt && typeof data.dueAt === "object" && "toDate" in data.dueAt && typeof (data.dueAt as { toDate?: unknown }).toDate === "function"
-    ? (data.dueAt as { toDate(): Date }).toDate().toISOString()
-    : typeof data.dueAt === "string" && Number.isFinite(Date.parse(data.dueAt)) ? data.dueAt : null;
-  return { id, targetType, targetId, reasonCode, riskLevel, status, revision, dueAt };
+  if (!["OPEN", "ACKNOWLEDGED", "RESOLVED", "CANCELLED"].includes(status)) return null;
+  const dueAt = timestampIso(data.dueAt);
+  const createdAt = timestampIso(data.createdAt);
+  const updatedAt = timestampIso(data.updatedAt);
+  const title = safeString(data.title, 120);
+  const details = safeString(data.details, 1000);
+  return { id, targetType, targetId, reasonCode, riskLevel, status, revision, dueAt, createdAt, updatedAt, title, details };
 }
 
 function sameOriginMutation(req: { get(name: string): string | undefined }): boolean {
@@ -175,7 +184,7 @@ export const auroraNexusBootstrap = onRequest(
       auroraDb.doc(`organizations/${member.orgId}`).get(),
       auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get(),
       mayReadActions
-        ? auroraDb.collection(`organizations/${member.orgId}/actionItems`).where("status", "in", ["OPEN", "ACKNOWLEDGED"]).limit(50).get()
+        ? auroraDb.collection(`organizations/${member.orgId}/actionItems`).limit(100).get()
         : Promise.resolve(null)
     ]);
     const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
@@ -183,7 +192,36 @@ export const auroraNexusBootstrap = onRequest(
     const rawProjection = snapshot.exists
       ? { ...snapshot.data(), generatedAt: snapshot.data()?.generatedAt?.toDate?.().toISOString?.() ?? null }
       : { ...buildProjection(empty, new Date(), { orgId: member.orgId, competence }), generatedAt: null };
-    const safeActions = actions ? actions.docs.map((doc) => publicAction(doc.id, doc.data())).filter((item): item is Record<string, unknown> => item !== null) : [];
+    const safeActions = actions
+      ? actions.docs.map((doc) => publicAction(doc.id, doc.data())).filter((item): item is Record<string, unknown> => item !== null)
+        .sort((a, b) => Date.parse(String(b.updatedAt ?? b.createdAt ?? 0)) - Date.parse(String(a.updatedAt ?? a.createdAt ?? 0)))
+      : [];
+    const nowMs = Date.now();
+    const actionSummary = safeActions.reduce<{
+      total: number;
+      open: number;
+      inProgress: number;
+      resolved: number;
+      cancelled: number;
+      overdue: number;
+    }>((summary, item) => {
+      const status = String(item.status ?? "");
+      if (status === "OPEN") summary.open += 1;
+      else if (status === "ACKNOWLEDGED") summary.inProgress += 1;
+      else if (status === "RESOLVED") summary.resolved += 1;
+      else if (status === "CANCELLED") summary.cancelled += 1;
+      const dueMs = item.dueAt ? Date.parse(String(item.dueAt)) : NaN;
+      if (!["RESOLVED", "CANCELLED"].includes(status) && Number.isFinite(dueMs) && dueMs < nowMs) summary.overdue += 1;
+      summary.total += 1;
+      return summary;
+    }, { total: 0, open: 0, inProgress: 0, resolved: 0, cancelled: 0, overdue: 0 });
+    const recentActivity = safeActions.slice(0, 12).map((item) => ({
+      actionId: item.id,
+      title: item.title ?? item.targetId,
+      status: item.status,
+      riskLevel: item.riskLevel,
+      at: item.updatedAt ?? item.createdAt ?? null
+    }));
     res.status(200).json({
       ok: true,
       environment: "HOMOLOGATION",
@@ -192,7 +230,9 @@ export const auroraNexusBootstrap = onRequest(
       member: { email: member.email, role: member.role, mfaVerified: member.mfaVerified },
       projection: visibleProjection(rawProjection, member),
       release: buildReleaseStatus(org.data() ?? {}),
-      actions: safeActions
+      actions: safeActions,
+      actionSummary,
+      recentActivity
     });
   }
 );
@@ -298,14 +338,34 @@ export const auroraNexusAction = onRequest(
           ? auroraDb.doc(`organizations/${member.orgId}/actionItems/${randomUUID()}`)
           : auroraDb.doc(`organizations/${member.orgId}/actionItems/${command.actionId}`);
         if (command.type === "CREATE_REVIEW") {
+          const dueAt = Timestamp.fromDate(new Date(command.dueAt));
+          if (command.targetType === "managementInput") {
+            const managerInputRef = auroraDb.doc(`organizations/${member.orgId}/managerInputs/${command.targetId}`);
+            tx.create(managerInputRef, {
+              orgId: member.orgId,
+              title: command.title,
+              details: command.details ?? null,
+              competence: command.competence,
+              dueAt,
+              state: "OPEN",
+              evidenceRefs: [],
+              createdBy: member.uid,
+              createdAt: FieldValue.serverTimestamp(),
+              updatedAt: FieldValue.serverTimestamp(),
+              sanitized: true,
+              sensitivity: "INTERNAL"
+            });
+          }
           tx.create(actionRef, {
             orgId: member.orgId,
             targetType: command.targetType,
             targetId: command.targetId,
+            title: command.title ?? null,
+            details: command.details ?? null,
             reasonCode: command.reasonCode,
             riskLevel: command.riskLevel,
             competence: command.competence,
-            dueAt: Timestamp.fromDate(new Date(command.dueAt)),
+            dueAt,
             status: "OPEN",
             revision: 1,
             createdBy: member.uid,
