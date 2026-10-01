@@ -28,7 +28,8 @@ test("crypto self-test is authenticated, MFA-gated, CSRF-scoped and audited", ()
 });
 
 test("HML crypto workflow requires explicit request and preserves non-production gates", () => {
-  assert.match(workflow, /pull_request:[\s\S]*aurora-crypto-hml\.json/);
+  assert.match(workflow, /push:[\s\S]*branches: \[main\][\s\S]*aurora-crypto-hml\.json/);
+  assert.doesNotMatch(workflow, /pull_request:/);
   assert.match(workflow, /environment: firebase-homologation/);
   assert.match(workflow, /google-github-actions\/auth@v2/);
   assert.match(workflow, /cloudkms\.googleapis\.com/);
