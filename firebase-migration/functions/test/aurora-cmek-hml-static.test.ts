@@ -6,7 +6,7 @@ const workflow = readFileSync(new URL("../../../.github/workflows/aurora-cmek-hm
 const script = readFileSync(new URL("../../scripts/aurora-cmek-hml.sh", import.meta.url), "utf8");
 const policy = JSON.parse(readFileSync(new URL("../../policy/cmek-hml-baseline-v1.json", import.meta.url), "utf8"));
 
-test("CMEK HML workflow is manual or one-shot request only and protected", () => {
+test("CMEK HML workflow is main-only, protected and request-scoped", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /push:/);
   assert.match(workflow, /feat\/aurora-sec-002-cmek-lgpd-pack-20261001/);
@@ -31,8 +31,8 @@ test("CMEK HML policy forbids production, clinical data and destruction", () => 
   assert.equal(policy.realDataAllowed, false);
   assert.equal(policy.destructiveOperationsAllowed, false);
   assert.equal(policy.keyDestructionAllowed, false);
-  assert.equal(policy.firestoreCmekFeatureAccessRequired, false);
-  assert.equal(policy.firestoreCmekFeatureAccessState, "RUNTIME_VERIFIED_BY_DATABASE_CREATE_OR_EXISTING_CMEK_DATABASE");
+  assert.equal(policy.firestoreCmekFeatureAccessRequired, true);
+  assert.equal(policy.firestoreCmekFeatureAccessState, "REQUIRES_PROVIDER_ACCESS_REQUEST_AND_RUNTIME_VERIFICATION");
   assert.equal(policy.projectId, "wmgj-hml-jfn-20260927");
   assert.equal(policy.databaseId, "aurora-hml-cmek");
   assert.equal(policy.location, "southamerica-east1");
