@@ -53,6 +53,26 @@ jobs:
           current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
           test "$current_main" = "$GITHUB_SHA"
 
+      - name: Cancel stale queued or waiting HML deploys
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          runs_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/deploy-aurora-firebase.yml/runs?per_page=50")"
+          stale_ids="$(jq -r --arg sha "$GITHUB_SHA" '
+            .workflow_runs[]
+            | select(.head_sha != $sha)
+            | select(.status == "queued" or .status == "pending" or .status == "waiting" or .status == "requested")
+            | .id
+          ' <<<"$runs_json")"
+          if [ -n "$stale_ids" ]; then
+            while IFS= read -r run_id; do
+              test -n "$run_id"
+              gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel"
+              echo "AURORA_HML_STALE_RUN_CANCEL_REQUESTED=${run_id}"
+            done <<<"$stale_ids"
+          fi
+
       - name: Dispatch protected deploy workflow at exact main SHA
         env:
           GH_TOKEN: ${{ github.token }}
