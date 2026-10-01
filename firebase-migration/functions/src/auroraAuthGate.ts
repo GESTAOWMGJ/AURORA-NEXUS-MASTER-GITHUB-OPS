@@ -112,6 +112,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
   <script src="/__/firebase/10.12.5/firebase-auth-compat.js"></script>
   <script src="/__/firebase/init.js"></script>
   <script>
+    if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/service-worker.js').catch(() => {}); }
     const form = document.getElementById('login-form');
     const statusEl = document.getElementById('status');
     const submit = document.getElementById('submit');
