@@ -1,7 +1,7 @@
 ---
 name: aurora-nexus-continuous-dev
 description: Desenvolvimento contínuo verificável do AURORA NEXUS até versão final vendável. Cada solicitação relevante vira incremento versionado com patch, testes, evidência, progresso e próximo gate.
-version: 1.3.0
+version: 1.4.0-firebase-native
 code: AURORA-DEV-001
 ---
 
@@ -57,6 +57,20 @@ A ordem de preferência é:
 4. provedores externos opcionais, encapsulados por interface substituível.
 
 Nenhuma regra essencial de faturamento, auditoria, SLA, segurança, autorização ou integridade pode depender exclusivamente de um modelo externo.
+
+## Plano nativo Firebase e vigilância documental
+
+Para ingestão, conectores, auditoria documental ou inteligência, preservar esta separação:
+
+`origem autorizada → materialização canônica Firebase → inteligência nativa → ação → validação → aprendizagem orgânica`.
+
+Depois de `nativeReady=true` e `sourceIndependent=true`, nenhuma feature de análise pode reintroduzir leitura da origem como dependência silenciosa. Necessidade de releitura deve aparecer como `externalFetchRequired` ou fragilidade explícita e ser tratada no pipeline.
+
+Novos conectores MV/TASY/ERP devem preferir o contrato canônico comum. Usar `DRIVE_FOLDER` quando houver exportação/sincronização documental e `AURORA_INTEGRATION_API` quando o sistema puder fazer push estruturado. Criar adaptador proprietário somente quando nenhum desses contratos servir; o adaptador específico termina no mesmo `sourceDocument`, sem novo banco ou motor paralelo.
+
+IA externa permanece fallback desligado por padrão. Antes de adicionar chamada externa, verificar se o fato já existe no snapshot Firebase ou pode ser extraído por regra nativa versionada.
+
+Fragilidade documental, SLA vencido e gargalo de fluxo devem gerar pendência idempotente no Firebase. A resolução validada de pendência gerada pelo watchdog pode alimentar automaticamente AURORA-ORG-001, preservando elegibilidade de evidência, isolamento do tenant, revisão e rollback. Nunca autoencerrar pendência material apenas porque a condição parece ter desaparecido.
 
 ## Patch contínuo
 
