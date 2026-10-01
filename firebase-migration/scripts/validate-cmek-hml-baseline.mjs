@@ -10,8 +10,8 @@ if (p.status !== "PREPARED_NOT_APPLIED") fail("status must remain plan-only in r
 if (p.projectId !== "wmgj-hml-jfn-20260927") fail("project");
 if (p.databaseId !== "aurora-hml-cmek") fail("database");
 if (p.location !== "southamerica-east1") fail("location");
-if (p.firestoreCmekFeatureAccessRequired !== false) fail("CMEK runtime capability gate");
-if (p.firestoreCmekFeatureAccessState !== "RUNTIME_VERIFIED_BY_DATABASE_CREATE_OR_EXISTING_CMEK_DATABASE") fail("CMEK feature access state");
+if (p.firestoreCmekFeatureAccessRequired !== true) fail("CMEK access request gate");
+if (p.firestoreCmekFeatureAccessState !== "REQUIRES_PROVIDER_ACCESS_REQUEST_AND_RUNTIME_VERIFICATION") fail("CMEK access state");
 if (p.sameLocationKmsRequired !== true) fail("KMS location binding");
 if (p.serviceAgentRole !== "roles/cloudkms.cryptoKeyEncrypterDecrypter") fail("service agent role");
 if (p.type !== "firestore-native") fail("type");
@@ -30,5 +30,6 @@ if (p.keyFailureTest?.action !== "TEMPORARY_DISABLE_ENABLE_ONLY") fail("failure 
 if (p.keyFailureTest?.destroyForbidden !== true) fail("destroy forbidden");
 if (p.applyConfirmation !== "APPLY_AURORA_CMEK_HML") fail("apply confirmation");
 if (p.restoreConfirmation !== "RESTORE_AURORA_CMEK_HML") fail("restore confirmation");
+if (p.keyFailureConfirmation !== "TEST_AURORA_CMEK_KEY_FAILURE_HML") fail("key failure confirmation");
 
 console.log("AURORA_CMEK_HML_BASELINE_OK");
