@@ -6,6 +6,7 @@ import * as logger from "firebase-functions/logger";
 import {
   CSRF_PURPOSES,
   can,
+  csrfTokenForSession,
   validCsrf,
   verifyAuroraAccess
 } from "./auroraAccess.js";
@@ -78,13 +79,9 @@ export const auroraNexusCryptoSelfTest = onRequest(
   },
   async (req, res) => {
     apiHeaders(res);
-    if (req.method !== "POST") {
-      res.set("Allow", "POST");
+    if (!["GET", "POST"].includes(req.method)) {
+      res.set("Allow", "GET, POST");
       res.status(405).json({ ok: false, code: "METHOD_NOT_ALLOWED" });
-      return;
-    }
-    if (!sameOriginMutation(req) || !isJson(req)) {
-      res.status(403).json({ ok: false, code: "REQUEST_CONTEXT_REJECTED" });
       return;
     }
 
@@ -99,6 +96,21 @@ export const auroraNexusCryptoSelfTest = onRequest(
     }
     if (!member.mfaVerified) {
       res.status(403).json({ ok: false, code: "MFA_REQUIRED" });
+      return;
+    }
+
+    if (req.method === "GET") {
+      const csrf = csrfTokenForSession(req.get("cookie"), CSRF_HMAC_KEY.value(), CSRF_PURPOSES.crypto);
+      if (!csrf) {
+        res.status(503).json({ ok: false, code: "CSRF_NOT_CONFIGURED" });
+        return;
+      }
+      res.status(200).json({ ok: true, csrf, purpose: CSRF_PURPOSES.crypto });
+      return;
+    }
+
+    if (!sameOriginMutation(req) || !isJson(req)) {
+      res.status(403).json({ ok: false, code: "REQUEST_CONTEXT_REJECTED" });
       return;
     }
     if (!validCsrf(req.get("cookie"), req.get("x-aurora-csrf"), CSRF_HMAC_KEY.value(), CSRF_PURPOSES.crypto)) {
