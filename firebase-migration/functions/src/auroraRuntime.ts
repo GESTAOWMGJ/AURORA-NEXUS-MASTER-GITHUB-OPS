@@ -386,19 +386,29 @@ export const auroraNexusAction = onRequest(
 );
 
 export const auroraNexusProjectionEngine = onSchedule(
-  { schedule: "every 15 minutes", timeZone: "America/Sao_Paulo", retryCount: 1, maxInstances: 1 },
+  { schedule: "every 15 minutes", timeZone: "America/Sao_Paulo", retryCount: 1, maxInstances: 1, timeoutSeconds: 300 },
   async () => {
-    try {
-      await refreshProjection(DEFAULT_ORG_ID);
-      logger.info("Aurora projection refreshed", { orgId: DEFAULT_ORG_ID });
-    } catch (error) {
-      const code = error instanceof Error ? error.message : "PROJECTION_FAILED";
-      if (["PROJECTION_DISABLED", "PROJECTION_COMPETENCE_REQUIRED", "PROJECTION_NO_SOURCE"].includes(code)) {
-        logger.info("Aurora projection skipped safely", { orgId: DEFAULT_ORG_ID, code });
-        return;
+    const organizations = await auroraDb.collection("organizations")
+      .where("active", "==", true)
+      .limit(20)
+      .get();
+    const orgIds = organizations.empty ? [DEFAULT_ORG_ID] : organizations.docs.map((doc) => doc.id);
+    const failures: Array<{ orgId: string; code: string }> = [];
+
+    for (const orgId of orgIds) {
+      try {
+        await refreshProjection(orgId);
+        logger.info("Aurora projection refreshed", { orgId });
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "PROJECTION_FAILED";
+        if (["PROJECTION_DISABLED", "PROJECTION_COMPETENCE_REQUIRED", "PROJECTION_NO_SOURCE"].includes(code)) {
+          logger.info("Aurora projection skipped safely", { orgId, code });
+          continue;
+        }
+        failures.push({ orgId, code });
+        logger.error("Aurora projection failed", { orgId, code });
       }
-      logger.error("Aurora projection failed", { orgId: DEFAULT_ORG_ID, code });
-      throw error;
     }
+    if (failures.length > 0) throw new Error(`PROJECTION_TENANT_FAILURES:${failures.length}`);
   }
 );
