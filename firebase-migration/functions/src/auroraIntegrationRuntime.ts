@@ -159,6 +159,50 @@ export const auroraNexusIntegrationKeys = onRequest(
       return;
     }
 
+    if (action === "REGISTER_HASH") {
+      const name=typeof req.body?.name==="string"?req.body.name.trim():"";
+      const scopes=normalizeScopes(req.body?.scopes);
+      const keyId=typeof req.body?.keyId==="string"?req.body.keyId:"";
+      const tokenHash=typeof req.body?.tokenHash==="string"?req.body.tokenHash.toLowerCase():"";
+      const expiresAtRaw=typeof req.body?.expiresAt==="string"?req.body.expiresAt:"";
+      const expiresAt=new Date(expiresAtRaw);
+      const now=Date.now();
+      if (
+        !NAME_RE.test(name)
+        || !scopes
+        || !KEY_ID_RE.test(keyId)
+        || !/^[a-f0-9]{64}$/.test(tokenHash)
+        || !Number.isFinite(expiresAt.getTime())
+        || expiresAt.getTime() <= now
+        || expiresAt.getTime() > now + 365 * 24 * 60 * 60 * 1000
+      ) {
+        res.status(400).json({ok:false, code:"INVALID_INTEGRATION_HASH_REGISTRATION"});
+        return;
+      }
+      const ref=collection.doc(keyId);
+      if ((await ref.get()).exists) {
+        res.status(409).json({ok:false, code:"KEY_ID_EXISTS"});
+        return;
+      }
+      await ref.create({
+        schemaVersion:1,
+        orgId:member.orgId,
+        keyId,
+        name,
+        scopes,
+        tokenHash,
+        tokenPrefix:`anx_${keyId}`,
+        active:true,
+        origin:"INSTALLER_HASH_REGISTRATION",
+        createdBy:member.uid,
+        createdAt:FieldValue.serverTimestamp(),
+        expiresAt:Timestamp.fromDate(expiresAt)
+      });
+      logger.info("Aurora installer integration credential registered", {orgId:member.orgId,keyId,scopes});
+      res.status(201).json({ok:true,keyId,scopes,expiresAt:expiresAt.toISOString(),registeredFromHash:true});
+      return;
+    }
+
     if (action === "REVOKE") {
       const keyId=typeof req.body?.keyId==="string"?req.body.keyId:"";
       if (!KEY_ID_RE.test(keyId)) {
