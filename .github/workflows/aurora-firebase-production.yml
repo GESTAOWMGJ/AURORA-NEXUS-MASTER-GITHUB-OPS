@@ -18,15 +18,15 @@ concurrency:
 
 jobs:
   provision:
-    name: Create isolated cold-production Firebase project
+    name: Complete isolated cold-production Firebase setup
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    # Bootstrap only: this protected HML environment currently owns the validated\n    # GitHub→GCP WIF variables. The target project remains strictly production.\n    environment: firebase-homologation
+    environment: firebase-production
     env:
       REQUEST_FILE: .github/requests/aurora-firebase-production.json
-      HML_PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
-      WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
-      PROVISION_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      APPROVED_PROJECT: ${{ vars.FIREBASE_PROD_PROJECT_ID }}
+      WIF_PROVIDER: ${{ vars.GCP_PROD_WIF_PROVIDER }}
+      PROVISION_SERVICE_ACCOUNT: ${{ vars.GCP_PROD_DEPLOY_SERVICE_ACCOUNT }}
     steps:
       - uses: actions/checkout@v4
         with:
