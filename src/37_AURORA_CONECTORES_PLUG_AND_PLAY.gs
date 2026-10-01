@@ -149,6 +149,32 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
   return result;
 }
 
+function auroraDiagnosticarFontesDocumentais_() {
+  return auroraFontesDocumentaisConfiguradas_().map(function(item) {
+    var accessible = false;
+    var name = "";
+    var error = "";
+    try {
+      var folder = DriveApp.getFolderById(String(item.folderId || ""));
+      name = folder.getName();
+      accessible = true;
+    } catch (sourceError) {
+      error = sourceError && sourceError.message ? String(sourceError.message).slice(0, 180) : "SOURCE_UNAVAILABLE";
+    }
+    return {
+      sourceId: item.sourceId,
+      system: item.system,
+      mode: item.mode,
+      folderId: item.folderId,
+      folderName: name,
+      slaMinutes: item.slaMinutes,
+      active: item.active !== false,
+      accessible: accessible,
+      error: error
+    };
+  });
+}
+
 function auroraDiagnosticarConectoresPlugAndPlay() {
   var props = PropertiesService.getScriptProperties();
   var folderId = String(props.getProperty('WMGJ_PASTA_ENTRADA_ID') || '');
@@ -164,8 +190,10 @@ function auroraDiagnosticarConectoresPlugAndPlay() {
     ? wmgjFirestoreDiagnostico()
     : { ok: false, code: 'FIRESTORE_DIAGNOSTIC_MISSING' };
 
+  var documentSources = auroraDiagnosticarFontesDocumentais_();
+  var sourcesOk = documentSources.length > 0 && documentSources.every(function(item) { return item.accessible === true; });
   var result = {
-    ok: folderOk && firestore.ok === true,
+    ok: folderOk && sourcesOk && firestore.ok === true,
     version: String(props.getProperty('AURORA_CONNECTOR_SETUP_VERSION') || ''),
     drive: {
       configured: !!folderId,
@@ -179,7 +207,7 @@ function auroraDiagnosticarConectoresPlugAndPlay() {
       dryRun: String(props.getProperty('WMGJ_FIRESTORE_DRY_RUN') || 'true') !== 'false',
       diagnostic: firestore
     },
-    documentSources: auroraFontesDocumentaisConfiguradas_().map(function(item) { return { sourceId: item.sourceId, system: item.system, mode: item.mode, folderId: item.folderId, slaMinutes: item.slaMinutes, active: item.active !== false }; }),
+    documentSources: documentSources,
     nativeDataPlane: {
       storage: 'FIRESTORE',
       sourceAccessRequiredAfterIngest: false,
