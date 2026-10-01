@@ -24,6 +24,12 @@ test("shell privado carrega dados somente pela API autenticada e não contém de
   assert.match(html, /\/api\/native-insight\?intent=/);
   assert.match(html, /Conclusão da versão vendável/);
   assert.match(html, /release\.engineeringReadinessPercent/);
+  assert.match(html, /Registrar ação no app/);
+  assert.match(html, /managementInput/);
+  assert.match(html, /Registro de ações/);
+  assert.match(html, /Atividade recente/);
+  assert.match(html, /manifest\.webmanifest/);
+  assert.match(html, /service-worker\.js/);
   assert.doesNotMatch(html, /demo pública/i);
 });
 
@@ -44,4 +50,6 @@ test("login conclui desafio TOTP antes de trocar o ID token por sessão", () => 
   assert.match(source, /await mfaResolver\.resolveSignIn\(assertion\)/);
   assert.match(source, /await createPrivateSession\(credential\)/);
   assert.match(source, /autocomplete="one-time-code"/);
+  assert.match(source, /manifest\.webmanifest/);
+  assert.match(source, /service-worker\.js/);
 });
