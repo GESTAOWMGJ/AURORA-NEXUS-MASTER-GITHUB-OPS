@@ -1,7 +1,7 @@
 ---
 name: aurora-nexus-security
 description: Segurança digital nativa, criptografia, privacidade, supply chain e market readiness do AURORA NEXUS. Usar antes de qualquer alteração em autenticação, autorização, banco, chaves, segredos, dados sensíveis, integrações, deploy, dependências, instaladores, IA ou liberação comercial.
-version: 1.0.0-draft
+version: 1.1.0-draft
 code: AURORA-SEC-001
 ---
 
@@ -265,3 +265,24 @@ Sempre separar:
 - CERTIFIED
 
 Nenhum estado posterior pode ser inferido do anterior.
+
+
+## Pacote AURORA-SEC-002 — pré-requisitos de produção sensível
+
+Antes de preparar CMEK, dado pessoal real ou qualquer promoção de CLINICAL_SENSITIVE, ler e manter coerentes:
+
+- `docs/30-threat-model.md`;
+- `docs/31-lgpd-ropa.md`;
+- `docs/32-security-risk-register.md`;
+- `docs/33-incident-response-plan.md`;
+- `docs/34-dpa-template-lgpd.md`;
+- `docs/35-firestore-cmek-hml-spec.md`;
+- `docs/36-vulnerability-consolidated-report.md`;
+- `docs/37-clinical-sensitive-release-gate.md`;
+- `policy/cmek-hml-baseline-v1.json`.
+
+Firestore CMEK é provisionado somente em banco HML novo e isolado. O workflow é manual, exige confirmação literal, WIF, ambiente protegido e confirmação prévia de que o projeto recebeu acesso ao recurso CMEK do Firestore. Não alterar `(default)` para obter CMEK.
+
+O gate `CLINICAL_SENSITIVE` nasce `BLOCKED` e só pode ser promovido após evidência de envelope encryption, KMS/CMEK, backup/restore, teste de falha de chave, RoPA/DPA, RIPD quando aplicável, pentest independente, exercício de incidente, revisão de acesso e aceite formal do risco residual.
+
+Codex Security complementa CodeQL quando conectado; ausência da conexão não pode ser reportada como scan executado.
