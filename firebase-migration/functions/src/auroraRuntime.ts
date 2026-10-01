@@ -209,20 +209,29 @@ export const auroraNexusNativeInsight = onRequest(
     const intent = parseNativeInsightIntent(String(req.query.intent ?? "EXECUTIVE"));
     if (!intent) { res.status(400).json({ ok: false, code: "INVALID_NATIVE_INTENT" }); return; }
 
-    const [org, snapshot] = await Promise.all([
-      auroraDb.doc(`organizations/${member.orgId}`).get(),
-      auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get()
-    ]);
-    const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
-    const competence = safeString(org.data()?.projectionCompetence, 7) ?? new Date().toISOString().slice(0, 7);
-    const rawProjection = snapshot.exists
-      ? { ...snapshot.data(), generatedAt: snapshot.data()?.generatedAt?.toDate?.().toISOString?.() ?? null }
-      : { ...buildProjection(empty, new Date(), { orgId: member.orgId, competence }), generatedAt: null };
+    const snapshot = await auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get();
+    if (!snapshot.exists) {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_SNAPSHOT_REQUIRED" });
+      return;
+    }
+    const rawProjection = {
+      ...snapshot.data(),
+      generatedAt: snapshot.data()?.generatedAt?.toDate?.().toISOString?.() ?? null
+    };
+    const nativeDataPlane = rawProjection.nativeDataPlane && typeof rawProjection.nativeDataPlane === "object"
+      ? rawProjection.nativeDataPlane as Record<string, unknown>
+      : {};
+    if (nativeDataPlane.storage !== "FIRESTORE" || nativeDataPlane.sourceAccessDuringInference !== false) {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_CONTRACT_REQUIRED" });
+      return;
+    }
     const projection = visibleProjection(rawProjection, member);
     res.status(200).json({
       ok: true,
       environment: "HOMOLOGATION",
-      mode: "SHADOW",
+      mode: "FIREBASE_NATIVE",
+      sourceAccessDuringInference: false,
+      externalAiUsed: false,
       insight: generateNativeInsight(projection, intent)
     });
   }
