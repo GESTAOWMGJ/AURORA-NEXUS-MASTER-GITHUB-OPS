@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'aurora-coletor/**'
+      - 'src/04_EXTRACAO_DOCUMENTAL_WMGJ.gs'
+      - 'src/37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'
       - '.github/workflows/validate-aurora-onboarding.yml'
   push:
     branches: [main]
@@ -31,7 +33,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Compile installer and onboarding module
-        run: python -m py_compile aurora-coletor/install.py aurora-coletor/aurora_onboarding.py
+        run: python -m py_compile aurora-coletor/install.py aurora-coletor/one_click_deploy.py aurora-coletor/connector_setup.py aurora-coletor/aurora_onboarding.py
       - name: Synthetic scope and capability tests
         run: python -m unittest discover -s aurora-coletor/tests -p 'test_onboarding.py' -v
+      - name: Plug-and-play connector and one-click tests
+        run: python -m unittest discover -s aurora-coletor/tests -p 'test_connector_setup.py' -v
+      - name: Parse Apps Script connector path
+        run: |
+          cp src/04_EXTRACAO_DOCUMENTAL_WMGJ.gs "$RUNNER_TEMP/extraction.js"
+          cp src/37_AURORA_CONECTORES_PLUG_AND_PLAY.gs "$RUNNER_TEMP/connectors.js"
+          node --check "$RUNNER_TEMP/extraction.js"
+          node --check "$RUNNER_TEMP/connectors.js"
