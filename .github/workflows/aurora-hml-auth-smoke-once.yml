@@ -19,13 +19,13 @@ jobs:
     environment: firebase-homologation
     steps:
       - name: Authenticate to HML with WIF
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2 pinned 2026-10-01
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
 
       - name: Configure gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2 pinned 2026-10-01
         with:
           version: "548.0.0"
           project_id: ${{ vars.FIREBASE_HML_PROJECT_ID }}

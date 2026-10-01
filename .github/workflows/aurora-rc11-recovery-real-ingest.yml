@@ -28,7 +28,7 @@ jobs:
       APPS_SCRIPT_ID: 1_fQPqaq0EjaugyIF6jyuENDhJ2c2oTFm1kC-wdjmfaDqyRzy_uqwtiSW
       REGION: southamerica-east1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned 2026-10-01
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
@@ -53,18 +53,18 @@ jobs:
             .clinicalSensitiveEnabled==false
           ' "$REQUEST_FILE" >/dev/null
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4 pinned 2026-10-01
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: firebase-migration/functions/package-lock.json
 
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2 pinned 2026-10-01
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2 pinned 2026-10-01
         with:
           version: "548.0.0"
           project_id: ${{ vars.FIREBASE_HML_PROJECT_ID }}
@@ -352,7 +352,7 @@ jobs:
           clasp run auroraRc11DryRunAmostra >/dev/null
           jq -n '{release:"1.0.0-rc.1",gate:"RC1.1",restoreVerified:true,ingestAuthenticated:true,realWmgjSample:true,reconciled:true,nativeInsightVerified:true,killSwitch:true,productionMutation:false,sourceMutation:false}' > "$RUNNER_TEMP/rc11-evidence/final-gate.json"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned 2026-10-01
         with:
           name: aurora-rc11-evidence
           path: ${{ runner.temp }}/rc11-evidence/
