@@ -32,6 +32,8 @@ jobs:
         with:
           python-version: '3.12'
       - name: Compile installer and onboarding module
-        run: python -m py_compile aurora-coletor/install.py aurora-coletor/aurora_onboarding.py
+        run: python -m py_compile aurora-coletor/install.py aurora-coletor/one_click_deploy.py aurora-coletor/connector_setup.py aurora-coletor/aurora_onboarding.py
       - name: Synthetic scope and capability tests
         run: python -m unittest discover -s aurora-coletor/tests -p 'test_onboarding.py' -v
+      - name: Plug-and-play connector and one-click tests
+        run: python -m unittest discover -s aurora-coletor/tests -p 'test_connector_setup.py' -v
