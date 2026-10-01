@@ -42,6 +42,7 @@ export function auroraProtectedShell(member: AuroraMember, csrfTokens: { action:
 <article class="card section" id="recent-activity"><h2>Atividade recente</h2><div class="activity-list" id="activity-list"></div></article>
 <article class="card section" id="modules-summary"><h2>Mapa operacional M01–M10</h2><div class="modules" id="modules"></div></article></section></main></div>
 <script>
+if('serviceWorker' in navigator){navigator.serviceWorker.register('/service-worker.js').catch(()=>{});}
 const csrf=${JSON.stringify(csrfTokens)};const capabilities=${JSON.stringify(capabilities)};const sessionMfa=${JSON.stringify(member.mfaVerified)};const app=document.getElementById('app');const notice=document.getElementById('notice');const content=document.getElementById('content');let activeCompetence='';let selectedResolution=null;let activeController=null;let loadRevision=0;let sessionBlocked=false;let mutationsInFlight=0;
 const money=c=>c===null||c===undefined?'Sem fonte':new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(c)/100);const pct=v=>v===null||v===undefined?'Sem fonte':v.toLocaleString('pt-BR')+'%';
 function txt(id,value){document.getElementById(id).textContent=String(value)}
