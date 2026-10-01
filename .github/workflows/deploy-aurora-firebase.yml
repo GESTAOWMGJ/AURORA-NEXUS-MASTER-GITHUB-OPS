@@ -12,6 +12,11 @@ on:
         required: true
         default: "VALIDATE_ONLY"
         type: string
+      expected_main_sha:
+        description: "Optional exact main SHA required for this deployment request"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -31,10 +36,15 @@ jobs:
       - name: Require dispatch from main
         env:
           CANDIDATE_SHA: ${{ github.sha }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
           test "$GITHUB_SHA" = "$CANDIDATE_SHA"
+          if [ -n "$EXPECTED_MAIN_SHA" ]; then
+            [[ "$EXPECTED_MAIN_SHA" =~ ^[a-f0-9]{40}$ ]]
+            test "$GITHUB_SHA" = "$EXPECTED_MAIN_SHA"
+          fi
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
