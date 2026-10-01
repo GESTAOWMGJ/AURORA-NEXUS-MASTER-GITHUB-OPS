@@ -367,3 +367,33 @@ Antes de alterar automações WMGJ/AURORA, o agente deve:
 5. não criar projeto paralelo;
 6. preservar segurança, evidência, rollback e isolamento;
 7. atualizar este documento quando uma nova capacidade operacional for promovida à baseline.
+
+
+## 18. Auditoria técnica semanal de código e automação
+
+A manutenção do AURORA inclui auditoria técnica semanal do repositório, sempre baseada na ponta real da `main` no momento da revisão.
+
+Escopo mínimo:
+
+1. resolver o SHA atual da `main` antes de usar qualquer baseline informado anteriormente;
+2. revisar mudanças, PRs e workflows materialmente relevantes dos últimos 7 dias;
+3. verificar sintaxe/configuração de workflows e contratos tocados;
+4. verificar funções duplicadas, fontes executáveis concorrentes e preservação da fonte canônica;
+5. verificar exposição ou manejo inadequado de segredos, sem imprimir valores sensíveis;
+6. revisar mudanças de algoritmo, contratos e gates;
+7. confrontar testes, CI e SHA/base realmente validados;
+8. não estimar custo ou consumo sem dado real observável.
+
+O relatório executivo deve conter no máximo 3 prioridades materiais, selecionadas entre:
+
+- segurança/integridade;
+- falha de algoritmo;
+- custo/eficiência.
+
+Cada prioridade deve registrar evidência objetiva (SHA, PR, workflow, arquivo/trecho ou teste), impacto, estado verificado e próximo passo verificável.
+
+CI verde em SHA ou base antiga não libera uma branch divergente. Antes de sair de draft, a branch deve ser reconciliada com a `main` corrente e os checks relevantes devem ser repetidos no SHA final.
+
+Correções decorrentes desta auditoria são feitas somente em branch isolada, com PR draft e revisão humana. Não há merge ou deploy automático.
+
+A auditoria deve manter separados os estados: especificado, implementado, testado, CI verificado, implantado e validado em ambiente real.
