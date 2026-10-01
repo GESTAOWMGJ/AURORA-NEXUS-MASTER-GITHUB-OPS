@@ -154,6 +154,45 @@ test("motor calcula SLA, cobertura e filtra competência", () => {
   assert.equal(projection.coverage.reconciliationPercent, 50);
 });
 
+test("motor mede fragilidade documental SLA fluxo e independência da origem", () => {
+  const projection = buildProjection(source({
+    sourceDocuments: [
+      {
+        workflowState: "VALIDATED",
+        nativeReady: true,
+        sourceIndependent: true,
+        externalFetchRequired: false,
+        externalAiUsed: false,
+        documentFragility: "NONE",
+        originSystem: "TASY"
+      },
+      {
+        workflowState: "PENDING_HUMAN_REVIEW",
+        nativeReady: false,
+        sourceIndependent: false,
+        externalFetchRequired: true,
+        externalAiUsed: true,
+        documentFragility: "DEGRADED_EXTRACTION",
+        missingFieldsCount: 1,
+        slaDueAt: "2026-09-26T10:00:00Z",
+        originSystem: "MV"
+      }
+    ]
+  }), new Date("2026-09-27T12:00:00Z"), context) as any;
+
+  assert.equal(projection.documentIntelligence.totalDocuments, 2);
+  assert.equal(projection.documentIntelligence.sourceIndependentDocuments, 1);
+  assert.equal(projection.documentIntelligence.sourceDependentDocuments, 1);
+  assert.equal(projection.documentIntelligence.fragileDocuments, 1);
+  assert.equal(projection.documentIntelligence.overdueDocumentSla, 1);
+  assert.equal(projection.documentIntelligence.pendingDocumentFlow, 1);
+  assert.equal(projection.documentIntelligence.externalAiDocuments, 1);
+  assert.deepEqual(projection.documentIntelligence.origins, { TASY: 1, MV: 1 });
+  assert.equal(projection.nativeDataPlane.storage, "FIRESTORE");
+  assert.equal(projection.nativeDataPlane.sourceAccessDuringInference, false);
+  assert.equal(projection.organicLoop.humanValidationRequired, true);
+});
+
 test("comandos exigem SLA, competência, códigos e evidência", () => {
   assert.deepEqual(parseActionCommand({
     type: "CREATE_REVIEW",
