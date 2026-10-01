@@ -229,6 +229,14 @@ def build_install_bundle(
             "scopes": list(issued.scopes),
             "rawKeyStoredInManifest": False,
             "registrationState": "AWAITING_SERVER_REGISTRATION",
+            "registrationRequest": {
+                "action": "REGISTER_HASH",
+                "name": external["name"] if external else "external-system",
+                "keyId": issued.key_id,
+                "tokenHash": issued.sha256,
+                "expiresAt": issued.expires_at,
+                "scopes": list(issued.scopes),
+            },
         },
         "secrets": redacted_secret_inventory(secrets_map),
     }
