@@ -223,7 +223,7 @@ verify() {
   billing="$(gcloud billing projects describe "$PROJECT_ID" --format='value(billingEnabled)' 2>/dev/null || true)"
   db=false; firebase firestore:databases:list --project "$PROJECT_ID" --json 2>/dev/null | grep -Fq '(default)' && db=true
   functions="$(firebase functions:list --project "$PROJECT_ID" --json 2>/dev/null | jq -c '[..|objects|.id?//.name?//empty]|unique' 2>/dev/null || printf '[]')"
-  for fn in ingestWmgjEvent runtimeHealth auroraNexusAuthGate auroraNexusSessionLogin auroraNexusSessionLogout auroraNexusBootstrap auroraNexusNativeInsight auroraNexusAction auroraNexusRefresh auroraNexusProjectionEngine auroraNexusOrganic; do
+  for fn in ingestWmgjEvent runtimeHealth auroraNexusAuthGate auroraNexusSessionLogin auroraNexusSessionLogout auroraNexusBootstrap auroraNexusNativeInsight auroraNexusAction auroraNexusRefresh auroraNexusProjectionEngine auroraNexusOrganic auroraNexusIntegrationKeys auroraNexusIntegrationPing; do
     printf '%s' "$functions" | grep -Fq "$fn" || fail 80 VERIFY_FUNCTIONS "Function obrigatória ausente: $fn"
   done
   ingest_secret=false; firebase functions:secrets:get WMGJ_INGEST_HMAC_KEYRING --project "$PROJECT_ID" >/dev/null 2>&1 && ingest_secret=true

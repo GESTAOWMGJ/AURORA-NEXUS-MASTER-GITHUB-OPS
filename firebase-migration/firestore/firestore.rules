@@ -164,7 +164,7 @@ service cloud.firestore {
       match /{collection}/{documentId} {
         allow read: if collection in [
           'professionals', 'shifts', 'productivityRecords',
-          'runtimeCheckpoints'
+          'runtimeCheckpoints', 'managerInputs'
         ]
           && canReadOperational(orgId)
           && facilityAllowed(orgId, resource.data);

@@ -1,0 +1,19 @@
+{
+  "name": "Aurora Nexus",
+  "short_name": "Aurora",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#06191e",
+  "theme_color": "#06191e",
+  "description": "Centro privado de gestão, auditoria e rastreabilidade operacional.",
+  "icons": [
+    {
+      "src": "/aurora-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

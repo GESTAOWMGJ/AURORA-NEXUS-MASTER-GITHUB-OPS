@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Aurora Nexus">
+  <rect width="512" height="512" rx="112" fill="#06191e"/>
+  <circle cx="256" cy="256" r="184" fill="#10343c" stroke="#d4ae62" stroke-width="14"/>
+  <path d="M151 344 235 151h42l84 193h-46l-19-47H214l-19 47h-44Zm78-84h52l-26-65-26 65Z" fill="#f7f3e9"/>
+  <path d="M315 168h42v176h-42z" fill="#d4ae62" opacity=".9"/>
+</svg>
