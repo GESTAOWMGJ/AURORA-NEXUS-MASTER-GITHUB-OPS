@@ -17,6 +17,8 @@ test("CMEK HML workflow is manual-only and protected", () => {
   assert.match(workflow, /APPLY_AURORA_CMEK_HML/);
   assert.match(workflow, /RESTORE_AURORA_CMEK_HML/);
   assert.match(workflow, /TEST_AURORA_CMEK_KEY_FAILURE_HML/);
+  assert.match(workflow, /cmek_access_confirmed/);
+  assert.match(workflow, /AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED/);
 });
 
 test("CMEK HML policy forbids production, clinical data and destruction", () => {
@@ -47,7 +49,8 @@ test("CMEK HML script prepares guarded database, backup, restore and reversible 
     "kms versions enable",
     "trap reenable",
     "AURORA_CMEK_KEY_FAILURE_PENDING_PROPAGATION",
-    "AURORA_CMEK_HML_RESTORE_VERIFIED"
+    "AURORA_CMEK_HML_RESTORE_VERIFIED",
+    "BLOCKED_FIRESTORE_CMEK_FEATURE_ACCESS_NOT_CONFIRMED"
   ]) assert.ok(script.includes(required), required);
 
   for (const forbidden of [
