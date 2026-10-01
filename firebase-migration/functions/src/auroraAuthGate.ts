@@ -59,6 +59,11 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#06191e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Aurora Nexus">
+  <link rel="manifest" href="/manifest.webmanifest">
   <title>Aurora Nexus | Login</title>
   <style>
     :root { color-scheme: dark; --bg:#071f25; --panel:#0d2d34; --line:#1d4a53; --gold:#c6a45d; --text:#f7f1e7; --muted:#b9c7c6; }
@@ -107,6 +112,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
   <script src="/__/firebase/10.12.5/firebase-auth-compat.js"></script>
   <script src="/__/firebase/init.js"></script>
   <script>
+    if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/service-worker.js').catch(() => {}); }
     const form = document.getElementById('login-form');
     const statusEl = document.getElementById('status');
     const submit = document.getElementById('submit');
@@ -248,14 +254,15 @@ export const auroraNexusAuthGate = onRequest(
     const csrfTokens = {
       action: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.action),
       refresh: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.refresh),
+      integrationKey: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.integrationKey),
       logout: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.logout)
     };
-    if (!csrfTokens.action || !csrfTokens.refresh || !csrfTokens.logout) {
+    if (!csrfTokens.action || !csrfTokens.refresh || !csrfTokens.integrationKey || !csrfTokens.logout) {
       logger.error("Aurora Nexus CSRF key is not configured");
       res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança."));
       return;
     }
-    let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; logout: string });
+    let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; integrationKey: string; logout: string });
     if (["platform_admin", "org_admin", "director"].includes(member.role) || member.permissions.includes("downloads.hml.read")) {
       shell = shell.replace("</nav>", '<a href="/downloads">Instaladores Mac e Windows</a></nav>');
     }

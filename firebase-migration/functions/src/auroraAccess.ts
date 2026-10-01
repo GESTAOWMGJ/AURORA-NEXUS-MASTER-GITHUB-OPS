@@ -10,6 +10,7 @@ export const CSRF_PURPOSES = {
   action: "POST:/api/actions",
   refresh: "POST:/api/refresh",
   organic: "POST:/organic",
+  integrationKey: "POST:/api/integration-keys",
   crypto: "POST:/api/crypto/self-test",
   logout: "POST:/__sessionLogout"
 } as const;

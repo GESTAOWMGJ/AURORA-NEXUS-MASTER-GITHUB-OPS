@@ -250,7 +250,7 @@ jobs:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
-          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only functions:ingestWmgjEvent,functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,hosting,firestore:rules,firestore:indexes
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only functions:ingestWmgjEvent,functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,hosting,firestore:rules,firestore:indexes
           echo "AURORA_RC11_INGEST_URL=https://${REGION}-${PROJECT_ID}.cloudfunctions.net/ingestWmgjEvent" >> "$GITHUB_ENV"
 
       - name: Push bridge and configure Apps Script

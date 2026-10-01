@@ -3,7 +3,8 @@ const ACTION_TARGET_COLLECTIONS: Readonly<Record<string, string>> = Object.freez
   bankTransaction: "bankTransactions",
   sourceDocument: "sourceDocuments",
   reconciliation: "reconciliations",
-  auditFinding: "auditFindings"
+  auditFinding: "auditFindings",
+  managementInput: "managerInputs"
 });
 
 const DOCUMENT_ID_PATTERN = /^[A-Za-z0-9._:-]{1,160}$/;

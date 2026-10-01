@@ -125,6 +125,11 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
         continue;
       }
 
+      var firestoreMirror = espelharDocumentoProcessadoFirestoreWMGJ_(file, validacao.dados, extracao);
+      if (firestoreMirror.required && !firestoreMirror.ok) {
+        throw new Error("FIRESTORE_MIRROR_REQUIRED:" + firestoreMirror.status);
+      }
+
       registrarDocumentoMemoriaWMGJ_Compat_(memoria, {
         origem: "DRIVE_EXTRACAO_REAL",
         idOrigem: idOrigem,
@@ -140,7 +145,7 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
       atualizarLinhaFilaWMGJ_Compat_(fila, i + 1, idx, {
         STATUS: "PROCESSADO",
         ULTIMO_ERRO: "",
-        OBSERVACAO: "Extração real + classificação + memória-base OK"
+        OBSERVACAO: "Extração real + classificação + memória-base OK; Firebase=" + firestoreMirror.status
       });
 
       processados++;
@@ -169,6 +174,46 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
 
   registrarLogWMGJ_Compat_("OK", "processarFilaComExtracaoRealWMGJ_V1", "AppsScript", JSON.stringify(resultado));
   return resultado;
+}
+
+function espelharDocumentoProcessadoFirestoreWMGJ_(file, dados, extracao) {
+  var props = PropertiesService.getScriptProperties();
+  var required = String(props.getProperty("AURORA_FIRESTORE_MIRROR_REQUIRED") || "false").toLowerCase() === "true";
+
+  if (typeof wmgjFirestoreEventoArquivo_ !== "function" || typeof wmgjFirestoreEnviarEvento_ !== "function") {
+    return { ok: !required, required: required, status: "BRIDGE_UNAVAILABLE" };
+  }
+
+  try {
+    var classification = JSON.parse(JSON.stringify(dados || {}));
+    classification.status = "PROCESSADO";
+    classification.metodo_extracao = String(extracao && extracao.metodo || "");
+    var event = wmgjFirestoreEventoArquivo_(file, classification, {
+      sourceContext: "drive-continuous-extraction",
+      pipelineVersion: WMGJ_EXTRACAO_VERSAO
+    });
+    var response = wmgjFirestoreEnviarEvento_(event);
+    if (response && (response.accepted === true || response.duplicate === true)) {
+      return {
+        ok: true,
+        required: required,
+        status: response.duplicate === true ? "DUPLICATE_CONFIRMED" : "ACCEPTED",
+        entityId: response.entityId || "",
+        eventId: response.eventId || event.eventId
+      };
+    }
+    if (response && response.dryRun === true) {
+      return { ok: !required, required: required, status: "DRY_RUN" };
+    }
+    return { ok: false, required: required, status: "UNCONFIRMED" };
+  } catch (error) {
+    return {
+      ok: false,
+      required: required,
+      status: "ERROR",
+      error: error && error.message ? String(error.message).slice(0, 240) : "unknown"
+    };
+  }
 }
 
 function extrairConteudoArquivoWMGJ_V1_(file) {

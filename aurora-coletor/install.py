@@ -18,6 +18,7 @@ import shutil
 import shlex
 import plistlib
 from aurora_onboarding import installation_config, install_assets
+from connector_setup import interactive_install as install_connectors
 import stat
 import sys
 
@@ -245,6 +246,9 @@ AURORA_COLLECTOR_TOKEN=
     }).decode("utf-8")
     write_text(target / "aurora-coletor.launchd.plist.example", launchd_example, 0o600)
     install_assets(source_dir, target, onboarding)
+    connector_manifest = None
+    if args.setup_connectors:
+        connector_manifest = install_connectors(target, org=org)
 
     print("INSTALAÇÃO PREPARADA")
     print("Descoberta documental: autorizada localmente" if onboarding["authorization"]["approved"] else "Descoberta documental: bloqueada até autorização institucional")
@@ -255,6 +259,9 @@ AURORA_COLLECTOR_TOKEN=
     print(f"Identidade técnica: {identity}")
     print(f"Execução de validação: {target / 'run.sh'}")
     print(f"Execução autorizada única: {target / 'run.sh'} --once")
+    if connector_manifest:
+        print("Conectores: Drive → extração contínua → Firebase configurados para ativação após autorização/teste")
+        print(f"Manifesto sem segredos: {target / 'connectors' / 'connectors.json'}")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -276,6 +283,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--discovery-actor-ref", help="ID técnico do responsável pela autorização, sem nome pessoal.")
     parser.add_argument("--discovery-authorization-ref", help="Referência técnica da autorização institucional.")
     parser.add_argument("--discovery-expires-at", help="Vencimento da autorização ISO-8601 com fuso. Não é a credencial do coletor.")
+    parser.add_argument("--setup-connectors", action="store_true", help="Abre o assistente seguro de conectores Drive/Firebase e integração externa. Segredos são solicitados interativamente.")
     args = parser.parse_args(argv)
     if args.poll_seconds < 5:
         fail("--poll-seconds deve ser >= 5")
