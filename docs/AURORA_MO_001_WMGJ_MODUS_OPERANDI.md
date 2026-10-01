@@ -286,15 +286,21 @@ A promoção transforma uma regra particular em capacidade reutilizável apenas 
 Precedência:
 
 ```text
-Aurora Native Intelligence
+Conectores autorizados (MV / TASY / ERP / Drive / Gmail)
+→ materialização canônica no Firebase
+→ Aurora Native Intelligence
 → Organic Engine
 → Knowledge Registry
 → Pattern Matcher
 → modelo privado/controlado quando homologado
-→ provedores externos opcionais
+→ provedores externos opcionais e excepcionais
 ```
 
-Regras essenciais de faturamento, auditoria, SLA, segurança, autorização, evidência e conciliação não podem depender exclusivamente de LLM externo.
+A inteligência nativa é condicionada ao Firebase: sem `dashboardSnapshots/current` e sem contrato `sourceAccessDuringInference=false`, não há inferência nativa. Depois que um dado/documento alcança snapshot canônico `nativeReady`, a análise operacional não relê a origem. O link/fonte permanece como proveniência e para revalidação explícita, não como dependência de execução.
+
+Provedor externo de IA fica desabilitado por padrão na classificação documental. Regra nativa determinística é tentada primeiro; uso externo só pode ocorrer quando explicitamente habilitado para caso não resolvido pelo motor nativo, com payload mínimo, sanitizado e rastreado. Repetição de chamada externa para padrão já absorvido é desperdício a eliminar.
+
+Regras essenciais de faturamento, auditoria, SLA, segurança, autorização, evidência, conciliação e fragilidade documental não podem depender exclusivamente de LLM externo.
 
 ## 14. Inteligência coletiva
 
@@ -397,3 +403,85 @@ CI verde em SHA ou base antiga não libera uma branch divergente. Antes de sair 
 Correções decorrentes desta auditoria são feitas somente em branch isolada, com PR draft e revisão humana, sem merge ou deploy automático.
 
 A auditoria deve manter separados os estados: especificado, implementado, testado, CI verificado, implantado e validado em ambiente real.
+
+
+## 19. Plano de dados nativo Firebase — regra fundamental
+
+O Firebase é a memória operacional executável do AURORA NEXUS. Drive, MV, TASY, Gmail, APIs e demais sistemas são fontes de aquisição e proveniência.
+
+Fluxo obrigatório:
+
+```text
+ORIGEM AUTORIZADA
+→ CAPTURA
+→ EXTRAÇÃO
+→ CLASSIFICAÇÃO NATIVA
+→ SANITIZAÇÃO
+→ HASH + VERSÃO + PROVENIÊNCIA
+→ SNAPSHOT CANÔNICO FIREBASE
+→ PROJEÇÃO
+→ INTELIGÊNCIA NATIVA
+→ AÇÃO / REVISÃO
+→ APRENDIZAGEM ORGÂNICA VALIDADA
+```
+
+Invariantes:
+
+1. análise nativa lê somente estado persistido no Firebase; não consulta Drive/MV/TASY durante inferência;
+2. `nativeReady=true` significa que o snapshot operacional possui fatos estruturados suficientes para análise sem releitura da origem;
+3. `sourceIndependent=true` significa independência operacional pós-ingestão; não significa que o documento-fonte possa ser apagado;
+4. arquivo-fonte permanece imutável e referenciável como evidência/proveniência;
+5. desconexão da origem após ingestão não invalida snapshots já aceitos; gera perda de cobertura apenas para conteúdo novo/alterado;
+6. documento com extração degradada, baixa confiança ou campos canônicos ausentes permanece fragilidade explícita; não é promovido silenciosamente a evidência perfeita;
+7. narrativa bruta, prontuário e PHI não entram no endpoint genérico. Conteúdo clínico-sensível exige caminho criptográfico dedicado, finalidade autorizada e controles AURORA-SEC-001;
+8. hashes, versões, `orgId`, origem, SLA, estado e trilha de auditoria acompanham o snapshot;
+9. IA externa nunca é requisito para disponibilidade do núcleo operacional.
+
+O snapshot genérico deve privilegiar fatos estruturados: categoria, competência, valores canônicos, contagens, estágio do fluxo, confiança, método de extração, origem, SLA, fragilidade, necessidade de releitura e hashes. Texto narrativo bruto não é necessário para o motor operacional padrão.
+
+## 20. Vigilância documental contínua de MV, TASY e outros ERPs
+
+A instalação do AURORA deve provisionar um registro de fontes documentais por organização. Cada fonte recebe:
+
+- `sourceId` estável;
+- sistema de origem: `MV`, `TASY`, `ERP` ou `DRIVE`;
+- modo de entrada implementado;
+- pasta/endpoint explicitamente autorizado;
+- SLA documental;
+- estado ativo/inativo;
+- diagnóstico de acessibilidade;
+- isolamento por organização.
+
+O modo inicial implementado é `DRIVE_FOLDER`: exportações documentais do MV, TASY ou outro ERP são direcionadas/sincronizadas para pastas autorizadas e o mesmo pipeline canônico as acompanha continuamente. Um conector indisponível não derruba os demais.
+
+A vigilância deve procurar pelo menos:
+
+- documento novo ou alterado;
+- extração degradada;
+- classificação de baixa confiança;
+- campos canônicos ausentes;
+- documento dependente de releitura da origem;
+- fila parada;
+- documento além do SLA da fonte;
+- gargalo entre recebido → extraído → validado;
+- uso residual de IA externa que já possa ser substituído por regra nativa;
+- recorrência por sistema, setor, tipo documental e causa-raiz.
+
+Ciclo de resolução:
+
+```text
+DETECTAR NO FIREBASE
+→ MANTER EXCEÇÃO ATIVA
+→ PRIORIZAR POR SLA / IMPACTO / RECORRÊNCIA
+→ PROPOR CORREÇÃO
+→ REVISÃO HUMANA QUANDO MATERIAL
+→ EXECUTAR INTERVENÇÃO PERMITIDA
+→ MEDIR RESULTADO
+→ REGISTRAR EVIDÊNCIA
+→ ALIMENTAR AURORA-ORG-001
+→ REUTILIZAR REGRA VALIDADA
+```
+
+A aprendizagem orgânica não fecha pendência por inferência. Somente resolução validada com evidência pode virar `REWORK`, `VALIDATED_DECISION`, `SECTOR_NEED` ou outro sinal elegível. Ferramentas promovidas continuam limitadas por escopo, revisão, teste, rollback e proibição de mutação autônoma do sistema-fonte.
+
+Essa vigilância é complementar aos módulos já existentes de faturamento, glosa, reconciliação, SLA, governança e auditoria; não cria produto, banco ou motor paralelo.
