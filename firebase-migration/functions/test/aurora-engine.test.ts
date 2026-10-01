@@ -172,6 +172,36 @@ test("comandos exigem SLA, competência, códigos e evidência", () => {
     dueAt: "2026-09-30T23:59:59-03:00",
     competence: "2026-09"
   });
+  assert.deepEqual(parseActionCommand({
+    type: "CREATE_REVIEW",
+    targetType: "managementInput",
+    targetId: "mgmt-123",
+    title: "Atualizar faturamento",
+    details: "Conferir divergências abertas no app.",
+    reasonCode: "MANUAL_REVIEW",
+    riskLevel: "MEDIUM",
+    dueAt: "2026-10-02T23:59:59-03:00",
+    competence: "2026-10"
+  }), {
+    type: "CREATE_REVIEW",
+    targetType: "managementInput",
+    targetId: "mgmt-123",
+    title: "Atualizar faturamento",
+    details: "Conferir divergências abertas no app.",
+    reasonCode: "MANUAL_REVIEW",
+    riskLevel: "MEDIUM",
+    dueAt: "2026-10-02T23:59:59-03:00",
+    competence: "2026-10"
+  });
+  assert.equal(parseActionCommand({
+    type: "CREATE_REVIEW",
+    targetType: "managementInput",
+    targetId: "mgmt-124",
+    reasonCode: "MANUAL_REVIEW",
+    riskLevel: "MEDIUM",
+    dueAt: "2026-10-02T23:59:59-03:00",
+    competence: "2026-10"
+  }), null);
   assert.equal(parseActionCommand({ type: "CREATE_REVIEW", targetType: "invoice", targetId: "NF-1", reasonCode: "texto livre", riskLevel: "HIGH" }), null);
   assert.equal(parseActionCommand({ type: "RESOLVE", actionId: "A-1", expectedRevision: 1, resolutionCode: "SOURCE_CORRECTED" }), null);
   assert.deepEqual(parseActionCommand({ type: "RESOLVE", actionId: "A-1", expectedRevision: 1, resolutionCode: "SOURCE_CORRECTED", evidenceRefs: ["doc:1"] }), {
