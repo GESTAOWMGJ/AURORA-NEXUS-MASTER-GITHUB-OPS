@@ -1,0 +1,69 @@
+name: Authorized Aurora Firebase HML Deploy Request
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/requests/aurora-firebase-hml.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: aurora-firebase-hml-dispatch
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    name: Validate request and dispatch protected HML workflow
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate exact authorized request
+        env:
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          REQUEST_FILE: .github/requests/aurora-firebase-hml.json
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -n "$APPROVED_PROJECT"
+          jq -e --arg project "$APPROVED_PROJECT" '
+            .requestVersion == 1 and
+            .confirmation == "DEPLOY_HOMOLOGATION" and
+            .projectId == $project and
+            .projectId == "wmgj-hml-jfn-20260927" and
+            .authorizedScope == "PR72_APP_PRIMARY_INPUT" and
+            .sourceMutation == false and
+            .productionMutation == false and
+            .clinicalSensitiveEnabled == false and
+            (.expectedSourceSha | test("^[a-f0-9]{40}$"))
+          ' "$REQUEST_FILE" >/dev/null
+          expected_source="$(jq -r '.expectedSourceSha' "$REQUEST_FILE")"
+          git cat-file -e "$expected_source^{commit}"
+          git merge-base --is-ancestor "$expected_source" "$GITHUB_SHA"
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$GITHUB_SHA"
+
+      - name: Dispatch protected deploy workflow at exact main SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_FILE: .github/requests/aurora-firebase-hml.json
+        run: |
+          set -euo pipefail
+          project_id="$(jq -r '.projectId' "$REQUEST_FILE")"
+          gh workflow run deploy-aurora-firebase.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main \
+            -f project_id="$project_id" \
+            -f deploy_confirmation=DEPLOY_HOMOLOGATION \
+            -f expected_main_sha="$GITHUB_SHA"
+          echo "AURORA_HML_DEPLOY_DISPATCHED_SHA=$GITHUB_SHA"
