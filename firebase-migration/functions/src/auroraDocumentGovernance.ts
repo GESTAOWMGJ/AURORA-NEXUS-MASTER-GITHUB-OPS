@@ -259,16 +259,27 @@ export async function syncDocumentGovernance(orgId = DEFAULT_ORG_ID, now = new D
 }
 
 export const auroraNexusDocumentWatchdog = onSchedule(
-  { schedule: "every 15 minutes", timeZone: "America/Sao_Paulo", retryCount: 1, maxInstances: 1 },
+  { schedule: "every 15 minutes", timeZone: "America/Sao_Paulo", retryCount: 1, maxInstances: 1, timeoutSeconds: 300 },
   async () => {
-    try {
-      const result = await syncDocumentGovernance(DEFAULT_ORG_ID);
-      logger.info("Aurora document governance synchronized", result);
-    } catch (error) {
-      logger.error("Aurora document governance failed", {
-        error: error instanceof Error ? error.message : String(error)
-      });
-      throw error;
+    const organizations = await auroraDb.collection("organizations")
+      .where("active", "==", true)
+      .limit(20)
+      .get();
+    const orgIds = organizations.empty ? [DEFAULT_ORG_ID] : organizations.docs
+      .filter((doc) => doc.id === DEFAULT_ORG_ID || doc.data().projectionEnabled === true || doc.data().documentWatchEnabled === true)
+      .map((doc) => doc.id);
+    const failures: Array<{ orgId: string; code: string }> = [];
+
+    for (const orgId of orgIds) {
+      try {
+        const result = await syncDocumentGovernance(orgId);
+        logger.info("Aurora document governance synchronized", result);
+      } catch (error) {
+        const code = error instanceof Error ? error.message : "DOCUMENT_GOVERNANCE_FAILED";
+        failures.push({ orgId, code });
+        logger.error("Aurora document governance failed", { orgId, code });
+      }
     }
+    if (failures.length > 0) throw new Error(`DOCUMENT_GOVERNANCE_TENANT_FAILURES:${failures.length}`);
   }
 );
