@@ -265,6 +265,11 @@ def build_install_bundle(
             "pollMinutes": 15,
         },
         "documentSources": normalized_sources,
+        "documentInputs": {
+            "supportedModes": ["DRIVE_FOLDER", "AURORA_INTEGRATION_API"],
+            "canonicalApiPath": "/api/integration/documents",
+            "requiredApiScope": "documents.ingest",
+        },
         "nativeDataPlane": {
             "storage": "FIRESTORE",
             "sourceAccessRequiredAfterIngest": False,
