@@ -1,4 +1,4 @@
-export const AURORA_NATIVE_INTELLIGENCE_VERSION = "0.1.0";
+export const AURORA_NATIVE_INTELLIGENCE_VERSION = "0.2.0-firebase-native";
 
 export type NativeInsightIntent =
   | "EXECUTIVE"
