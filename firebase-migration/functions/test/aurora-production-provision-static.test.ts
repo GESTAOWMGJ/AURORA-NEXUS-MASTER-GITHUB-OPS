@@ -11,7 +11,10 @@ test("production provisioning is isolated and cold by default",()=>{
   assert.equal(request.productionMutation,false);
   assert.equal(request.sourceMutation,false);
   assert.equal(request.clinicalSensitiveEnabled,false);
-  assert.match(workflow,/environment: firebase-production/);
+  assert.match(workflow,/environment: firebase-homologation/);
+  assert.match(workflow,/aurora-prod-deploy/);
+  assert.match(workflow,/roles\/iam\.workloadIdentityUser/);
+  assert.match(workflow,/attribute\.repository/);
   assert.match(workflow,/environment=production/);
   assert.match(workflow,/deployment_stage=cold/);
   assert.match(workflow,/--delete-protection/);

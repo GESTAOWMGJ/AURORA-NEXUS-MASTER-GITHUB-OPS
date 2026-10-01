@@ -20,7 +20,7 @@ jobs:
     name: Create isolated cold-production Firebase project
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    environment: firebase-production
+    # Bootstrap only: this protected HML environment currently owns the validated\n    # GitHub→GCP WIF variables. The target project remains strictly production.\n    environment: firebase-homologation
     env:
       REQUEST_FILE: .github/requests/aurora-firebase-production.json
       HML_PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
@@ -101,6 +101,48 @@ jobs:
           fi
           gcloud billing projects link "$PROJECT_ID" --billing-account "$BILLING_ID" --quiet
           gcloud projects update "$PROJECT_ID"             --update-labels='environment=production,system=aurora-nexus,data_scope=nonclinical,managed_by=jfn,deployment_stage=cold'             --quiet >/dev/null
+
+      - name: Create dedicated production deploy identity
+        env:
+          PROJECT_ID: ${{ steps.request.outputs.project_id }}
+        run: |
+          set -euo pipefail
+          prod_sa_name="aurora-prod-deploy"
+          prod_sa="${prod_sa_name}@${PROJECT_ID}.iam.gserviceaccount.com"
+          gcloud iam service-accounts describe "$prod_sa" --project "$PROJECT_ID" >/dev/null 2>&1 \
+            || gcloud iam service-accounts create "$prod_sa_name" \
+              --display-name="Aurora Nexus Production Deploy" \
+              --project "$PROJECT_ID" --quiet
+          for role in \
+            roles/firebase.admin \
+            roles/datastore.owner \
+            roles/cloudfunctions.admin \
+            roles/run.admin \
+            roles/artifactregistry.admin \
+            roles/secretmanager.admin \
+            roles/cloudscheduler.admin \
+            roles/eventarc.admin \
+            roles/pubsub.admin \
+            roles/serviceusage.serviceUsageAdmin \
+            roles/iam.serviceAccountUser; do
+            gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+              --member="serviceAccount:$prod_sa" \
+              --role="$role" \
+              --condition=None \
+              --quiet >/dev/null
+          done
+          provider_project_number="$(cut -d/ -f2 <<<"$WIF_PROVIDER")"
+          provider_pool="$(cut -d/ -f6 <<<"$WIF_PROVIDER")"
+          [[ "$provider_project_number" =~ ^[0-9]+$ ]]
+          [[ "$provider_pool" =~ ^[A-Za-z0-9_-]{2,128}$ ]]
+          principal="principalSet://iam.googleapis.com/projects/${provider_project_number}/locations/global/workloadIdentityPools/${provider_pool}/attribute.repository/${GITHUB_REPOSITORY}"
+          gcloud iam service-accounts add-iam-policy-binding "$prod_sa" \
+            --project "$PROJECT_ID" \
+            --role="roles/iam.workloadIdentityUser" \
+            --member="$principal" \
+            --quiet >/dev/null
+          echo "AURORA_PROD_DEPLOY_SERVICE_ACCOUNT=$prod_sa"
+          echo "AURORA_PROD_WIF_PROVIDER_CONFIGURED=true"
 
       - name: Enable production platform APIs
         env:
@@ -219,5 +261,8 @@ jobs:
             latest="$(gcloud secrets versions describe latest --secret "$secret" --project "$PROJECT_ID" --format='value(state)')"
             test "$latest" = "ENABLED"
           done
+          prod_sa="aurora-prod-deploy@${PROJECT_ID}.iam.gserviceaccount.com"
+          gcloud iam service-accounts describe "$prod_sa" --project "$PROJECT_ID" --format='value(email)' | grep -Fx "$prod_sa" >/dev/null
           echo "AURORA_PRODUCTION_PROJECT_CREATED=$PROJECT_ID"
           echo "AURORA_PRODUCTION_STAGE=COLD_PRODUCTION"
+          echo "AURORA_PRODUCTION_DEPLOY_IDENTITY=$prod_sa"
