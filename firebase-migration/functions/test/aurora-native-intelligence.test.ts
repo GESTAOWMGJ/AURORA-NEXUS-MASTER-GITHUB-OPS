@@ -54,7 +54,7 @@ test("next action returns only the highest-priority actionable finding", () => {
 });
 
 test("document fragility SLA and flow are native Firebase findings", () => {
-  const result = generateNativeInsight({
+  const input = {
     ...projection,
     documentIntelligence: {
       fragileDocuments: 3,
@@ -63,13 +63,17 @@ test("document fragility SLA and flow are native Firebase findings", () => {
       pendingDocumentFlow: 4,
       externalAiDocuments: 1
     }
-  }, "EXECUTIVE") as any;
-  const codes = new Set(result.findings.map((item: any) => item.code));
-  assert.equal(codes.has("FIREBASE_NATIVE_GAP"), true);
-  assert.equal(codes.has("DOCUMENT_FRAGILITY"), true);
-  assert.equal(codes.has("DOCUMENT_SLA_OVERDUE"), true);
-  assert.equal(result.source.type, "FIREBASE_CANONICAL_SNAPSHOT");
-  assert.equal(result.source.sourceAccessRequired, false);
+  };
+  const quality = generateNativeInsight(input, "DATA_QUALITY") as any;
+  const sla = generateNativeInsight(input, "SLA_RISK") as any;
+  const qualityCodes = new Set(quality.findings.map((item: any) => item.code));
+  const slaCodes = new Set(sla.findings.map((item: any) => item.code));
+  assert.equal(qualityCodes.has("FIREBASE_NATIVE_GAP"), true);
+  assert.equal(qualityCodes.has("DOCUMENT_FRAGILITY"), true);
+  assert.equal(slaCodes.has("DOCUMENT_SLA_OVERDUE"), true);
+  assert.equal(slaCodes.has("FLOW_BOTTLENECK"), true);
+  assert.equal(quality.source.type, "FIREBASE_CANONICAL_SNAPSHOT");
+  assert.equal(quality.source.sourceAccessRequired, false);
 });
 
 test("intent parser is closed", () => {
