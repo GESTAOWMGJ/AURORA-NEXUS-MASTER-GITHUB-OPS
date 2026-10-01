@@ -212,9 +212,13 @@ jobs:
                   delete_done=true
                   break
                 fi
-                if grep -Eqi "in the middle of restore|FAILED_PRECONDITION" <<<"$delete_out"; then
+                if grep -qi "in the middle of restore" <<<"$delete_out"; then
                   sleep 15
                   continue
+                fi
+                if grep -qi "FAILED_PRECONDITION" <<<"$delete_out"; then
+                  echo "$delete_out" >&2
+                  exit "$delete_rc"
                 fi
                 echo "$delete_out" >&2
                 exit "$delete_rc"
