@@ -109,6 +109,13 @@
         }
       },
       {
+        "source": "/api/integration/documents",
+        "function": {
+          "functionId": "auroraNexusIntegrationDocuments",
+          "region": "southamerica-east1"
+        }
+      },
+      {
         "source": "**",
         "function": {
           "functionId": "auroraNexusAuthGate",
