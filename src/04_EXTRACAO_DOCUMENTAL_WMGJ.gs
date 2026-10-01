@@ -93,14 +93,26 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
       var file = DriveApp.getFileById(idOrigem);
       var hash = gerarHashArquivoWMGJ_Compat_(file);
 
-      if (documentoJaProcessadoWMGJ_Compat_(idOrigem, hash)) {
+      var jaProcessado = documentoJaProcessadoWMGJ_Compat_(idOrigem, hash);
+      var mirrorRequired = firestoreMirrorObrigatorioWMGJ_();
+      var mirrorConfirmed = firestoreMirrorJaConfirmadoWMGJ_(idOrigem, hash);
+      if (jaProcessado && (!mirrorRequired || mirrorConfirmed)) {
         atualizarLinhaFilaWMGJ_Compat_(fila, i + 1, idx, {
           STATUS: "DUPLICADO",
           ULTIMO_ERRO: "",
-          OBSERVACAO: "Arquivo já reconhecido por ID_ORIGEM + HASH"
+          OBSERVACAO: mirrorConfirmed
+            ? "Arquivo já reconhecido por ID_ORIGEM + HASH e Firebase confirmado"
+            : "Arquivo já reconhecido por ID_ORIGEM + HASH"
         });
         duplicados++;
         continue;
+      }
+      if (jaProcessado && mirrorRequired && !mirrorConfirmed) {
+        atualizarLinhaFilaWMGJ_Compat_(fila, i + 1, idx, {
+          STATUS: "EXTRAINDO",
+          ULTIMO_ERRO: "",
+          OBSERVACAO: "Backfill idempotente: memória local existe, Firebase ainda não confirmado"
+        });
       }
 
       var extracao = extrairConteudoArquivoWMGJ_V1_(file);
@@ -127,8 +139,10 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
 
       var firestoreMirror = espelharDocumentoProcessadoFirestoreWMGJ_(file, validacao.dados, extracao);
       if (firestoreMirror.required && !firestoreMirror.ok) {
+        registrarFirestoreMirrorWMGJ_(file, hash, firestoreMirror);
         throw new Error("FIRESTORE_MIRROR_REQUIRED:" + firestoreMirror.status);
       }
+      if (firestoreMirror.ok) registrarFirestoreMirrorWMGJ_(file, hash, firestoreMirror);
 
       registrarDocumentoMemoriaWMGJ_Compat_(memoria, {
         origem: "DRIVE_EXTRACAO_REAL",
@@ -174,6 +188,54 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
 
   registrarLogWMGJ_Compat_("OK", "processarFilaComExtracaoRealWMGJ_V1", "AppsScript", JSON.stringify(resultado));
   return resultado;
+}
+
+function firestoreMirrorObrigatorioWMGJ_() {
+  return String(PropertiesService.getScriptProperties().getProperty("AURORA_FIRESTORE_MIRROR_REQUIRED") || "false").toLowerCase() === "true";
+}
+
+function garantirAbaFirestoreMirrorWMGJ_() {
+  var ss = getPlanilhaWMGJ_Compat_();
+  return obterOuCriarAbaWMGJ_Compat_(ss, "17_FIRESTORE_MIRROR", [
+    "DATA",
+    "ID_ORIGEM",
+    "HASH",
+    "STATUS",
+    "ENTITY_ID",
+    "EVENT_ID",
+    "REQUIRED"
+  ]);
+}
+
+function registrarFirestoreMirrorWMGJ_(file, hash, mirror) {
+  var aba = garantirAbaFirestoreMirrorWMGJ_();
+  aba.appendRow([
+    new Date(),
+    file.getId(),
+    hash,
+    mirror && mirror.status || "UNKNOWN",
+    mirror && mirror.entityId || "",
+    mirror && mirror.eventId || "",
+    !!(mirror && mirror.required)
+  ]);
+}
+
+function firestoreMirrorJaConfirmadoWMGJ_(idOrigem, hash) {
+  var ss = getPlanilhaWMGJ_Compat_();
+  var aba = ss.getSheetByName("17_FIRESTORE_MIRROR");
+  if (!aba || aba.getLastRow() < 2) return false;
+  var values = aba.getDataRange().getValues();
+  var idx = mapearCabecalhoWMGJ_Compat_(values[0]);
+  for (var i = values.length - 1; i >= 1; i--) {
+    if (
+      String(values[i][idx.ID_ORIGEM] || "") === String(idOrigem || "")
+      && String(values[i][idx.HASH] || "") === String(hash || "")
+    ) {
+      var status = String(values[i][idx.STATUS] || "").toUpperCase();
+      return status === "ACCEPTED" || status === "DUPLICATE_CONFIRMED";
+    }
+  }
+  return false;
 }
 
 function espelharDocumentoProcessadoFirestoreWMGJ_(file, dados, extracao) {
