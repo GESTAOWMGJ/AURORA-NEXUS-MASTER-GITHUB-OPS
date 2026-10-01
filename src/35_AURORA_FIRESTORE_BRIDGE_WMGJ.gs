@@ -249,6 +249,7 @@ function wmgjFirestoreEventoArquivo_(file, classification, context) {
     competence: wmgjFirestoreCompetencia_(classification.competencia),
     documentType: String(classification.tipo_documento || classification.categoria || 'outro').slice(0, 128),
     record: {
+      sanitized: true,
       category: nativeSnapshot.category,
       confidence: nativeSnapshot.confidence,
       extractionMethod: nativeSnapshot.extractionMethod,
