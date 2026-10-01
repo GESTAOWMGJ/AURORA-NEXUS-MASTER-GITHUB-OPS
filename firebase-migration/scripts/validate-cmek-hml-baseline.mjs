@@ -10,8 +10,8 @@ if (p.status !== "PREPARED_NOT_APPLIED") fail("status must remain plan-only in r
 if (p.projectId !== "wmgj-hml-jfn-20260927") fail("project");
 if (p.databaseId !== "aurora-hml-cmek") fail("database");
 if (p.location !== "southamerica-east1") fail("location");
-if (p.firestoreCmekFeatureAccessRequired !== true) fail("CMEK feature access gate");
-if (p.firestoreCmekFeatureAccessState !== "MUST_BE_CONFIRMED_BEFORE_APPLY") fail("CMEK feature access state");
+if (p.firestoreCmekFeatureAccessRequired !== false) fail("CMEK runtime capability gate");
+if (p.firestoreCmekFeatureAccessState !== "RUNTIME_VERIFIED_BY_DATABASE_CREATE_OR_EXISTING_CMEK_DATABASE") fail("CMEK feature access state");
 if (p.sameLocationKmsRequired !== true) fail("KMS location binding");
 if (p.serviceAgentRole !== "roles/cloudkms.cryptoKeyEncrypterDecrypter") fail("service agent role");
 if (p.type !== "firestore-native") fail("type");
