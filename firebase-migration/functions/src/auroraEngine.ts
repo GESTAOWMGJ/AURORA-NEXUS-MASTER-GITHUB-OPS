@@ -275,7 +275,7 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
     competence: context.competence ?? now.toISOString().slice(0, 7),
     generatedAt: now.toISOString(),
     asOf: now.toISOString(),
-    policyVersion: "aurora-nexus-2.3.0-firebase-shadow-v2",
+    policyVersion: "aurora-nexus-2.4.0-firebase-native-v1",
     completeness,
     severity,
     pipeline: pipelineMetrics(operationalSource),
