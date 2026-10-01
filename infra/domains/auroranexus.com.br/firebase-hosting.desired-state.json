@@ -1,6 +1,6 @@
 {
-  "schemaVersion": "1.1.0",
-  "updatedAt": "2026-09-26",
+  "schemaVersion": "1.2.0",
+  "updatedAt": "2026-10-01",
   "product": "AURORA NEXUS",
   "domain": "auroranexus.com.br",
   "interfacePolicy": {
@@ -19,7 +19,17 @@
     "currentFallbackUrl": "https://wmgj-ops.web.app/portal",
     "productionProjectId": "PENDING_FIREBASE_PROJECT_SELECTION",
     "hostingConfigurationInFirebaseJson": "firebase-migration/firebase.json",
-    "customDomainStatus": "PENDING_PROVIDER_DNS_SSL_AND_AUTH_SMOKE_TEST"
+    "customDomainStatus": "PENDING_PROVIDER_DNS_SSL_AND_AUTH_SMOKE_TEST",
+    "productionProjectIdCandidate": "aurora-nexus-prod-wmgj",
+    "productionProvisioningStatus": "REQUESTED_COLD_PRODUCTION",
+    "productionGuardrails": {
+      "deploymentStage": "COLD_PRODUCTION",
+      "productionMutation": false,
+      "sourceMutation": false,
+      "clinicalSensitiveEnabled": false,
+      "projectionEnabled": false,
+      "projectionMode": "SHADOW"
+    }
   },
   "domains": [
     {

@@ -1,0 +1,223 @@
+name: Provision Aurora Firebase Production
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/requests/aurora-firebase-production.json"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aurora-firebase-production-provision
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    name: Create isolated cold-production Firebase project
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: firebase-production
+    env:
+      REQUEST_FILE: .github/requests/aurora-firebase-production.json
+      HML_PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+      WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      PROVISION_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate exact production creation request
+        id: request
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          jq -e '
+            .requestVersion == 1 and
+            .confirmation == "CREATE_PRODUCTION_PROJECT" and
+            .projectId == "aurora-nexus-prod-wmgj" and
+            .region == "southamerica-east1" and
+            .organizationId == "wmgj" and
+            .deploymentStage == "COLD_PRODUCTION" and
+            .productionMutation == false and
+            .sourceMutation == false and
+            .clinicalSensitiveEnabled == false and
+            (.expectedSourceSha | test("^[a-f0-9]{40}$"))
+          ' "$REQUEST_FILE" >/dev/null
+          expected="$(jq -r '.expectedSourceSha' "$REQUEST_FILE")"
+          git cat-file -e "$expected^{commit}"
+          git merge-base --is-ancestor "$expected" "$GITHUB_SHA"
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$GITHUB_SHA"
+          project_id="$(jq -r '.projectId' "$REQUEST_FILE")"
+          region="$(jq -r '.region' "$REQUEST_FILE")"
+          echo "project_id=$project_id" >> "$GITHUB_OUTPUT"
+          echo "region=$region" >> "$GITHUB_OUTPUT"
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          version: "548.0.0"
+
+      - name: Verify cloud identity and billing source
+        id: billing
+        env:
+          PROJECT_ID: ${{ steps.request.outputs.project_id }}
+        run: |
+          set -euo pipefail
+          test -n "$HML_PROJECT_ID"
+          test "$PROJECT_ID" != "$HML_PROJECT_ID"
+          test "$PROJECT_ID" != "wmgj-ops"
+          case "$PROJECT_ID" in aurora-nexus-prod-*) ;; *) exit 41 ;; esac
+          active_account="$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')"
+          test -n "$active_account"
+          test "$active_account" = "$PROVISION_SERVICE_ACCOUNT"
+          billing_resource="$(gcloud billing projects describe "$HML_PROJECT_ID" --format='value(billingAccountName)')"
+          test -n "$billing_resource"
+          billing_id="${billing_resource##*/}"
+          [[ "$billing_id" =~ ^[A-Fa-f0-9-]{6,64}$ ]]
+          echo "billing_id=$billing_id" >> "$GITHUB_OUTPUT"
+
+      - name: Create production project and attach billing
+        env:
+          PROJECT_ID: ${{ steps.request.outputs.project_id }}
+          BILLING_ID: ${{ steps.billing.outputs.billing_id }}
+        run: |
+          set -euo pipefail
+          if gcloud projects describe "$PROJECT_ID" --format='value(projectId)' >/dev/null 2>&1; then
+            test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectId)')" = "$PROJECT_ID"
+          else
+            gcloud projects create "$PROJECT_ID" --name="Aurora Nexus Production" --quiet
+          fi
+          gcloud billing projects link "$PROJECT_ID" --billing-account "$BILLING_ID" --quiet
+          gcloud projects update "$PROJECT_ID"             --update-labels='environment=production,system=aurora-nexus,data_scope=nonclinical,managed_by=jfn,deployment_stage=cold'             --quiet >/dev/null
+
+      - name: Enable production platform APIs
+        env:
+          PROJECT_ID: ${{ steps.request.outputs.project_id }}
+        run: |
+          set -euo pipefail
+          gcloud services enable             firebase.googleapis.com             firebaserules.googleapis.com             firebasehosting.googleapis.com             identitytoolkit.googleapis.com             firestore.googleapis.com             cloudfunctions.googleapis.com             run.googleapis.com             artifactregistry.googleapis.com             cloudbuild.googleapis.com             eventarc.googleapis.com             pubsub.googleapis.com             cloudscheduler.googleapis.com             secretmanager.googleapis.com             cloudkms.googleapis.com             iamcredentials.googleapis.com             billingbudgets.googleapis.com             --project "$PROJECT_ID" --quiet
+
+      - name: Add Firebase control plane
+        env:
+          PROJECT_ID: ${{ steps.request.outputs.project_id }}
+        run: |
+          set -euo pipefail
+          access_token="$(gcloud auth print-access-token)"
+          project_url="https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}"
+          if ! curl --fail --silent --show-error --max-time 30               -H "Authorization: Bearer ${access_token}" "$project_url" >/dev/null 2>&1; then
+            operation="$(curl --fail --silent --show-error --max-time 30               -X POST               -H "Authorization: Bearer ${access_token}"               -H 'Content-Type: application/json'               --data '{}'               "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}:addFirebase")"
+            op_name="$(jq -r '.name // empty' <<<"$operation")"
+            test -n "$op_name"
+            for _ in $(seq 1 30); do
+              state="$(curl --fail --silent --show-error --max-time 30                 -H "Authorization: Bearer ${access_token}"                 "https://firebase.googleapis.com/v1beta1/${op_name}")"
+              if [ "$(jq -r '.done // false' <<<"$state")" = true ]; then
+                jq -e 'has("error") | not' <<<"$state" >/dev/null
+                break
+              fi
+              sleep 5
+            done
+          fi
+          curl --fail --silent --show-error --max-time 30             -H "Authorization: Bearer ${access_token}" "$project_url" >/dev/null
+
+      - name: Create protected Firestore production database
+        env:
+          PROJECT_ID: ${{ steps.request.outputs.project_id }}
+          REGION: ${{ steps.request.outputs.region }}
+        run: |
+          set -euo pipefail
+          if ! gcloud firestore databases describe --database='(default)' --project "$PROJECT_ID" --format=json >/dev/null 2>&1; then
+            gcloud firestore databases create               --database='(default)'               --location="$REGION"               --type=firestore-native               --delete-protection               --project="$PROJECT_ID"               --quiet
+          fi
+          gcloud firestore databases update             --database='(default)'             --enable-pitr             --delete-protection             --project="$PROJECT_ID"             --quiet
+          db_json="$(gcloud firestore databases describe --database='(default)' --project "$PROJECT_ID" --format=json)"
+          test "$(jq -r '.locationId // empty' <<<"$db_json")" = "$REGION"
+          test "$(jq -r '.deleteProtectionState // empty' <<<"$db_json")" = "DELETE_PROTECTION_ENABLED"
+          test "$(jq -r '.pointInTimeRecoveryEnablement // empty' <<<"$db_json")" = "POINT_IN_TIME_RECOVERY_ENABLED"
+
+      - name: Provision isolated application secrets
+        env:
+          PROJECT_ID: ${{ steps.request.outputs.project_id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          temp="$(mktemp -d "${RUNNER_TEMP}/aurora-prod-secrets.XXXXXX")"
+          cleanup(){ find "$temp" -type f -delete; rmdir "$temp"; }
+          trap cleanup EXIT
+          for name in AURORA_NEXUS_ALLOWED_EMAILS AURORA_NEXUS_CSRF_HMAC_KEY WMGJ_INGEST_HMAC_KEYRING; do
+            gcloud secrets describe "$name" --project "$PROJECT_ID" >/dev/null 2>&1               || gcloud secrets create "$name" --project "$PROJECT_ID" --replication-policy=automatic --quiet >/dev/null
+          done
+          gcloud secrets versions access latest             --secret AURORA_NEXUS_ALLOWED_EMAILS             --project "$HML_PROJECT_ID"             --out-file="$temp/allowed-emails"
+          test -s "$temp/allowed-emails"
+          node -e '
+            const fs=require("node:fs");
+            const xs=fs.readFileSync(process.argv[1],"utf8").split(/[\s,;]+/).filter(Boolean);
+            process.exit(xs.length>0 && xs.every(x=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x))?0:1);
+          ' "$temp/allowed-emails"
+          gcloud secrets versions add AURORA_NEXUS_ALLOWED_EMAILS             --project "$PROJECT_ID" --data-file="$temp/allowed-emails" --quiet >/dev/null
+          openssl rand -hex 32 > "$temp/csrf"
+          gcloud secrets versions add AURORA_NEXUS_CSRF_HMAC_KEY             --project "$PROJECT_ID" --data-file="$temp/csrf" --quiet >/dev/null
+          hmac_secret="$(openssl rand -hex 32)"
+          jq -n --arg secret "$hmac_secret"             '{"apps-script-prod-cold-20261001":{active:false,secret:$secret,orgIds:["wmgj"],entityTypes:["sourceDocument","invoice","bankTransaction","gloss","reconciliation"]}}'             > "$temp/keyring.json"
+          unset hmac_secret
+          gcloud secrets versions add WMGJ_INGEST_HMAC_KEYRING             --project "$PROJECT_ID" --data-file="$temp/keyring.json" --quiet >/dev/null
+          cleanup
+          trap - EXIT
+
+      - name: Initialize cold-production organization guardrails
+        env:
+          PROJECT_ID: ${{ steps.request.outputs.project_id }}
+        run: |
+          set -euo pipefail
+          access_token="$(gcloud auth print-access-token)"
+          org_url="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj"
+          payload='{"fields":{"active":{"booleanValue":true},"environment":{"stringValue":"PRODUCTION"},"deploymentStage":{"stringValue":"COLD_PRODUCTION"},"projectionEnabled":{"booleanValue":false},"projectionMode":{"stringValue":"SHADOW"},"organicEnabled":{"booleanValue":true},"organicSectors":{"arrayValue":{"values":[{"stringValue":"AUDIT"},{"stringValue":"FINANCE"}]}},"clinicalSensitiveEnabled":{"booleanValue":false},"productionMutation":{"booleanValue":false},"sourceMutation":{"booleanValue":false}}}'
+          curl --fail --silent --show-error --max-time 30             -X PATCH             -H "Authorization: Bearer ${access_token}"             -H 'Content-Type: application/json'             --data "$payload"             "$org_url?updateMask.fieldPaths=active&updateMask.fieldPaths=environment&updateMask.fieldPaths=deploymentStage&updateMask.fieldPaths=projectionEnabled&updateMask.fieldPaths=projectionMode&updateMask.fieldPaths=organicEnabled&updateMask.fieldPaths=organicSectors&updateMask.fieldPaths=clinicalSensitiveEnabled&updateMask.fieldPaths=productionMutation&updateMask.fieldPaths=sourceMutation" >/dev/null
+
+      - name: Request nonce TTL
+        env:
+          PROJECT_ID: ${{ steps.request.outputs.project_id }}
+        run: |
+          set -euo pipefail
+          gcloud firestore fields ttls update expiresAt             --collection-group=requestNonces             --database='(default)'             --enable-ttl             --project="$PROJECT_ID"             --async --quiet
+
+      - name: Verify cold-production state
+        env:
+          PROJECT_ID: ${{ steps.request.outputs.project_id }}
+          REGION: ${{ steps.request.outputs.region }}
+        run: |
+          set -euo pipefail
+          test "$(gcloud billing projects describe "$PROJECT_ID" --format='value(billingEnabled)')" = "True"
+          db_json="$(gcloud firestore databases describe --database='(default)' --project "$PROJECT_ID" --format=json)"
+          test "$(jq -r '.locationId // empty' <<<"$db_json")" = "$REGION"
+          test "$(jq -r '.deleteProtectionState // empty' <<<"$db_json")" = "DELETE_PROTECTION_ENABLED"
+          test "$(jq -r '.pointInTimeRecoveryEnablement // empty' <<<"$db_json")" = "POINT_IN_TIME_RECOVERY_ENABLED"
+          access_token="$(gcloud auth print-access-token)"
+          org_json="$(curl --fail --silent --show-error --max-time 30             -H "Authorization: Bearer ${access_token}"             "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj")"
+          jq -e '
+            .fields.active.booleanValue == true and
+            .fields.environment.stringValue == "PRODUCTION" and
+            .fields.deploymentStage.stringValue == "COLD_PRODUCTION" and
+            .fields.projectionEnabled.booleanValue == false and
+            .fields.projectionMode.stringValue == "SHADOW" and
+            .fields.clinicalSensitiveEnabled.booleanValue == false and
+            .fields.productionMutation.booleanValue == false and
+            .fields.sourceMutation.booleanValue == false
+          ' <<<"$org_json" >/dev/null
+          for secret in AURORA_NEXUS_ALLOWED_EMAILS AURORA_NEXUS_CSRF_HMAC_KEY WMGJ_INGEST_HMAC_KEYRING; do
+            latest="$(gcloud secrets versions describe latest --secret "$secret" --project "$PROJECT_ID" --format='value(state)')"
+            test "$latest" = "ENABLED"
+          done
+          echo "AURORA_PRODUCTION_PROJECT_CREATED=$PROJECT_ID"
+          echo "AURORA_PRODUCTION_STAGE=COLD_PRODUCTION"
