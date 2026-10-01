@@ -31,6 +31,13 @@ assert_static_gates() {
 }
 assert_static_gates
 
+require_cmek_feature_access() {
+  test "${AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED:-NO}" = "YES" || {
+    echo "BLOCKED_FIRESTORE_CMEK_FEATURE_ACCESS_NOT_CONFIRMED" >&2
+    exit 9
+  }
+}
+
 active_account() {
   gcloud auth list --filter='status:ACTIVE' --format='value(account)' | head -n1
 }
@@ -75,6 +82,7 @@ plan() {
 }
 
 apply() {
+  require_cmek_feature_access
   test "${AURORA_CMEK_CONFIRMATION:-}" = "APPLY_AURORA_CMEK_HML" || {
     echo "BLOCKED_CONFIRMATION" >&2; exit 10;
   }
@@ -126,6 +134,7 @@ apply() {
 }
 
 restore_test() {
+  require_cmek_feature_access
   test "${AURORA_CMEK_CONFIRMATION:-}" = "RESTORE_AURORA_CMEK_HML" || {
     echo "BLOCKED_CONFIRMATION" >&2; exit 20;
   }
@@ -156,6 +165,7 @@ restore_test() {
 }
 
 key_failure_test() {
+  require_cmek_feature_access
   test "${AURORA_CMEK_CONFIRMATION:-}" = "TEST_AURORA_CMEK_KEY_FAILURE_HML" || {
     echo "BLOCKED_CONFIRMATION" >&2; exit 30;
   }
