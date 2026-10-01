@@ -30,7 +30,11 @@ Tecnologia atual: Google Apps Script.
 
 Responsável por transformar abas e logs em JSON previsível para o app.
 
-O app não deve depender diretamente da estrutura bruta da planilha.
+- v1: `contracts/operational-status.schema.json`, preservado para compatibilidade;
+- v2: `contracts/operational-status.v2.schema.json`, com `schemaVersion: 2`;
+- manifesto orgânico server-side: `firebase-migration/schemas/organic-patcher.schema.json`.
+
+Mudanças incompatíveis não reutilizam silenciosamente o mesmo contrato. O app não deve depender diretamente da estrutura bruta da planilha.
 
 ### 3. API de integração
 
@@ -92,6 +96,6 @@ Ações iniciais:
 
 ## Primeira entrega recomendada
 
-Criar um dashboard local em React/TypeScript que leia um JSON mockado em `contracts/operational-status.schema.json`.
+Consumidores legados podem continuar lendo `contracts/operational-status.schema.json`. Novas superfícies AURORA NEXUS devem negociar/validar explicitamente `schemaVersion: 2` contra `contracts/operational-status.v2.schema.json`.
 
-Depois, substituir o mock por endpoint Apps Script Web App.
+Depois, substituir o mock por endpoint controlado sem remover o suporte ao v1 antes de migração explícita dos consumidores.
