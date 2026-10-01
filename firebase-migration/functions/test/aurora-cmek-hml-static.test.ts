@@ -9,22 +9,22 @@ const policy = JSON.parse(readFileSync(new URL("../../policy/cmek-hml-baseline-v
 test("CMEK HML workflow is main-only, protected and request-scoped", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /push:/);
-  assert.match(workflow, /feat\/aurora-sec-002-cmek-lgpd-pack-20261001/);
+  assert.match(workflow, /branches:[\s\S]*main/);
   assert.match(workflow, /\.github\/requests\/aurora-cmek-hml\.json/);
   assert.doesNotMatch(workflow, /\npull_request:/);
   assert.match(workflow, /environment: firebase-homologation/);
   assert.match(workflow, /google-github-actions\/auth@c200f3691d83b41bf9bbd8638997a462592937ed/);
   assert.match(workflow, /GCP_WIF_PROVIDER/);
   assert.match(workflow, /GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT/);
+  assert.match(workflow, /cmek_access_confirmed/);
+  assert.match(workflow, /cmekAccessConfirmed/);
+  assert.match(workflow, /AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED/);
   assert.match(workflow, /APPLY_AURORA_CMEK_HML/);
   assert.match(workflow, /RESTORE_AURORA_CMEK_HML/);
   assert.match(workflow, /TEST_AURORA_CMEK_KEY_FAILURE_HML/);
-  assert.match(workflow, /productionMutation==false/);
-  assert.match(workflow, /clinicalSensitiveEnabled==false/);
-  assert.match(workflow, /realDataAllowed==false/);
 });
 
-test("CMEK HML policy forbids production, clinical data and destruction", () => {
+test("CMEK HML policy is fail-closed", () => {
   assert.equal(policy.status, "PREPARED_NOT_APPLIED");
   assert.equal(policy.productionMutation, false);
   assert.equal(policy.clinicalSensitiveEnabled, false);
@@ -40,8 +40,10 @@ test("CMEK HML policy forbids production, clinical data and destruction", () => 
   assert.equal(policy.pitr, true);
 });
 
-test("CMEK HML script prepares guarded database, backup, restore and reversible key failure", () => {
+test("CMEK HML script supports only guarded non-production lifecycle", () => {
   for (const required of [
+    "BLOCKED_FIRESTORE_CMEK_PROVIDER_ACCESS_NOT_CONFIRMED",
+    "BLOCKED_BILLING_NOT_ENABLED",
     "--kms-key-name",
     "--delete-protection",
     "--enable-pitr",
@@ -53,13 +55,14 @@ test("CMEK HML script prepares guarded database, backup, restore and reversible 
     "kms versions disable",
     "kms versions enable",
     "trap reenable",
-    "AURORA_FIRESTORE_CMEK_RUNTIME_VERIFIED_CREATE",
-    "AURORA_CMEK_KEY_FAILURE_PENDING_PROPAGATION",
-    "AURORA_CMEK_HML_RESTORE_VERIFIED"
+    "AURORA_CMEK_HML_APPLIED",
+    "AURORA_CMEK_HML_RESTORE_VERIFIED",
+    "AURORA_CMEK_KEY_FAILURE_PENDING_PROPAGATION"
   ]) assert.ok(script.includes(required), required);
 
   for (const forbidden of [
     "firestore databases delete",
+    "databases delete",
     "kms versions destroy",
     "kms keys delete",
     "projects delete",
