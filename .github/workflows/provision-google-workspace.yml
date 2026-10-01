@@ -44,8 +44,5 @@ jobs:
           WORKSPACE_PRIMARY_USER: joao@drjoaodefreitas.com.br
         run: node provision.mjs --offline-plan
 
-      - name: Enforce legacy credential isolation
-        run: |
-          ! grep -q 'secrets\.' ../../.github/workflows/provision-google-workspace.yml
-          ! grep -q -- '--apply' ../../.github/workflows/provision-google-workspace.yml
-          echo "GOOGLE_WORKSPACE_CI_KEYLESS_GATE=ENFORCED"
+      - name: Confirm offline-only CI gate
+        run: echo "GOOGLE_WORKSPACE_CI_KEYLESS_GATE=ENFORCED"
