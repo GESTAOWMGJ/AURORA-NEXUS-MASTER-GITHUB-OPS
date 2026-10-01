@@ -5,7 +5,7 @@ Python 3.10+ and local Go 1.23+ are required. No third-party modules/downloads.
 from __future__ import annotations
 import argparse, hashlib, json, os, pathlib, plistlib, shutil, stat, subprocess, tempfile, zipfile
 
-VERSION = '0.1.0-hml.20260928'
+VERSION = '0.2.0-hml.20261001'
 PORTAL = 'https://wmgj-hml-jfn-20260927.web.app/'
 MAC_NAME = 'AURORA-NEXUS-Mac-HML.zip'
 WIN_NAME = 'AURORA-NEXUS-Windows-x64-HML.exe'
@@ -37,7 +37,7 @@ Confirme a instalação por usuário em %LOCALAPPDATA%\\Programs\\AuroraNexusHML
 O instalador cria um atalho de Internet no menu Iniciar sem substituir atalhos existentes.
 O executável instalado abre o mesmo portal. Não requer Python para essa função.
 
-Atualizações do WEB APP aparecem na próxima abertura do mesmo portal.
+O WEB APP é o ponto principal de gestão: registro de ações, status, fontes e integrações.\nAtualizações do WEB APP aparecem na próxima abertura do mesmo portal.
 Este cliente NÃO baixa/executa atualizações binárias automaticamente.
 Atualização do cliente: nova versão autorizada, verificação de integridade e instalação.
 As versões coexistem; nenhum dado ou aplicativo anterior é sobrescrito.
@@ -241,7 +241,7 @@ def build(output: pathlib.Path):
         subprocess.run(['go','build','-trimpath','-ldflags=-H=windowsgui -s -w','-o',str(output/WIN_NAME),'.'],cwd=gosrc,env={**env,'GOOS':'windows','GOARCH':'amd64'},check=True)
         mac=work/'mac';app=mac/'Aurora Nexus HML.app';resources=app/'Contents/Resources'
         write(app/'Contents/MacOS/aurora-portal',fill(MAC_LAUNCHER),0o755)
-        plist={'CFBundleName':'Aurora Nexus HML','CFBundleDisplayName':'Aurora Nexus HML','CFBundleIdentifier':'br.com.auroranexus.desktop.hml','CFBundleExecutable':'aurora-portal','CFBundlePackageType':'APPL','CFBundleVersion':'1','CFBundleShortVersionString':'0.1.0','LSMinimumSystemVersion':'10.15','NSHighResolutionCapable':True}
+        plist={'CFBundleName':'Aurora Nexus HML','CFBundleDisplayName':'Aurora Nexus HML','CFBundleIdentifier':'br.com.auroranexus.desktop.hml','CFBundleExecutable':'aurora-portal','CFBundlePackageType':'APPL','CFBundleVersion':'1','CFBundleShortVersionString':'0.2.0','LSMinimumSystemVersion':'10.15','NSHighResolutionCapable':True}
         write(app/'Contents/Info.plist',plistlib.dumps(plist))
         write(resources/'LEIA_PRIMEIRO.txt',NOTICE)
         source=repo/'aurora-coletor/aurora_onboarding.py'
