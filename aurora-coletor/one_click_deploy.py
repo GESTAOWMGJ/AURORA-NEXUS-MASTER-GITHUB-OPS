@@ -1,61 +1,71 @@
 #!/usr/bin/env python3
-"""Aurora Coletor — implantação one-click segura.
+"""Aurora Coletor — one-click installer.
 
-Entrypoint intencionalmente sem segredo embutido. A implementação completa é
-documentada em ONE_CLICK_DEPLOYMENT.md e deve ser executada pelo pacote local
-aprovado do Aurora Nexus, nunca com token versionado.
+Runs the real installer first and then writes stable support commands. Secrets
+are collected interactively by connector_setup; none are accepted on argv.
 """
-
 from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
 from pathlib import Path
+import shlex
+import sys
+
+import install as aurora_install
 
 
-def now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Aurora Coletor one-click deployment gate")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Aurora Coletor one-click deployment")
     parser.add_argument("--target", default="/opt/aurora-coletor")
     parser.add_argument("--watch-dir", default="/srv/aurora-entrada")
     parser.add_argument("--endpoint", default="https://api.auroranexus.com.br/coletor")
     parser.add_argument("--org", default="wmgj")
     parser.add_argument("--facility", default="WMGJ")
-    parser.add_argument("--identity-id", default="aurora-collector-wmgj-hml-001")
+    parser.add_argument("--identity-id", default=None)
     parser.add_argument("--one-click", action="store_true")
-    parser.add_argument("--smoke-once", action="store_true")
-    args = parser.parse_args()
+    parser.add_argument("--without-connectors", action="store_true", help="Instala o coletor sem abrir o assistente de conectores.")
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
-    if args.org != args.org.lower():
-        raise SystemExit("ERRO: org deve estar em minúsculas")
-    if args.facility != args.facility.upper():
-        raise SystemExit("ERRO: facility deve estar em maiúsculas")
-    if not args.endpoint.startswith("https://"):
-        raise SystemExit("ERRO: endpoint deve ser HTTPS")
+    install_args = [
+        "--target", args.target,
+        "--watch-dir", args.watch_dir,
+        "--endpoint", args.endpoint,
+        "--org", args.org,
+        "--facility", args.facility,
+    ]
+    if args.identity_id:
+        install_args += ["--identity", args.identity_id]
+    if not args.without_connectors:
+        install_args += ["--setup-connectors"]
+
+    rc = aurora_install.main(install_args)
+    if rc != 0:
+        return rc
 
     target = Path(args.target)
     support = target / "support"
-    support.mkdir(parents=True, exist_ok=True)
+    support.mkdir(mode=0o700, parents=True, exist_ok=True)
+    run_sh = target / "run.sh"
     commands = {
-        "schemaVersion": "aurora.triggercmd.commands.v1",
-        "generatedAt": now(),
+        "schemaVersion": "aurora.triggercmd.commands.v2",
         "commands": [
-            {"name": "AURORA COLETOR Implantar Um Clique", "voice": "aurora coletor implantar", "command": "python3 one_click_deploy.py --one-click"},
-            {"name": "AURORA COLETOR Validar", "voice": "aurora coletor validar", "command": f"{target / 'run.sh'}"},
-            {"name": "AURORA COLETOR Smoke Test", "voice": "aurora coletor smoke test", "command": f"{target / 'run.sh'} --once"},
+            {"name": "AURORA COLETOR Validar", "voice": "aurora coletor validar", "command": shlex.quote(str(run_sh))},
+            {"name": "AURORA COLETOR Smoke Test", "voice": "aurora coletor smoke test", "command": shlex.quote(str(run_sh)) + " --once"},
+            {"name": "AURORA COLETOR Watch", "voice": "aurora coletor watch", "command": shlex.quote(str(run_sh)) + " --watch"},
         ],
     }
-    (support / "triggercmd-commands.json").write_text(json.dumps(commands, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print("AURORA COLETOR — pacote one-click inicializado")
+    command_file = support / "triggercmd-commands.json"
+    command_file.write_text(json.dumps(commands, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    try:
+        command_file.chmod(0o600)
+    except OSError:
+        pass
+
+    print("AURORA COLETOR — instalação one-click concluída")
     print("Target:", target)
-    print("Watch dir:", args.watch_dir)
-    print("Endpoint:", args.endpoint)
-    print("TRIGGERcmd:", support / "triggercmd-commands.json")
-    print("Para segredo e identidade técnica, seguir ONE_CLICK_DEPLOYMENT.md.")
+    print("TRIGGERcmd:", command_file)
+    print("Nenhum segredo foi gravado em linha de comando ou no manifesto público.")
     return 0
 
 
