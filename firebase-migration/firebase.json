@@ -88,6 +88,13 @@
         }
       },
       {
+        "source": "/api/crypto/self-test",
+        "function": {
+          "functionId": "auroraNexusCryptoSelfTest",
+          "region": "southamerica-east1"
+        }
+      },
+      {
         "source": "/api/integration-keys",
         "function": {
           "functionId": "auroraNexusIntegrationKeys",

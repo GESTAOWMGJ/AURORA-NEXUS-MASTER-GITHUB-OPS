@@ -45,14 +45,17 @@ HMAC-SHA-256 permanece adequado para autenticação da ingestão; aumentar o tam
 
 ## 3. Fases de implantação criptográfica
 
-### Fase A — agora
+### Fase A — implementada em código
 
 - política criptográfica versionada;
-- validação CI do baseline;
+- AES-256-GCM envelope encryption implementada;
+- DEK 256-bit por envelope, nonce 96-bit e AAD tenant-bound;
+- adapter Cloud KMS por workload identity/ADC;
+- self-test administrativo com MFA/CSRF/audit ledger;
+- validação CI do baseline e testes de adulteração;
 - CodeQL;
 - Secret Manager/WIF preservados;
-- dados clínicos continuam bloqueados;
-- nenhum deploy ou migração real.
+- dados clínicos continuam bloqueados até HML/produção comprovados.
 
 ### Fase B — homologação forte
 
@@ -67,11 +70,14 @@ HMAC-SHA-256 permanece adequado para autenticação da ingestão; aumentar o tam
 
 ### Fase C — campo sensível
 
-- definir schema de campos criptografados;
-- implementar envelope encryption AES-256-GCM;
-- testes positivos, negativos, adulteração de ciphertext, AAD incorreta, rotação e rollback;
+A primitive criptográfica e o schema de envelope estão implementados. Ainda falta promover o uso para campos clínicos reais:
+
+- definir matriz de campos criptografados por entidade;
+- HML KMS real + self-test MFA;
+- teste de rotação/rewrap e rollback;
 - proibir indexação/consulta em plaintext;
-- documentar limitações de busca.
+- documentar limitações de busca;
+- habilitar dados clínicos somente após os gates regulatórios e de segurança.
 
 ### Fase D — produção
 
@@ -187,4 +193,4 @@ AURORA-SEC-001 usa os estados:
 
 SPECIFIED → IMPLEMENTED → TESTED → CI_VERIFIED → HML_VERIFIED → PRODUCTION_VERIFIED → AUDITED_INDEPENDENTLY → CERTIFIED
 
-A existência deste documento coloca o baseline apenas em SPECIFIED. O workflow de validação pode tornar o **documento de política** CI_VERIFIED, mas não eleva automaticamente seus controles técnicos. TLS mínimo negociado, AES-256-GCM/envelope encryption, KMS/CMEK, secret scanning, bloqueio high/critical, pentest, LGPD operacional e produção exigem evidência separada.\n\nExceção legada conhecida: o provisionamento de Google Workspace ainda consome `GOOGLE_SERVICE_ACCOUNT_JSON` via GitHub Actions secret para domain-wide delegation. A exceção é transitória e deve migrar para mecanismo keyless/WIF + assinatura compatível antes de readiness comercial de segurança.
+O baseline criptográfico de aplicação pode atingir IMPLEMENTED/TESTED/CI_VERIFIED quando o código e os checks correspondentes estiverem verdes no SHA final. Isso não eleva automaticamente KMS para HML_VERIFIED, nem CMEK, pentest, LGPD operacional ou produção. Cada controle mantém evidência separada.\n\nExceção legada conhecida: o provisionamento de Google Workspace ainda consome `GOOGLE_SERVICE_ACCOUNT_JSON` via GitHub Actions secret para domain-wide delegation. A exceção é transitória e deve migrar para mecanismo keyless/WIF + assinatura compatível antes de readiness comercial de segurança.

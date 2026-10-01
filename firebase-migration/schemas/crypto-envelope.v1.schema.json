@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auroranexus.com.br/schemas/crypto-envelope.v1.schema.json",
+  "title": "AURORA NEXUS Crypto Envelope v1",
+  "type": "object",
+  "required": [
+    "envelopeVersion",
+    "algorithm",
+    "keyResource",
+    "keyVersion",
+    "wrappedDek",
+    "nonce",
+    "authTag",
+    "ciphertext",
+    "aadSha256"
+  ],
+  "properties": {
+    "envelopeVersion": { "const": 1 },
+    "algorithm": { "const": "AES-256-GCM" },
+    "keyResource": {
+      "type": "string",
+      "pattern": "^projects/[a-z0-9][a-z0-9-]{4,62}/locations/[a-z0-9-]+/keyRings/[a-z][a-z0-9_-]{0,62}/cryptoKeys/[a-z][a-z0-9_-]{0,62}$"
+    },
+    "keyVersion": {
+      "type": ["string", "null"],
+      "maxLength": 300
+    },
+    "wrappedDek": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 21848,
+      "contentEncoding": "base64"
+    },
+    "nonce": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{16}$"
+    },
+    "authTag": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/]{22}==$"
+    },
+    "ciphertext": {
+      "type": "string",
+      "minLength": 4,
+      "maxLength": 1398124,
+      "contentEncoding": "base64"
+    },
+    "aadSha256": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    }
+  },
+  "additionalProperties": false
+}

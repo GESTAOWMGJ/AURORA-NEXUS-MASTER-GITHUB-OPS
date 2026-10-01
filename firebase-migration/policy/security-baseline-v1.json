@@ -1,8 +1,8 @@
 {
   "id": "AURORA-SEC-001",
   "name": "Aurora Nexus Security Baseline",
-  "version": "1.0.0",
-  "status": "DRAFT_POLICY_VALIDATED_IN_CI",
+  "version": "1.1.0",
+  "status": "IMPLEMENTED_PENDING_HML_KMS_EVIDENCE",
   "dataClassification": [
     "PUBLIC",
     "INTERNAL",
@@ -60,7 +60,18 @@
       "schemaVersion",
       "logicalFieldOrDocumentId"
     ],
-    "deterministicEncryptionDefault": false
+    "deterministicEncryptionDefault": false,
+    "implementationState": "IMPLEMENTED",
+    "module": "functions/src/auroraCryptoEnvelope.ts",
+    "runtimeSelfTest": "functions/src/auroraCryptoRuntime.ts",
+    "envelopeSchema": "schemas/crypto-envelope.v1.schema.json",
+    "envelopeVersion": 1,
+    "kmsAuthentication": "WORKLOAD_IDENTITY_METADATA_ADC",
+    "kmsAadBinding": true,
+    "failClosed": true,
+    "plaintextOrDekLoggingAllowed": false,
+    "maxPlaintextBytes": 1048576,
+    "activationForClinicalData": "BLOCKED_UNTIL_HML_VERIFIED_AND_FORMALLY_APPROVED"
   },
   "keyManagement": {
     "kms": "GOOGLE_CLOUD_KMS",
@@ -84,7 +95,12 @@
         ],
         "sunsetGate": "migrate to keyless/WIF plus signJwt-compatible domain-wide delegation flow before commercial security readiness"
       }
-    ]
+    ],
+    "cryptographicAgilityRequired": true,
+    "keyResourceIsSecret": false,
+    "rawKekExportAllowed": false,
+    "rawDekPersistenceAllowed": false,
+    "kmsAuditLogsRequiredForCommercialSensitiveUse": true
   },
   "authentication": {
     "sharedAccountsAllowed": false,
@@ -176,6 +192,27 @@
     "CHANGE_RELEASE_MANAGEMENT",
     "SLA_SLO_SUPPORT",
     "SECURITY_QUESTIONNAIRE_PACK",
-    "TRUST_CENTER_OR_SECURITY_DOSSIER"
-  ]
+    "TRUST_CENTER_OR_SECURITY_DOSSIER",
+    "CRYPTOGRAPHIC_ARCHITECTURE",
+    "KEY_MANAGEMENT_PRACTICE_STATEMENT",
+    "CRYPTOGRAPHIC_BILL_OF_MATERIALS",
+    "PQC_MIGRATION_ROADMAP",
+    "CRYPTO_HML_EVIDENCE"
+  ],
+  "postQuantumReadiness": {
+    "state": "CRYPTO_AGILITY_AND_INVENTORY",
+    "standardizedAlgorithms": [
+      "ML-KEM",
+      "ML-DSA",
+      "SLH-DSA"
+    ],
+    "useCases": {
+      "keyEstablishment": "MIGRATE_WHEN_PLATFORM_AND_PROTOCOL_PATH_IS_HOMOLOGATED",
+      "signatures": "AVAILABLE_FOR_LONG_LIVED_ARTIFACTS_WHEN_REQUIRED",
+      "storedDataEncryption": "AES-256-GCM_REMAINS_PRIMARY"
+    },
+    "harvestNowDecryptLaterReviewRequired": true,
+    "cryptoBillOfMaterialsRequiredForCommercialRelease": true,
+    "prohibitedShortcut": "DO_NOT_REPLACE_AUTHENTICATED_SYMMETRIC_ENCRYPTION_WITH_PQC_SIGNATURE_OR_KEM_PRIMITIVES"
+  }
 }
