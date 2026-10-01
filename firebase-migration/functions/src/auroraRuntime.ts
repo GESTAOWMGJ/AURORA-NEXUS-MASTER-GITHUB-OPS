@@ -351,7 +351,7 @@ export const auroraNexusAction = onRequest(
         tx.create(idemRef, { commandHash, actionId: actionRef.id, createdAt: FieldValue.serverTimestamp() });
         return { actionId: actionRef.id, duplicate: false };
       });
-      let organicObservation: Record<string, unknown> | null = null;
+      let organicObservation: unknown = null;
       if (command.type === "RESOLVE") {
         try {
           organicObservation = await autoObserveResolvedDocumentAction(member.orgId, result.actionId, member);
