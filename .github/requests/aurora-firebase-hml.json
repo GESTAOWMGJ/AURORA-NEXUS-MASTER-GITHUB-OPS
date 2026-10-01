@@ -3,9 +3,10 @@
   "confirmation": "DEPLOY_HOMOLOGATION",
   "projectId": "wmgj-hml-jfn-20260927",
   "authorizedScope": "PR70_FIREBASE_NATIVE_DOCUMENTS",
-  "expectedSourceSha": "f647f182f3e2c5ccce49d750f41c40eb374588a2",
+  "expectedSourceSha": "ee378f985f69113866d7b72a49e0628bb5ed73ca",
   "sourceMutation": false,
   "productionMutation": false,
   "clinicalSensitiveEnabled": false,
-  "requestedAt": "2026-10-01"
+  "requestedAt": "2026-10-01",
+  "requestReason": "PR70_FIREBASE_NATIVE_WORKFLOW_CORRECTED"
 }
