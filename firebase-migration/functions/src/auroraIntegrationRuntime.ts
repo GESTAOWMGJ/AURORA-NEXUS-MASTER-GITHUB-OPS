@@ -40,6 +40,14 @@ function jsonRequest(req: {get(name:string):string|undefined}): boolean {
   return String(req.get("content-type") || "").split(";", 1)[0]?.trim().toLowerCase() === "application/json";
 }
 
+function timestampIso(value: unknown): string | null {
+  if (!value || typeof value !== "object" || !("toDate" in value)) return null;
+  const toDate=(value as {toDate?:unknown}).toDate;
+  if (typeof toDate !== "function") return null;
+  const date=(toDate as () => Date).call(value);
+  return date instanceof Date && Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
 function canManage(member: AuroraMember): boolean {
   return member.allFacilities
     && member.mfaVerified
@@ -102,8 +110,8 @@ export const auroraNexusIntegrationKeys = onRequest(
             name:data.name,
             scopes:Array.isArray(data.scopes)?data.scopes:[],
             active:data.active===true,
-            expiresAt:data.expiresAt?.toDate?.().toISOString?.() || null,
-            createdAt:data.createdAt?.toDate?.().toISOString?.() || null
+            expiresAt:timestampIso(data.expiresAt),
+            createdAt:timestampIso(data.createdAt)
           };
         })
       });
