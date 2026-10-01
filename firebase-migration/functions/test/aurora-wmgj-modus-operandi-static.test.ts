@@ -35,3 +35,20 @@ test("AURORA-MO-001 preserves WMGJ automation inventory and product separation",
   assert.match(doc, /tenant-piloto/);
   assert.match(doc, /não é dependência estrutural/);
 });
+
+
+test("AURORA-MO-001 preserves the weekly technical audit gate", () => {
+  const doc = readRepoFile("docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md");
+  const skill = readRepoFile("skills/aurora-nexus-continuous-dev/SKILL.md");
+  for (const text of [doc, skill]) {
+    assert.match(text, /auditoria técnica semanal/i);
+    assert.match(text, /7 dias/);
+    assert.match(text, /segurança\/integridade/);
+    assert.match(text, /falha de algoritmo/);
+    assert.match(text, /custo\/eficiência/);
+    assert.match(text, /no máximo 3 prioridades/i);
+    assert.match(text, /main/);
+    assert.match(text, /SHA final/i);
+    assert.match(text, /sem merge ou deploy automático/i);
+  }
+});
