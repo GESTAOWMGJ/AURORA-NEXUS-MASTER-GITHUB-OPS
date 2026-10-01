@@ -217,6 +217,47 @@ test("bridge só aceita resposta 2xx com confirmação inequívoca", () => {
   }), false);
 });
 
+test("snapshot documental nativo persiste fatos suficientes sem narrativa da origem", () => {
+  const context = appsScriptContext() as any;
+  const snapshot = context.wmgjFirestoreNativeSnapshot_({
+    categoria: "financeiro",
+    confianca: 0.82,
+    competencia: "2026-09",
+    valor_total: 1234.56,
+    atendimentos: 8,
+    metodo_extracao: "google_docs_text",
+    origem_classificacao: "aurora_native_rules_v2"
+  }, {
+    sourceSystem: "TASY",
+    originConnector: "DRIVE_FOLDER"
+  });
+  assert.equal(snapshot.originSystem, "TASY");
+  assert.equal(snapshot.sourceIndependent, true);
+  assert.equal(snapshot.nativeReady, true);
+  assert.equal(snapshot.externalFetchRequired, false);
+  assert.equal(snapshot.externalAiUsed, false);
+  assert.equal(snapshot.amountCents, 123456);
+  assert.equal(snapshot.documentFragility, "NONE");
+  assert.match(snapshot.canonicalSnapshotHash, /^[a-f0-9]{64}$/);
+  assert.equal("texto" in snapshot, false);
+  assert.equal("narrative" in snapshot, false);
+});
+
+test("snapshot documental marca extração degradada como dependente da origem", () => {
+  const context = appsScriptContext() as any;
+  const snapshot = context.wmgjFirestoreNativeSnapshot_({
+    categoria: "relatorio",
+    confianca: 0.78,
+    metodo_extracao: "metadata_fallback",
+    origem_classificacao: "aurora_native_rules_v2"
+  }, { sourceSystem: "MV" });
+  assert.equal(snapshot.originSystem, "MV");
+  assert.equal(snapshot.sourceIndependent, false);
+  assert.equal(snapshot.externalFetchRequired, true);
+  assert.equal(snapshot.nativeReady, false);
+  assert.equal(snapshot.documentFragility, "DEGRADED_EXTRACTION");
+});
+
 test("actor do Apps Script é pseudonimizado antes do evento", () => {
   const context = appsScriptContext() as any;
   context.Session = {
