@@ -184,3 +184,12 @@ O coletor exige HTTPS, usa verificação de certificado padrão e não segue red
 O receptor desta versão deve permanecer limitado por configuração a homologação sintética, em instância única com disco persistente. Não é implantação produtiva nem certificação de conformidade.
 
 Ativação real exige identidade, destino, volume persistente/backup, região, retenção aprovada, ACL da pasta, restauração e revisão operacional no ambiente do cliente. Gmail/Drive continuam fontes complementares; este agente não afirma sincronizá-los.
+
+
+## Instalação com conectores
+
+Para o fluxo plug-and-play completo, use `one_click_deploy.py --one-click`. O processo chama o instalador real e solicita os dados dos conectores em modo interativo/oculto; segredos não são aceitos na linha de comando.
+
+A conexão documental usa a arquitetura existente: Google Drive autorizado → extração/classificação → evento `DOCUMENT_UPSERT` → ingestão autenticada Firebase → `sourceDocuments`. Quando o conector é ativado como obrigatório, sucesso local sem confirmação Firebase deixa de ser considerado fechamento.
+
+Para integração com outro ERP/software, o instalador pode registrar a chave recebida do sistema externo e gerar uma chave Aurora independente, limitada por escopo/validade. A ativação server-side da chave Aurora exige registro do hash por administrador autenticado com MFA.
