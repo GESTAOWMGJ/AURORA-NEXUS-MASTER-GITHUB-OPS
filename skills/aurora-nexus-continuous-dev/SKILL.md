@@ -30,7 +30,8 @@ Para toda solicitação de produto, engenharia, gestão, auditoria, interface, i
 1. Revalidar a baseline da `main` e a versão funcional instalada quando o trabalho envolver desktop.
 2. Classificar a solicitação como correção, capacidade, integração, hardening, experiência, inteligência ou release.
 3. Criar o menor patch coerente no mesmo sistema-mãe.
-4. Preservar M01–M10, M03.1/JFN-AUD-FAT-001, AURORA-ORG-001 e isolamento por organização.
+4. Preservar M01–M10, M03.1/JFN-AUD-FAT-001, AURORA-ORG-001, AURORA-SEC-001 e isolamento por organização.
+5. Aplicar AURORA-SEC-001 quando houver segurança, criptografia, dados, dependências, deploy ou liberação comercial.
 5. Adicionar ou atualizar testes.
 6. Atualizar o Release Cockpit quando o patch muda um gate.
 7. Separar claramente: especificado, implementado, testado, CI, implantado, publicado e validado com dados reais.
