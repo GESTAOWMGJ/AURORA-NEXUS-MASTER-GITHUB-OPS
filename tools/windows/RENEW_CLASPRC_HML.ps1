@@ -115,7 +115,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Falha ao atualizar GitHub Secret CLASPRC_JSON." }
 
   Write-Host "CLASPRC_JSON_ROTATED_AND_EXECUTION_API_VERIFIED"
-  Write-Host "Segredo atualizado no GitHub sem imprimir token, client_id ou client_secret."
+  Write-Host "Segredo atualizado no GitHub sem imprimir material OAuth sensivel."
 } catch {
   if ($Backup -and (Test-Path $Backup)) {
     Copy-Item $Backup (Join-Path $HOME ".clasprc.json") -Force
