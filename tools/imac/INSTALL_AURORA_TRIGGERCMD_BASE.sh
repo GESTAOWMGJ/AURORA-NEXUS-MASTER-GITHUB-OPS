@@ -215,6 +215,8 @@ if [ -f "$DATA/commands.json.backup.newagt" ] && [ ! -s "$DATA/commands.json.bac
 fi
 
 /bin/launchctl unload "$PLIST" >/dev/null 2>&1 || true
+/usr/bin/pkill -f "$AGENT_SRC/agent.js --console" >/dev/null 2>&1 || true
+sleep 1
 /bin/launchctl load "$PLIST"
 sleep 4
 
