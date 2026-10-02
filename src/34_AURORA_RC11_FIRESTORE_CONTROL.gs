@@ -26,6 +26,20 @@ function auroraRc11ConfigurarIngestao(url, keyId, secret) {
   return { ok: true, keyId: keyId, dryRun: true, secretConfigured: true, sourceMutation: false };
 }
 
+function auroraRc11InspecionarConfiguracao() {
+  var cfg = wmgjFirestoreConfig_();
+  return {
+    ok: true,
+    endpointConfigured: /^https:\/\/[^\s]+\/ingestWmgjEvent$/.test(cfg.url || ''),
+    keyIdConfigured: !!cfg.keyId,
+    secretConfigured: cfg.secret.length >= 32,
+    orgConfigured: cfg.orgId === 'wmgj',
+    dryRun: cfg.dryRun === true,
+    hmacConfigured: !!cfg.keyId && cfg.secret.length >= 32 && cfg.orgId === 'wmgj',
+    sourceMutation: false
+  };
+}
+
 function auroraRc11ConfigurarEndpointExistente(url) {
   url = String(url || '').trim();
   if (!/^https:\/\/[^\s]+\/ingestWmgjEvent$/.test(url)) throw new Error('RC11_INGEST_URL_INVALIDA');
