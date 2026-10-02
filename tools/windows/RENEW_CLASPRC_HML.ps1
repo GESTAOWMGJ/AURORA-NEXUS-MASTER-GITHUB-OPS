@@ -36,9 +36,29 @@ function Find-DesktopClientSecret {
 }
 
 Require-Command "gcloud"
-Require-Command "gh"
 Require-Command "node"
 Require-Command "npm"
+
+$Gh = $null
+$ghCommand = Get-Command gh -ErrorAction SilentlyContinue
+if ($ghCommand) {
+  $Gh = $ghCommand.Source
+} else {
+  $portableGh = Join-Path $env:LOCALAPPDATA "Programs\GitHubCLI\gh.exe"
+  if (Test-Path $portableGh) {
+    $Gh = $portableGh
+  }
+}
+if (-not $Gh) {
+  throw "GitHub CLI ausente. Instale ou use a versao portatil em %LOCALAPPDATA%\Programs\GitHubCLI\gh.exe."
+}
+
+& $Gh auth status --hostname github.com *> $null
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "Autorizando GitHub CLI no navegador..."
+  & $Gh auth login --hostname github.com --git-protocol https --web --skip-ssh-key
+  if ($LASTEXITCODE -ne 0) { throw "GitHub CLI nao autenticado." }
+}
 
 Write-Host "AURORA RC1.1 - renovacao CLASPRC_JSON"
 Write-Host "Projeto GCP: $ProjectId"
@@ -111,7 +131,7 @@ try {
     throw "Credencial clasp nova incompleta."
   }
 
-  Get-Content -Raw $clasprc | & gh secret set CLASPRC_JSON --repo $Repo
+  Get-Content -Raw $clasprc | & $Gh secret set CLASPRC_JSON --repo $Repo
   if ($LASTEXITCODE -ne 0) { throw "Falha ao atualizar GitHub Secret CLASPRC_JSON." }
 
   Write-Host "CLASPRC_JSON_ROTATED_AND_EXECUTION_API_VERIFIED"
