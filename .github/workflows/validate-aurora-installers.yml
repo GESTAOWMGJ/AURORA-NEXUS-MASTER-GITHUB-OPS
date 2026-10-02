@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'desktop/**'
+      - 'tools/imac/**'
       - 'aurora-coletor/aurora_onboarding.py'
       - 'aurora-coletor/aurora_organic.py'
       - 'aurora-coletor/tests/test_organic.py'
@@ -19,6 +20,29 @@ concurrency:
   group: aurora-installers-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  imac-bootstrap:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: iMac bootstrap offline safety and rollback tests
+        run: |
+          /bin/bash -n tools/imac/INSTALL_AURORA_TRIGGERCMD_BASE.sh
+          python3 -m unittest discover -s tools/imac/tests -v
+      - name: Record validation limits
+        run: |
+          echo 'Offline fixtures only. No real LaunchAgent, remote device, HML, credential or app installation. macOS runner is not High Sierra certification.' >> "$GITHUB_STEP_SUMMARY"
   build-hml:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
