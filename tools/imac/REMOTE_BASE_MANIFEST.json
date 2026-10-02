@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "AURORA-IMAC-REMOTE-BASE-001",
-  "status": "CANDIDATE",
+  "status": "ACTIVE_REMOTE_BASE_HARDENING_PENDING",
   "role": "PRIMARY_REMOTE_OPERATIONAL_NODE",
   "target": {
     "hostname": "iMac-de-Joao.local",
@@ -47,5 +47,19 @@
     "requiresHighSierraNativeTest": true,
     "requiresRemoteRoundTripEvidence": true,
     "requiresRollbackEvidence": true
+  },
+  "runtimeEvidence": {
+    "observedAt": "2026-10-02",
+    "commandInventoryPublished": true,
+    "requiredCommandsPresent": [
+      "JFN Status Mac",
+      "AURORA NEXUS Status",
+      "AURORA NEXUS Sincronizar",
+      "JFN Reiniciar Agente"
+    ],
+    "triggerDispatchVerified": true,
+    "restartSurvivalVerified": true,
+    "commandOutputRoundTripVerified": false,
+    "note": "TRIGGERcmd connector verified publication and trigger dispatch. It does not expose command stdout/result payload through the generic run tool."
   }
 }
