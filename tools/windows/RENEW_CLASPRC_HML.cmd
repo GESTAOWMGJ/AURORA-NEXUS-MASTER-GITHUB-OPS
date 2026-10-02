@@ -11,9 +11,19 @@ set "CLASP_HOME=%LOCALAPPDATA%\Temp\aurora-clasp-npm"
 echo [AURORA] Renovacao CLASPRC_JSON via CMD - sem administrador
 
 set "GH="
-for /r "%LOCALAPPDATA%\Temp\aurora-gh-portable\extract" %%F in (gh.exe) do (
-  set "GH=%%~fF"
+if exist "%USERPROFILE%\aurora-gh\gh.exe" (
+  set "GH=%USERPROFILE%\aurora-gh\gh.exe"
   goto :ghfound
+)
+if exist "%LOCALAPPDATA%\Temp\aurora-gh-portable\extract\bin\gh.exe" (
+  set "GH=%LOCALAPPDATA%\Temp\aurora-gh-portable\extract\bin\gh.exe"
+  goto :ghfound
+)
+for /r "%LOCALAPPDATA%\Temp\aurora-gh-portable\extract" %%F in (gh.exe) do (
+  if exist "%%~fF" (
+    set "GH=%%~fF"
+    goto :ghfound
+  )
 )
 :ghfound
 if not defined GH (
