@@ -88,6 +88,7 @@ if errorlevel 1 exit /b 34
 if errorlevel 1 (
   echo GitHub CLI precisa de autorizacao. Abrindo login...
   "%GH%" auth login --hostname github.com --git-protocol https --web --skip-ssh-key
+  "%GH%" auth status --hostname github.com >nul 2>&1
   if errorlevel 1 (
     echo ERRO_GH_AUTH
     exit /b 35
