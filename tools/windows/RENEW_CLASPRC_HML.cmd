@@ -22,20 +22,36 @@ if not defined GH (
 )
 echo GH_OK
 
-set "NODEDIR="
+set "NODE="
 for /r "%LOCALAPPDATA%\Temp\aurora-node-portable" %%F in (node.exe) do (
-  set "NODEDIR=%%~dpF"
+  set "NODE=%%~fF"
   goto :nodefound
 )
 :nodefound
-if not defined NODEDIR (
+if not defined NODE (
   echo ERRO_NODE_NAO_ENCONTRADO
   exit /b 32
 )
-set "PATH=%NODEDIR%;%CLASP_HOME%;%APPDATA%\npm;%PATH%"
-node --version
+
+set "NPM="
+for /r "%LOCALAPPDATA%\Temp\aurora-node-portable" %%F in (npm.cmd) do (
+  set "NPM=%%~fF"
+  goto :npmfound
+)
+:npmfound
+if not defined NPM (
+  echo ERRO_NPM_NAO_ENCONTRADO
+  exit /b 34
+)
+
+set "NODEDIR=%~dp0"
+for %%F in ("!NODE!") do set "NODEDIR=%%~dpF"
+for %%F in ("!NPM!") do set "NPMDIR=%%~dpF"
+set "PATH=!NODEDIR!;!NPMDIR!;%CLASP_HOME%;%APPDATA%\npm;%PATH%"
+
+"!NODE!" --version
 if errorlevel 1 exit /b 33
-npm --version
+call "!NPM!" --version
 if errorlevel 1 exit /b 34
 
 "%GH%" auth status --hostname github.com >nul 2>&1
@@ -85,7 +101,7 @@ if errorlevel 1 exit /b 38
 
 if exist "%CLASP_HOME%" rmdir /s /q "%CLASP_HOME%"
 mkdir "%CLASP_HOME%"
-call npm install --prefix "%CLASP_HOME%" @google/clasp@3.4.1
+call "!NPM!" install --prefix "%CLASP_HOME%" @google/clasp@3.4.1
 if errorlevel 1 (
   echo ERRO_INSTALACAO_CLASP
   exit /b 39
