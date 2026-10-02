@@ -22,7 +22,8 @@ from .errors import (
 from .models import (
     AiRunResponse,
     AiRunStatus,
-    DashboardSnapshot,
+    DASHBOARD_SNAPSHOT_ADAPTER,
+    DashboardSnapshotRead,
     Membership,
     ReviewDecision,
     ReviewRequest,
@@ -55,7 +56,7 @@ def model_payload(model_type, data: Mapping[str, object]) -> dict[str, object]:
 class Repository(Protocol):
     async def ready(self) -> bool: ...
     async def get_membership(self, org_id: str, uid: str) -> Membership | None: ...
-    async def get_dashboard_snapshot(self, org_id: str, competence: str) -> DashboardSnapshot | None: ...
+    async def get_dashboard_snapshot(self, org_id: str, competence: str) -> DashboardSnapshotRead | None: ...
     async def reserve_ai_run(
         self,
         org_id: str,
@@ -117,17 +118,17 @@ class FirestoreRepository:
 
         return await run_in_threadpool(read)
 
-    async def get_dashboard_snapshot(self, org_id: str, competence: str) -> DashboardSnapshot | None:
+    async def get_dashboard_snapshot(self, org_id: str, competence: str) -> DashboardSnapshotRead | None:
         doc_id = deterministic_entity_id("dashboardSnapshot", competence)
 
-        def read() -> DashboardSnapshot | None:
+        def read() -> DashboardSnapshotRead | None:
             snapshot = self.client.document(
                 f"organizations/{org_id}/dashboardSnapshots/{doc_id}"
             ).get()
             if not snapshot.exists:
                 return None
             data = snapshot.to_dict() or {}
-            return DashboardSnapshot.model_validate(data)
+            return DASHBOARD_SNAPSHOT_ADAPTER.validate_python(data)
 
         return await run_in_threadpool(read)
 

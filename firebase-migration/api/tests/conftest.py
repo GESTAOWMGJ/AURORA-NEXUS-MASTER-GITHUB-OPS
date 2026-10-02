@@ -15,7 +15,7 @@ from wmgj_api.models import (
     AuditMetrics,
     CompletenessState,
     DashboardAlert,
-    DashboardSnapshot,
+    DashboardSnapshotV2,
     FinancialMetrics,
     Membership,
     OperationalSeverity,
@@ -39,7 +39,7 @@ class FakeRepository:
                 uid="admin", role=Role.ORG_ADMIN, active=True, all_facilities=True
             )
         }
-        self.snapshot = DashboardSnapshot(
+        self.snapshot = DashboardSnapshotV2(
             schema_version=2,
             org_id="wmgj",
             competence="2026-08",

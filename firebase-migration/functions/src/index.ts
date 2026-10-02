@@ -202,12 +202,15 @@ export const ingestWmgjEvent = onRequest(
     }
 
     const event = validation.event;
-    if (event.orgId !== authHeaders.orgId || event.idempotencyKey !== authHeaders.idempotencyKey) {
-      res.status(403).json({ ok: false, code: "SIGNED_HEADER_BODY_MISMATCH" });
-      return;
-    }
+    // O escopo da credencial é verificado antes do mismatch deliberado usado
+    // pelo preflight RC1.1. Assim, o teste sem escrita prova autenticação,
+    // política e autorização para cada tipo de entidade antes da transação.
     if (!keyAllowsEntityType(verification.principal.entityTypes, event.entityType)) {
       res.status(403).json({ ok: false, code: "KEY_SCOPE_VIOLATION" });
+      return;
+    }
+    if (event.orgId !== authHeaders.orgId || event.idempotencyKey !== authHeaders.idempotencyKey) {
+      res.status(403).json({ ok: false, code: "SIGNED_HEADER_BODY_MISMATCH" });
       return;
     }
 

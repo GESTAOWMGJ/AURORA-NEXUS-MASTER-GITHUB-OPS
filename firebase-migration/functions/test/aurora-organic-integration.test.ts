@@ -14,7 +14,7 @@ function fixture(){
  for(let i=1;i<=3;i++){
  records[`organizations/wmgj/actionItems/action-${i}`]={orgId:'wmgj',status:'RESOLVED',revision:2,updatedBy:'reviewer-1',targetType:'invoice',targetId:`invoice-${i}`,evidenceRefs:[`doc-${i}`]};
  records[`organizations/wmgj/invoices/invoice-${i}`]={orgId:'wmgj',evidenceRefs:[`doc-${i}`]};
- records[`organizations/wmgj/sourceDocuments/doc-${i}`]={orgId:'wmgj',reviewState:'APPROVED',workflowState:'VALIDATED',sensitivity:'INTERNAL',sourceVersion:1};
+ records[`organizations/wmgj/sourceDocuments/doc-${i}`]={orgId:'wmgj',reviewState:'APPROVED',workflowState:'VALIDATED',sensitivity:'INTERNAL',documentType:'FINANCIAL',sanitized:true,sourceVersion:1};
  }
  const read=async(path:string)=>records[path]??null;
  return {records,read,org:{active:true,organicEnabled:true,organicSectors:['AUDIT']}};

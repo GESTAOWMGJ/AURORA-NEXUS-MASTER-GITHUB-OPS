@@ -298,33 +298,6 @@
       "title": "DashboardDocumentIntelligence",
       "type": "object"
     },
-    "DashboardEngine": {
-      "additionalProperties": false,
-      "properties": {
-        "mode": {
-          "const": "SHADOW",
-          "title": "Mode",
-          "type": "string"
-        },
-        "name": {
-          "const": "aurora-projection",
-          "title": "Name",
-          "type": "string"
-        },
-        "version": {
-          "const": 2,
-          "title": "Version",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "name",
-        "version",
-        "mode"
-      ],
-      "title": "DashboardEngine",
-      "type": "object"
-    },
     "DashboardEngineV3": {
       "additionalProperties": false,
       "properties": {
@@ -632,342 +605,6 @@
       "title": "DashboardSampleSizes",
       "type": "object"
     },
-    "DashboardSnapshotV2": {
-      "additionalProperties": false,
-      "properties": {
-        "alerts": {
-          "items": {
-            "$ref": "#/$defs/DashboardAlert"
-          },
-          "maxItems": 50,
-          "title": "Alerts",
-          "type": "array"
-        },
-        "asOf": {
-          "format": "date-time",
-          "title": "Asof",
-          "type": "string"
-        },
-        "audit": {
-          "$ref": "#/$defs/AuditMetrics"
-        },
-        "competence": {
-          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
-          "title": "Competence",
-          "type": "string"
-        },
-        "completeness": {
-          "$ref": "#/$defs/CompletenessState"
-        },
-        "coverage": {
-          "$ref": "#/$defs/DashboardCoverage"
-        },
-        "dataQuality": {
-          "$ref": "#/$defs/DashboardDataQuality"
-        },
-        "engine": {
-          "$ref": "#/$defs/DashboardEngine"
-        },
-        "facilityId": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Facilityid"
-        },
-        "financial": {
-          "$ref": "#/$defs/FinancialMetrics"
-        },
-        "financialCents": {
-          "$ref": "#/$defs/DashboardFinancialCents"
-        },
-        "generatedAt": {
-          "format": "date-time",
-          "title": "Generatedat",
-          "type": "string"
-        },
-        "modules": {
-          "items": {
-            "$ref": "#/$defs/DashboardModule"
-          },
-          "maxItems": 10,
-          "minItems": 10,
-          "title": "Modules",
-          "type": "array"
-        },
-        "operations": {
-          "$ref": "#/$defs/DashboardOperations"
-        },
-        "orgId": {
-          "title": "Orgid",
-          "type": "string"
-        },
-        "pipeline": {
-          "$ref": "#/$defs/PipelineMetrics"
-        },
-        "policyVersion": {
-          "title": "Policyversion",
-          "type": "string"
-        },
-        "sampleSizes": {
-          "$ref": "#/$defs/DashboardSampleSizes"
-        },
-        "sanitized": {
-          "const": true,
-          "title": "Sanitized",
-          "type": "boolean"
-        },
-        "schemaVersion": {
-          "const": 2,
-          "title": "Schemaversion",
-          "type": "integer"
-        },
-        "sensitivity": {
-          "const": "INTERNAL",
-          "title": "Sensitivity",
-          "type": "string"
-        },
-        "severity": {
-          "$ref": "#/$defs/OperationalSeverity"
-        },
-        "snapshotId": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Snapshotid",
-          "type": "string"
-        },
-        "sourceHash": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Sourcehash",
-          "type": "string"
-        },
-        "sourceLimit": {
-          "const": 1000,
-          "title": "Sourcelimit",
-          "type": "integer"
-        },
-        "sources": {
-          "items": {
-            "$ref": "#/$defs/SourceState"
-          },
-          "title": "Sources",
-          "type": "array"
-        },
-        "state": {
-          "const": "SHADOW",
-          "title": "State",
-          "type": "string"
-        }
-      },
-      "required": [
-        "schemaVersion",
-        "orgId",
-        "competence",
-        "generatedAt",
-        "asOf",
-        "policyVersion",
-        "completeness",
-        "severity",
-        "pipeline",
-        "financial",
-        "audit",
-        "sources",
-        "alerts",
-        "sanitized",
-        "sensitivity",
-        "state",
-        "financialCents",
-        "operations",
-        "coverage",
-        "sampleSizes",
-        "dataQuality",
-        "modules",
-        "engine",
-        "sourceLimit",
-        "sourceHash",
-        "snapshotId"
-      ],
-      "title": "DashboardSnapshotV2",
-      "type": "object"
-    },
-    "DashboardSnapshotV3": {
-      "additionalProperties": false,
-      "properties": {
-        "alerts": {
-          "items": {
-            "$ref": "#/$defs/DashboardAlert"
-          },
-          "maxItems": 50,
-          "title": "Alerts",
-          "type": "array"
-        },
-        "asOf": {
-          "format": "date-time",
-          "title": "Asof",
-          "type": "string"
-        },
-        "audit": {
-          "$ref": "#/$defs/AuditMetrics"
-        },
-        "competence": {
-          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
-          "title": "Competence",
-          "type": "string"
-        },
-        "completeness": {
-          "$ref": "#/$defs/CompletenessState"
-        },
-        "coverage": {
-          "$ref": "#/$defs/DashboardCoverage"
-        },
-        "dataQuality": {
-          "$ref": "#/$defs/DashboardDataQuality"
-        },
-        "documentIntelligence": {
-          "$ref": "#/$defs/DashboardDocumentIntelligence"
-        },
-        "engine": {
-          "$ref": "#/$defs/DashboardEngineV3"
-        },
-        "facilityId": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Facilityid"
-        },
-        "financial": {
-          "$ref": "#/$defs/FinancialMetrics"
-        },
-        "financialCents": {
-          "$ref": "#/$defs/DashboardFinancialCents"
-        },
-        "generatedAt": {
-          "format": "date-time",
-          "title": "Generatedat",
-          "type": "string"
-        },
-        "modules": {
-          "items": {
-            "$ref": "#/$defs/DashboardModule"
-          },
-          "maxItems": 10,
-          "minItems": 10,
-          "title": "Modules",
-          "type": "array"
-        },
-        "nativeDataPlane": {
-          "$ref": "#/$defs/DashboardNativeDataPlane"
-        },
-        "operations": {
-          "$ref": "#/$defs/DashboardOperations"
-        },
-        "orgId": {
-          "title": "Orgid",
-          "type": "string"
-        },
-        "organicLoop": {
-          "$ref": "#/$defs/DashboardOrganicLoop"
-        },
-        "pipeline": {
-          "$ref": "#/$defs/PipelineMetrics"
-        },
-        "policyVersion": {
-          "title": "Policyversion",
-          "type": "string"
-        },
-        "sampleSizes": {
-          "$ref": "#/$defs/DashboardSampleSizes"
-        },
-        "sanitized": {
-          "const": true,
-          "title": "Sanitized",
-          "type": "boolean"
-        },
-        "schemaVersion": {
-          "const": 3,
-          "title": "Schemaversion",
-          "type": "integer"
-        },
-        "sensitivity": {
-          "const": "INTERNAL",
-          "title": "Sensitivity",
-          "type": "string"
-        },
-        "severity": {
-          "$ref": "#/$defs/OperationalSeverity"
-        },
-        "snapshotId": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
-          "title": "Snapshotid",
-          "type": "string"
-        },
-        "sourceHash": {
-          "pattern": "^[0-9a-f]{64}$",
-          "title": "Sourcehash",
-          "type": "string"
-        },
-        "sourceLimit": {
-          "const": 1000,
-          "title": "Sourcelimit",
-          "type": "integer"
-        },
-        "sources": {
-          "items": {
-            "$ref": "#/$defs/SourceState"
-          },
-          "title": "Sources",
-          "type": "array"
-        },
-        "state": {
-          "const": "SHADOW",
-          "title": "State",
-          "type": "string"
-        }
-      },
-      "required": [
-        "schemaVersion",
-        "orgId",
-        "competence",
-        "generatedAt",
-        "asOf",
-        "policyVersion",
-        "completeness",
-        "severity",
-        "pipeline",
-        "financial",
-        "audit",
-        "sources",
-        "alerts",
-        "sanitized",
-        "sensitivity",
-        "state",
-        "financialCents",
-        "operations",
-        "coverage",
-        "sampleSizes",
-        "dataQuality",
-        "modules",
-        "engine",
-        "sourceLimit",
-        "sourceHash",
-        "snapshotId",
-        "documentIntelligence",
-        "nativeDataPlane",
-        "organicLoop"
-      ],
-      "title": "DashboardSnapshotV3",
-      "type": "object"
-    },
     "FinancialMetrics": {
       "additionalProperties": false,
       "properties": {
@@ -1252,21 +889,178 @@
       "type": "object"
     }
   },
-  "$id": "https://wmgj.example/schemas/dashboard-snapshot.schema.json",
+  "$id": "https://wmgj.example/schemas/dashboard-snapshot.v3.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "discriminator": {
-    "mapping": {
-      "2": "#/$defs/DashboardSnapshotV2",
-      "3": "#/$defs/DashboardSnapshotV3"
+  "additionalProperties": false,
+  "properties": {
+    "alerts": {
+      "items": {
+        "$ref": "#/$defs/DashboardAlert"
+      },
+      "maxItems": 50,
+      "title": "Alerts",
+      "type": "array"
     },
-    "propertyName": "schemaVersion"
-  },
-  "oneOf": [
-    {
-      "$ref": "#/$defs/DashboardSnapshotV2"
+    "asOf": {
+      "format": "date-time",
+      "title": "Asof",
+      "type": "string"
     },
-    {
-      "$ref": "#/$defs/DashboardSnapshotV3"
+    "audit": {
+      "$ref": "#/$defs/AuditMetrics"
+    },
+    "competence": {
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+      "title": "Competence",
+      "type": "string"
+    },
+    "completeness": {
+      "$ref": "#/$defs/CompletenessState"
+    },
+    "coverage": {
+      "$ref": "#/$defs/DashboardCoverage"
+    },
+    "dataQuality": {
+      "$ref": "#/$defs/DashboardDataQuality"
+    },
+    "documentIntelligence": {
+      "$ref": "#/$defs/DashboardDocumentIntelligence"
+    },
+    "engine": {
+      "$ref": "#/$defs/DashboardEngineV3"
+    },
+    "facilityId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Facilityid"
+    },
+    "financial": {
+      "$ref": "#/$defs/FinancialMetrics"
+    },
+    "financialCents": {
+      "$ref": "#/$defs/DashboardFinancialCents"
+    },
+    "generatedAt": {
+      "format": "date-time",
+      "title": "Generatedat",
+      "type": "string"
+    },
+    "modules": {
+      "items": {
+        "$ref": "#/$defs/DashboardModule"
+      },
+      "maxItems": 10,
+      "minItems": 10,
+      "title": "Modules",
+      "type": "array"
+    },
+    "nativeDataPlane": {
+      "$ref": "#/$defs/DashboardNativeDataPlane"
+    },
+    "operations": {
+      "$ref": "#/$defs/DashboardOperations"
+    },
+    "orgId": {
+      "title": "Orgid",
+      "type": "string"
+    },
+    "organicLoop": {
+      "$ref": "#/$defs/DashboardOrganicLoop"
+    },
+    "pipeline": {
+      "$ref": "#/$defs/PipelineMetrics"
+    },
+    "policyVersion": {
+      "title": "Policyversion",
+      "type": "string"
+    },
+    "sampleSizes": {
+      "$ref": "#/$defs/DashboardSampleSizes"
+    },
+    "sanitized": {
+      "const": true,
+      "title": "Sanitized",
+      "type": "boolean"
+    },
+    "schemaVersion": {
+      "const": 3,
+      "title": "Schemaversion",
+      "type": "integer"
+    },
+    "sensitivity": {
+      "const": "INTERNAL",
+      "title": "Sensitivity",
+      "type": "string"
+    },
+    "severity": {
+      "$ref": "#/$defs/OperationalSeverity"
+    },
+    "snapshotId": {
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "title": "Snapshotid",
+      "type": "string"
+    },
+    "sourceHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sourcehash",
+      "type": "string"
+    },
+    "sourceLimit": {
+      "const": 1000,
+      "title": "Sourcelimit",
+      "type": "integer"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/SourceState"
+      },
+      "title": "Sources",
+      "type": "array"
+    },
+    "state": {
+      "const": "SHADOW",
+      "title": "State",
+      "type": "string"
     }
-  ]
+  },
+  "required": [
+    "schemaVersion",
+    "orgId",
+    "competence",
+    "generatedAt",
+    "asOf",
+    "policyVersion",
+    "completeness",
+    "severity",
+    "pipeline",
+    "financial",
+    "audit",
+    "sources",
+    "alerts",
+    "sanitized",
+    "sensitivity",
+    "state",
+    "financialCents",
+    "operations",
+    "coverage",
+    "sampleSizes",
+    "dataQuality",
+    "modules",
+    "engine",
+    "sourceLimit",
+    "sourceHash",
+    "snapshotId",
+    "documentIntelligence",
+    "nativeDataPlane",
+    "organicLoop"
+  ],
+  "title": "DashboardSnapshotV3",
+  "type": "object"
 }

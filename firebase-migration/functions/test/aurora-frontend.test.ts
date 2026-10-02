@@ -11,6 +11,8 @@ test("shell privado carrega dados somente pela API autenticada e não contém de
   assert.match(html, /fetch\('\/api\/bootstrap'/);
   assert.match(html, /X-Aurora-CSRF/);
   assert.match(html, /fetch\('\/api\/actions'/);
+  assert.match(html, /fetch\('\/api\/evidence'/);
+  assert.match(html, /fetch\('\/api\/audit-events'/);
   assert.match(html, /csrf\.action/);
   assert.match(html, /csrf\.refresh/);
   assert.match(html, /csrf\.logout/);
@@ -18,6 +20,8 @@ test("shell privado carrega dados somente pela API autenticada e não contém de
   assert.match(html, /Não insira nome/);
   assert.match(html, /Resolver revisão com evidência/);
   assert.match(html, /evidenceRefs/);
+  assert.match(html, /id="review-evidence" multiple required/);
+  assert.match(html, /id="resolve-evidence" multiple required/);
   assert.match(html, /EVIDENCE_CONFIRMED/);
   assert.match(html, /const sessionMfa=true/);
   assert.match(html, /Aurora Native Intelligence/);
@@ -28,6 +32,7 @@ test("shell privado carrega dados somente pela API autenticada e não contém de
   assert.match(html, /managementInput/);
   assert.match(html, /Registro de ações/);
   assert.match(html, /Atividade recente/);
+  assert.match(html, /Trilha de auditoria recente/);
   assert.match(html, /manifest\.webmanifest/);
   assert.match(html, /service-worker\.js/);
   assert.doesNotMatch(html, /demo pública/i);
@@ -46,7 +51,8 @@ test("shell escapa identidade antes de renderizar", () => {
 test("login conclui desafio TOTP antes de trocar o ID token por sessão", () => {
   const source = readFileSync(new URL("../src/auroraAuthGate.ts", import.meta.url), "utf8");
   assert.match(source, /auth\/multi-factor-auth-required/);
-  assert.match(source, /TotpMultiFactorGenerator\.assertionForSignIn/);
+  assert.match(source, /firebaseAuthApi\.TotpMultiFactorGenerator\.assertionForSignIn/);
+  assert.match(source, /firebaseAuthApi\.getMultiFactorResolver\(auth, error\)/);
   assert.match(source, /await mfaResolver\.resolveSignIn\(assertion\)/);
   assert.match(source, /await createPrivateSession\(credential\)/);
   assert.match(source, /autocomplete="one-time-code"/);

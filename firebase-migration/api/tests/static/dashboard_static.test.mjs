@@ -32,6 +32,10 @@ test("cliente permanece somente leitura e sem persistência local", async () => 
   assert.match(javascript, /"X-Firebase-AppCheck": authContext\.appCheckToken/);
   assert.match(javascript, /Authorization: `Bearer \$\{authContext\.idToken\}`/);
   assert.match(javascript, /organizations\/\{orgId\}\/dashboards\/operational/);
+  assert.match(javascript, /\[2, 3\]\.includes\(snapshot\.schemaVersion\)/);
+  assert.match(javascript, /documentIntelligence/);
+  assert.match(javascript, /nativeDataPlane/);
+  assert.match(javascript, /humanValidationRequired/);
   assert.doesNotMatch(javascript, /localStorage|sessionStorage|indexedDB/);
   assert.doesNotMatch(javascript, /method:\s*"(?:POST|PUT|PATCH|DELETE)"/);
   for (const field of [

@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 from pydantic.alias_generators import to_camel
 
 
@@ -179,7 +179,7 @@ class DashboardEngine(StrictModel):
     mode: Literal["SHADOW"]
 
 
-class DashboardSnapshot(StrictModel):
+class DashboardSnapshotV2(StrictModel):
     schema_version: Literal[2]
     org_id: str
     facility_id: str | None = None
@@ -211,6 +211,68 @@ class DashboardSnapshot(StrictModel):
     )
 
 
+class DashboardDocumentIntelligence(StrictModel):
+    total_documents: int = Field(ge=0)
+    native_ready_documents: int = Field(ge=0)
+    source_independent_documents: int = Field(ge=0)
+    source_dependent_documents: int = Field(ge=0)
+    external_fetch_required_documents: int = Field(ge=0)
+    fragile_documents: int = Field(ge=0)
+    degraded_extraction_documents: int = Field(ge=0)
+    low_confidence_documents: int = Field(ge=0)
+    missing_canonical_fields_documents: int = Field(ge=0)
+    overdue_document_sla: int = Field(ge=0)
+    pending_document_flow: int = Field(ge=0)
+    external_ai_documents: int = Field(ge=0)
+    native_ready_percent: Annotated[float, Field(ge=0, le=100)] | None
+    source_independent_percent: Annotated[float, Field(ge=0, le=100)] | None
+    origins: dict[str, Annotated[int, Field(ge=0)]]
+
+
+class DashboardNativeDataPlane(StrictModel):
+    storage: Literal["FIRESTORE"]
+    inference_input: Literal["CANONICAL_FIREBASE_SNAPSHOT"]
+    source_access_during_inference: Literal[False]
+    external_ai_required: Literal[False]
+    external_ai_fallback_default: Literal[False]
+    source_independent_documents: int = Field(ge=0)
+    source_dependent_documents: int = Field(ge=0)
+
+
+class DashboardOrganicLoop(StrictModel):
+    observes: tuple[
+        Literal["DOCUMENT_FRAGILITY"],
+        Literal["DOCUMENT_SLA"],
+        Literal["FLOW_BOTTLENECK"],
+        Literal["VALIDATED_RESOLUTION"],
+    ]
+    human_validation_required: Literal[True]
+    autonomous_source_mutation: Literal[False]
+    next_state: Literal["EVIDENCE_TO_LIMITED_PROPOSAL"]
+
+
+class DashboardEngineV3(StrictModel):
+    name: Literal["aurora-projection"]
+    version: Literal[3]
+    mode: Literal["SHADOW"]
+
+
+class DashboardSnapshotV3(DashboardSnapshotV2):
+    schema_version: Literal[3]
+    engine: DashboardEngineV3
+    document_intelligence: DashboardDocumentIntelligence
+    native_data_plane: DashboardNativeDataPlane
+    organic_loop: DashboardOrganicLoop
+
+
+DashboardSnapshot = Annotated[
+    DashboardSnapshotV2 | DashboardSnapshotV3,
+    Field(discriminator="schema_version"),
+]
+DashboardSnapshotRead = DashboardSnapshot
+DASHBOARD_SNAPSHOT_ADAPTER = TypeAdapter(DashboardSnapshot)
+
+
 class Freshness(StrictModel):
     state: FreshnessState
     age_seconds: int = Field(ge=0)
@@ -218,7 +280,7 @@ class Freshness(StrictModel):
 
 
 class DashboardResponse(StrictModel):
-    snapshot: DashboardSnapshot
+    snapshot: DashboardSnapshotRead
     freshness: Freshness
 
 

@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { validEvidenceRef } from "./auroraEvidence.js";
+import { validatedOperationalText } from "./policy.js";
 
 export const AURORA_MODULES = [
   ["M01", "Ingestão e Proveniência Documental"],
@@ -12,6 +14,9 @@ export const AURORA_MODULES = [
   ["M09", "Segurança, LGPD e Segregação"],
   ["M10", "Trilha de Auditoria e Integridade"]
 ] as const;
+
+export const DASHBOARD_SNAPSHOT_SCHEMA_VERSION = 3 as const;
+export const DASHBOARD_PROJECTION_ENGINE_VERSION = 3 as const;
 
 export type ProjectionSource = {
   invoices: Array<Record<string, unknown>>;
@@ -31,6 +36,9 @@ export type ProjectionContext = {
 type CentsMetric = { value: number | null; valid: number; invalid: number };
 const VALIDATED_STATES = new Set(["VALIDATED", "CLOSED"]);
 const TEST_RECORD_MARKERS = new Set(["TEST", "TESTE"]);
+const SETTLED_FINANCIAL_STATUSES = new Set(["LIQUIDATED", "RECONCILED", "MATCHED", "LIQUIDADO", "CONCILIADO"]);
+const CANONICAL_TRANSACTION_KINDS = new Set(["RECEIPT", "DISBURSEMENT"]);
+const FIRESTORE_ENTITY_ID = /^[a-f0-9]{48}$/;
 
 function normalized(value: unknown): string {
   return String(value ?? "")
@@ -64,14 +72,17 @@ function financialStatus(record: Record<string, unknown>): string {
   return "";
 }
 
-function withoutTestRecords(source: ProjectionSource): ProjectionSource {
+function scopedOperationalSource(source: ProjectionSource, competence: string): ProjectionSource {
   return Object.fromEntries(
-    Object.entries(source).map(([name, records]) => [name, records.filter((record) => !isTestRecord(record))])
+    Object.entries(source).map(([name, records]) => [
+      name,
+      records.filter((record) => !isTestRecord(record) && inCompetence(record, competence))
+    ])
   ) as ProjectionSource;
 }
 
-function inCompetence(record: Record<string, unknown>, competence?: string): boolean {
-  return !competence || record.competence === competence;
+function inCompetence(record: Record<string, unknown>, competence: string): boolean {
+  return record.competence === competence;
 }
 
 function firstCanonicalCents(record: Record<string, unknown>, fields: string[]): number | undefined {
@@ -87,13 +98,13 @@ function firstCanonicalCents(record: Record<string, unknown>, fields: string[]):
 function sumCents(
   records: Array<Record<string, unknown>>,
   fields: string[],
-  options: { competence?: string; allowNegative?: boolean; status?: Set<string> } = {}
+  options: { allowNegative?: boolean; status?: Set<string> } = {}
 ): CentsMetric {
   let total = 0;
   let valid = 0;
   let invalid = 0;
   for (const record of records) {
-    if (isTestRecord(record) || !isValidated(record) || !inCompetence(record, options.competence)) continue;
+    if (isTestRecord(record) || !isValidated(record)) continue;
     if (options.status && !options.status.has(financialStatus(record))) continue;
     const cents = firstCanonicalCents(record, fields);
     if (cents === undefined || (!options.allowNegative && cents < 0)) {
@@ -108,6 +119,71 @@ function sumCents(
     total = next;
     valid++;
   }
+  return { value: valid > 0 && invalid === 0 ? total : null, valid, invalid };
+}
+
+function transactionKind(record: Record<string, unknown>): string {
+  return normalized(record.transactionKind ?? record.transaction_kind);
+}
+
+function linkedInvoiceEntityId(record: Record<string, unknown>): string {
+  const value = record.invoiceEntityId ?? record.invoice_entity_id;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function deterministicInvoiceId(record: Record<string, unknown>): string | null {
+  if (!isValidated(record)) return null;
+  const entityKey = typeof record.entityKey === "string" ? record.entityKey.trim() : "";
+  const cents = firstCanonicalCents(record, ["totalCents", "amountCents", "grossAmountCents", "valorCentavos"]);
+  if (!entityKey || cents === undefined || cents < 0) return null;
+  return createHash("sha256").update(`invoice:${entityKey}`).digest("hex").slice(0, 48);
+}
+
+/**
+ * Recebimento exige mais que um status textual: a transação precisa ser um
+ * crédito canônico e apontar para uma NF válida da mesma competência. Linhas
+ * liquidadas antigas sem discriminador/vínculo bloqueiam a qualidade em vez de
+ * serem silenciosamente tratadas como receita.
+ */
+function sumReconciledReceipts(
+  records: Array<Record<string, unknown>>,
+  invoices: Array<Record<string, unknown>>
+): CentsMetric {
+  const eligibleInvoiceIds = new Set(
+    invoices.map(deterministicInvoiceId).filter((value): value is string => value !== null)
+  );
+  let total = 0;
+  let valid = 0;
+  let invalid = 0;
+
+  for (const record of records) {
+    if (isTestRecord(record) || !isValidated(record)) continue;
+    if (!SETTLED_FINANCIAL_STATUSES.has(financialStatus(record))) continue;
+
+    const kind = transactionKind(record);
+    if (kind === "DISBURSEMENT") continue;
+    if (!CANONICAL_TRANSACTION_KINDS.has(kind) || kind !== "RECEIPT") {
+      invalid++;
+      continue;
+    }
+
+    const invoiceEntityId = linkedInvoiceEntityId(record);
+    const cents = firstCanonicalCents(record, ["liquidatedAmountCents", "amountCents", "valorCentavos"]);
+    if (!FIRESTORE_ENTITY_ID.test(invoiceEntityId) || !eligibleInvoiceIds.has(invoiceEntityId)
+      || cents === undefined || cents < 0) {
+      invalid++;
+      continue;
+    }
+
+    const next = total + cents;
+    if (!Number.isSafeInteger(next)) {
+      invalid++;
+      continue;
+    }
+    total = next;
+    valid++;
+  }
+
   return { value: valid > 0 && invalid === 0 ? total : null, valid, invalid };
 }
 
@@ -230,14 +306,12 @@ function sourceStates(source: ProjectionSource): Array<Record<string, unknown>> 
 }
 
 export function buildProjection(source: ProjectionSource, now = new Date(), context: ProjectionContext = {}): Record<string, unknown> {
-  const operationalSource = withoutTestRecords(source);
-  const invoiced = sumCents(operationalSource.invoices, ["totalCents", "amountCents", "grossAmountCents", "valorCentavos"], { competence: context.competence });
-  const received = sumCents(operationalSource.bankTransactions, ["liquidatedAmountCents", "amountCents", "valorCentavos"], {
-    competence: context.competence,
-    status: new Set(["LIQUIDATED", "RECONCILED", "MATCHED", "LIQUIDADO", "CONCILIADO"])
-  });
-  const gloss = sumCents(operationalSource.glosses, ["glossAmountCents", "amountCents", "valorCentavos"], { competence: context.competence });
-  const actionScope = operationalSource.actionItems.filter((item) => inCompetence(item, context.competence));
+  const competence = context.competence ?? now.toISOString().slice(0, 7);
+  const operationalSource = scopedOperationalSource(source, competence);
+  const invoiced = sumCents(operationalSource.invoices, ["totalCents", "amountCents", "grossAmountCents", "valorCentavos"]);
+  const received = sumReconciledReceipts(operationalSource.bankTransactions, operationalSource.invoices);
+  const gloss = sumCents(operationalSource.glosses, ["glossAmountCents", "amountCents", "valorCentavos"]);
+  const actionScope = operationalSource.actionItems;
   const openActions = countWhere(actionScope, (item) => !["RESOLVED", "CANCELLED"].includes(normalized(item.status || "OPEN")));
   const overdueActions = countWhere(actionScope, (item) => {
     if (["RESOLVED", "CANCELLED"].includes(normalized(item.status || "OPEN"))) return false;
@@ -264,15 +338,15 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
   const documentFragile = Number(documentIntelligence.fragileDocuments || 0);
   const severity = invalidFinancialRecords > 0 ? "BLOCKED" : (criticalFindings > 0 || overdueActions > 0 || documentOverdue > 0 || documentFragile > 0 ? "ATTENTION" : totalRecords > 0 ? "NOMINAL" : "UNKNOWN");
   const alerts: Array<Record<string, unknown>> = [];
-  if (invalidFinancialRecords > 0) alerts.push({ alertId: "financial-data-quality", severity: "CRITICAL", title: "Dados financeiros bloqueados", detail: `${invalidFinancialRecords} registro(s) sem centavos canônicos válidos`, evidenceRefs: [], createdAt: now.toISOString() });
+  if (invalidFinancialRecords > 0) alerts.push({ alertId: "financial-data-quality", severity: "CRITICAL", title: "Dados financeiros bloqueados", detail: `${invalidFinancialRecords} registro(s) sem valor canônico ou vínculo de conciliação válido`, evidenceRefs: [], createdAt: now.toISOString() });
   if (overdueActions > 0) alerts.push({ alertId: "overdue-actions", severity: "HIGH", title: "SLA vencido", detail: `${overdueActions} ação(ões) aguardam tratamento`, evidenceRefs: [], createdAt: now.toISOString() });
   if (documentOverdue > 0) alerts.push({ alertId: "document-sla-overdue", severity: "HIGH", title: "SLA documental vencido", detail: `${documentOverdue} documento(s) permanecem no fluxo após o SLA configurado`, evidenceRefs: [], createdAt: now.toISOString() });
   if (documentFragile > 0) alerts.push({ alertId: "document-fragility", severity: "MEDIUM", title: "Fragilidade documental", detail: `${documentFragile} documento(s) possuem extração degradada, baixa confiança ou campos canônicos ausentes`, evidenceRefs: [], createdAt: now.toISOString() });
 
   return {
-    schemaVersion: 2,
+    schemaVersion: DASHBOARD_SNAPSHOT_SCHEMA_VERSION,
     orgId: context.orgId ?? "wmgj",
-    competence: context.competence ?? now.toISOString().slice(0, 7),
+    competence,
     generatedAt: now.toISOString(),
     asOf: now.toISOString(),
     policyVersion: "aurora-nexus-2.4.0-firebase-native-v1",
@@ -335,9 +409,17 @@ export type ActionCommand =
   | { type: "RESOLVE"; actionId: string; expectedRevision: number; resolutionCode: string; evidenceRefs: string[] };
 
 function safeOperationalText(value: unknown, maxLength: number): string | null {
-  if (typeof value !== "string") return null;
-  const normalized = value.replace(/\s+/g, " ").trim();
-  return normalized.length > 0 && normalized.length <= maxLength ? normalized : null;
+  return validatedOperationalText(value, {
+    maxLength,
+    maxWords: maxLength <= 120 ? 16 : 48,
+    maxSentences: maxLength <= 120 ? 1 : 3
+  });
+}
+
+function hasSuppliedText(value: unknown): boolean {
+  return value !== undefined
+    && value !== null
+    && !(typeof value === "string" && value.trim().length === 0);
 }
 
 function safeEvidenceRefs(value: unknown): string[] | null {
@@ -358,8 +440,11 @@ export function parseActionCommand(value: unknown): ActionCommand | null {
     const competence = typeof body.competence === "string" ? body.competence : "";
     const title = safeOperationalText(body.title, 120);
     const details = safeOperationalText(body.details, 1000);
+    const titleSupplied = hasSuppliedText(body.title);
+    const detailsSupplied = hasSuppliedText(body.details);
     if (!TARGET_TYPES.has(targetType) || !/^[A-Za-z0-9._:-]{1,160}$/.test(targetId) || !REASON_CODES.has(reasonCode)) return null;
     if (!["LOW", "MEDIUM", "HIGH", "CRITICAL"].includes(riskLevel) || !Number.isFinite(Date.parse(dueAt)) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(competence)) return null;
+    if ((titleSupplied && !title) || (detailsSupplied && !details)) return null;
     if (targetType === "managementInput" && !title) return null;
     return {
       type: "CREATE_REVIEW",

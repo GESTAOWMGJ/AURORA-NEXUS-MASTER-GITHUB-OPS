@@ -231,7 +231,20 @@
       throw new Error("CONTRACT_INVALID_ROOT");
     }
     const snapshot = payload.snapshot;
-    if (snapshot.schemaVersion !== 2) throw new Error("CONTRACT_SCHEMA_VERSION_UNSUPPORTED");
+    if (![2, 3].includes(snapshot.schemaVersion)) {
+      throw new Error("CONTRACT_SCHEMA_VERSION_UNSUPPORTED");
+    }
+    if (snapshot.schemaVersion === 3) {
+      if (!isObject(snapshot.documentIntelligence) || !isObject(snapshot.nativeDataPlane) || !isObject(snapshot.organicLoop)) {
+        throw new Error("CONTRACT_NATIVE_BLOCKS_MISSING");
+      }
+      if (snapshot.nativeDataPlane.storage !== "FIRESTORE" || snapshot.nativeDataPlane.sourceAccessDuringInference !== false) {
+        throw new Error("CONTRACT_NATIVE_DATA_PLANE_INVALID");
+      }
+      if (snapshot.organicLoop.humanValidationRequired !== true || snapshot.organicLoop.autonomousSourceMutation !== false) {
+        throw new Error("CONTRACT_ORGANIC_GOVERNANCE_INVALID");
+      }
+    }
     if (snapshot.orgId !== expectedScope.org) throw new Error("CONTRACT_ORG_SCOPE_MISMATCH");
     if (snapshot.competence !== expectedScope.competence) {
       throw new Error("CONTRACT_COMPETENCE_SCOPE_MISMATCH");

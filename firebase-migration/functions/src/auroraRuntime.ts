@@ -13,9 +13,15 @@ import {
   verifyAuroraAccess,
   type AuroraMember
 } from "./auroraAccess.js";
-import { validateResolutionEvidence } from "./auroraEvidence.js";
-import { buildProjection, parseActionCommand, type ProjectionSource } from "./auroraEngine.js";
+import { validEvidenceRef, validateEvidenceSelection, validateResolutionEvidence } from "./auroraEvidence.js";
+import {
+  DASHBOARD_PROJECTION_ENGINE_VERSION,
+  buildProjection,
+  parseActionCommand,
+  type ProjectionSource
+} from "./auroraEngine.js";
 import { generateNativeInsight, parseNativeInsightIntent } from "./auroraNativeIntelligence.js";
+import { managerInputTransitionPatch, publicAuditEvent, publicEligibleEvidence } from "./auroraOperationalViews.js";
 import { buildReleaseStatus } from "./auroraReleaseStatus.js";
 import { autoObserveResolvedDocumentAction } from "./auroraOrganicAutoObserve.js";
 import { auroraDb } from "./firebase.js";
@@ -23,6 +29,10 @@ import { auroraDb } from "./firebase.js";
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
 const SOURCE_LIMIT = 1000;
+const EVIDENCE_SCAN_LIMIT = 200;
+const EVIDENCE_RESPONSE_LIMIT = 50;
+const AUDIT_SCAN_LIMIT = 200;
+const AUDIT_EVENT_LIMIT = 50;
 const sourceCollections = ["invoices", "bankTransactions", "glosses", "actionItems", "sourceDocuments", "reconciliations", "auditFindings"] as const;
 
 type ResponseLike = { set(name: string, value: string): unknown };
@@ -65,7 +75,16 @@ function publicAction(id: string, data: Record<string, unknown>): Record<string,
   const updatedAt = timestampIso(data.updatedAt);
   const title = safeString(data.title, 120);
   const details = safeString(data.details, 1000);
-  return { id, targetType, targetId, reasonCode, riskLevel, status, revision, dueAt, createdAt, updatedAt, title, details };
+  const evidenceRefs = Array.isArray(data.evidenceRefs)
+    ? data.evidenceRefs.filter(validEvidenceRef).slice(0, 20)
+    : [];
+  return { id, targetType, targetId, reasonCode, riskLevel, status, revision, dueAt, createdAt, updatedAt, title, details, evidenceRefs };
+}
+
+function boundedEvidenceRefs(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 20) return null;
+  const refs = value.map((item) => typeof item === "string" ? item.trim() : "");
+  return refs.every(validEvidenceRef) && new Set(refs).size === refs.length ? refs : null;
 }
 
 function sameOriginMutation(req: { get(name: string): string | undefined }): boolean {
@@ -85,9 +104,12 @@ async function requireAccess(req: { get(name: string): string | undefined }, res
   return null;
 }
 
-async function readProjectionSource(orgId: string): Promise<ProjectionSource> {
+async function readProjectionSource(orgId: string, competence: string): Promise<ProjectionSource> {
   const entries = await Promise.all(sourceCollections.map(async (name) => {
-    const snapshot = await auroraDb.collection(`organizations/${orgId}/${name}`).limit(SOURCE_LIMIT + 1).get();
+    const snapshot = await auroraDb.collection(`organizations/${orgId}/${name}`)
+      .where("competence", "==", competence)
+      .limit(SOURCE_LIMIT + 1)
+      .get();
     if (snapshot.size > SOURCE_LIMIT) throw new Error(`SOURCE_LIMIT_EXCEEDED:${name}`);
     return [name, snapshot.docs.map((doc) => doc.data())] as const;
   }));
@@ -124,7 +146,7 @@ async function projectionSettings(orgId: string): Promise<{ competence: string; 
 export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: ProjectionActor = { uid: "scheduler", role: "system", source: "SCHEDULER" }): Promise<Record<string, unknown>> {
   const settings = await projectionSettings(orgId);
   if (!settings.enabled) throw new Error("PROJECTION_DISABLED");
-  const source = await readProjectionSource(orgId);
+  const source = await readProjectionSource(orgId, settings.competence);
   const projection = buildProjection(source, new Date(), { orgId, competence: settings.competence });
   const dataQuality = projection.dataQuality as Record<string, unknown>;
   if (projection.state === "NO_SOURCE") throw new Error("PROJECTION_NO_SOURCE");
@@ -135,7 +157,7 @@ export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: Projectio
   const storedProjection = {
     ...projection,
     generatedAt: FieldValue.serverTimestamp(),
-    engine: { name: "aurora-projection", version: 2, mode: "SHADOW" },
+    engine: { name: "aurora-projection", version: DASHBOARD_PROJECTION_ENGINE_VERSION, mode: "SHADOW" },
     sourceLimit: SOURCE_LIMIT,
     sourceHash,
     snapshotId
@@ -148,6 +170,7 @@ export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: Projectio
     tx.create(auroraDb.doc(`${base}/auditEvents/${randomUUID()}`), {
       action: "DASHBOARD_PROJECTION_REFRESHED",
       type: "DASHBOARD_PROJECTION_REFRESHED",
+      orgId,
       actorUid: actor.uid,
       actorRole: actor.role,
       actorSource: actor.source,
@@ -215,13 +238,6 @@ export const auroraNexusBootstrap = onRequest(
       summary.total += 1;
       return summary;
     }, { total: 0, open: 0, inProgress: 0, resolved: 0, cancelled: 0, overdue: 0 });
-    const recentActivity = safeActions.slice(0, 12).map((item) => ({
-      actionId: item.id,
-      title: item.title ?? item.targetId,
-      status: item.status,
-      riskLevel: item.riskLevel,
-      at: item.updatedAt ?? item.createdAt ?? null
-    }));
     res.status(200).json({
       ok: true,
       environment: "HOMOLOGATION",
@@ -231,9 +247,62 @@ export const auroraNexusBootstrap = onRequest(
       projection: visibleProjection(rawProjection, member),
       release: buildReleaseStatus(org.data() ?? {}),
       actions: safeActions,
-      actionSummary,
-      recentActivity
+      actionSummary
     });
+  }
+);
+
+export const auroraNexusEvidence = onRequest(
+  { cors: false, secrets: [ALLOWED_EMAILS] },
+  async (req, res) => {
+    apiHeaders(res);
+    if (req.method !== "GET") { res.set("Allow", "GET"); res.status(405).json({ ok: false, code: "METHOD_NOT_ALLOWED" }); return; }
+    const member = await requireAccess(req, res); if (!member) return;
+    if (!can(member, "actions.write", ["platform_admin", "org_admin", "director", "auditor", "operator"])) {
+      res.status(403).json({ ok: false, code: "PERMISSION_DENIED" });
+      return;
+    }
+    try {
+      const snapshot = await auroraDb.collection(`organizations/${member.orgId}/sourceDocuments`)
+        .orderBy("updatedAt", "desc")
+        .limit(EVIDENCE_SCAN_LIMIT)
+        .get();
+      const evidence = snapshot.docs
+        .map((doc) => publicEligibleEvidence(doc.id, doc.data(), member.orgId))
+        .filter((item): item is Record<string, unknown> => item !== null)
+        .slice(0, EVIDENCE_RESPONSE_LIMIT);
+      res.status(200).json({ ok: true, evidence, limit: EVIDENCE_RESPONSE_LIMIT });
+    } catch (error) {
+      logger.error("Aurora evidence list failed", { code: error instanceof Error ? error.message : "EVIDENCE_LIST_FAILED" });
+      res.status(500).json({ ok: false, code: "EVIDENCE_LIST_FAILED" });
+    }
+  }
+);
+
+export const auroraNexusAuditEvents = onRequest(
+  { cors: false, secrets: [ALLOWED_EMAILS] },
+  async (req, res) => {
+    apiHeaders(res);
+    if (req.method !== "GET") { res.set("Allow", "GET"); res.status(405).json({ ok: false, code: "METHOD_NOT_ALLOWED" }); return; }
+    const member = await requireAccess(req, res); if (!member) return;
+    if (!can(member, "audit.read", ["platform_admin", "org_admin", "director", "auditor"])) {
+      res.status(403).json({ ok: false, code: "PERMISSION_DENIED" });
+      return;
+    }
+    try {
+      const snapshot = await auroraDb.collection(`organizations/${member.orgId}/auditEvents`)
+        .orderBy("occurredAt", "desc")
+        .limit(AUDIT_SCAN_LIMIT)
+        .get();
+      const events = snapshot.docs
+        .map((doc) => publicAuditEvent(doc.id, doc.data(), member.orgId))
+        .filter((item): item is Record<string, unknown> => item !== null)
+        .slice(0, AUDIT_EVENT_LIMIT);
+      res.status(200).json({ ok: true, events, limit: AUDIT_EVENT_LIMIT });
+    } catch (error) {
+      logger.error("Aurora audit list failed", { code: error instanceof Error ? error.message : "AUDIT_LIST_FAILED" });
+      res.status(500).json({ ok: false, code: "AUDIT_LIST_FAILED" });
+    }
   }
 );
 
@@ -322,9 +391,23 @@ export const auroraNexusAction = onRequest(
     const command = parseActionCommand(req.body);
     const idempotencyKey = String(req.get("idempotency-key") ?? "");
     if (!command) { res.status(400).json({ ok: false, code: "INVALID_COMMAND" }); return; }
+    if (command.type === "CREATE_REVIEW" && !validEvidenceRef(command.targetId)) {
+      res.status(400).json({ ok: false, code: "INVALID_TARGET_ID" });
+      return;
+    }
+    const createEvidenceRefs = command.type === "CREATE_REVIEW" && command.targetType === "managementInput"
+      ? boundedEvidenceRefs((req.body as Record<string, unknown>).evidenceRefs)
+      : null;
+    if (command.type === "CREATE_REVIEW" && command.targetType === "managementInput" && !createEvidenceRefs) {
+      res.status(400).json({ ok: false, code: "EVIDENCE_SELECTION_REQUIRED" });
+      return;
+    }
     if (command.type === "RESOLVE" && !can(member, "actions.resolve", ["platform_admin", "org_admin", "director", "auditor"])) { res.status(403).json({ ok: false, code: "RESOLUTION_PERMISSION_REQUIRED" }); return; }
     if (!/^[A-Za-z0-9._:-]{16,160}$/.test(idempotencyKey)) { res.status(400).json({ ok: false, code: "INVALID_IDEMPOTENCY_KEY" }); return; }
-    const commandHash = createHash("sha256").update(JSON.stringify(command)).digest("hex");
+    const commandHash = createHash("sha256").update(JSON.stringify({
+      ...command,
+      ...(createEvidenceRefs ? { evidenceRefs: createEvidenceRefs } : {})
+    })).digest("hex");
     const idemId = createHash("sha256").update(`${member.orgId}:${idempotencyKey}`).digest("hex");
     try {
       const result = await auroraDb.runTransaction(async (tx) => {
@@ -337,18 +420,32 @@ export const auroraNexusAction = onRequest(
         const actionRef = command.type === "CREATE_REVIEW"
           ? auroraDb.doc(`organizations/${member.orgId}/actionItems/${randomUUID()}`)
           : auroraDb.doc(`organizations/${member.orgId}/actionItems/${command.actionId}`);
+        let auditTargetType: string | null = null;
+        let auditTargetId: string | null = null;
+        let auditFromState: string | null = null;
+        let auditToState: string;
+        let auditRevision: number;
+        let auditEvidenceRefCount: number;
         if (command.type === "CREATE_REVIEW") {
           const dueAt = Timestamp.fromDate(new Date(command.dueAt));
+          const linkedEvidenceRefs = command.targetType === "managementInput" ? createEvidenceRefs ?? [] : [];
           if (command.targetType === "managementInput") {
+            const evidence = await validateEvidenceSelection(member.orgId, linkedEvidenceRefs, async (path) => {
+              const snapshot = await tx.get(auroraDb.doc(path));
+              return snapshot.exists ? snapshot.data() ?? {} : null;
+            });
+            if (!evidence.ok) throw new Error(evidence.code);
             const managerInputRef = auroraDb.doc(`organizations/${member.orgId}/managerInputs/${command.targetId}`);
             tx.create(managerInputRef, {
               orgId: member.orgId,
+              actionId: actionRef.id,
               title: command.title,
               details: command.details ?? null,
               competence: command.competence,
               dueAt,
               state: "OPEN",
-              evidenceRefs: [],
+              revision: 1,
+              evidenceRefs: evidence.evidenceRefs,
               createdBy: member.uid,
               createdAt: FieldValue.serverTimestamp(),
               updatedAt: FieldValue.serverTimestamp(),
@@ -368,20 +465,35 @@ export const auroraNexusAction = onRequest(
             dueAt,
             status: "OPEN",
             revision: 1,
+            evidenceRefs: linkedEvidenceRefs,
             createdBy: member.uid,
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp(),
             sanitized: true,
             sensitivity: "INTERNAL"
           });
+          auditTargetType = command.targetType;
+          auditTargetId = command.targetId;
+          auditToState = "OPEN";
+          auditRevision = 1;
+          auditEvidenceRefCount = linkedEvidenceRefs.length;
         } else {
           const current = await tx.get(actionRef);
           if (!current.exists) throw new Error("ACTION_NOT_FOUND");
           const currentData = current.data() ?? {};
+          if (currentData.orgId !== member.orgId) throw new Error("ACTION_SCOPE_VIOLATION");
           if (currentData.revision !== command.expectedRevision) throw new Error("REVISION_CONFLICT");
           const currentStatus = safeString(currentData.status, 32);
           if (!currentStatus || ["RESOLVED", "CANCELLED"].includes(currentStatus)) throw new Error("INVALID_TRANSITION");
           if (command.type === "ACKNOWLEDGE" && currentStatus !== "OPEN") throw new Error("INVALID_TRANSITION");
+          const targetType = safeString(currentData.targetType, 64);
+          const targetId = safeString(currentData.targetId, 160);
+          if (!targetType || !targetId || !validEvidenceRef(targetId)) throw new Error("TARGET_NOT_FOUND");
+          const managerInputRef = targetType === "managementInput"
+            ? auroraDb.doc(`organizations/${member.orgId}/managerInputs/${targetId}`)
+            : null;
+          const managerInputSnapshot = managerInputRef ? await tx.get(managerInputRef) : null;
+          const managerInputData = managerInputSnapshot?.exists ? managerInputSnapshot.data() ?? {} : null;
           if (command.type === "RESOLVE") {
             if (currentStatus !== "ACKNOWLEDGED") throw new Error("INVALID_TRANSITION");
             if (["HIGH", "CRITICAL"].includes(String(currentData.riskLevel)) && !member.mfaVerified) throw new Error("MFA_REQUIRED");
@@ -396,20 +508,54 @@ export const auroraNexusAction = onRequest(
             });
             if (!evidence.ok) throw new Error(evidence.code);
           }
+          const targetPatch = managerInputTransitionPatch({
+            orgId: member.orgId,
+            actionId: actionRef.id,
+            actorUid: member.uid,
+            expectedRevision: command.expectedRevision,
+            type: command.type,
+            ...(command.type === "RESOLVE" ? {
+              resolutionCode: command.resolutionCode,
+              resolutionEvidenceRefs: command.evidenceRefs
+            } : {}),
+            action: currentData,
+            managerInput: managerInputData
+          });
+          const nextStatus = command.type === "ACKNOWLEDGE" ? "ACKNOWLEDGED" : "RESOLVED";
           tx.update(actionRef, {
-            status: command.type === "ACKNOWLEDGE" ? "ACKNOWLEDGED" : "RESOLVED",
-            resolutionCode: command.type === "RESOLVE" ? command.resolutionCode : null,
-            evidenceRefs: command.type === "RESOLVE" ? command.evidenceRefs : [],
+            status: nextStatus,
+            ...(command.type === "RESOLVE" ? {
+              resolutionCode: command.resolutionCode,
+              evidenceRefs: command.evidenceRefs
+            } : {}),
             revision: command.expectedRevision + 1,
             updatedBy: member.uid,
             updatedAt: FieldValue.serverTimestamp()
           });
+          if (managerInputRef && targetPatch) {
+            tx.update(managerInputRef, { ...targetPatch, updatedAt: FieldValue.serverTimestamp() });
+          }
+          auditTargetType = targetType;
+          auditTargetId = targetId;
+          auditFromState = currentStatus;
+          auditToState = nextStatus;
+          auditRevision = command.expectedRevision + 1;
+          auditEvidenceRefCount = command.type === "RESOLVE"
+            ? command.evidenceRefs.length
+            : boundedEvidenceRefs(currentData.evidenceRefs)?.length ?? 0;
         }
         const eventRef = auroraDb.doc(`organizations/${member.orgId}/auditEvents/${randomUUID()}`);
         tx.create(eventRef, {
           action: `ACTION_${command.type}`,
           type: `ACTION_${command.type}`,
+          orgId: member.orgId,
           actionId: actionRef.id,
+          targetType: auditTargetType,
+          targetId: auditTargetId,
+          fromState: auditFromState,
+          toState: auditToState,
+          revision: auditRevision,
+          evidenceRefCount: auditEvidenceRefCount,
           actorUid: member.uid,
           actorRole: member.role,
           commandHash,
@@ -438,7 +584,7 @@ export const auroraNexusAction = onRequest(
       const status = code === "ACTION_NOT_FOUND" ? 404
         : code === "MFA_REQUIRED" ? 403
           : ["ACTION_SCOPE_VIOLATION", "TARGET_SCOPE_VIOLATION", "EVIDENCE_SCOPE_VIOLATION"].includes(code) ? 403
-            : ["IDEMPOTENCY_CONFLICT", "REVISION_CONFLICT", "INVALID_TRANSITION", "TARGET_NOT_FOUND", "EVIDENCE_NOT_FOUND", "EVIDENCE_NOT_LINKED"].includes(code) ? 409 : 500;
+            : ["IDEMPOTENCY_CONFLICT", "REVISION_CONFLICT", "TARGET_REVISION_CONFLICT", "TARGET_STATE_CONFLICT", "TARGET_ACTION_MISMATCH", "INVALID_TRANSITION", "TARGET_NOT_FOUND", "EVIDENCE_NOT_FOUND", "EVIDENCE_NOT_ELIGIBLE", "EVIDENCE_NOT_LINKED", "EVIDENCE_SET_MISMATCH"].includes(code) ? 409 : 500;
       if (status === 500) logger.error("Aurora action failed", { code });
       res.status(status).json({ ok: false, code: status === 500 ? "ACTION_FAILED" : code });
     }

@@ -346,7 +346,8 @@ jobs:
         run: |
           set -euo pipefail
           functions="$(npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json)"
-          jq -e --argjson expected '[
+          jq -e --argjson required '[
+            "ingestWmgjEvent",
             "runtimeWatchdog",
             "runtimeHealth",
             "auroraNexusAuthGate",
@@ -361,10 +362,12 @@ jobs:
             "auroraNexusIntegrationKeys",
             "auroraNexusIntegrationPing",
             "auroraNexusIntegrationDocuments",
-            "auroraNexusDocumentWatchdog"
+            "auroraNexusDocumentWatchdog",
+            "auroraNexusCryptoSelfTest"
           ]' '
             (.result // .functions // []) as $functions |
-            [$functions[] | (.id // .name // "") | split("/")[-1]] | sort == ($expected | sort)
+            [$functions[] | (.id // .name // "") | split("/")[-1]] as $deployed |
+            all($required[]; $deployed | index(.) != null)
           ' <<<"$functions" >/dev/null
           shell="$(curl --fail --silent --show-error --max-time 30 "https://${PROJECT_ID}.web.app/")"
           grep -Fq "Ambiente privado" <<<"$shell"

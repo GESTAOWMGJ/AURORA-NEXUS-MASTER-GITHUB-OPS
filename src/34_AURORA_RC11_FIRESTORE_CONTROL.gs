@@ -8,11 +8,17 @@
 var AURORA_RC11_SAMPLE_COMPETENCE = '2026-05';
 var AURORA_RC11_CONFIRMATION = 'ATIVAR_RC11_WMGJ_HML';
 
+function auroraRc11IngestUrlValida_(value) {
+  // Gen2 expõe o serviço pelo URI HTTPS retornado por serviceConfig.uri.
+  // Não aceite URL arbitrária: o bridge envia payload financeiro assinado.
+  return /^https:\/\/ingestwmgjevent-[a-z0-9-]+(?:\.[a-z0-9-]+)*\.run\.app\/?$/.test(String(value || '').trim());
+}
+
 function auroraRc11ConfigurarIngestao(url, keyId, secret) {
   url = String(url || '').trim();
   keyId = String(keyId || '').trim();
   secret = String(secret || '');
-  if (!/^https:\/\/[^\s]+\/ingestWmgjEvent$/.test(url)) throw new Error('RC11_INGEST_URL_INVALIDA');
+  if (!auroraRc11IngestUrlValida_(url)) throw new Error('RC11_INGEST_URL_INVALIDA');
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/.test(keyId)) throw new Error('RC11_KEY_ID_INVALIDO');
   if (secret.length < 32) throw new Error('RC11_HMAC_SECRET_INVALIDO');
   PropertiesService.getScriptProperties().setProperties({
@@ -30,8 +36,9 @@ function auroraRc11InspecionarConfiguracao() {
   var cfg = wmgjFirestoreConfig_();
   return {
     ok: true,
-    endpointConfigured: /^https:\/\/[^\s]+\/ingestWmgjEvent$/.test(cfg.url || ''),
+    endpointConfigured: auroraRc11IngestUrlValida_(cfg.url),
     keyIdConfigured: !!cfg.keyId,
+    keyId: cfg.keyId || '',
     secretConfigured: cfg.secret.length >= 32,
     orgConfigured: cfg.orgId === 'wmgj',
     dryRun: cfg.dryRun === true,
@@ -42,7 +49,7 @@ function auroraRc11InspecionarConfiguracao() {
 
 function auroraRc11ConfigurarEndpointExistente(url) {
   url = String(url || '').trim();
-  if (!/^https:\/\/[^\s]+\/ingestWmgjEvent$/.test(url)) throw new Error('RC11_INGEST_URL_INVALIDA');
+  if (!auroraRc11IngestUrlValida_(url)) throw new Error('RC11_INGEST_URL_INVALIDA');
   var cfg = wmgjFirestoreConfig_();
   if (!cfg.keyId || cfg.secret.length < 32 || cfg.orgId !== 'wmgj') throw new Error('RC11_HMAC_EXISTENTE_AUSENTE');
   PropertiesService.getScriptProperties().setProperties({
@@ -61,15 +68,12 @@ function auroraRc11ConfigurarEndpointExistente(url) {
   };
 }
 
-function auroraRc11ValidarHmacExistente() {
-  var cfg = wmgjFirestoreConfig_();
-  if (!cfg.dryRun) throw new Error('RC11_DRY_RUN_OBRIGATORIO');
-  if (!/^https:\/\/[^\s]+\/ingestWmgjEvent$/.test(cfg.url || '')) throw new Error('RC11_INGEST_URL_INVALIDA');
-  if (!cfg.keyId || cfg.secret.length < 32 || cfg.orgId !== 'wmgj') throw new Error('RC11_HMAC_EXISTENTE_AUSENTE');
-
-  var probeId = 'rc11-hmac-probe-' + Utilities.getUuid().replace(/-/g, '');
-  var probe = { orgId: 'wmgj', idempotencyKey: probeId, probe: true };
-  var body = JSON.stringify(probe);
+function auroraRc11ValidarEventoSemEscrita_(event, cfg) {
+  // O cabeçalho é deliberadamente diferente do corpo. O servidor somente
+  // alcança SIGNED_HEADER_BODY_MISMATCH depois de autenticar o HMAC e validar
+  // integralmente o evento, mas antes de abrir a transação Firestore.
+  var signedIdempotencyKey = event.idempotencyKey + ':policy-preflight:' + Utilities.getUuid().replace(/-/g, '');
+  var body = JSON.stringify(event);
   var timestamp = String(Math.floor(Date.now() / 1000));
   var nonce = Utilities.getUuid();
   var canonical = wmgjFirestoreCanonicalHmacV2_(body, {
@@ -77,7 +81,7 @@ function auroraRc11ValidarHmacExistente() {
     nonce: nonce,
     keyId: cfg.keyId,
     orgId: 'wmgj',
-    idempotencyKey: probeId
+    idempotencyKey: signedIdempotencyKey
   });
   var signature = wmgjFirestoreHmacHex_(canonical, cfg.secret);
   var response = UrlFetchApp.fetch(cfg.url, {
@@ -93,33 +97,46 @@ function auroraRc11ValidarHmacExistente() {
       'X-WMGJ-Key-Id': cfg.keyId,
       'X-WMGJ-Signature': signature,
       'X-WMGJ-Org-Id': 'wmgj',
-      'X-WMGJ-Idempotency-Key': probeId
+      'X-WMGJ-Idempotency-Key': signedIdempotencyKey
     }
   });
   var code = response.getResponseCode();
   var parsed = wmgjFirestoreParseJson_(response.getContentText());
-
+  if (code === 403 && parsed && parsed.code === 'SIGNED_HEADER_BODY_MISMATCH') return true;
   if (code === 400 && parsed && parsed.code === 'VALIDATION_ERROR') {
-    return {
-      ok: true,
-      authenticated: true,
-      noWrite: true,
-      httpCode: code,
-      expectedCode: 'VALIDATION_ERROR',
-      dryRun: true,
-      sourceMutation: false
-    };
+    throw new Error('RC11_EVENTO_REJEITADO_PELA_POLITICA:' + event.entityType);
   }
   if (code === 401) throw new Error('RC11_HMAC_INVALIDO');
   if (code === 503) throw new Error('RC11_KEYRING_INVALIDO');
   throw new Error('RC11_HMAC_PROBE_INESPERADO:HTTP_' + code + ':' + String(response.getContentText() || '').slice(0, 200));
 }
 
+function auroraRc11ValidarHmacExistente() {
+  var cfg = wmgjFirestoreConfig_();
+  if (!cfg.dryRun) throw new Error('RC11_DRY_RUN_OBRIGATORIO');
+  if (!auroraRc11IngestUrlValida_(cfg.url)) throw new Error('RC11_INGEST_URL_INVALIDA');
+  if (!cfg.keyId || cfg.secret.length < 32 || cfg.orgId !== 'wmgj') throw new Error('RC11_HMAC_EXISTENTE_AUSENTE');
+
+  var invoice = auroraRc11InvoiceEvent_();
+  var bank = auroraRc11BankEvent_(invoice.entityKey);
+  auroraRc11ValidarEventoSemEscrita_(invoice, cfg);
+  auroraRc11ValidarEventoSemEscrita_(bank, cfg);
+  return {
+    ok: true,
+    authenticated: true,
+    policyAccepted: true,
+    noWrite: true,
+    eventsValidated: 2,
+    dryRun: true,
+    sourceMutation: false
+  };
+}
+
 function auroraRc11AtivarEscritaAmostra(confirmacao) {
   if (String(confirmacao || '') !== AURORA_RC11_CONFIRMATION) throw new Error('RC11_CONFIRMACAO_INVALIDA');
   var props = PropertiesService.getScriptProperties();
   var cfg = wmgjFirestoreConfig_();
-  if (!cfg.url || !cfg.keyId || cfg.secret.length < 32 || cfg.orgId !== 'wmgj') throw new Error('RC11_CONFIG_INCOMPLETA');
+  if (!auroraRc11IngestUrlValida_(cfg.url) || !cfg.keyId || cfg.secret.length < 32 || cfg.orgId !== 'wmgj') throw new Error('RC11_CONFIG_INCOMPLETA');
   props.setProperty('WMGJ_FIRESTORE_DRY_RUN', 'false');
   return { ok: true, dryRun: false, sampleOnly: true, sourceMutation: false };
 }
@@ -178,8 +195,10 @@ function auroraRc11InvoiceEvent_() {
     eventType: 'ENTITY_UPSERT',
     orgId: 'wmgj',
     occurredAt: new Date().toISOString(),
-    sourceVersion: 1,
-    idempotencyKey: ['wmgj','SHEETS',row.ss.getId(),'06_NFS_E',row.rowNumber,rowHash].join(':'),
+    // Namespace e versão próprios evitam colisão semântica com o backfill
+    // genérico da mesma linha-fonte.
+    sourceVersion: 2,
+    idempotencyKey: ['wmgj','AURORA_RC11_V2','SHEETS',row.ss.getId(),'06_NFS_E',row.rowNumber,rowHash].join(':'),
     entityType: 'invoice',
     entityKey: '06_NFS_E:' + chave,
     actor: { type: 'SYSTEM', id: wmgjFirestoreActorId_(), source: 'AURORA_RC11_WMGJ' },
@@ -205,7 +224,11 @@ function auroraRc11InvoiceEvent_() {
   };
 }
 
-function auroraRc11BankEvent_() {
+function auroraRc11BankEvent_(invoiceEntityKey) {
+  var linkedInvoiceKey = String(invoiceEntityKey || '').trim();
+  if (!linkedInvoiceKey) throw new Error('RC11_INVOICE_ENTITY_KEY_AUSENTE');
+  var invoiceEntityId = wmgjFirestoreHashString_('invoice:' + linkedInvoiceKey).slice(0, 48);
+  if (!/^[a-f0-9]{48}$/.test(invoiceEntityId)) throw new Error('RC11_INVOICE_ENTITY_ID_INVALIDO');
   var row = auroraRc11BuscarLinha_('08_EXTRATOS_BRADESCO', function(record) {
     return String(record.competencia_assistencial_relacionada || '') === AURORA_RC11_SAMPLE_COMPETENCE &&
       auroraRc11Normalizar_(record.subcategoria) === 'RECEBIMENTO_NFS_E' &&
@@ -217,17 +240,18 @@ function auroraRc11BankEvent_() {
   var cents = wmgjFirestoreBrlToCents_(row.raw[creditIndex], row.display[creditIndex]);
   if (cents !== 4950000) throw new Error('RC11_CREDITO_VALOR_INESPERADO');
   var rowHash = wmgjFirestoreHashString_(JSON.stringify(wmgjFirestoreRowObject_(row.headers, row.display)));
-  var dcto = String(row.record.dcto || row.rowNumber).trim();
   return {
     schemaVersion: 1,
     eventId: Utilities.getUuid(),
     eventType: 'ENTITY_UPSERT',
     orgId: 'wmgj',
     occurredAt: new Date().toISOString(),
-    sourceVersion: 1,
-    idempotencyKey: ['wmgj','SHEETS',row.ss.getId(),'08_EXTRATOS_BRADESCO',row.rowNumber,rowHash].join(':'),
+    sourceVersion: 2,
+    idempotencyKey: ['wmgj','AURORA_RC11_V2','SHEETS',row.ss.getId(),'08_EXTRATOS_BRADESCO',row.rowNumber,rowHash].join(':'),
     entityType: 'bankTransaction',
-    entityKey: '08_EXTRATOS_BRADESCO:' + dcto,
+    // Usa a mesma identidade canônica do backfill. O documento da amostra não
+    // pode divergir apenas porque percorreu o caminho controlado RC1.1.
+    entityKey: wmgjFirestoreEntityKey_('08_EXTRATOS_BRADESCO', row.record, row.rowNumber),
     actor: { type: 'SYSTEM', id: wmgjFirestoreActorId_(), source: 'AURORA_RC11_WMGJ' },
     source: {
       system: 'SHEETS',
@@ -246,7 +270,8 @@ function auroraRc11BankEvent_() {
       status: 'RECONCILED',
       amountCents: cents,
       liquidatedAmountCents: cents,
-      transactionKind: 'RECEIPT'
+      transactionKind: 'RECEIPT',
+      invoiceEntityId: invoiceEntityId
     },
     metadata: { rc11Sample: true, sourceSheet: '08_EXTRATOS_BRADESCO', sourceRow: row.rowNumber, nonDestructive: true }
   };
@@ -254,7 +279,7 @@ function auroraRc11BankEvent_() {
 
 function auroraRc11ResumoFonte_() {
   var invoice = auroraRc11InvoiceEvent_();
-  var bank = auroraRc11BankEvent_();
+  var bank = auroraRc11BankEvent_(invoice.entityKey);
   return {
     ok: true,
     competence: AURORA_RC11_SAMPLE_COMPETENCE,
@@ -263,6 +288,7 @@ function auroraRc11ResumoFonte_() {
     differenceCents: invoice.record.totalCents - bank.record.liquidatedAmountCents,
     invoiceSourceHash: invoice.source.contentHash,
     bankSourceHash: bank.source.contentHash,
+    invoiceEntityId: bank.record.invoiceEntityId,
     sourceMutation: false
   };
 }
@@ -271,7 +297,7 @@ function auroraRc11DryRunAmostra() {
   var cfg = wmgjFirestoreConfig_();
   if (!cfg.dryRun) throw new Error('RC11_DRY_RUN_OBRIGATORIO');
   var invoice = auroraRc11InvoiceEvent_();
-  var bank = auroraRc11BankEvent_();
+  var bank = auroraRc11BankEvent_(invoice.entityKey);
   var invoiceResult = wmgjFirestoreEnviarEvento_(invoice);
   var bankResult = wmgjFirestoreEnviarEvento_(bank);
   return {
@@ -290,7 +316,7 @@ function auroraRc11EnviarAmostraReal(confirmacao) {
   var props = PropertiesService.getScriptProperties();
   try {
     var invoice = auroraRc11InvoiceEvent_();
-    var bank = auroraRc11BankEvent_();
+    var bank = auroraRc11BankEvent_(invoice.entityKey);
     var invoiceResult = wmgjFirestoreEnviarEvento_(invoice);
     var bankResult = wmgjFirestoreEnviarEvento_(bank);
     return {

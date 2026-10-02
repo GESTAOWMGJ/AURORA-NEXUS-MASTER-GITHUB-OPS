@@ -11,7 +11,7 @@ const snapshot = { projection: { competence: '2026-08', generatedAt: '2026-09-28
 
 type Handler = (event?: any) => unknown;
 class Element {
-  textContent = ''; className = ''; hidden = false; disabled = false; value = ''; colSpan = 0;
+  textContent = ''; className = ''; hidden = false; disabled = false; selected = false; required = false; value = ''; colSpan = 0;
   children: Element[] = []; handlers = new Map<string, Handler>(); parentForm: Element | null = null;
   classList = { remove: (_name: string) => {} }; button: Element | null = null;
   id: string;
@@ -19,6 +19,7 @@ class Element {
   addEventListener(name: string, callback: Handler) { this.handlers.set(name, callback); }
   appendChild(child: Element) { this.children.push(child); return child; }
   append(...children: Element[]) { this.children.push(...children); }
+  get options() { return this.children; }
   replaceChildren() { this.children = []; this.textContent = ''; }
   querySelector(selector: string) { assert.equal(selector, 'button'); return this.button ??= new Element(); }
   reset() { this.value = ''; }
@@ -32,7 +33,14 @@ async function fixture(first = response()) {
   const docHandlers = new Map<string, Handler>(); const winHandlers = new Map<string, Handler>();
   const document = { visibilityState: 'visible', activeElement: null as Element | null, getElementById(id: string) { const element = elements.get(id); assert.ok(element, 'Known DOM id: ' + id); return element; }, createElement: (_tag: string) => new Element(), addEventListener: (name: string, callback: Handler) => docHandlers.set(name, callback) };
   const calls: { url: string; options: any }[] = []; const redirects: string[] = []; const intervals: { fn: Handler; ms: number }[] = []; const timeouts = new Map<number, Handler>(); let timerId = 0;
-  let fetcher = async (_url: string, _options: any): Promise<any> => first;
+  let fetcher = async (url: string, _options: any): Promise<any> => {
+    if (url === '/api/evidence') return response(200, { evidence: [
+      { id: 'synthetic-doc-1', category: 'FINANCIAL', originSystem: 'TASY', competence: '2026-08', workflowStatus: 'VALIDATED', updatedAt: '2026-09-28T11:00:00Z' },
+      { id: 'synthetic-doc-2', category: 'OPERATIONAL', originSystem: 'DRIVE', competence: '2026-08', workflowStatus: 'VALIDATED', updatedAt: '2026-09-27T11:00:00Z' }
+    ] });
+    if (url === '/api/audit-events') return response(200, { events: [{ id: 'audit-1', type: 'ACTION_CREATE_REVIEW', targetType: 'managementInput', targetId: 'mgmt-1', occurredAt: '2026-09-28T11:00:00Z' }] });
+    return first;
+  };
   const context = createContext({ document, window: { addEventListener: (name: string, callback: Handler) => winHandlers.set(name, callback) }, navigator: { onLine: true }, location: { replace: (url: string) => redirects.push(url) }, Intl, Date, AbortController, crypto: { randomUUID: () => 'synthetic-idempotency-key' }, setInterval: (fn: Handler, ms: number) => intervals.push({ fn, ms }), setTimeout: (fn: Handler) => { const id = ++timerId; timeouts.set(id, fn); return id; }, clearTimeout: (id: number) => timeouts.delete(id), fetch: (url: string, options: any) => { calls.push({ url, options }); return fetcher(url, options); } });
   scripts.forEach(script => new Script(script).runInContext(context));
   await setImmediate();
@@ -42,7 +50,7 @@ async function fixture(first = response()) {
 test('the actual emitted browser script parses; missing regex delimiters fail this gate', () => {
   assert.equal(scripts.length, 1);
   scripts.forEach(script => assert.doesNotThrow(() => new Script(script)));
-  assert.throws(() => new Script(scripts[0].replace('value=>!/^[A-Za-z0-9._:-]', 'value=>!^[A-Za-z0-9._:-]')), SyntaxError);
+  assert.throws(() => new Script(scripts[0].replace('option=>option.selected', 'option=>?option.selected')), SyntaxError);
 });
 
 test('all navigation links target existing sections, not placeholder pages', () => {
@@ -67,8 +75,10 @@ test('periodic updates are authenticated GET-only and preserve manual engine exe
   const f = await fixture();
   assert.equal(f.intervals.length, 1); assert.equal(f.intervals[0].ms, 60000);
   await f.intervals[0].fn();
-  assert.equal(f.calls.length, 2);
-  assert.ok(f.calls.every(call => call.url === '/api/bootstrap' && !call.options.method));
+  assert.equal(f.calls.filter(call => call.url === '/api/bootstrap').length, 2);
+  assert.equal(f.calls.filter(call => call.url === '/api/audit-events').length, 2);
+  assert.equal(f.calls.filter(call => call.url === '/api/evidence').length, 1);
+  assert.ok(f.calls.every(call => ['/api/bootstrap', '/api/audit-events', '/api/evidence'].includes(call.url) && !call.options.method));
   assert.equal(f.elements.get('overdue')!.textContent, '0');
 });
 
@@ -79,7 +89,7 @@ test('polling pauses when hidden, offline, editing, resolving or mutating', asyn
   f.run('navigator.onLine=true'); const field = new Element(); field.parentForm = new Element('form'); f.document.activeElement = field; await f.intervals[0].fn();
   f.document.activeElement = null; f.run('selectedResolution={id:"synthetic"}'); await f.intervals[0].fn();
   f.run('selectedResolution=null;mutationsInFlight=1'); await f.intervals[0].fn();
-  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls.length, 3);
 });
 
 test('network errors become visible and never present stale values as current', async () => {
@@ -140,6 +150,7 @@ test('manager can create a structured action directly in the app', async () => {
   f.elements.get('review-reason')!.value = 'MANUAL_REVIEW';
   f.elements.get('review-risk')!.value = 'HIGH';
   f.elements.get('review-due')!.value = '2026-10-02';
+  f.elements.get('review-evidence')!.options[0].selected = true;
   await f.submit('create-review');
   const write = f.calls.find(call => call.url === '/api/actions' && call.options.method === 'POST');
   assert.ok(write);
@@ -148,17 +159,23 @@ test('manager can create a structured action directly in the app', async () => {
   assert.match(body.targetId, /^mgmt-/);
   assert.equal(body.title, 'Atualizar faturamento e relatório atual');
   assert.equal(body.riskLevel, 'HIGH');
+  assert.deepEqual(body.evidenceRefs, ['synthetic-doc-1']);
   assert.equal(write.options.headers['X-Aurora-CSRF'], 'synthetic-action');
 });
 
-test('invalid evidence identifiers do not trigger a write; valid identifiers do', async () => {
+test('resolution picker blocks an empty selection and sends the complete linked evidence set', async () => {
   const f = await fixture();
-  f.run('selectedResolution={id:"synthetic-action",revision:1,riskLevel:"LOW"}');
+  f.run('eligibleEvidence=eligibleEvidence.filter(item=>item.id!=="synthetic-doc-2")');
+  f.run('prepareResolution({id:"synthetic-action",revision:1,riskLevel:"LOW",targetType:"managementInput",evidenceRefs:["synthetic-doc-1","synthetic-doc-2"]})');
+  assert.equal(f.elements.get('resolve-evidence')!.options.length, 2);
+  assert.match(f.elements.get('resolve-evidence')!.options[1].textContent, /revalidação obrigatória/);
   f.elements.get('resolve-code')!.value = 'EVIDENCE_CONFIRMED';
-  f.elements.get('resolve-evidence')!.value = '../invalid'; await f.submit('resolve-review');
-  assert.equal(f.calls.length, 1);
-  f.elements.get('resolve-evidence')!.value = 'synthetic-doc-1, synthetic-doc-2'; await f.submit('resolve-review');
-  const write = f.calls.find(call => call.url === '/api/actions'); assert.ok(write);
+  for (const option of f.elements.get('resolve-evidence')!.options) option.selected = false;
+  await f.submit('resolve-review');
+  assert.equal(f.calls.filter(call => call.url === '/api/actions').length, 0);
+  for (const option of f.elements.get('resolve-evidence')!.options) option.selected = true;
+  await f.submit('resolve-review');
+  const write = f.calls.find(call => call.url === '/api/actions' && call.options.method === 'POST'); assert.ok(write);
   assert.equal(write.options.method, 'POST');
   assert.equal(write.options.headers['X-Aurora-CSRF'], 'synthetic-action');
   assert.deepEqual(JSON.parse(write.options.body).evidenceRefs, ['synthetic-doc-1', 'synthetic-doc-2']);

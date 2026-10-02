@@ -6,6 +6,7 @@ import test from "node:test";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import { canonicalHmacV2Payload, type HmacV2Headers } from "../src/security.ts";
+import { validateEvent } from "../src/validation.ts";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const migrationRoot = path.resolve(testDir, "../..");
@@ -27,7 +28,11 @@ function appsScriptContext(): Record<string, unknown> {
     }
   };
   vm.createContext(context);
-  for (const relative of ["../src/35_AURORA_FIRESTORE_BRIDGE_WMGJ.gs", "../src/36_AURORA_FIRESTORE_MIGRATION_WMGJ.gs"]) {
+  for (const relative of [
+    "../src/35_AURORA_FIRESTORE_BRIDGE_WMGJ.gs",
+    "../src/36_AURORA_FIRESTORE_MIGRATION_WMGJ.gs",
+    "../src/34_AURORA_RC11_FIRESTORE_CONTROL.gs"
+  ]) {
     vm.runInContext(fs.readFileSync(path.join(migrationRoot, relative), "utf8"), context, {
       filename: relative
     });
@@ -62,18 +67,180 @@ test("normalizador BRL falha fechado em formato ambíguo, precisão ou faixa inv
   assert.throws(() => context.wmgjFirestoreBrlToCents_(Number.MAX_SAFE_INTEGER, String(Number.MAX_SAFE_INTEGER)), /MONEY_/);
 });
 
-test("adaptador por aba mantém o texto-fonte e adiciona campo canônico", () => {
+test("normalizador financeiro retorna somente campo canônico em centavos", () => {
   const context = appsScriptContext() as any;
-  const headers = ["Número NF", "Valor Total"];
-  const sourceRecord = context.wmgjFirestoreRowObject_(headers, ["NF-1", "R$ 1.234,56"]);
-  const raw = ["NF-1", 1234.56];
-  const display = ["NF-1", "R$ 1.234,56"];
+  const headers = ["Número NF", "Valor Total", "Observação"];
+  const sourceRecord = context.wmgjFirestoreRowObject_(headers, ["NF-1", "R$ 1.234,56", "texto legado"]);
+  const raw = ["NF-1", 1234.56, "texto legado"];
+  const display = ["NF-1", "R$ 1.234,56", "texto legado"];
   const normalized = context.wmgjFirestoreAddCanonicalMoney_(headers, raw, display, sourceRecord, {
     totalCents: ["valor_total"]
   });
-  assert.equal(normalized.valor_total, "R$ 1.234,56");
   assert.equal(normalized.totalCents, 123456);
+  assert.deepEqual(Object.keys(normalized), ["totalCents"]);
+  assert.equal("numero_nf" in normalized, false);
+  assert.equal("observacao" in normalized, false);
   assert.equal(raw[1], 1234.56);
+});
+
+test("evento exato do migrador canônico passa pela validação sem contrabandear legado", () => {
+  const context = appsScriptContext() as any;
+  const config = context.wmgjFirestoreMigrationMap_()["06_NFS_E"];
+  const headers = [
+    "Competência Assistencial",
+    "Status Extração",
+    "Número NF",
+    "Valor Serviço",
+    "Observação",
+    "Environment",
+    "Record Type"
+  ];
+  const display = [
+    "2026-06",
+    "VALIDADO",
+    "9",
+    "R$ 49.500,00",
+    "diagnóstico: narrativa legada que não pode sair da origem",
+    "HOMOLOGATION",
+    "OPERACIONAL"
+  ];
+  const raw = ["2026-06", "VALIDADO", "9", 49500, display[4], "HOMOLOGATION", "OPERACIONAL"];
+  const occurredAt = vm.runInContext('new Date("2026-10-02T12:00:00.000Z")', context);
+  const event = context.wmgjFirestoreBuildEvent_(
+    "spreadsheet-wmgj",
+    "06_NFS_E",
+    config,
+    headers,
+    raw,
+    display,
+    2,
+    { orgId: "wmgj", dryRun: true },
+    occurredAt
+  );
+
+  assert.equal(event.record.totalCents, 4_950_000);
+  assert.match(event.record.invoiceNumberHash, /^[a-f0-9]{64}$/);
+  assert.equal(event.record.sourceRowHash, event.source.contentHash);
+  assert.equal(event.competence, "2026-06");
+  for (const forbidden of ["observacao", "environment", "record_type", "valor_servico", "numero_nf"]) {
+    assert.equal(forbidden in event.record, false, forbidden);
+  }
+  assert.doesNotMatch(JSON.stringify(event), /narrativa legada|diagn[oó]stico|HOMOLOGATION|OPERACIONAL/i);
+
+  const validation = validateEvent(event, Buffer.byteLength(JSON.stringify(event), "utf8"));
+  assert.equal(validation.ok, true, validation.errors.join("; "));
+});
+
+test("migrador bancário mantém discriminador RECEIPT e contrato estrito", () => {
+  const context = appsScriptContext() as any;
+  const config = context.wmgjFirestoreMigrationMap_()["08_EXTRATOS_BRADESCO"];
+  const headers = [
+    "Competência Assistencial Relacionada",
+    "Status Conciliação",
+    "Subcategoria",
+    "Crédito",
+    "Dcto",
+    "Histórico"
+  ];
+  const display = ["2026-06", "CONCILIADO", "RECEBIMENTO_NFS_E", "R$ 49.500,00", "DOC-9", "texto bancário legado"];
+  const raw = ["2026-06", "CONCILIADO", "RECEBIMENTO_NFS_E", 49500, "DOC-9", "texto bancário legado"];
+  const event = context.wmgjFirestoreBuildEvent_(
+    "spreadsheet-wmgj",
+    "08_EXTRATOS_BRADESCO",
+    config,
+    headers,
+    raw,
+    display,
+    7,
+    { orgId: "wmgj", dryRun: true },
+    vm.runInContext('new Date("2026-10-02T12:00:00.000Z")', context)
+  );
+
+  assert.equal(event.competence, "2026-06");
+  assert.equal(event.record.amountCents, 4_950_000);
+  assert.equal(event.record.liquidatedAmountCents, 4_950_000);
+  assert.equal(event.workflowState, "PENDING_EVIDENCE");
+  assert.equal(event.reviewState, "PENDING");
+  assert.equal(event.record.status, "SOURCE_REPORTED_RECONCILED");
+  assert.equal(event.record.reconciliationStatus, "PENDING_EVIDENCE");
+  assert.equal(event.record.transactionKind, "RECEIPT");
+  assert.equal("historico" in event.record, false);
+  assert.equal("subcategoria" in event.record, false);
+
+  const validation = validateEvent(event, Buffer.byteLength(JSON.stringify(event), "utf8"));
+  assert.equal(validation.ok, true, validation.errors.join("; "));
+
+  const tampered = JSON.parse(JSON.stringify(event));
+  tampered.record.transactionKind = "FREE_TEXT";
+  const rejected = validateEvent(tampered, Buffer.byteLength(JSON.stringify(tampered), "utf8"));
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.errors.join("; "), /transactionKind deve usar enum financeiro canônico/);
+});
+
+test("backfill genérico falha fechado para as duas linhas reservadas ao RC1.1", () => {
+  const context = appsScriptContext() as any;
+  const mapping = context.wmgjFirestoreMigrationMap_();
+  const occurredAt = vm.runInContext('new Date("2026-10-02T12:00:00.000Z")', context);
+  const fixtures = [
+    {
+      sheet: "06_NFS_E",
+      headers: ["Competência Assistencial", "Status Extração", "Número NF", "Valor Serviço", "Chave Acesso"],
+      raw: ["2026-05", "VALIDADO", "8", 49500, "CHAVE-NF-8"],
+      display: ["2026-05", "VALIDADO", "8", "R$ 49.500,00", "CHAVE-NF-8"],
+      row: 2
+    },
+    {
+      sheet: "08_EXTRATOS_BRADESCO",
+      headers: ["Competência Assistencial Relacionada", "Status Conciliação", "Subcategoria", "Crédito", "Dcto"],
+      raw: ["2026-05", "CONCILIADO", "RECEBIMENTO_NFS_E", 49500, "DOC-8"],
+      display: ["2026-05", "CONCILIADO", "RECEBIMENTO_NFS_E", "R$ 49.500,00", "DOC-8"],
+      row: 7
+    }
+  ];
+
+  for (const fixture of fixtures) {
+    assert.throws(() => context.wmgjFirestoreBuildEvent_(
+      "spreadsheet-wmgj",
+      fixture.sheet,
+      mapping[fixture.sheet],
+      fixture.headers,
+      fixture.raw,
+      fixture.display,
+      fixture.row,
+      { orgId: "wmgj", dryRun: true },
+      occurredAt
+    ), /RC11_RESERVED_SOURCE_ROW_REQUIRES_DEDICATED_PIPELINE/);
+  }
+});
+
+test("todas as fontes documentais suportadas produzem DOCUMENT_UPSERT válido", () => {
+  const context = appsScriptContext() as any;
+  const mapping = context.wmgjFirestoreMigrationMap_();
+  const supportedDocuments = [
+    "01_CADASTRO_ARQUIVOS",
+    "14_MEMORIA_BASE_DOCUMENTOS",
+    "21_GMAIL_INDEXACAO_FATURAMENTO"
+  ];
+
+  for (const [index, sheetName] of supportedDocuments.entries()) {
+    const event = context.wmgjFirestoreBuildEvent_(
+      "spreadsheet-wmgj",
+      sheetName,
+      mapping[sheetName],
+      ["Status Processamento", "ID Drive", "Observação"],
+      ["PROCESSADO", `drive-${index + 1}`, "narrativa legada local"],
+      ["PROCESSADO", `drive-${index + 1}`, "narrativa legada local"],
+      index + 2,
+      { orgId: "wmgj", dryRun: true },
+      vm.runInContext('new Date("2026-10-02T12:00:00.000Z")', context)
+    );
+    assert.equal(event.eventType, "DOCUMENT_UPSERT");
+    assert.equal(event.entityType, "sourceDocument");
+    assert.match(event.record.documentIdHash, /^[a-f0-9]{64}$/);
+    assert.equal("observacao" in event.record, false);
+    const validation = validateEvent(event, Buffer.byteLength(JSON.stringify(event), "utf8"));
+    assert.equal(validation.ok, true, `${sheetName}: ${validation.errors.join("; ")}`);
+  }
 });
 
 test("status de liquidação valida somente entidades financeiras compatíveis", () => {
@@ -131,6 +298,72 @@ test("primeiro backfill identifica cabeçalhos clínicos para quarentena fail-cl
   );
 });
 
+test("mapa de backfill habilita somente coleções consumidas pela projeção atual", () => {
+  const context = appsScriptContext() as any;
+  const mapping = context.wmgjFirestoreMigrationMap_();
+  const supported = Object.entries(mapping)
+    .filter(([, config]: any) => config.supported === true)
+    .map(([sheetName]) => sheetName)
+    .sort();
+  assert.deepEqual(supported, [
+    "01_CADASTRO_ARQUIVOS",
+    "06_NFS_E",
+    "08_EXTRATOS_BRADESCO",
+    "14_MEMORIA_BASE_DOCUMENTOS",
+    "21_GMAIL_INDEXACAO_FATURAMENTO"
+  ]);
+  for (const config of Object.values(mapping) as any[]) {
+    assert.ok(
+      config.supported === true || (
+        config.supported === false
+        && config.quarantineReason === "ENTITY_NOT_PROJECTED_BY_CURRENT_ENGINE"
+      )
+    );
+  }
+});
+
+test("mapeamentos fora da projeção atual ficam em quarentena sem leitura ou envio", () => {
+  const context = appsScriptContext() as any;
+  const calls: string[] = [];
+  context.wmgjFirestoreEnviarEvento_ = () => {
+    calls.push("send");
+    throw new Error("UNSUPPORTED_SOURCE_MUST_NOT_BE_SENT");
+  };
+  context.wmgjFirestoreLog_ = (event: string) => calls.push(event);
+  context.PropertiesService = {
+    getScriptProperties() {
+      calls.push("properties");
+      return { getProperty() { return null; }, setProperty() { calls.push("checkpoint"); } };
+    }
+  };
+  const sheet = {
+    getLastRow() { return 3; },
+    getLastColumn() { calls.push("width"); return 2; },
+    getRange() { calls.push("rows"); throw new Error("UNSUPPORTED_SOURCE_MUST_NOT_BE_READ"); }
+  };
+  const spreadsheet = {
+    getId() { return "sheet-wmgj"; },
+    getSheetByName() { return sheet; }
+  };
+  const config = context.wmgjFirestoreMigrationMap_()["05_FINANCEIRO_MENSAL"];
+
+  const result = context.wmgjFirestoreMigrarAba_(
+    spreadsheet,
+    "05_FINANCEIRO_MENSAL",
+    config,
+    10,
+    { orgId: "wmgj", dryRun: false }
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.quarantined, true);
+  assert.equal(result.unsupported, true);
+  assert.equal(result.reason, "ENTITY_NOT_PROJECTED_BY_CURRENT_ENGINE");
+  assert.equal(result.sent, 0);
+  assert.equal(result.checkpointAdvanced, false);
+  assert.deepEqual(calls, ["MIGRATION_QUARANTINE"]);
+});
+
 test("migrador quarentena aba clínica sem ler linhas nem avançar checkpoint", () => {
   const context = appsScriptContext() as any;
   const calls: Array<{ row: number; rows: number }> = [];
@@ -165,7 +398,7 @@ test("migrador quarentena aba clínica sem ler linhas nem avançar checkpoint", 
   const result = context.wmgjFirestoreMigrarAba_(
     spreadsheet,
     "ABA_CLINICA",
-    { entityType: "sourceDocument", sensitivity: "RESTRICTED" },
+    { supported: true, entityType: "sourceDocument", sensitivity: "RESTRICTED" },
     10,
     { orgId: "wmgj", dryRun: false }
   );
@@ -177,6 +410,70 @@ test("migrador quarentena aba clínica sem ler linhas nem avançar checkpoint", 
   assert.equal(logs[0]?.event, "MIGRATION_QUARANTINE");
   assert.equal(logs[0]?.status, "ERRO");
   assert.deepEqual([...logs[0]?.payload.blockedHeaders], ["cpf_paciente"]);
+});
+
+test("eventos exatos RC1.1 passam no contrato e preservam o tipo RECEIPT", () => {
+  const context = appsScriptContext() as any;
+  context.auroraRc11BuscarLinha_ = (sheetName: string) => {
+    if (sheetName === "06_NFS_E") {
+      const headers = ["Competência Assistencial", "Número NF", "Status Extração", "Valor Serviço", "Chave Acesso"];
+      return {
+        ss: { getId() { return "spreadsheet-wmgj"; } },
+        headers,
+        map: { competencia_assistencial: 0, numero_nf: 1, status_extracao: 2, valor_servico: 3, chave_acesso: 4 },
+        display: ["2026-05", "8", "VALIDADO", "R$ 49.500,00", "CHAVE-NF-8"],
+        raw: ["2026-05", "8", "VALIDADO", 49500, "CHAVE-NF-8"],
+        rowNumber: 2,
+        record: {
+          competencia_assistencial: "2026-05",
+          numero_nf: "8",
+          status_extracao: "VALIDADO",
+          valor_servico: "R$ 49.500,00",
+          chave_acesso: "CHAVE-NF-8"
+        }
+      };
+    }
+    if (sheetName === "08_EXTRATOS_BRADESCO") {
+      const headers = ["Competência Assistencial Relacionada", "Subcategoria", "Status Conciliação", "Crédito", "Dcto"];
+      return {
+        ss: { getId() { return "spreadsheet-wmgj"; } },
+        headers,
+        map: { competencia_assistencial_relacionada: 0, subcategoria: 1, status_conciliacao: 2, credito: 3, dcto: 4 },
+        display: ["2026-05", "RECEBIMENTO_NFS_E", "CONCILIADO", "R$ 49.500,00", "DOC-8"],
+        raw: ["2026-05", "RECEBIMENTO_NFS_E", "CONCILIADO", 49500, "DOC-8"],
+        rowNumber: 7,
+        record: {
+          competencia_assistencial_relacionada: "2026-05",
+          subcategoria: "RECEBIMENTO_NFS_E",
+          status_conciliacao: "CONCILIADO",
+          credito: "R$ 49.500,00",
+          dcto: "DOC-8"
+        }
+      };
+    }
+    throw new Error(`UNEXPECTED_SHEET:${sheetName}`);
+  };
+
+  const invoice = context.auroraRc11InvoiceEvent_();
+  const bank = context.auroraRc11BankEvent_(invoice.entityKey);
+  const expectedInvoiceId = createHash("sha256").update(`invoice:${invoice.entityKey}`).digest("hex").slice(0, 48);
+  assert.equal(bank.record.transactionKind, "RECEIPT");
+  assert.equal(bank.record.invoiceEntityId, expectedInvoiceId);
+  assert.equal(invoice.sourceVersion, 2);
+  assert.equal(bank.sourceVersion, 2);
+  assert.match(invoice.idempotencyKey, /AURORA_RC11_V2/);
+  assert.match(bank.idempotencyKey, /AURORA_RC11_V2/);
+  assert.equal(bank.entityKey, "08_EXTRATOS_BRADESCO:legacy-row:7");
+  for (const candidate of [invoice, bank]) {
+    const result = validateEvent(candidate, Buffer.byteLength(JSON.stringify(candidate), "utf8"));
+    assert.equal(result.ok, true, `${candidate.entityType}: ${result.errors.join("; ")}`);
+  }
+
+  const unlinked = JSON.parse(JSON.stringify(bank));
+  delete unlinked.record.invoiceEntityId;
+  const rejected = validateEvent(unlinked, Buffer.byteLength(JSON.stringify(unlinked), "utf8"));
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.errors.join("; "), /recebimento conciliado exige invoiceEntityId válido/);
 });
 
 test("canonical HMAC v2 do Apps Script é idêntico ao servidor", () => {

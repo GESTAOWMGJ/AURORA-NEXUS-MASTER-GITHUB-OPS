@@ -101,6 +101,11 @@ service cloud.firestore {
       ]) || hasPermission(orgId, 'clinical.read');
     }
 
+    function clinicalSensitiveEnabled(orgId) {
+      return activeOrganization(orgId)
+        && get(organizationPath(orgId)).data.clinicalSensitiveEnabled == true;
+    }
+
     function canReadAudit(orgId) {
       return roleIn(orgId, [
         'platform_admin', 'org_admin', 'director', 'auditor'
@@ -193,7 +198,8 @@ service cloud.firestore {
       }
 
       match /clinicalEvidence/{evidenceId} {
-        allow read: if canReadClinical(orgId)
+        allow read: if clinicalSensitiveEnabled(orgId)
+          && canReadClinical(orgId)
           && facilityAllowed(orgId, resource.data);
         allow write: if false;
       }
