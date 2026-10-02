@@ -38,7 +38,10 @@ if [ "$rc" -ne 0 ]; then
   exit "$rc"
 fi
 if ! jq -e 'type=="object" and has("response") and (.error == null) and (.response != null)' "$tmp_out" >/dev/null 2>&1; then
-  echo "::error title=Apps Script invalid execution response::Function $function_name did not return a successful JSON execution envelope." >&2
+  error_code="$(jq -r '.error.code // "UNKNOWN"' "$tmp_out" 2>/dev/null || printf 'UNKNOWN')"
+  error_message="$(jq -r '.error.details[0].errorMessage // .error.message // "UNKNOWN"' "$tmp_out" 2>/dev/null || printf 'UNKNOWN')"
+  error_message="$(printf '%s' "$error_message" | tr '\r\n' '  ' | sed -E 's/[A-Za-z0-9+\/_=-]{32,}/[REDACTED]/g' | cut -c1-240)"
+  echo "::error title=Apps Script invalid execution response::Function $function_name returned error code $error_code: $error_message" >&2
   exit 73
 fi
 
