@@ -45,6 +45,8 @@ jobs:
             .projectId==$project and
             .projectId=="wmgj-hml-jfn-20260927" and
             .sourceDatabase=="(default)" and
+            .requestVersion==4 and
+            .hmacMode=="REUSE_EXISTING_WITH_AUTH_PROBE" and
             .restoreDatabasePrefix=="rc11-restore" and
             .competence=="2026-05" and
             .sample.invoiceNumber=="8" and
@@ -223,7 +225,7 @@ jobs:
             fi
           fi
 
-      - name: Build and configure HMAC keyring
+      - name: Build and validate existing HMAC contract
         env:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
@@ -231,18 +233,9 @@ jobs:
           npm --prefix firebase-migration/functions ci
           npm --prefix firebase-migration/functions test
           npm --prefix firebase-migration/functions run build
-          hmac_secret="$(openssl rand -hex 32)"; echo "::add-mask::$hmac_secret"
-          key_id="apps-script-hml-rc11-20260929"
-          keyring="$RUNNER_TEMP/rc11-keyring.json"
-          jq -n --arg key "$key_id" --arg secret "$hmac_secret" '{($key):{active:true,secret:$secret,orgIds:["wmgj"],entityTypes:["invoice","bankTransaction"]}}' > "$keyring"
           secret_name="WMGJ_INGEST_HMAC_KEYRING"
           existing_secret="$(gcloud secrets describe "$secret_name" --project "$PROJECT_ID" --format='value(name)')"
           test -n "$existing_secret"
-          secret_version="$(gcloud secrets versions add "$secret_name" --project "$PROJECT_ID" --data-file="$keyring" --quiet --format='value(name)')"
-          test -n "$secret_version"
-          echo "AURORA_RC11_HMAC_SECRET=$hmac_secret" >> "$GITHUB_ENV"
-          echo "AURORA_RC11_HMAC_KEY_ID=$key_id" >> "$GITHUB_ENV"
-          rm -f "$keyring"
 
       - name: Deploy exact RC1.1 HML runtime
         working-directory: firebase-migration
@@ -267,8 +260,9 @@ jobs:
           printf '{"scriptId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" > "$RUNNER_TEMP/build-appscript/.clasp.json"
           cd "$RUNNER_TEMP/build-appscript"
           clasp push --force
-          params="$(jq -nc --arg url "$AURORA_RC11_INGEST_URL" --arg key "$AURORA_RC11_HMAC_KEY_ID" --arg secret "$AURORA_RC11_HMAC_SECRET" '[$url,$key,$secret]')"
-          clasp run auroraRc11ConfigurarIngestao --params "$params" > "$RUNNER_TEMP/rc11-config.out"
+          params="$(jq -nc --arg url "$AURORA_RC11_INGEST_URL" '[$url]')"
+          clasp run auroraRc11ConfigurarEndpointExistente --params "$params" > "$RUNNER_TEMP/rc11-config.out"
+          clasp run auroraRc11ValidarHmacExistente > "$RUNNER_TEMP/rc11-hmac-probe.out"
           clasp run auroraRc11DryRunAmostra > "$RUNNER_TEMP/rc11-dry-run.out"
 
       - name: Send one real sample and reapply kill switch

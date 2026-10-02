@@ -26,6 +26,81 @@ function auroraRc11ConfigurarIngestao(url, keyId, secret) {
   return { ok: true, keyId: keyId, dryRun: true, secretConfigured: true, sourceMutation: false };
 }
 
+function auroraRc11ConfigurarEndpointExistente(url) {
+  url = String(url || '').trim();
+  if (!/^https:\/\/[^\s]+\/ingestWmgjEvent$/.test(url)) throw new Error('RC11_INGEST_URL_INVALIDA');
+  var cfg = wmgjFirestoreConfig_();
+  if (!cfg.keyId || cfg.secret.length < 32 || cfg.orgId !== 'wmgj') throw new Error('RC11_HMAC_EXISTENTE_AUSENTE');
+  PropertiesService.getScriptProperties().setProperties({
+    WMGJ_FIRESTORE_INGEST_URL: url,
+    WMGJ_FIRESTORE_ORG_ID: 'wmgj',
+    WMGJ_FIRESTORE_DRY_RUN: 'true',
+    WMGJ_FIRESTORE_MAX_ROWS: '2'
+  }, false);
+  return {
+    ok: true,
+    endpointConfigured: true,
+    keyIdConfigured: true,
+    secretConfigured: true,
+    dryRun: true,
+    sourceMutation: false
+  };
+}
+
+function auroraRc11ValidarHmacExistente() {
+  var cfg = wmgjFirestoreConfig_();
+  if (!cfg.dryRun) throw new Error('RC11_DRY_RUN_OBRIGATORIO');
+  if (!/^https:\/\/[^\s]+\/ingestWmgjEvent$/.test(cfg.url || '')) throw new Error('RC11_INGEST_URL_INVALIDA');
+  if (!cfg.keyId || cfg.secret.length < 32 || cfg.orgId !== 'wmgj') throw new Error('RC11_HMAC_EXISTENTE_AUSENTE');
+
+  var probeId = 'rc11-hmac-probe-' + Utilities.getUuid().replace(/-/g, '');
+  var probe = { orgId: 'wmgj', idempotencyKey: probeId, probe: true };
+  var body = JSON.stringify(probe);
+  var timestamp = String(Math.floor(Date.now() / 1000));
+  var nonce = Utilities.getUuid();
+  var canonical = wmgjFirestoreCanonicalHmacV2_(body, {
+    timestamp: timestamp,
+    nonce: nonce,
+    keyId: cfg.keyId,
+    orgId: 'wmgj',
+    idempotencyKey: probeId
+  });
+  var signature = wmgjFirestoreHmacHex_(canonical, cfg.secret);
+  var response = UrlFetchApp.fetch(cfg.url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: body,
+    muteHttpExceptions: true,
+    followRedirects: false,
+    headers: {
+      'X-WMGJ-Signature-Version': WMGJ_FIRESTORE_SIGNATURE_VERSION,
+      'X-WMGJ-Timestamp': timestamp,
+      'X-WMGJ-Nonce': nonce,
+      'X-WMGJ-Key-Id': cfg.keyId,
+      'X-WMGJ-Signature': signature,
+      'X-WMGJ-Org-Id': 'wmgj',
+      'X-WMGJ-Idempotency-Key': probeId
+    }
+  });
+  var code = response.getResponseCode();
+  var parsed = wmgjFirestoreParseJson_(response.getContentText());
+
+  if (code === 400 && parsed && parsed.code === 'VALIDATION_ERROR') {
+    return {
+      ok: true,
+      authenticated: true,
+      noWrite: true,
+      httpCode: code,
+      expectedCode: 'VALIDATION_ERROR',
+      dryRun: true,
+      sourceMutation: false
+    };
+  }
+  if (code === 401) throw new Error('RC11_HMAC_INVALIDO');
+  if (code === 503) throw new Error('RC11_KEYRING_INVALIDO');
+  throw new Error('RC11_HMAC_PROBE_INESPERADO:HTTP_' + code + ':' + String(response.getContentText() || '').slice(0, 200));
+}
+
 function auroraRc11AtivarEscritaAmostra(confirmacao) {
   if (String(confirmacao || '') !== AURORA_RC11_CONFIRMATION) throw new Error('RC11_CONFIRMACAO_INVALIDA');
   var props = PropertiesService.getScriptProperties();

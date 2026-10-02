@@ -1,5 +1,5 @@
 {
-  "requestVersion": 3,
+  "requestVersion": 4,
   "confirmation": "RUN_RC11_HML",
   "projectId": "wmgj-hml-jfn-20260927",
   "sourceDatabase": "(default)",
@@ -11,6 +11,7 @@
   "productionMutation": false,
   "clinicalSensitiveEnabled": false,
   "sourceMutation": false,
-  "requestedAt": "2026-09-30",
-  "restoreDatabasePrefix": "rc11-restore"
+  "requestedAt": "2026-10-02",
+  "restoreDatabasePrefix": "rc11-restore",
+  "hmacMode": "REUSE_EXISTING_WITH_AUTH_PROBE"
 }
