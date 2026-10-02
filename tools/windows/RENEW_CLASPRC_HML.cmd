@@ -27,6 +27,12 @@ for /r "%LOCALAPPDATA%\Temp\aurora-node-portable" %%F in (node.exe) do (
   set "NODE=%%~fF"
   goto :nodefound
 )
+if not defined NODE (
+  for /r "%USERPROFILE%\aurora-node" %%F in (node.exe) do (
+    set "NODE=%%~fF"
+    goto :nodefound
+  )
+)
 :nodefound
 if not defined NODE (
   echo ERRO_NODE_NAO_ENCONTRADO
@@ -37,6 +43,12 @@ set "NPM="
 for /r "%LOCALAPPDATA%\Temp\aurora-node-portable" %%F in (npm.cmd) do (
   set "NPM=%%~fF"
   goto :npmfound
+)
+if not defined NPM (
+  for /r "%USERPROFILE%\aurora-node" %%F in (npm.cmd) do (
+    set "NPM=%%~fF"
+    goto :npmfound
+  )
 )
 :npmfound
 if not defined NPM (
