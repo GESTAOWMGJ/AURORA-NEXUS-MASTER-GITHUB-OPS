@@ -11,7 +11,8 @@
   "productionMutation": false,
   "clinicalSensitiveEnabled": false,
   "sourceMutation": false,
-  "requestedAt": "2026-10-02",
+  "requestedAt": "2026-10-02T12:59:00Z",
   "restoreDatabasePrefix": "rc11-restore",
-  "hmacMode": "REUSE_EXISTING_WITH_AUTH_PROBE"
+  "hmacMode": "REUSE_EXISTING_WITH_AUTH_PROBE",
+  "requestReason": "RC11_VERIFY_EXISTING_RUNTIME_AFTER_PR89"
 }
