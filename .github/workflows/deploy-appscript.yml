@@ -7,6 +7,7 @@ on:
     paths:
       - 'src/**/*.gs'
       - 'tools/**/*.js'
+      - 'tools/**/*.sh'
       - 'appsscript.json'
       - '.github/workflows/deploy-appscript.yml'
   workflow_dispatch:
@@ -20,18 +21,18 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Audit Apps Script source boundaries
         run: node tools/audit-appscript.js
 
       - name: Install clasp
-        run: npm install -g @google/clasp
+        run: npm install -g @google/clasp@3.4.1
 
       - name: Validate required credentials
         run: |
@@ -60,12 +61,16 @@ jobs:
         working-directory: build-appscript
         run: clasp push --force
 
-      - name: Create Apps Script version
+      - name: Publish canonical Apps Script Execution API deployment
         working-directory: build-appscript
-        run: clasp version "GitHub Actions deploy $GITHUB_SHA" || true
+        run: |
+          set -euo pipefail
+          bash "$GITHUB_WORKSPACE/tools/ensure-appscript-execution-deployment.sh" "$RUNNER_TEMP/appscript-deployment.json"
+          jq -e '.deploymentId and (.versionNumber|tonumber) >= 1' "$RUNNER_TEMP/appscript-deployment.json" >/dev/null
 
       - name: Verify deployed source
         run: |
+          set -euo pipefail
           mkdir -p verify-appscript
           cat > verify-appscript/.clasp.json <<EOF
           {
@@ -80,50 +85,17 @@ jobs:
           grep -R "wmgjFirestoreDiagnostico" .
           grep -R "auroraRc11DryRunAmostra" .
 
-      - name: Validate API security gate
+      - name: Validate Apps Script Execution API without operational mutation
         working-directory: build-appscript
-        run: clasp run auditarSegurancaApiWMGJ
+        run: |
+          set -euo pipefail
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" obterStatusWMGJ "$RUNNER_TEMP/appscript-status.json"
+          jq -e '.response.ok==true and .response.status=="ONLINE" and .response.sistema=="WMGJ"' "$RUNNER_TEMP/appscript-status.json" >/dev/null
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auditarSegurancaApiWMGJ "$RUNNER_TEMP/appscript-security.json"
+          jq -e '.response.ok==true' "$RUNNER_TEMP/appscript-security.json" >/dev/null
 
-      - name: Validate status sheet write
-        working-directory: build-appscript
-        run: clasp run validarRegistroStatusAutomacaoWMGJ
+      - name: Preserve deploy-operation separation
+        run: |
+          echo "Apps Script source deployed and Execution API validated."
+          echo "Operational Gmail/dashboard/trigger routines are intentionally not executed by the deploy workflow."
 
-      - name: Audit and organize Apps Script
-        working-directory: build-appscript
-        run: clasp run auditarOrganizarAppsScriptWMGJ || true
-
-      - name: Diagnose Apps Script automation
-        working-directory: build-appscript
-        run: clasp run diagnosticarAutomacaoAppsScriptWMGJ || true
-
-      - name: Diagnose financial dashboard
-        working-directory: build-appscript
-        run: clasp run diagnosticarDashboardFinanceiroWMGJ
-
-      - name: Update financial dashboard
-        working-directory: build-appscript
-        run: clasp run atualizarDashboardFinanceiro
-
-      - name: Diagnose Gmail fiscal financial orchestrator
-        working-directory: build-appscript
-        run: clasp run diagnosticarOrquestradorGmailFiscalFinanceiroWMGJ
-
-      - name: Run Gmail based fiscal financial extraction cycle
-        working-directory: build-appscript
-        run: clasp run rodarCicloCompletoGmailFiscalFinanceiroWMGJ_Teste20
-
-      - name: Diagnose Gmail dashboard robot
-        working-directory: build-appscript
-        run: clasp run diagnosticarRoboGmailDashboardWMGJ
-
-      - name: Run Gmail dashboard robot controlled test
-        working-directory: build-appscript
-        run: clasp run rodarRoboGmailDashboardWMGJ_Teste20
-
-      - name: Install Apps Script automation trigger
-        working-directory: build-appscript
-        run: clasp run instalarGatilhoAutomacaoWMGJ
-
-      - name: Final Apps Script automation diagnosis
-        working-directory: build-appscript
-        run: clasp run diagnosticarAutomacaoAppsScriptWMGJ || true

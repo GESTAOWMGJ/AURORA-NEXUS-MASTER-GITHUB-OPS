@@ -270,7 +270,7 @@ jobs:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
           set -euo pipefail
-          npm install -g @google/clasp
+          npm install -g @google/clasp@3.4.1
           umask 077
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           mkdir -p "$RUNNER_TEMP/build-appscript"
@@ -279,20 +279,32 @@ jobs:
           printf '{"scriptId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" > "$RUNNER_TEMP/build-appscript/.clasp.json"
           cd "$RUNNER_TEMP/build-appscript"
           clasp push --force
+          bash "$GITHUB_WORKSPACE/tools/ensure-appscript-execution-deployment.sh" "$RUNNER_TEMP/rc11-appscript-deployment.json"
           params="$(jq -nc --arg url "$AURORA_RC11_INGEST_URL" '[$url]')"
-          clasp run auroraRc11ConfigurarEndpointExistente --params "$params" > "$RUNNER_TEMP/rc11-config.out"
-          clasp run auroraRc11ValidarHmacExistente > "$RUNNER_TEMP/rc11-hmac-probe.out"
-          clasp run auroraRc11DryRunAmostra > "$RUNNER_TEMP/rc11-dry-run.out"
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ConfigurarEndpointExistente "$RUNNER_TEMP/rc11-config.json" "$params"
+          jq -e '.response.ok==true and .response.endpointConfigured==true and .response.secretConfigured==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-config.json" >/dev/null
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ValidarHmacExistente "$RUNNER_TEMP/rc11-hmac-probe.json"
+          jq -e '.response.ok==true and .response.authenticated==true and .response.noWrite==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-hmac-probe.json" >/dev/null
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-dry-run.json"
+          jq -e '.response.ok==true and .response.dryRun==true and .response.planned==2 and .response.expected.competence=="2026-05" and .response.expected.invoiceCents==4950000 and .response.expected.receivedCents==4950000 and .response.expected.differenceCents==0' "$RUNNER_TEMP/rc11-dry-run.json" >/dev/null
 
       - name: Send one real sample and reapply kill switch
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/build-appscript"
-          clasp run auroraRc11AtivarEscritaAmostra --params '["ATIVAR_RC11_WMGJ_HML"]' >/dev/null
-          trap 'clasp run auroraRc11KillSwitch >/dev/null 2>&1 || true' EXIT
-          clasp run auroraRc11EnviarAmostraReal --params '["ATIVAR_RC11_WMGJ_HML"]' > "$RUNNER_TEMP/rc11-live.out"
-          clasp run auroraRc11KillSwitch >/dev/null
-          clasp run auroraRc11DryRunAmostra >/dev/null
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11AtivarEscritaAmostra "$RUNNER_TEMP/rc11-activate.json" '["ATIVAR_RC11_WMGJ_HML"]'
+          jq -e '.response.ok==true and .response.dryRun==false and .response.sampleOnly==true' "$RUNNER_TEMP/rc11-activate.json" >/dev/null
+          trap 'bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11KillSwitch "$RUNNER_TEMP/rc11-kill-trap.json" >/dev/null 2>&1 || true' EXIT
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11EnviarAmostraReal "$RUNNER_TEMP/rc11-live.json" '["ATIVAR_RC11_WMGJ_HML"]'
+          jq -e '.response.ok==true and .response.oneShot==true and ((.response.sent + .response.duplicates)==2) and .response.expected.competence=="2026-05" and .response.expected.invoiceCents==4950000 and .response.expected.receivedCents==4950000 and .response.expected.differenceCents==0 and (.response.invoiceEntityId|length)>0 and (.response.bankEntityId|length)>0' "$RUNNER_TEMP/rc11-live.json" >/dev/null
+          invoice_entity_id="$(jq -r '.response.invoiceEntityId' "$RUNNER_TEMP/rc11-live.json")"
+          bank_entity_id="$(jq -r '.response.bankEntityId' "$RUNNER_TEMP/rc11-live.json")"
+          echo "AURORA_RC11_INVOICE_ENTITY_ID=$invoice_entity_id" >> "$GITHUB_ENV"
+          echo "AURORA_RC11_BANK_ENTITY_ID=$bank_entity_id" >> "$GITHUB_ENV"
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11KillSwitch "$RUNNER_TEMP/rc11-kill.json"
+          jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-kill.json" >/dev/null
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-post-live-dry-run.json"
+          jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-post-live-dry-run.json" >/dev/null
           trap - EXIT
 
       - name: Reconcile HML and enable SHADOW projection
@@ -300,17 +312,20 @@ jobs:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
+          test -n "$AURORA_RC11_INVOICE_ENTITY_ID"
+          test -n "$AURORA_RC11_BANK_ENTITY_ID"
           access_token="$(gcloud auth print-access-token)"
           base="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj"
-          curl -fsS -H "Authorization: Bearer ${access_token}" "$base/invoices?pageSize=100" > "$RUNNER_TEMP/invoices.json"
-          curl -fsS -H "Authorization: Bearer ${access_token}" "$base/bankTransactions?pageSize=100" > "$RUNNER_TEMP/banks.json"
-          invoice_count="$(jq '[.documents[]?|select(.fields.competence.stringValue=="2026-05" and .fields.metadata.mapValue.fields.rc11Sample.booleanValue==true)]|length' "$RUNNER_TEMP/invoices.json")"
-          bank_count="$(jq '[.documents[]?|select(.fields.competence.stringValue=="2026-05" and .fields.metadata.mapValue.fields.rc11Sample.booleanValue==true)]|length' "$RUNNER_TEMP/banks.json")"
-          invoice_cents="$(jq -r '[.documents[]?|select(.fields.competence.stringValue=="2026-05" and .fields.metadata.mapValue.fields.rc11Sample.booleanValue==true)|(.fields.record.mapValue.fields.totalCents.integerValue|tonumber)]|add//0' "$RUNNER_TEMP/invoices.json")"
-          bank_cents="$(jq -r '[.documents[]?|select(.fields.competence.stringValue=="2026-05" and .fields.metadata.mapValue.fields.rc11Sample.booleanValue==true)|(.fields.record.mapValue.fields.liquidatedAmountCents.integerValue|tonumber)]|add//0' "$RUNNER_TEMP/banks.json")"
-          test "$invoice_count" -eq 1; test "$bank_count" -eq 1
-          test "$invoice_cents" -eq 4950000; test "$bank_cents" -eq 4950000; test "$invoice_cents" -eq "$bank_cents"
-          jq -n --argjson i "$invoice_count" --argjson b "$bank_count" '{gate:"RECONCILED",invoiceDocuments:$i,bankDocuments:$b,amountsEqual:true,differenceZero:true,sourceMutation:false}' > "$RUNNER_TEMP/rc11-evidence/reconciliation.json"
+          curl -fsS -H "Authorization: Bearer ${access_token}" "$base/invoices/$AURORA_RC11_INVOICE_ENTITY_ID" > "$RUNNER_TEMP/invoice.json"
+          curl -fsS -H "Authorization: Bearer ${access_token}" "$base/bankTransactions/$AURORA_RC11_BANK_ENTITY_ID" > "$RUNNER_TEMP/bank.json"
+          jq -e '.fields.orgId.stringValue=="wmgj" and .fields.entityType.stringValue=="invoice" and .fields.competence.stringValue=="2026-05" and .fields.documentType.stringValue=="06_NFS_E" and .fields.invoiceNumber.stringValue=="8" and (.fields.totalCents.integerValue|tonumber)==4950000 and .fields.source.mapValue.fields.system.stringValue=="SHEETS"' "$RUNNER_TEMP/invoice.json" >/dev/null
+          jq -e '.fields.orgId.stringValue=="wmgj" and .fields.entityType.stringValue=="bankTransaction" and .fields.competence.stringValue=="2026-05" and .fields.documentType.stringValue=="08_EXTRATOS_BRADESCO" and .fields.status.stringValue=="RECONCILED" and (.fields.liquidatedAmountCents.integerValue|tonumber)==4950000 and .fields.source.mapValue.fields.system.stringValue=="SHEETS"' "$RUNNER_TEMP/bank.json" >/dev/null
+          invoice_cents="$(jq -r '.fields.totalCents.integerValue|tonumber' "$RUNNER_TEMP/invoice.json")"
+          bank_cents="$(jq -r '.fields.liquidatedAmountCents.integerValue|tonumber' "$RUNNER_TEMP/bank.json")"
+          test "$invoice_cents" -eq 4950000
+          test "$bank_cents" -eq 4950000
+          test "$invoice_cents" -eq "$bank_cents"
+          jq -n --arg invoiceId "$AURORA_RC11_INVOICE_ENTITY_ID" --arg bankId "$AURORA_RC11_BANK_ENTITY_ID" --argjson cents "$invoice_cents" '{gate:"RECONCILED",invoiceEntityId:$invoiceId,bankEntityId:$bankId,invoiceCents:$cents,receivedCents:$cents,amountsEqual:true,differenceZero:true,sourceMutation:false}' > "$RUNNER_TEMP/rc11-evidence/reconciliation.json"
           payload='{"fields":{"projectionEnabled":{"booleanValue":true},"projectionMode":{"stringValue":"SHADOW"},"projectionCompetence":{"stringValue":"2026-05"},"productionMutation":{"booleanValue":false},"sourceMutation":{"booleanValue":false}}}'
           curl -fsS -X PATCH -H "Authorization: Bearer ${access_token}" -H 'Content-Type: application/json' --data "$payload" "${base}?updateMask.fieldPaths=projectionEnabled&updateMask.fieldPaths=projectionMode&updateMask.fieldPaths=projectionCompetence&updateMask.fieldPaths=productionMutation&updateMask.fieldPaths=sourceMutation" >/dev/null
 
@@ -361,8 +376,10 @@ jobs:
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/build-appscript"
-          clasp run auroraRc11KillSwitch >/dev/null
-          clasp run auroraRc11DryRunAmostra >/dev/null
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11KillSwitch "$RUNNER_TEMP/rc11-final-kill.json"
+          jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-final-kill.json" >/dev/null
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-final-dry-run.json"
+          jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-final-dry-run.json" >/dev/null
           jq -n '{release:"1.0.0-rc.1",gate:"RC1.1",restoreVerified:true,ingestAuthenticated:true,realWmgjSample:true,reconciled:true,nativeInsightVerified:true,killSwitch:true,productionMutation:false,sourceMutation:false}' > "$RUNNER_TEMP/rc11-evidence/final-gate.json"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned 2026-10-01
