@@ -185,5 +185,11 @@ if errorlevel 1 (
   exit /b 46
 )
 
+"%GH%" issue comment 46 --repo "%REPO%" --body "CLASPRC_JSON_ROTATED_AND_EXECUTION_API_VERIFIED"
+if errorlevel 1 (
+  echo ERRO_GITHUB_EVIDENCE_MARKER
+  exit /b 47
+)
+
 echo CLASPRC_JSON_ROTATED_AND_EXECUTION_API_VERIFIED
 exit /b 0
