@@ -268,7 +268,7 @@ jobs:
             healthUrl:$healthUrl
           }' > "$RUNNER_TEMP/rc11-evidence/runtime.json"
 
-      - name: Push bridge and configure Apps Script
+      - name: Use canonical Apps Script deployment and configure bridge
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
@@ -278,12 +278,10 @@ jobs:
           umask 077
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           mkdir -p "$RUNNER_TEMP/build-appscript"
-          cp appsscript.json "$RUNNER_TEMP/build-appscript/appsscript.json"
-          cp src/*.gs "$RUNNER_TEMP/build-appscript/"
           printf '{"scriptId":"%s","projectId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" "$PROJECT_ID" > "$RUNNER_TEMP/build-appscript/.clasp.json"
           cd "$RUNNER_TEMP/build-appscript"
-          clasp push --force
-          bash "$GITHUB_WORKSPACE/tools/ensure-appscript-execution-deployment.sh" "$RUNNER_TEMP/rc11-appscript-deployment.json"
+          # Apps Script source/deployment is owned exclusively by deploy-appscript.yml.
+          # RC1.1 consumes the canonical nondev deployment and never pushes/redeploys it.
           test "$(jq -r '.deploymentApproved' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
           test "$(jq -r '.firebaseWriteApproved' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
           test "$(jq -r '.hmacBootstrapIfMissing' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
