@@ -162,3 +162,38 @@ test("Apps Script deploy validates execution but never runs operational cycles a
   assert.doesNotMatch(workflow, /clasp run atualizarDashboardFinanceiro/);
   assert.doesNotMatch(workflow, /clasp run instalarGatilhoAutomacaoWMGJ/);
 });
+
+
+test("Apps Script CI pins clasp to the HML standard Cloud project", () => {
+  const deployWorkflow = readFileSync(new URL("../../../.github/workflows/deploy-appscript.yml", import.meta.url), "utf8");
+  const rc11Workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  assert.match(deployWorkflow, /APPS_SCRIPT_GCP_PROJECT_ID: wmgj-hml-jfn-20260927/);
+  assert.match(deployWorkflow, /"projectId": "\$APPS_SCRIPT_GCP_PROJECT_ID"/);
+  assert.match(rc11Workflow, /"projectId":"%s"/);
+  assert.match(rc11Workflow, /"\$APPS_SCRIPT_ID" "\$PROJECT_ID"/);
+});
+
+test("Windows clasp renewal keeps OAuth material local and updates GitHub Secret only after run validation", () => {
+  const helper = readFileSync(new URL("../../../tools/windows/RENEW_CLASPRC_HML.ps1", import.meta.url), "utf8");
+  assert.match(helper, /wmgj-hml-jfn-20260927/);
+  assert.match(helper, /299889357292/);
+  assert.match(helper, /clasp login --use-project-scopes --include-clasp-scopes --creds/);
+  assert.match(helper, /clasp run obterStatusWMGJ --nondev --json/);
+  assert.match(helper, /\$Gh secret set CLASPRC_JSON/);
+  assert.match(helper, /Programs\\GitHubCLI\\gh\.exe/);
+  assert.match(helper, /auth status --hostname github\.com/);
+  assert.match(helper, /auth login --hostname github\.com --git-protocol https --web --skip-ssh-key/);
+  assert.match(helper, /CLASPRC_JSON_ROTATED_AND_EXECUTION_API_VERIFIED/);
+  assert.doesNotMatch(helper, /Write-Host .*client_secret/i);
+  assert.doesNotMatch(helper, /Write-Host .*refresh_token/i);
+});
+
+test("Windows CMD clasp renewal preserves control flow and portable Node discovery", () => {
+  const helper = readFileSync(new URL("../../../tools/windows/RENEW_CLASPRC_HML.cmd", import.meta.url), "utf8");
+  assert.match(helper, /LOCALAPPDATA%\\Programs\\node-v\*/);
+  assert.match(helper, /call "!NPM!" --version/);
+  assert.match(helper, /call gcloud services enable/);
+  assert.match(helper, /"!NODE!" -e/);
+  assert.doesNotMatch(helper, /if\(!\(/);
+  assert.match(helper, /CLASPRC_JSON_ROTATED_AND_EXECUTION_API_VERIFIED/);
+});
