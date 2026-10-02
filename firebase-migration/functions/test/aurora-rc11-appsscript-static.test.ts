@@ -115,3 +115,50 @@ test("RC1.1 verifies existing Functions runtime without secret IAM mutation", ()
   assert.doesNotMatch(workflow, /secretmanager\.secrets\.setIamPolicy/);
   assert.match(workflow, /functionsRedeployed:false/);
 });
+
+
+test("RC1.1 treats clasp execution as a fail-closed nondev gate", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const runner = readFileSync(new URL("../../../tools/run-clasp-checked.sh", import.meta.url), "utf8");
+  const deployment = readFileSync(new URL("../../../tools/ensure-appscript-execution-deployment.sh", import.meta.url), "utf8");
+  assert.match(workflow, /ensure-appscript-execution-deployment\.sh/);
+  assert.match(workflow, /run-clasp-checked\.sh/);
+  assert.doesNotMatch(workflow, /clasp run auroraRc11/);
+  assert.match(runner, /--nondev/);
+  assert.match(runner, /--json/);
+  assert.match(runner, /Unable to run script function/);
+  assert.match(runner, /NOT_AUTHORIZED/);
+  assert.match(runner, /exit 71/);
+  assert.match(deployment, /AURORA_EXECUTION_API_CANONICAL/);
+  assert.match(deployment, /clasp redeploy/);
+  assert.match(deployment, /clasp deploy/);
+});
+
+test("RC1.1 reconciles the exact entity ids returned by real ingestion", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  assert.match(workflow, /AURORA_RC11_INVOICE_ENTITY_ID/);
+  assert.match(workflow, /AURORA_RC11_BANK_ENTITY_ID/);
+  assert.match(workflow, /\.response\.invoiceEntityId/);
+  assert.match(workflow, /\.response\.bankEntityId/);
+  assert.match(workflow, /invoices\/\$AURORA_RC11_INVOICE_ENTITY_ID/);
+  assert.match(workflow, /bankTransactions\/\$AURORA_RC11_BANK_ENTITY_ID/);
+  assert.match(workflow, /\.fields\.totalCents\.integerValue/);
+  assert.match(workflow, /\.fields\.liquidatedAmountCents\.integerValue/);
+  assert.doesNotMatch(workflow, /metadata\.mapValue\.fields\.rc11Sample/);
+  assert.doesNotMatch(workflow, /\.fields\.record\.mapValue/);
+});
+
+test("Apps Script deploy validates execution but never runs operational cycles automatically", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/deploy-appscript.yml", import.meta.url), "utf8");
+  assert.match(workflow, /actions\/checkout@v7/);
+  assert.match(workflow, /actions\/setup-node@v7/);
+  assert.match(workflow, /node-version: '22'/);
+  assert.match(workflow, /@google\/clasp@3\.4\.1/);
+  assert.match(workflow, /ensure-appscript-execution-deployment\.sh/);
+  assert.match(workflow, /run-clasp-checked\.sh/);
+  assert.match(workflow, /obterStatusWMGJ/);
+  assert.doesNotMatch(workflow, /rodarCicloCompletoGmailFiscalFinanceiroWMGJ_Teste20/);
+  assert.doesNotMatch(workflow, /rodarRoboGmailDashboardWMGJ_Teste20/);
+  assert.doesNotMatch(workflow, /clasp run atualizarDashboardFinanceiro/);
+  assert.doesNotMatch(workflow, /clasp run instalarGatilhoAutomacaoWMGJ/);
+});
