@@ -187,3 +187,13 @@ test("Windows clasp renewal keeps OAuth material local and updates GitHub Secret
   assert.doesNotMatch(helper, /Write-Host .*client_secret/i);
   assert.doesNotMatch(helper, /Write-Host .*refresh_token/i);
 });
+
+test("Windows CMD clasp renewal preserves control flow and portable Node discovery", () => {
+  const helper = readFileSync(new URL("../../../tools/windows/RENEW_CLASPRC_HML.cmd", import.meta.url), "utf8");
+  assert.match(helper, /LOCALAPPDATA%\\Programs\\node-v\*/);
+  assert.match(helper, /call "!NPM!" --version/);
+  assert.match(helper, /call gcloud services enable/);
+  assert.match(helper, /"!NODE!" -e/);
+  assert.doesNotMatch(helper, /if\(!\(/);
+  assert.match(helper, /CLASPRC_JSON_ROTATED_AND_EXECUTION_API_VERIFIED/);
+});
