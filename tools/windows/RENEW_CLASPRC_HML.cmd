@@ -33,6 +33,12 @@ if not defined GH (
 echo GH_OK
 
 set "NODE="
+for /d %%D in ("%LOCALAPPDATA%\Programs\node-v*") do (
+  if exist "%%~fD\node.exe" (
+    set "NODE=%%~fD\node.exe"
+    goto :nodefound
+  )
+)
 for /r "%USERPROFILE%\aurora-node" %%F in (node.exe) do (
   if exist "%%~fF" (
     set "NODE=%%~fF"
@@ -54,6 +60,11 @@ if not defined NODE (
 )
 
 set "NPM="
+for %%F in ("!NODE!") do set "NODEDIR=%%~dpF"
+if exist "!NODEDIR!npm.cmd" (
+  set "NPM=!NODEDIR!npm.cmd"
+  goto :npmfound
+)
 for /r "%USERPROFILE%\aurora-node" %%F in (npm.cmd) do (
   if exist "%%~fF" (
     set "NPM=%%~fF"
@@ -99,7 +110,7 @@ echo GH_AUTH_OK
 set "CLIENT_JSON="
 for /f "delims=" %%F in ('dir /b /a-d /o-d "%USERPROFILE%\Downloads\*.json" 2^>nul') do (
   set "CAND=%USERPROFILE%\Downloads\%%F"
-  node -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));const x=j.installed;if(x&&x.client_id&&x.client_secret&&Array.isArray(x.redirect_uris)&&x.redirect_uris.some(u=>/^http:\/\/localhost/.test(u)))process.exit(0)}catch(e){}process.exit(1)" "!CAND!"
+  "!NODE!" -e "const fs=require('fs');try{const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));const x=j.installed;if(x&&x.client_id&&x.client_secret&&Array.isArray(x.redirect_uris)&&x.redirect_uris.some(u=>/^http:\/\/localhost/.test(u)))process.exit(0)}catch(e){}process.exit(1)" "!CAND!"
   if !errorlevel! equ 0 (
     set "CLIENT_JSON=!CAND!"
     goto :clientfound
@@ -113,7 +124,7 @@ if not defined CLIENT_JSON (
 )
 echo OAUTH_DESKTOP_JSON_OK
 
-gcloud services enable script.googleapis.com drive.googleapis.com serviceusage.googleapis.com logging.googleapis.com --project "%PROJECT_ID%" --quiet
+call gcloud services enable script.googleapis.com drive.googleapis.com serviceusage.googleapis.com logging.googleapis.com --project "%PROJECT_ID%" --quiet
 if errorlevel 1 (
   echo ERRO_APIS_GCP
   exit /b 37
@@ -167,7 +178,7 @@ if errorlevel 1 (
   exit /b 43
 )
 
-node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));if(!(j&&j.response&&j.response.ok===true&&j.response.status==='ONLINE'&&j.response.sistema==='WMGJ'))process.exit(1)" "%WORK%\status.json"
+"!NODE!" -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));if(j&&j.response&&j.response.ok===true&&j.response.status==='ONLINE'&&j.response.sistema==='WMGJ'){process.exit(0)}process.exit(1)" "%WORK%\status.json"
 if errorlevel 1 (
   popd
   echo ERRO_EXECUTION_API_STATUS
