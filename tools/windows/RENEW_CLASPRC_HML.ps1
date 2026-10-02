@@ -36,8 +36,25 @@ function Find-DesktopClientSecret {
 }
 
 Require-Command "gcloud"
+
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+  $nodeRoot = Join-Path $env:LOCALAPPDATA "Temp\aurora-node-portable"
+  if (Test-Path $nodeRoot) {
+    $nodeExe = Get-ChildItem $nodeRoot -Filter "node.exe" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($nodeExe) {
+      $nodeDir = Split-Path $nodeExe.FullName
+      $env:PATH = "$nodeDir;$env:PATH"
+    }
+  }
+}
 Require-Command "node"
 Require-Command "npm"
+Require-Command "npx"
+
+$npmUserBin = Join-Path $env:APPDATA "npm"
+if (Test-Path $npmUserBin) {
+  $env:PATH = "$npmUserBin;$env:PATH"
+}
 
 $Gh = $null
 $ghCommand = Get-Command gh -ErrorAction SilentlyContinue
@@ -47,6 +64,12 @@ if ($ghCommand) {
   $portableGh = Join-Path $env:LOCALAPPDATA "Programs\GitHubCLI\gh.exe"
   if (Test-Path $portableGh) {
     $Gh = $portableGh
+  } else {
+    $extractRoot = Join-Path $env:LOCALAPPDATA "Temp\aurora-gh-portable\extract"
+    if (Test-Path $extractRoot) {
+      $foundGh = Get-ChildItem $extractRoot -Filter "gh.exe" -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($foundGh) { $Gh = $foundGh.FullName }
+    }
   }
 }
 if (-not $Gh) {
