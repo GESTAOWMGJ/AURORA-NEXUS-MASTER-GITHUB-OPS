@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "AURORA-IMAC-REMOTE-BASE-001",
+  "status": "CANDIDATE",
+  "role": "PRIMARY_REMOTE_OPERATIONAL_NODE",
+  "target": {
+    "hostname": "iMac-de-Joao.local",
+    "platform": "macOS",
+    "osVersion": "10.13.6",
+    "architecture": "x86_64"
+  },
+  "controlPlane": {
+    "provider": "TRIGGERcmd",
+    "mode": "allowlisted-commands-only",
+    "arbitraryShell": false,
+    "autostart": "LaunchAgent",
+    "launchAgentLabel": "com.jfn.triggercmd.imac"
+  },
+  "auroraMirror": {
+    "repository": "GESTAOWMGJ/automacao-gestao-wmgj",
+    "branch": "main",
+    "updatePolicy": "fast-forward-only",
+    "localMutationAllowed": false,
+    "deployAllowed": false,
+    "firebaseWriteAllowed": false
+  },
+  "authorizedCommands": [
+    "JFN Status Mac",
+    "JFN Diagnostico",
+    "JFN Rede",
+    "JFN Reiniciar Agente",
+    "AURORA NEXUS Status",
+    "AURORA NEXUS Sincronizar"
+  ],
+  "guardrails": [
+    "no-sudo",
+    "no-sip-disable",
+    "no-gatekeeper-disable",
+    "no-arbitrary-shell",
+    "no-production-deploy",
+    "no-firebase-write-from-sync",
+    "no-destructive-git-reset",
+    "no-secret-output"
+  ],
+  "promotionGate": {
+    "requiresHumanReview": true,
+    "requiresHighSierraNativeTest": true,
+    "requiresRemoteRoundTripEvidence": true,
+    "requiresRollbackEvidence": true
+  }
+}
