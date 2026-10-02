@@ -57,19 +57,26 @@ test("RC1.1 cleanup tolerates Firestore post-restore finalization", () => {
 });
 
 
-test("RC1.1 reuses provisioned HMAC and never mutates Secret Manager", () => {
+test("RC1.1 reuses or one-shot bootstraps the existing HML HMAC without mutating Secret Manager", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
   assert.match(workflow, /Build and validate existing HMAC contract/);
   assert.match(workflow, /gcloud secrets describe "\$secret_name"/);
+  assert.match(workflow, /gcloud secrets versions access latest/);
+  assert.match(workflow, /auroraRc11InspecionarConfiguracao/);
+  assert.match(workflow, /auroraRc11ConfigurarEndpointExistente/);
+  assert.match(workflow, /auroraRc11ConfigurarIngestao/);
+  assert.match(workflow, /::add-mask::\$hmac_secret/);
   assert.doesNotMatch(workflow, /gcloud secrets versions add/);
   assert.doesNotMatch(workflow, /functions:secrets:set WMGJ_INGEST_HMAC_KEYRING/);
   assert.doesNotMatch(workflow, /gcloud secrets update/);
   assert.doesNotMatch(workflow, /gcloud secrets create/);
-  assert.match(workflow, /auroraRc11ConfigurarEndpointExistente/);
+  assert.doesNotMatch(workflow, /add-iam-policy-binding/);
   assert.match(workflow, /auroraRc11ValidarHmacExistente/);
 });
 
 test("RC1.1 HMAC probe is authenticated, dry-run and non-mutating", () => {
+  assert.match(source, /function auroraRc11InspecionarConfiguracao\(\)/);
+  assert.match(source, /hmacConfigured:/);
   assert.match(source, /function auroraRc11ValidarHmacExistente\(\)/);
   assert.match(source, /RC11_DRY_RUN_OBRIGATORIO/);
   assert.match(source, /code === 400 && parsed && parsed\.code === 'VALIDATION_ERROR'/);
@@ -88,10 +95,16 @@ test("RC1.1 HMAC probe is authenticated, dry-run and non-mutating", () => {
 test("RC1.1 request explicitly selects existing-HMAC probe mode", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
   const request = JSON.parse(readFileSync(new URL("../../../.github/requests/aurora-rc11-run.json", import.meta.url), "utf8"));
-  assert.equal(request.requestVersion, 4);
-  assert.equal(request.hmacMode, "REUSE_EXISTING_WITH_AUTH_PROBE");
-  assert.match(workflow, /\.requestVersion==4/);
-  assert.match(workflow, /\.hmacMode=="REUSE_EXISTING_WITH_AUTH_PROBE"/);
+  assert.equal(request.requestVersion, 5);
+  assert.equal(request.hmacMode, "REUSE_OR_BOOTSTRAP_EXISTING_KEYRING");
+  assert.equal(request.deploymentApproved, true);
+  assert.equal(request.firebaseWriteApproved, true);
+  assert.equal(request.hmacBootstrapIfMissing, true);
+  assert.match(workflow, /\.requestVersion==5/);
+  assert.match(workflow, /\.hmacMode=="REUSE_OR_BOOTSTRAP_EXISTING_KEYRING"/);
+  assert.match(workflow, /\.deploymentApproved==true/);
+  assert.match(workflow, /\.firebaseWriteApproved==true/);
+  assert.match(workflow, /\.hmacBootstrapIfMissing==true/);
 });
 
 
