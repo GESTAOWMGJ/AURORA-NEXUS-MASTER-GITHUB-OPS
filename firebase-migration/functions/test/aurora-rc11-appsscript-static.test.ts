@@ -102,3 +102,16 @@ test("RC1.1 workflow cannot auto-run from implementation changes", () => {
   assert.doesNotMatch(workflow, /paths:[\s\S]*aurora-rc11-recovery-real-ingest\.yml/);
   assert.doesNotMatch(workflow, /paths:[\s\S]*firebase-migration\/functions\/\*\*/);
 });
+
+
+test("RC1.1 verifies existing Functions runtime without secret IAM mutation", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  assert.match(workflow, /Verify existing HML runtime and deploy non-secret surfaces/);
+  assert.match(workflow, /firebase-tools@14\.17\.0 functions:list/);
+  assert.match(workflow, /gcloud functions describe runtimeHealth/);
+  assert.match(workflow, /signatureVersion=="v2"/);
+  assert.match(workflow, /--only hosting,firestore:rules,firestore:indexes/);
+  assert.doesNotMatch(workflow, /--only functions:ingestWmgjEvent/);
+  assert.doesNotMatch(workflow, /secretmanager\.secrets\.setIamPolicy/);
+  assert.match(workflow, /functionsRedeployed:false/);
+});
