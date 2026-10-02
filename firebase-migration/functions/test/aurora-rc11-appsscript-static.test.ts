@@ -129,6 +129,9 @@ test("RC1.1 treats clasp execution as a fail-closed nondev gate", () => {
   assert.match(runner, /Unable to run script function/);
   assert.match(runner, /NOT_AUTHORIZED/);
   assert.match(runner, /exit 71/);
+  assert.match(runner, /error\.details\[0\]\.errorMessage/);
+  assert.match(runner, /\[REDACTED\]/);
+  assert.match(runner, /exit 73/);
   assert.match(deployment, /AURORA_EXECUTION_API_CANONICAL/);
   assert.match(deployment, /clasp redeploy/);
   assert.match(deployment, /clasp deploy/);
