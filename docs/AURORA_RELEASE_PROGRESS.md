@@ -100,3 +100,20 @@ esta nota. AURORA NEXUS permanece sistema-mãe; WMGJ Operação, tenant-piloto.
 
 Rollback desta candidata: descartar/reverter o patch na branch antes de qualquer
 implantação; não há estado remoto ou instalação modificados nesta etapa.
+
+### Regressão encontrada pelo emulador no PR #98
+
+O run `37078422306` executou Java 21 e identificou uma falha de disponibilidade
+na autorização de `clinicalEvidence`: repetição dos helpers de membership e
+escopo ultrapassou o limite de 1.000 expressões do Firestore Rules. Não houve
+escrita em HML/produção. Instaladores, criptografia e integração orgânica passaram
+no primeiro SHA remoto `6cf04cbd637dcfc3983c233a6a28e507d8a3de7b`.
+
+Correção candidata: reutilizar o profile em variáveis locais e validar o escopo
+sem reentrar repetidamente nos mesmos helpers. Mantidos organização ativa,
+membership ativo, papel/permissão, gate clínico e unidade. Testes individualizam
+papel clínico e permissão explícita e cobrem membership ausente/inativo, escopo
+vazio/malformado e permissão malformada. Aceite: suíte inteira no emulador, sem
+remover negativos; até nova evidência o gate permanece pendente.
+
+Referência técnica: https://firebase.google.com/docs/firestore/security/rules-structure

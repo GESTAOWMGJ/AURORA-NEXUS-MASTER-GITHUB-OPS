@@ -62,6 +62,22 @@ async function seed() {
       setDoc(doc(db, 'organizations/wmgj/members/clinical-reader'), member('viewer', {
         permissions: ['clinical.read']
       })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-no-facility'), member('viewer', {
+        permissions: ['clinical.read'],
+        facilityIds: []
+      })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-malformed-scope'), member('viewer', {
+        permissions: ['clinical.read'],
+        allFacilities: 'true',
+        facilityIds: 'facility-alpha'
+      })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-malformed-permission'), member('viewer', {
+        permissions: 'clinical.read'
+      })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-inactive'), member('medical_auditor', {
+        active: false,
+        permissions: ['clinical.read']
+      })),
       setDoc(doc(db, 'organizations/wmgj/members/inactive'), member('auditor', {
         active: false,
         allFacilities: true,
@@ -342,27 +358,29 @@ test('auditor médico não recebe financeiro ou operação por padrão', async (
   );
 });
 
-test('clinicalEvidence exige gate clínico, papel/permissão e facility scope', async () => {
-  const medicalDb = env.authenticatedContext('medical').firestore();
-  const permissionDb = env.authenticatedContext('clinical-reader').firestore();
-  const operatorDb = env.authenticatedContext('operator').firestore();
+for (const uid of ['medical', 'clinical-reader']) {
+  test(`clinicalEvidence permite ${uid} no orçamento real de expressões, apenas na unidade`, async () => {
+    const db = env.authenticatedContext(uid).firestore();
+    await assertSucceeds(
+      getDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-alpha'))
+    );
+    await assertFails(
+      getDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-beta'))
+    );
+  });
+}
 
-  await assertSucceeds(
-    getDoc(doc(medicalDb, 'organizations/wmgj/clinicalEvidence/clinical-alpha'))
-  );
-  await assertFails(
-    getDoc(doc(medicalDb, 'organizations/wmgj/clinicalEvidence/clinical-beta'))
-  );
-  await assertSucceeds(
-    getDoc(doc(permissionDb, 'organizations/wmgj/clinicalEvidence/clinical-alpha'))
-  );
-  await assertFails(
-    getDoc(doc(permissionDb, 'organizations/wmgj/clinicalEvidence/clinical-beta'))
-  );
-  await assertFails(
-    getDoc(doc(operatorDb, 'organizations/wmgj/clinicalEvidence/clinical-alpha'))
-  );
-});
+for (const uid of [
+  'operator', 'clinical-no-facility', 'clinical-malformed-scope',
+  'clinical-malformed-permission', 'clinical-inactive', 'no-membership'
+]) {
+  test(`clinicalEvidence nega ${uid} sem reduzir os gates para caber no orçamento`, async () => {
+    const db = env.authenticatedContext(uid).firestore();
+    await assertFails(
+      getDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-alpha'))
+    );
+  });
+}
 
 test('clinicalEvidence falha fechado quando gate clínico é false ou ausente', async () => {
   const db = env.authenticatedContext('admin').firestore();
