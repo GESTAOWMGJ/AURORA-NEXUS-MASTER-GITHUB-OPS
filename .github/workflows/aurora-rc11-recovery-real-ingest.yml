@@ -268,6 +268,7 @@ jobs:
       - name: Push bridge and configure Apps Script
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
           npm install -g @google/clasp@3.4.1
@@ -276,7 +277,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/build-appscript"
           cp appsscript.json "$RUNNER_TEMP/build-appscript/appsscript.json"
           cp src/*.gs "$RUNNER_TEMP/build-appscript/"
-          printf '{"scriptId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" > "$RUNNER_TEMP/build-appscript/.clasp.json"
+          printf '{"scriptId":"%s","projectId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" "$PROJECT_ID" > "$RUNNER_TEMP/build-appscript/.clasp.json"
           cd "$RUNNER_TEMP/build-appscript"
           clasp push --force
           bash "$GITHUB_WORKSPACE/tools/ensure-appscript-execution-deployment.sh" "$RUNNER_TEMP/rc11-appscript-deployment.json"
