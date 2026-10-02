@@ -8,6 +8,7 @@ on:
       - 'src/**/*.gs'
       - 'tools/**/*.js'
       - 'tools/**/*.sh'
+      - 'tools/**/*.cjs'
       - 'appsscript.json'
       - '.github/workflows/deploy-appscript.yml'
   workflow_dispatch:
