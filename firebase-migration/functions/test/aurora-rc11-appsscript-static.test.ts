@@ -179,7 +179,10 @@ test("Windows clasp renewal keeps OAuth material local and updates GitHub Secret
   assert.match(helper, /299889357292/);
   assert.match(helper, /clasp login --use-project-scopes --include-clasp-scopes --creds/);
   assert.match(helper, /clasp run obterStatusWMGJ --nondev --json/);
-  assert.match(helper, /gh secret set CLASPRC_JSON/);
+  assert.match(helper, /\$Gh secret set CLASPRC_JSON/);
+  assert.match(helper, /Programs\\GitHubCLI\\gh\.exe/);
+  assert.match(helper, /auth status --hostname github\.com/);
+  assert.match(helper, /auth login --hostname github\.com --git-protocol https --web --skip-ssh-key/);
   assert.match(helper, /CLASPRC_JSON_ROTATED_AND_EXECUTION_API_VERIFIED/);
   assert.doesNotMatch(helper, /Write-Host .*client_secret/i);
   assert.doesNotMatch(helper, /Write-Host .*refresh_token/i);
