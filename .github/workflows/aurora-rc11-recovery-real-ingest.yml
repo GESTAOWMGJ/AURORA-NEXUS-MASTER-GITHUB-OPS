@@ -237,14 +237,33 @@ jobs:
           existing_secret="$(gcloud secrets describe "$secret_name" --project "$PROJECT_ID" --format='value(name)')"
           test -n "$existing_secret"
 
-      - name: Deploy exact RC1.1 HML runtime
+      - name: Verify existing HML runtime and deploy non-secret surfaces
         working-directory: firebase-migration
         env:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
-          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only functions:ingestWmgjEvent,functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,hosting,firestore:rules,firestore:indexes
+          npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json > "$RUNNER_TEMP/functions-list.json"
+          required='["ingestWmgjEvent","runtimeWatchdog","runtimeHealth","auroraNexusAuthGate","auroraNexusSessionLogin","auroraNexusSessionLogout","auroraNexusBootstrap","auroraNexusNativeInsight","auroraNexusAction","auroraNexusRefresh","auroraNexusProjectionEngine","auroraNexusOrganic","auroraNexusIntegrationKeys","auroraNexusIntegrationPing"]'
+          jq -e --argjson required "$required" '
+            [.. | objects | (.id? // .name? // empty) | tostring | split("/")[-1]] as $deployed
+            | all($required[]; $deployed | index(.) != null)
+          ' "$RUNNER_TEMP/functions-list.json" >/dev/null
+          health_url="$(gcloud functions describe runtimeHealth --gen2 --region "$REGION" --project "$PROJECT_ID" --format='value(serviceConfig.uri)')"
+          test -n "$health_url"
+          curl -fsS "$health_url" > "$RUNNER_TEMP/runtime-health.json"
+          jq -e '.ok==true and .service=="wmgj-firestore-ingestion" and .signatureVersion=="v2"' "$RUNNER_TEMP/runtime-health.json" >/dev/null
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only hosting,firestore:rules,firestore:indexes
           echo "AURORA_RC11_INGEST_URL=https://${REGION}-${PROJECT_ID}.cloudfunctions.net/ingestWmgjEvent" >> "$GITHUB_ENV"
+          jq -n --arg healthUrl "$health_url" '{
+            gate:"HML_RUNTIME_VERIFIED",
+            functionsPresent:true,
+            runtimeHealth:true,
+            signatureVersion:"v2",
+            functionsRedeployed:false,
+            nonSecretSurfacesDeployed:true,
+            healthUrl:$healthUrl
+          }' > "$RUNNER_TEMP/rc11-evidence/runtime.json"
 
       - name: Push bridge and configure Apps Script
         env:
