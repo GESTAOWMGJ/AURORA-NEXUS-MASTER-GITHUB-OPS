@@ -298,13 +298,9 @@ chmod 600 "$STAGE/commands.json"
 
 # Escape values interpolated in XML; unusual account paths must remain data.
 xml_escape() {
-  local value="$1"
-  value="${value//&/\&amp;}"
-  value="${value//</\&lt;}"
-  value="${value//>/\&gt;}"
-  value="${value//\"/\&quot;}"
-  value="${value//\'/\&apos;}"
-  printf '%s' "$value"
+  # POSIX sed keeps identical escaping on Apple Bash 3.2 and modern Bash.
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' \
+    -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"
 }
 NODE_XML="$(xml_escape "$NODE")"
 AGENT_XML="$(xml_escape "$AGENT_SRC/agent.js")"
