@@ -52,3 +52,30 @@ test("AURORA-MO-001 preserves the weekly technical audit gate", () => {
     assert.match(text, /sem merge ou deploy automático/i);
   }
 });
+
+
+test("AURORA-MO-001 native routine registry is mandatory and tenant-safe", () => {
+  const doc = readRepoFile("docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md");
+  const skill = readRepoFile("skills/aurora-nexus-continuous-dev/SKILL.md");
+  const registry = readRepoFile("firebase-migration/functions/src/auroraNativeRoutines.ts");
+  for (const text of [doc, skill]) {
+    assert.match(text, /auroraNativeRoutines\.ts/);
+    assert.match(text, /LEGACY_MIRRORED/);
+    assert.match(text, /tenant/i);
+  }
+  assert.match(registry, /AURORA-FIN-SOC-001/);
+  assert.match(registry, /AURORA-REV-SAN-001/);
+  assert.match(registry, /AURORA-TECH-AUDIT-WEEKLY/);
+  assert.match(registry, /tenantRawDataTransfer:\s*false/);
+});
+
+test("AURORA-MO-001 defines the simplified monthly closing and manager decision guardrails", () => {
+  const doc = readRepoFile("docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md");
+  assert.match(doc, /contas vencidas/i);
+  assert.match(doc, /contas a vencer/i);
+  assert.match(doc, /receita esperada/i);
+  assert.match(doc, /saldo em conta/i);
+  assert.match(doc, /APPROVED_FOR_DISTRIBUTION/);
+  assert.match(doc, /MFA/);
+  assert.match(doc, /não executa PIX/i);
+});

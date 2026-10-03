@@ -1,4 +1,5 @@
 import { validEvidenceRef } from "./auroraEvidence.js";
+import { nativeRoutineSummary } from "./auroraNativeRoutines.js";
 
 export const AURORA_MODULES = [
   ["M01", "Ingestão e Proveniência Documental"],
@@ -310,6 +311,7 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
       autonomousSourceMutation: false,
       nextState: "EVIDENCE_TO_LIMITED_PROPOSAL"
     },
+    nativeRoutines: nativeRoutineSummary(),
     coverage: {
       evidencePercent: ratio(validatedSources, operationalSource.sourceDocuments.length),
       reconciliationPercent: ratio(reconciled, operationalSource.reconciliations.length)

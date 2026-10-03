@@ -1,0 +1,208 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import test from "node:test";
+import { buildLayFinancialStatus, distributionDecisionGuard, financialClosingHash } from "../src/auroraFinancialStatus.ts";
+
+const closing = {
+  orgId: "wmgj",
+  competence: "2026-09",
+  status: "CLOSED",
+  distributionGateState: "ELIGIBLE",
+  financialCents: {
+    forecastCents: 5000000,
+    cashBalanceCents: 3600000,
+    receivableCents: 1200000,
+    distributableCents: 750000
+  }
+};
+
+test("resumo leigo calcula vencidas, a vencer e janelas de recebimento sem inventar ausência", () => {
+  const result = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-09",
+    closing,
+    financialEntries: [
+      { workflowState: "VALIDATED", kind: "EXPENSE", status: "OPEN", amountCents: 120000, dueDate: "2026-10-02" },
+      { workflowState: "VALIDATED", kind: "PAYABLE", status: "OPEN", amountCents: 180000, dueDate: "2026-10-10" },
+      { workflowState: "VALIDATED", kind: "REVENUE", status: "OPEN", amountCents: 999999, dueDate: "2026-10-04" }
+    ],
+    taxObligations: [
+      { workflowState: "VALIDATED", status: "OPEN", amountCents: 50000, due_date: "2026-10-05" }
+    ],
+    invoices: [
+      { workflowState: "VALIDATED", status: "OPEN", totalCents: 500000, dueDate: "2026-10-02" },
+      { workflowState: "VALIDATED", status: "OPEN", totalCents: 700000, dueDate: "2026-10-10" }
+    ],
+    now: new Date("2026-10-03T12:00:00Z")
+  }) as any;
+  assert.equal(result.amounts.overduePayablesCents, 120000);
+  assert.equal(result.amounts.upcomingPayablesCents, 230000);
+  assert.equal(result.dueDates.currentDueDate, "2026-10-02");
+  assert.equal(result.dueDates.nextDueDate, "2026-10-05");
+  assert.equal(result.amounts.receivableUntilCurrentDueCents, 500000);
+  assert.equal(result.amounts.receivableUntilNextDueCents, 500000);
+  assert.equal(result.amounts.revenueToCashGapCents, 1400000);
+  assert.equal(result.canApproveDistribution, true);
+});
+
+test("sem saldo ou previsão comprovados, diferença permanece null e não zero", () => {
+  const result = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-09",
+    closing: { ...closing, financialCents: { distributableCents: 0 }, distributionGateState: "ELIGIBLE" },
+    financialEntries: [],
+    taxObligations: [],
+    invoices: [],
+    now: new Date("2026-10-03T12:00:00Z")
+  }) as any;
+  assert.equal(result.amounts.expectedRevenueCents, null);
+  assert.equal(result.amounts.cashBalanceCents, null);
+  assert.equal(result.amounts.revenueToCashGapCents, null);
+  assert.equal(result.amounts.distributableCents, 0);
+  assert.equal(result.amounts.overduePayablesCents, null);
+});
+
+test("fonte incompleta ou gate não elegível bloqueia aprovação, mas rejeição permanece decisão humana possível no endpoint", () => {
+  const incomplete = buildLayFinancialStatus({
+    orgId: "wmgj", competence: "2026-09", closing,
+    financialEntries: [], taxObligations: [], invoices: [], sourceComplete: false
+  }) as any;
+  assert.equal(incomplete.canApproveDistribution, false);
+  assert.equal(incomplete.amounts.overduePayablesCents, null);
+  assert.equal(incomplete.amounts.upcomingPayablesCents, null);
+  assert.equal(incomplete.dueDates.currentDueDate, null);
+  const blocked = buildLayFinancialStatus({
+    orgId: "wmgj", competence: "2026-09",
+    closing: { ...closing, distributionGateState: "BLOCKED" },
+    financialEntries: [], taxObligations: [], invoices: []
+  }) as any;
+  assert.equal(blocked.canApproveDistribution, false);
+});
+
+
+test("mudança da evidência entre pré-validação e commit invalida a aprovação mesmo com fechamento imutável", () => {
+  const beforeClosing = { ...closing, financialCents: { ...closing.financialCents } };
+  const duringCommitClosing = { ...closing, financialCents: { ...closing.financialCents } };
+  const before = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-09",
+    closing: beforeClosing,
+    financialEntries: [
+      { _id: "pay-1", workflowState: "VALIDATED", kind: "PAYABLE", status: "OPEN", amountCents: 100000, dueDate: "2026-10-10" }
+    ],
+    taxObligations: [],
+    invoices: []
+  }) as any;
+
+  assert.equal(before.canApproveDistribution, true);
+  assert.equal(distributionDecisionGuard(before, before.snapshotHash, "APPROVE"), null);
+  assert.equal(financialClosingHash(beforeClosing), financialClosingHash(duringCommitClosing));
+
+  const duringCommit = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-09",
+    closing: duringCommitClosing,
+    financialEntries: [
+      { _id: "pay-1", workflowState: "VALIDATED", kind: "PAYABLE", status: "OPEN", amountCents: 110000, dueDate: "2026-10-10" }
+    ],
+    taxObligations: [],
+    invoices: []
+  }) as any;
+
+  assert.equal(duringCommit.canApproveDistribution, true);
+  assert.notEqual(duringCommit.snapshotHash, before.snapshotHash);
+  assert.equal(
+    distributionDecisionGuard(duringCommit, before.snapshotHash, "APPROVE"),
+    "STALE_FINANCIAL_SNAPSHOT"
+  );
+});
+
+test("runtime de decisão registra aprovação, nunca pagamento ou transferência", () => {
+  const runtime = fs.readFileSync("src/auroraFinancialDecisionRuntime.ts", "utf8");
+  assert.match(runtime, /APPROVED_FOR_DISTRIBUTION/);
+  assert.match(runtime, /MFA_REQUIRED/);
+  assert.match(runtime, /moneyMoved:\s*false/);
+  assert.match(runtime, /automaticPayment:\s*false/);
+  assert.match(runtime, /automaticDistribution:\s*false/);
+  assert.match(runtime, /tx\.get\(financialEntriesQuery\)/);
+  assert.match(runtime, /tx\.get\(taxObligationsQuery\)/);
+  assert.match(runtime, /tx\.get\(invoicesQuery\)/);
+  assert.match(runtime, /distributionDecisionGuard\(transactionalSummary, snapshotHash, decision\)/);
+  assert.doesNotMatch(runtime, /executePayment|pix\(|bankTransfer|transferFunds/);
+});
+
+
+test("registro aberto sem vencimento bloqueia totais por prazo e aprovação", () => {
+  const result = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-09",
+    closing,
+    financialEntries: [
+      { workflowState: "VALIDATED", kind: "PAYABLE", status: "OPEN", amountCents: 180000, dueDate: "2026-10-10" },
+      { workflowState: "VALIDATED", kind: "EXPENSE", status: "OPEN", amountCents: 120000 }
+    ],
+    taxObligations: [],
+    invoices: [],
+    now: new Date("2026-10-03T12:00:00Z")
+  }) as any;
+  assert.equal(result.sourceComplete, false);
+  assert.equal(result.counts.invalidOpenPayables, 1);
+  assert.equal(result.amounts.overduePayablesCents, null);
+  assert.equal(result.amounts.upcomingPayablesCents, null);
+  assert.equal(result.dueDates.currentDueDate, null);
+  assert.equal(result.canApproveDistribution, false);
+});
+
+test("aprovação de snapshot anterior deixa de valer e a revisão é preservada para nova decisão", () => {
+  const result = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-09",
+    closing,
+    financialEntries: [],
+    taxObligations: [],
+    invoices: [],
+    currentDecision: {
+      snapshotHash: "0".repeat(64),
+      decision: "APPROVED_FOR_DISTRIBUTION",
+      revision: 4
+    }
+  }) as any;
+  assert.equal(result.decision, null);
+  assert.equal(result.decisionRevision, 4);
+});
+
+
+test("prazo usa o dia civil de São Paulo perto da virada UTC", () => {
+  const result = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-10",
+    closing,
+    financialEntries: [
+      { workflowState: "VALIDATED", kind: "PAYABLE", status: "OPEN", amountCents: 100000, dueDate: "2026-10-03" }
+    ],
+    taxObligations: [],
+    invoices: [],
+    now: new Date("2026-10-04T01:30:00Z")
+  }) as any;
+  assert.equal(result.dueDates.currentDueDate, "2026-10-03");
+  assert.equal(result.dueDates.currentDueDays, 0);
+  assert.equal(result.amounts.overduePayablesCents, 0);
+  assert.equal(result.amounts.upcomingPayablesCents, 100000);
+});
+
+test("lançamento financeiro aberto sem natureza conhecida bloqueia cobertura em vez de sumir da tela", () => {
+  const result = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-10",
+    closing,
+    financialEntries: [
+      { workflowState: "VALIDATED", status: "OPEN", amountCents: 100000, dueDate: "2026-10-05" }
+    ],
+    taxObligations: [],
+    invoices: []
+  }) as any;
+  assert.equal(result.sourceComplete, false);
+  assert.equal(result.counts.invalidOpenPayables, 1);
+  assert.equal(result.amounts.upcomingPayablesCents, null);
+  assert.equal(result.canApproveDistribution, false);
+});

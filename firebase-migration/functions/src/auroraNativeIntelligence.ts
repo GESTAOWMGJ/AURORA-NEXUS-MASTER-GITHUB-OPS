@@ -1,4 +1,4 @@
-export const AURORA_NATIVE_INTELLIGENCE_VERSION = "0.2.0-firebase-native";
+export const AURORA_NATIVE_INTELLIGENCE_VERSION = "0.3.0-firebase-native-routines";
 
 export type NativeInsightIntent =
   | "EXECUTIVE"
@@ -81,6 +81,8 @@ export function generateNativeInsight(
   const coverage = record(projection.coverage);
   const documentIntelligence = record(projection.documentIntelligence);
   const nativeDataPlane = record(projection.nativeDataPlane);
+  const nativeRoutines = record(projection.nativeRoutines);
+  const routineCounts = record(nativeRoutines.counts);
 
   const findings: NativeInsightFinding[] = [];
   const sourcePresent = dataQuality.sourcePresent === true;
@@ -96,6 +98,7 @@ export function generateNativeInsight(
   const overdueDocumentSla = finiteNumber(documentIntelligence.overdueDocumentSla) ?? 0;
   const pendingDocumentFlow = finiteNumber(documentIntelligence.pendingDocumentFlow) ?? 0;
   const externalAiDocuments = finiteNumber(documentIntelligence.externalAiDocuments) ?? 0;
+  const legacyMirroredRoutines = finiteNumber(routineCounts.LEGACY_MIRRORED) ?? 0;
 
   if (nativeDataPlane.storage !== "FIRESTORE" || nativeDataPlane.sourceAccessDuringInference !== false) {
     findings.push(finding(
@@ -213,6 +216,17 @@ export function generateNativeInsight(
       `${pendingDocumentFlow} documento(s) ainda não atingiram estado VALIDATED/CLOSED.`,
       "Separar fila por origem (MV/TASY/ERP), estágio e fragilidade; promover melhoria orgânica somente após validação humana do resultado.",
       "projection.documentIntelligence.pendingDocumentFlow"
+    ));
+  }
+
+  if (legacyMirroredRoutines > 0) {
+    findings.push(finding(
+      "ROUTINE_NATIVE_MIGRATION",
+      "MEDIUM",
+      "Rotinas WMGJ ainda com executor legado",
+      `${legacyMirroredRoutines} rotina(s) já possuem representação nativa no motor, mas o executor permanece espelhado do Apps Script até migração governada.`,
+      "Migrar executor por paridade, teste, CI, HML e rollback; não duplicar gatilhos nem ativar duas fontes executoras simultaneamente.",
+      "projection.nativeRoutines.counts.LEGACY_MIRRORED"
     ));
   }
 

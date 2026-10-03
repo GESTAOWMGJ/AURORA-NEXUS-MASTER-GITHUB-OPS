@@ -105,3 +105,17 @@ A versão `1.0.0` GA exige, no mínimo:
 - experiência de instalação/atualização validada;
 - documentação comercial e operacional;
 - smoke e aceite em ambiente de referência.
+
+## Registro nativo de rotinas
+
+Toda rotina recorrente ou agendamento identificado na WMGJ/AURORA deve ser confrontado com `firebase-migration/functions/src/auroraNativeRoutines.ts` antes de criar novo scheduler, trigger ou automação.
+
+- reutilizar rotina nativa existente quando houver equivalência;
+- marcar execução legada como `LEGACY_MIRRORED` até migração comprovada;
+- nunca executar simultaneamente versão legada e nativa do mesmo efeito sem desenho explícito de idempotência;
+- incluir tenant, cadência, gatilho, gate humano, efeito permitido e estado real;
+- incorporar o registro ao contexto da Native Intelligence;
+- promover aprendizado de novos clientes somente como padrão sanitizado, tenant-agnostic, testado e aprovado;
+- nunca transportar dados brutos, regras contratuais específicas ou valores de um tenant para outro.
+
+Mudança de estado `LEGACY_MIRRORED → NATIVE_ACTIVE` exige patch, testes, CI, HML, evidência de não duplicidade e revisão humana.

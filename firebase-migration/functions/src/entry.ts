@@ -5,3 +5,5 @@ export * from "./auroraOrganicRuntime.js";
 export * from "./auroraCryptoRuntime.js";
 export * from "./auroraIntegrationRuntime.js";
 export * from "./auroraDocumentGovernance.js";
+export * from "./auroraShareholderReportRuntime.js";
+export * from "./auroraFinancialDecisionRuntime.js";
