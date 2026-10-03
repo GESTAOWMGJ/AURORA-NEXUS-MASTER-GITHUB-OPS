@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import { AURORA_NATIVE_ROUTINES, nativeRoutineSummary } from "../src/auroraNativeRoutines.ts";
+import { buildProjection, type ProjectionSource } from "../src/auroraEngine.ts";
+import { generateNativeInsight } from "../src/auroraNativeIntelligence.ts";
 
 test("modus operandi WMGJ está representado como registro nativo multi-tenant", () => {
   const ids = new Set(AURORA_NATIVE_ROUTINES.map((item) => item.id));
@@ -22,4 +25,29 @@ test("aprendizado orgânico promove capacidade, não dados entre clientes", () =
   assert.equal(summary.organicPromotion.validatedOutcomeRequired, true);
   assert.equal(summary.organicPromotion.humanReviewRequired, true);
   assert.equal(summary.organicPromotion.tenantAgnosticAbstractionRequired, true);
+});
+
+
+test("projeção e inteligência nativa recebem o estado real de migração das rotinas", () => {
+  const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
+  const projection = buildProjection(empty, new Date("2026-10-03T12:00:00Z"), { orgId: "wmgj", competence: "2026-10" }) as any;
+  assert.equal(projection.nativeRoutines.source, "AURORA-MO-001");
+  assert.ok(projection.nativeRoutines.counts.LEGACY_MIRRORED > 0);
+  const insight = generateNativeInsight({
+    ...projection,
+    dataQuality: { sourcePresent: true, invalidFinancialRecords: 0 },
+    nativeDataPlane: { storage: "FIRESTORE", sourceAccessDuringInference: false },
+    documentIntelligence: {},
+    operations: {},
+    coverage: {},
+    financialCents: {}
+  }, "EXECUTIVE") as any;
+  assert.ok(insight.findings.some((item: any) => item.code === "ROUTINE_NATIVE_MIGRATION"));
+});
+
+test("AURORA-MO-001 torna a representação nativa obrigatória e proíbe transferência de dados brutos entre clientes", () => {
+  const doc = fs.readFileSync(new URL("../../../docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md", import.meta.url), "utf8");
+  assert.match(doc, /registro nativo de rotinas/i);
+  assert.match(doc, /nenhum dado bruto de um cliente/i);
+  assert.match(doc, /LEGACY_MIRRORED/);
 });
