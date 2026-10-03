@@ -5,7 +5,7 @@ import test from 'node:test';
 import { auroraProtectedShell } from '../src/auroraFrontend.ts';
 
 const member = { uid: 'synthetic-u1', email: 'synthetic@example.test', orgId: 'wmgj', role: 'auditor' as const, permissions: [], facilityIds: [], allFacilities: true, mfaVerified: true };
-const html = auroraProtectedShell(member, { action: 'synthetic-action', refresh: 'synthetic-refresh', integrationKey: 'synthetic-integration', logout: 'synthetic-logout' });
+const html = auroraProtectedShell(member, { action: 'synthetic-action', refresh: 'synthetic-refresh', integrationKey: 'synthetic-integration', distributionApproval: 'synthetic-distribution', logout: 'synthetic-logout' });
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
 const snapshot = { projection: { competence: '2026-08', generatedAt: '2026-09-28T11:00:00Z', financialCents: { invoicedCents: 12345, receivedCents: 0, glossCents: null }, operations: { overdueActions: 0, openActions: 0 }, coverage: { evidencePercent: null, reconciliationPercent: 0 }, modules: [] }, actions: [] };
 
@@ -48,7 +48,7 @@ test('the actual emitted browser script parses; missing regex delimiters fail th
 test('all navigation links target existing sections, not placeholder pages', () => {
   const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
   const targets = [...html.matchAll(/href="#([^"]+)"/g)].map(match => match[1]);
-  assert.equal(targets.length, 10);
+  assert.equal(targets.length, 11);
   targets.forEach(id => assert.ok(ids.has(id), id));
 });
 
@@ -170,4 +170,66 @@ test('newer bootstrap wins when an older request finishes later', async () => {
   f.fetchWith(async () => response(200, { ...snapshot, projection: { ...snapshot.projection, operations: { overdueActions: 9, openActions: 9 } } }));
   await f.run('load()'); complete(response()); await old;
   assert.equal(f.elements.get('overdue')!.textContent, '9');
+});
+
+
+test('simplified monthly closing renders evidence-preserving values and blocks approval without gate', async () => {
+  const f = await fixture(response(200, {
+    ...snapshot,
+    financialStatus: {
+      competence: '2026-09',
+      snapshotHash: 'a'.repeat(64),
+      sourceComplete: true,
+      distributionGateState: 'PENDING',
+      canApproveDistribution: false,
+      amounts: {
+        overduePayablesCents: 120000,
+        upcomingPayablesCents: 350000,
+        expectedRevenueCents: 5000000,
+        cashBalanceCents: 3600000,
+        revenueToCashGapCents: 1400000,
+        currentDueCents: 120000,
+        nextDueCents: 180000,
+        receivableUntilCurrentDueCents: null,
+        receivableUntilNextDueCents: 900000,
+        totalReceivableCents: 1200000,
+        distributableCents: null
+      },
+      dueDates: { currentDueDate: '2026-10-03', nextDueDate: '2026-10-10' },
+      decision: null
+    }
+  }));
+  assert.match(f.elements.get('closing-overdue-payables')!.textContent, /1\.200,00/);
+  assert.match(f.elements.get('closing-cash-balance')!.textContent, /36\.000,00/);
+  assert.equal(f.elements.get('closing-receivable-current')!.textContent, 'Sem fonte');
+  assert.equal(f.elements.get('distribution-approve')!.disabled, true);
+  assert.match(f.elements.get('distribution-decision-status')!.textContent, /Aguardando/);
+});
+
+test('manager distribution approval posts a decision only and never a payment command', async () => {
+  const f = await fixture(response(200, {
+    ...snapshot,
+    financialStatus: {
+      competence: '2026-08',
+      snapshotHash: 'b'.repeat(64),
+      sourceComplete: true,
+      distributionGateState: 'ELIGIBLE',
+      canApproveDistribution: true,
+      amounts: { distributableCents: 2500000 },
+      dueDates: {},
+      decision: null
+    }
+  }));
+  f.elements.get('distribution-reason')!.value = 'Fechamento revisado e aprovado pelo gestor.';
+  await f.click('distribution-approve');
+  const write = f.calls.find(call => call.url === '/api/distribution-approval');
+  assert.ok(write);
+  assert.equal(write.options.method, 'POST');
+  assert.equal(write.options.headers['X-Aurora-CSRF'], 'synthetic-distribution');
+  const body = JSON.parse(write.options.body);
+  assert.equal(body.decision, 'APPROVE');
+  assert.equal(body.snapshotHash, 'b'.repeat(64));
+  assert.equal(body.expectedRevision, 0);
+  assert.ok(!('payment' in body));
+  assert.ok(!('transfer' in body));
 });
