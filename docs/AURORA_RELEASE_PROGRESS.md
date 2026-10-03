@@ -60,3 +60,14 @@ Toda solicitação relevante deve:
 - Validação: testes locais e CI devem ser vinculados ao SHA final; nenhum resultado HML ou de produção é inferido.
 - Próximo gate: consulta autenticada read-only do banco HML e projeto de produção; depois planejar execução HML separadamente autorizada.
 - Rollback: reverter o commit do patch em PR revisado; não remover os bloqueios em operação sem reconciliação da evidência.
+
+### Evidência complementar — 03/10/2026
+
+- Main reconciliada: `5dcaddc88b27b54a7f24f9042b05e9799205fb1a` (PR #109). Nenhuma alteração do request RC1.1 nesta reconciliação.
+- Consultas Cloud Shell fornecidas pelo titular, identidade `wmgjltda@gmail.com`: `aurora-hml-cmek` e a CryptoKey prevista retornaram NOT_FOUND; duas listagens KMS em `southamerica-east1` retornaram `[]`. A lista de seis bancos não contém `aurora-hml-cmek` nem apresenta cmekConfig. Acesso ao recurso concedido pelo Google não equivale a provisionamento.
+- Cinco backups READY pertencem a `(default)`, snapshots de 29/09 a 03/10/2026. `(default)` tem schedules de backup e PITR habilitados, retenção de 604800s e proteção contra exclusão.
+- Quatro destinos de restore listados têm sourceInfo.progress COMPLETED; `rc11-restore-37093409122-4` estava IN_PROGRESS. Conclusão do provedor não comprova reconciliação dos dados ou restore CMEK. Não remover destinos nem alterar proteção contra exclusão neste patch.
+- Produção: describe retornou falta de permissão ou possível inexistência; não permite afirmar inexistência atual. ID continua candidato não validado e bloqueado.
+- HMAC: job `111225779429` do run `37093409122` falhou no probe com HTTP 401 / RC11_HMAC_INVALIDO (saída 73). PR #109 corrige interpretação da chave hexadecimal para 32 bytes em paridade com o backend; deploy Apps Script `37132639621` foi aprovado. Hipótese de segredo antigo não comprovada. Correção implantada não equivale a probe HML aprovado.
+- Na consulta de acompanhamento, job `111230961385` da tentativa 4 estava em restore; probe HMAC, ingestão, reconciliação e inteligência nativa ainda pendentes. Não disparada nova tentativa neste trabalho.
+- CMEK permanece PENDING_HML_VERIFICATION; banco, cmekConfig, versões de chave, backup/restore CMEK e falha/recuperação da chave não comprovados. Nenhum apply, recurso cloud, merge ou deploy executado por este patch.

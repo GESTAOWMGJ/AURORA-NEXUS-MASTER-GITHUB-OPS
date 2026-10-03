@@ -324,12 +324,22 @@ function wmgjFirestoreActorId_() {
 }
 
 function wmgjFirestoreHmacHex_(value, secret) {
-  var signature = Utilities.computeHmacSha256Signature(
-    String(value || ''),
-    String(secret || ''),
-    Utilities.Charset.UTF_8
-  );
+  var keyBytes = wmgjFirestoreHexKeyBytes_(secret);
+  var valueBytes = Utilities.newBlob(String(value || ''), 'text/plain; charset=utf-8').getBytes();
+  var signature = Utilities.computeHmacSha256Signature(valueBytes, keyBytes);
   return wmgjFirestoreBytesHex_(signature);
+}
+
+function wmgjFirestoreHexKeyBytes_(secret) {
+  var text = String(secret || '').trim();
+  if (!/^[A-Fa-f0-9]{64}$/.test(text)) throw new Error('HMAC_SECRET_HEX_INVALIDO');
+  var bytes = [];
+  for (var i = 0; i < text.length; i += 2) {
+    var value = parseInt(text.slice(i, i + 2), 16);
+    bytes.push(value > 127 ? value - 256 : value);
+  }
+  if (bytes.length !== 32) throw new Error('HMAC_SECRET_BYTES_INVALIDO');
+  return bytes;
 }
 
 function wmgjFirestoreCanonicalHmacV2_(body, headers) {
