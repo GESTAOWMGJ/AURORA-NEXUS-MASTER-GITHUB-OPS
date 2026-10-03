@@ -150,12 +150,34 @@ HOST="$(hostname)"
 OS="$(sw_vers -productVersion)"
 ARCH="$(uname -m)"
 DISK="$(df -h / | awk 'NR==2 {print $5}')"
-if pgrep -f 'TRIGGERcmd-headless/src/agent.js --console' >/dev/null 2>&1; then
-  AGENT="PROCESS_PRESENT"
-else
-  AGENT="PROCESS_ABSENT"
+# Inspect the managed PID, not an argv substring: a shell launcher may exec Node
+# with different flags. Presence is not connectivity, authentication or health.
+AGENT="PROCESS_UNKNOWN"
+PID="UNKNOWN"
+if SERVICES="$(/bin/launchctl list 2>/dev/null)"; then
+  ROW="$(printf '%s\n' "$SERVICES" | awk '$3 == "com.jfn.triggercmd.imac" {print $1}')"
+  case "$ROW" in
+    ''|-) AGENT="PROCESS_ABSENT"; PID="NONE" ;;
+    *[!0-9]*|0) : ;;
+    *)
+      PID="$ROW"
+      if EXECUTABLE="$(/bin/ps -p "$PID" -o comm= 2>/dev/null)" &&
+         STATE="$(/bin/ps -p "$PID" -o stat= 2>/dev/null)"; then
+        EXECUTABLE="${EXECUTABLE#"${EXECUTABLE%%[![:space:]]*}"}"
+        STATE="$(printf '%s' "$STATE" | tr -d '[:space:]')"
+        case "$STATE" in
+          Z*) AGENT="PROCESS_ABSENT" ;;
+          '') : ;;
+          *)
+            if [ "$EXECUTABLE" = "$HOME/Applications/node16/bin/node" ]; then
+              AGENT="PROCESS_PRESENT"
+            fi ;;
+        esac
+      fi ;;
+  esac
 fi
-MSG="JFN_MAC host=$HOST macOS=$OS arch=$ARCH disco=$DISK triggercmd=$AGENT"
+STAMP="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+MSG="JFN_MAC timestamp=$STAMP host=$HOST macOS=$OS arch=$ARCH disco=$DISK triggercmd=$AGENT managed_pid=$PID REMOTE_CONNECTIVITY=UNKNOWN"
 echo "$MSG"
 if [ -n "${TCMD_COMPUTER_ID:-}" ]; then
   sh "$HOME/.TRIGGERcmdData/sendresult.sh" "$MSG" >/dev/null 2>&1 || true
