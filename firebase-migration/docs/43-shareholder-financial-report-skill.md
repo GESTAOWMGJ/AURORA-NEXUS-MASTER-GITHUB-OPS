@@ -40,8 +40,12 @@ A política operacional esperada é executar o fechamento no último dia útil a
 | `taxesCents` | tributos comprovados |
 | `transfersCents` | repasses comprovados |
 | `closingResultCents` | resultado apurado no fechamento |
+| `cashBalanceCents` | saldo bancário canônico no corte |
+| `distributableCents` | valor distribuível somente após cálculo/gate do fechamento |
 
 `exceptionSummary.openCount` e `exceptionSummary.openAmountCents` devem representar somente exemplares canônicos não sobrepostos.
+
+`distributionGateState` deve permanecer separado dos valores. Apenas `ELIGIBLE`, acompanhado de fechamento `CLOSED`, cobertura suficiente, `distributableCents` canônico, MFA e decisão do gestor, habilita o registro de aprovação; ainda assim, nenhuma transferência é executada.
 
 ## Estados do relatório
 
