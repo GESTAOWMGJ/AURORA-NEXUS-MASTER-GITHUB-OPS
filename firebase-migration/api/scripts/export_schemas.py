@@ -6,21 +6,31 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from wmgj_api.models import AiAnalysisRequest, AiStructuredOutput, DashboardSnapshot
+from pydantic import TypeAdapter
+
+from wmgj_api.models import (
+    AiAnalysisRequest,
+    AiStructuredOutput,
+    DASHBOARD_SNAPSHOT_ADAPTER,
+    DashboardSnapshotV2,
+    DashboardSnapshotV3,
+)
 
 
 TARGET = Path(__file__).parents[2] / "schemas"
 CONTRACTS = {
-    "ai-analysis-request.schema.json": AiAnalysisRequest,
-    "ai-analysis-output.schema.json": AiStructuredOutput,
-    "dashboard-snapshot.schema.json": DashboardSnapshot,
+    "ai-analysis-request.schema.json": TypeAdapter(AiAnalysisRequest),
+    "ai-analysis-output.schema.json": TypeAdapter(AiStructuredOutput),
+    "dashboard-snapshot.schema.json": DASHBOARD_SNAPSHOT_ADAPTER,
+    "dashboard-snapshot.v2.schema.json": TypeAdapter(DashboardSnapshotV2),
+    "dashboard-snapshot.v3.schema.json": TypeAdapter(DashboardSnapshotV3),
 }
 
 
 def main() -> None:
     TARGET.mkdir(parents=True, exist_ok=True)
-    for filename, model in CONTRACTS.items():
-        schema = model.model_json_schema(by_alias=True)
+    for filename, adapter in CONTRACTS.items():
+        schema = adapter.json_schema(by_alias=True)
         schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
         schema["$id"] = f"https://wmgj.example/schemas/{filename}"
         path = TARGET / filename

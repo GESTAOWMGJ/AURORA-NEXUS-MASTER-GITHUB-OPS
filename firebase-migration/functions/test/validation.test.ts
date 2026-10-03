@@ -108,6 +108,45 @@ test("rótulo INTERNAL ou RESTRICTED não contorna bloqueio clínico fail-closed
   }
 });
 
+test("campos permitidos não viram canal de PHI ou narrativa livre", () => {
+  const prohibited = [
+    "João da Silva - insuficiência cardíaca",
+    "CPF: 12345678900",
+    "529.982.247-25",
+    "CNS: 898001160440001",
+    "898 0011 6044 0001",
+    "pessoa@example.test",
+    "Paciente João da Silva",
+    "patient synthetic-123",
+    Array.from({ length: 25 }, (_, index) => `item${index}`).join(" ")
+  ];
+
+  for (const status of prohibited) {
+    const result = validateEvent(event({ record: { status } }), 500);
+    assert.equal(result.ok, false, status);
+    assert.match(result.errors.join(" "), /conteúdo clínico identificável/);
+  }
+
+  const narrativeCategory = validateEvent(event({
+    record: { category: "texto operacional livre com espaços" }
+  }), 500);
+  assert.equal(narrativeCategory.ok, false);
+  assert.match(narrativeCategory.errors.join(" "), /conteúdo clínico identificável/);
+});
+
+test("guarda textual preserva códigos e valores operacionais limitados", () => {
+  const result = validateEvent(event({
+    record: {
+      category: "financeiro",
+      status: "PENDING_EVIDENCE",
+      sourceContext: "pipeline-v3",
+      valor: "R$ 1.234,56"
+    }
+  }), 500);
+
+  assert.equal(result.ok, true, result.errors.join("; "));
+});
+
 test("identificadores técnicos e tipo documental não podem carregar referência clínica", () => {
   for (const candidate of [
     event({ entityKey: "patient:synthetic-123" }),

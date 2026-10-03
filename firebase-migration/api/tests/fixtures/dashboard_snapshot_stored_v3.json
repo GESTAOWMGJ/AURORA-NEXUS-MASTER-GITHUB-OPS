@@ -1,0 +1,222 @@
+{
+  "schemaVersion": 3,
+  "orgId": "wmgj",
+  "competence": "2026-09",
+  "generatedAt": "2026-09-27T12:00:00Z",
+  "asOf": "2026-09-27T12:00:00Z",
+  "policyVersion": "aurora-nexus-2.4.0-firebase-native-v1",
+  "completeness": "PARTIAL",
+  "severity": "NOMINAL",
+  "pipeline": {
+    "total": 1,
+    "queued": 0,
+    "processing": 0,
+    "validated": 1,
+    "pendingHumanReview": 0,
+    "failed": 0,
+    "deadLetter": 0,
+    "duplicateEvents": 0
+  },
+  "financial": {
+    "billedAmount": 10,
+    "receivedAmount": null,
+    "pendingAmount": null,
+    "reconciliationDifference": null,
+    "currency": "BRL"
+  },
+  "audit": {
+    "openFindings": 0,
+    "criticalFindings": 0,
+    "overdueActions": 0,
+    "evidenceGaps": 0
+  },
+  "sources": [
+    {
+      "source": "invoices",
+      "completeness": "PARTIAL",
+      "freshness": "UNKNOWN",
+      "lastSuccessAt": null,
+      "missing": false,
+      "detail": "1 registro(s) avaliados"
+    },
+    {
+      "source": "bankTransactions",
+      "completeness": "EMPTY",
+      "freshness": "UNKNOWN",
+      "lastSuccessAt": null,
+      "missing": true,
+      "detail": "Sem fonte disponível para a projeção"
+    },
+    {
+      "source": "glosses",
+      "completeness": "EMPTY",
+      "freshness": "UNKNOWN",
+      "lastSuccessAt": null,
+      "missing": true,
+      "detail": "Sem fonte disponível para a projeção"
+    },
+    {
+      "source": "actionItems",
+      "completeness": "EMPTY",
+      "freshness": "UNKNOWN",
+      "lastSuccessAt": null,
+      "missing": true,
+      "detail": "Sem fonte disponível para a projeção"
+    },
+    {
+      "source": "sourceDocuments",
+      "completeness": "EMPTY",
+      "freshness": "UNKNOWN",
+      "lastSuccessAt": null,
+      "missing": true,
+      "detail": "Sem fonte disponível para a projeção"
+    },
+    {
+      "source": "reconciliations",
+      "completeness": "EMPTY",
+      "freshness": "UNKNOWN",
+      "lastSuccessAt": null,
+      "missing": true,
+      "detail": "Sem fonte disponível para a projeção"
+    },
+    {
+      "source": "auditFindings",
+      "completeness": "EMPTY",
+      "freshness": "UNKNOWN",
+      "lastSuccessAt": null,
+      "missing": true,
+      "detail": "Sem fonte disponível para a projeção"
+    }
+  ],
+  "alerts": [],
+  "sanitized": true,
+  "sensitivity": "INTERNAL",
+  "state": "SHADOW",
+  "financialCents": {
+    "invoicedCents": 1000,
+    "receivedCents": null,
+    "glossCents": null,
+    "outstandingCents": null
+  },
+  "operations": {
+    "openActions": 0,
+    "overdueActions": 0,
+    "openFindings": 0
+  },
+  "coverage": {
+    "evidencePercent": null,
+    "reconciliationPercent": null
+  },
+  "sampleSizes": {
+    "invoices": 1,
+    "bankTransactions": 0,
+    "glosses": 0,
+    "actionItems": 0,
+    "sourceDocuments": 0,
+    "reconciliations": 0,
+    "auditFindings": 0
+  },
+  "dataQuality": {
+    "complete": true,
+    "sourcePresent": true,
+    "invalidFinancialRecords": 0,
+    "validFinancialRecords": 1
+  },
+  "modules": [
+    {
+      "id": "M01",
+      "name": "Ingestão e Proveniência Documental",
+      "status": "LEARNING"
+    },
+    {
+      "id": "M02",
+      "name": "Contratos, Regras e Evidências",
+      "status": "LEARNING"
+    },
+    {
+      "id": "M03",
+      "name": "Ciclo de Receita e Conciliação",
+      "status": "LEARNING"
+    },
+    {
+      "id": "M04",
+      "name": "Glosas, Recursos e Divergências",
+      "status": "LEARNING"
+    },
+    {
+      "id": "M05",
+      "name": "SLA e Workflow",
+      "status": "LEARNING"
+    },
+    {
+      "id": "M06",
+      "name": "Governança e Planos de Ação",
+      "status": "LEARNING"
+    },
+    {
+      "id": "M07",
+      "name": "Indicadores e Relatórios",
+      "status": "LEARNING"
+    },
+    {
+      "id": "M08",
+      "name": "Integrações e Conectores",
+      "status": "LEARNING"
+    },
+    {
+      "id": "M09",
+      "name": "Segurança, LGPD e Segregação",
+      "status": "LEARNING"
+    },
+    {
+      "id": "M10",
+      "name": "Trilha de Auditoria e Integridade",
+      "status": "LEARNING"
+    }
+  ],
+  "engine": {
+    "name": "aurora-projection",
+    "version": 3,
+    "mode": "SHADOW"
+  },
+  "sourceLimit": 1000,
+  "sourceHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "snapshotId": "123e4567-e89b-42d3-a456-426614174000",
+  "documentIntelligence": {
+    "totalDocuments": 0,
+    "nativeReadyDocuments": 0,
+    "sourceIndependentDocuments": 0,
+    "sourceDependentDocuments": 0,
+    "externalFetchRequiredDocuments": 0,
+    "fragileDocuments": 0,
+    "degradedExtractionDocuments": 0,
+    "lowConfidenceDocuments": 0,
+    "missingCanonicalFieldsDocuments": 0,
+    "overdueDocumentSla": 0,
+    "pendingDocumentFlow": 0,
+    "externalAiDocuments": 0,
+    "nativeReadyPercent": null,
+    "sourceIndependentPercent": null,
+    "origins": {}
+  },
+  "nativeDataPlane": {
+    "storage": "FIRESTORE",
+    "inferenceInput": "CANONICAL_FIREBASE_SNAPSHOT",
+    "sourceAccessDuringInference": false,
+    "externalAiRequired": false,
+    "externalAiFallbackDefault": false,
+    "sourceIndependentDocuments": 0,
+    "sourceDependentDocuments": 0
+  },
+  "organicLoop": {
+    "observes": [
+      "DOCUMENT_FRAGILITY",
+      "DOCUMENT_SLA",
+      "FLOW_BOTTLENECK",
+      "VALIDATED_RESOLUTION"
+    ],
+    "humanValidationRequired": true,
+    "autonomousSourceMutation": false,
+    "nextState": "EVIDENCE_TO_LIMITED_PROPOSAL"
+  }
+}

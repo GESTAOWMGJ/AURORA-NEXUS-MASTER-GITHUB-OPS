@@ -3,9 +3,9 @@ import test from "node:test";
 import { generateNativeInsight, parseNativeInsightIntent } from "../src/auroraNativeIntelligence.js";
 
 const projection = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   competence: "2026-09",
-  policyVersion: "aurora-nexus-2.3.0-firebase-shadow-v2",
+  policyVersion: "aurora-nexus-2.4.0-firebase-native-v1",
   dataQuality: { sourcePresent: true, invalidFinancialRecords: 0 },
   financialCents: { outstandingCents: 125000, glossCents: 25000 },
   operations: { overdueActions: 2, openFindings: 1 },

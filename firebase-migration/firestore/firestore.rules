@@ -26,48 +26,43 @@ service cloud.firestore {
     }
 
     function activeMember(orgId) {
+      let profile = member(orgId);
       return signedIn()
         && activeOrganization(orgId)
-        && exists(memberPath(orgId))
-        && member(orgId).active == true;
+        && profile != null
+        && profile.active == true;
     }
 
     function roleIn(orgId, roles) {
+      let profile = member(orgId);
       return activeMember(orgId)
-        && member(orgId).role is string
-        && member(orgId).role in roles;
+        && profile.role is string
+        && profile.role in roles;
     }
 
     function hasPermission(orgId, permission) {
+      let profile = member(orgId);
       return activeMember(orgId)
-        && member(orgId).keys().hasAll(['permissions'])
-        && member(orgId).permissions is list
-        && permission in member(orgId).permissions;
-    }
-
-    function allFacilities(orgId) {
-      return activeMember(orgId)
-        && member(orgId).keys().hasAll(['allFacilities'])
-        && member(orgId).allFacilities == true;
-    }
-
-    function hasFacilityList(orgId) {
-      return activeMember(orgId)
-        && member(orgId).keys().hasAll(['facilityIds'])
-        && member(orgId).facilityIds is list;
+        && profile.keys().hasAll(['permissions'])
+        && profile.permissions is list
+        && permission in profile.permissions;
     }
 
     // Fail-closed: projeções sem facilityId são organizacionais e exigem escopo
     // global. Membros limitados só recebem documentos com facilityId explícito.
     function facilityAllowed(orgId, data) {
+      // Validate identity once here. Re-entering activeMember through separate
+      // scope helpers can exceed the Rules expression budget for valid readers.
+      let profile = member(orgId);
       return activeMember(orgId)
         && (
-          allFacilities(orgId)
+          (profile.keys().hasAll(['allFacilities']) && profile.allFacilities == true)
           || (
             'facilityId' in data
             && data.facilityId is string
-            && hasFacilityList(orgId)
-            && data.facilityId in member(orgId).facilityIds
+            && profile.keys().hasAll(['facilityIds'])
+            && profile.facilityIds is list
+            && data.facilityId in profile.facilityIds
           )
         );
     }
@@ -99,6 +94,11 @@ service cloud.firestore {
       return roleIn(orgId, [
         'platform_admin', 'org_admin', 'auditor', 'medical_auditor'
       ]) || hasPermission(orgId, 'clinical.read');
+    }
+
+    function clinicalSensitiveEnabled(orgId) {
+      return activeOrganization(orgId)
+        && get(organizationPath(orgId)).data.clinicalSensitiveEnabled == true;
     }
 
     function canReadAudit(orgId) {
@@ -193,7 +193,8 @@ service cloud.firestore {
       }
 
       match /clinicalEvidence/{evidenceId} {
-        allow read: if canReadClinical(orgId)
+        allow read: if clinicalSensitiveEnabled(orgId)
+          && canReadClinical(orgId)
           && facilityAllowed(orgId, resource.data);
         allow write: if false;
       }

@@ -67,6 +67,20 @@
         }
       },
       {
+        "source": "/api/evidence",
+        "function": {
+          "functionId": "auroraNexusEvidence",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/audit-events",
+        "function": {
+          "functionId": "auroraNexusAuditEvents",
+          "region": "southamerica-east1"
+        }
+      },
+      {
         "source": "/api/refresh",
         "function": {
           "functionId": "auroraNexusRefresh",

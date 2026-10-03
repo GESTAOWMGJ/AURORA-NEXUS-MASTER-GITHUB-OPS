@@ -283,9 +283,8 @@ jobs:
             )
           ' <<<"$member_json" >/dev/null
 
-          # First HML deploy stays recovery-safe without creating a parallel
-          # Firestore database. No operational source data is allowed yet.
-          # Recovery requires PITR plus a recent READY managed backup.
+          # Recovery requires PITR plus a recent, unexpired READY backup from
+          # this physical database. Empty-HML bootstrap is not an exception.
           # A real restore rehearsal remains mandatory before real ingestion
           # or promotion of Firebase as an operational source.
           test "$(jq -r '.pointInTimeRecoveryEnablement // empty' <<<"$db_json")" = "POINT_IN_TIME_RECOVERY_ENABLED"
@@ -312,8 +311,12 @@ jobs:
               ((.snapshotTime // "") | length > 0) and
               ((.expireTime // "") | length > 0)
             ' <<<"$backup_json" >/dev/null
+            jq -n --argjson database "$db_json" --argjson backup "$backup_json" \
+              '{database:$database,backups:[$backup]}' | \
+              python3 firebase-migration/scripts/hml_readonly_preflight.py --check-backup
           else
-            echo "No READY managed backup yet; bootstrap allowed only for an operationally empty HML database."
+            echo "READY_BACKUP_REQUIRED_BEFORE_DEPLOY" >&2
+            exit 52
           fi
 
           collections_json="$(curl --fail --silent --show-error --max-time 30 \
@@ -346,7 +349,8 @@ jobs:
         run: |
           set -euo pipefail
           functions="$(npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json)"
-          jq -e --argjson expected '[
+          jq -e --argjson required '[
+            "ingestWmgjEvent",
             "runtimeWatchdog",
             "runtimeHealth",
             "auroraNexusAuthGate",
@@ -361,10 +365,12 @@ jobs:
             "auroraNexusIntegrationKeys",
             "auroraNexusIntegrationPing",
             "auroraNexusIntegrationDocuments",
-            "auroraNexusDocumentWatchdog"
+            "auroraNexusDocumentWatchdog",
+            "auroraNexusCryptoSelfTest"
           ]' '
             (.result // .functions // []) as $functions |
-            [$functions[] | (.id // .name // "") | split("/")[-1]] | sort == ($expected | sort)
+            [$functions[] | (.id // .name // "") | split("/")[-1]] as $deployed |
+            all($required[]; $deployed | index(.) != null)
           ' <<<"$functions" >/dev/null
           shell="$(curl --fail --silent --show-error --max-time 30 "https://${PROJECT_ID}.web.app/")"
           grep -Fq "Ambiente privado" <<<"$shell"

@@ -5,6 +5,8 @@ on:
     paths:
       - "firebase-migration/**"
       - "app-foundation/contracts/**"
+      - ".github/requests/aurora-rc11-run.json"
+      - ".github/workflows/aurora-rc11-recovery-real-ingest.yml"
       - ".github/workflows/validate-firestore-migration.yml"
       - ".github/workflows/deploy-aurora-firebase.yml"
   push:
@@ -14,6 +16,8 @@ on:
     paths:
       - "firebase-migration/**"
       - "app-foundation/contracts/**"
+      - ".github/requests/aurora-rc11-run.json"
+      - ".github/workflows/aurora-rc11-recovery-real-ingest.yml"
       - ".github/workflows/validate-firestore-migration.yml"
       - ".github/workflows/deploy-aurora-firebase.yml"
   workflow_dispatch:
@@ -114,6 +118,11 @@ jobs:
         env:
           WMGJ_FIREBASE_TEST_PROJECT_ID: wmgj-firestore-rules-test
         run: bash firebase-migration/scripts/bootstrap-homologacao.sh
+
+      - name: Test HML read-only gate collector with synthetic metadata
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s firebase-migration/scripts/tests -p 'test_hml_readonly_preflight.py' -v
 
       - name: Block high or critical production dependency advisories
         working-directory: firebase-migration/functions

@@ -32,7 +32,7 @@ Este registro separa **recurso criado**, **código validado** e **serviço impla
 - Evidências de resolução verificadas transacionalmente por organização e vínculo prévio.
 - Motor em `SHADOW`, desabilitado por padrão, com valores monetários em centavos.
 - Registros `TEST`/`TESTE` excluídos de todos os indicadores.
-- Snapshot persistido no contrato fechado `dashboard-snapshot.schema.json` v2.
+- Snapshot legado v2 preservado para leitura e nova projeção Firebase nativa versionada como v3. O v3 exige os blocos documental, plano nativo e ciclo orgânico; ambos passam pelo contrato fechado de leitura `dashboard-snapshot.schema.json`.
 - Auditoria server-only e Security Rules que negam escrita direta do cliente.
 - Ingestão rejeitada quando a organização sai de `HOMOLOGATION`/`SHADOW`, perde qualquer bloqueio de mutação ou habilita conteúdo clínico.
 - Conteúdo clínico/identificável, texto livre e identificadores pessoais são rejeitados no endpoint genérico mesmo quando rotulados como `INTERNAL` ou `RESTRICTED`.

@@ -93,9 +93,9 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
       <input id="email" name="email" type="email" autocomplete="username" required>
       <label for="password">Senha</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required>
-      <button id="submit" type="submit">Entrar</button>
-      <button id="reset-password" class="secondary" type="button">Definir ou redefinir senha</button>
-      <div id="status" class="status" aria-live="polite"></div>
+      <button id="submit" type="submit" disabled>Entrar</button>
+      <button id="reset-password" class="secondary" type="button" disabled>Definir ou redefinir senha</button>
+      <div id="status" class="status" aria-live="polite">Inicializando acesso seguro...</div>
     </form>
     <section id="mfa-panel" hidden>
       <p>Esta conta exige um segundo fator TOTP. Confirme o fator cadastrado antes de criar a sessão privada.</p>
@@ -108,10 +108,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
     </section>
     <div class="fineprint">Sem demonstração pública. Acesso restrito a usuários previamente autorizados.</div>
   </main>
-  <script src="/__/firebase/10.12.5/firebase-app-compat.js"></script>
-  <script src="/__/firebase/10.12.5/firebase-auth-compat.js"></script>
-  <script src="/__/firebase/init.js"></script>
-  <script>
+  <script type="module">
     if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/service-worker.js').catch(() => {}); }
     const form = document.getElementById('login-form');
     const statusEl = document.getElementById('status');
@@ -122,25 +119,32 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
     const mfaCode = document.getElementById('mfa-code');
     const mfaSubmit = document.getElementById('mfa-submit');
     const mfaStatus = document.getElementById('mfa-status');
+    let firebaseAuthApi = null;
+    let auth = null;
     let mfaResolver = null;
 
     async function createPrivateSession(credential) {
-      const idToken = await credential.user.getIdToken(true);
-      const response = await fetch('/__sessionLogin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken })
-      });
-      await firebase.auth().signOut();
+      if (!auth || !firebaseAuthApi) throw new Error('AUTH_NOT_INITIALIZED');
+      const idToken = await firebaseAuthApi.getIdToken(credential.user, true);
+      let response;
+      try {
+        response = await fetch('/__sessionLogin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken })
+        });
+      } finally {
+        await firebaseAuthApi.signOut(auth).catch(() => {});
+      }
       if (!response.ok) throw new Error('LOGIN_REJECTED');
       window.location.replace('/');
     }
 
     function requestTotpChallenge(error) {
-      const totp = firebase.auth.TotpMultiFactorGenerator;
-      const resolver = error && error.resolver;
+      if (!auth || !firebaseAuthApi) throw new Error('AUTH_NOT_INITIALIZED');
+      const resolver = firebaseAuthApi.getMultiFactorResolver(auth, error);
       const hints = resolver && Array.isArray(resolver.hints)
-        ? resolver.hints.filter((hint) => totp && hint.factorId === totp.FACTOR_ID)
+        ? resolver.hints.filter((hint) => hint.factorId === firebaseAuthApi.TotpMultiFactorGenerator.FACTOR_ID)
         : [];
       if (!resolver || hints.length === 0) throw new Error('UNSUPPORTED_MFA_FACTOR');
       mfaResolver = resolver;
@@ -166,7 +170,8 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
       resetPassword.disabled = true;
       statusEl.textContent = 'Solicitando redefinição...';
       try {
-        await firebase.auth().sendPasswordResetEmail(email);
+        if (!auth || !firebaseAuthApi) throw new Error('AUTH_NOT_INITIALIZED');
+        await firebaseAuthApi.sendPasswordResetEmail(auth, email);
       } catch (_) {
         // Resposta deliberadamente genérica para não revelar existência de conta.
       } finally {
@@ -180,10 +185,11 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
       submit.disabled = true;
       statusEl.textContent = 'Validando acesso...';
       try {
-        await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.NONE);
+        if (!auth || !firebaseAuthApi) throw new Error('AUTH_NOT_INITIALIZED');
+        await firebaseAuthApi.setPersistence(auth, firebaseAuthApi.inMemoryPersistence);
         const email = document.getElementById('email').value.trim();
         const password = document.getElementById('password').value;
-        const credential = await firebase.auth().signInWithEmailAndPassword(email, password);
+        const credential = await firebaseAuthApi.signInWithEmailAndPassword(auth, email, password);
         await createPrivateSession(credential);
       } catch (error) {
         if (error && error.code === 'auth/multi-factor-auth-required') {
@@ -208,13 +214,44 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
         if (!/^[0-9]{6,8}$/.test(code)) throw new Error('MFA_CODE_INVALID');
         const hint = mfaResolver.hints.find((item) => item.uid === mfaFactor.value);
         if (!hint) throw new Error('MFA_HINT_INVALID');
-        const assertion = firebase.auth.TotpMultiFactorGenerator.assertionForSignIn(hint.uid, code);
+        const assertion = firebaseAuthApi.TotpMultiFactorGenerator.assertionForSignIn(hint.uid, code);
         const credential = await mfaResolver.resolveSignIn(assertion);
         await createPrivateSession(credential);
       } catch (_) {
         mfaStatus.textContent = 'Segundo fator inválido ou expirado.';
         mfaSubmit.disabled = false;
       }
+    });
+
+    async function initializeFirebaseAuth() {
+      const [firebaseAppApi, authApi] = await Promise.all([
+        import('https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js'),
+        import('https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js')
+      ]);
+      const response = await fetch('/__/firebase/init.json', {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store'
+      });
+      if (!response.ok) throw new Error('FIREBASE_CONFIG_UNAVAILABLE');
+      const config = await response.json();
+      if (!config || typeof config !== 'object' || typeof config.apiKey !== 'string' || typeof config.projectId !== 'string') {
+        throw new Error('FIREBASE_CONFIG_INVALID');
+      }
+      firebaseAuthApi = authApi;
+      auth = authApi.getAuth(firebaseAppApi.initializeApp(config));
+      submit.disabled = false;
+      resetPassword.disabled = false;
+      statusEl.textContent = '';
+    }
+
+    initializeFirebaseAuth().catch(() => {
+      firebaseAuthApi = null;
+      auth = null;
+      submit.disabled = true;
+      resetPassword.disabled = true;
+      statusEl.textContent = 'Acesso temporariamente indisponível. Tente novamente em alguns minutos.';
     });
   </script>
 </body>

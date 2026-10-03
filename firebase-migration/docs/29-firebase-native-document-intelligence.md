@@ -92,6 +92,8 @@ O snapshot documental persiste apenas fatos operacionais sanitizados. Campos pri
 
 `sourceIndependent=true` significa que a operação analítica pode continuar com o Firebase. Não autoriza apagar, mover ou invalidar o documento original.
 
+A projeção agregada que consome esses fatos usa `schemaVersion: 3`. Os blocos `documentIntelligence`, `nativeDataPlane` e `organicLoop` são obrigatórios no contrato `dashboard-snapshot.v3.schema.json`; leituras legadas v2 continuam aceitas pelo contrato de leitura versionado, sem interpretar v2 como snapshot nativo.
+
 ## 4. Política de IA externa
 
 A classificação documental é native-first.

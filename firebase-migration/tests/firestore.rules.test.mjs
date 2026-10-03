@@ -36,7 +36,11 @@ async function seed() {
     const db = ctx.firestore();
 
     await Promise.all([
-      setDoc(doc(db, 'organizations/wmgj'), { name: 'WMGJ', active: true }),
+      setDoc(doc(db, 'organizations/wmgj'), {
+        name: 'WMGJ',
+        active: true,
+        clinicalSensitiveEnabled: true
+      }),
       setDoc(doc(db, 'organizations/wmgj/members/admin'), member('org_admin', {
         allFacilities: true,
         facilityIds: []
@@ -55,6 +59,25 @@ async function seed() {
       setDoc(doc(db, 'organizations/wmgj/members/ops-reader'), member('viewer', {
         permissions: ['operations.read']
       })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-reader'), member('viewer', {
+        permissions: ['clinical.read']
+      })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-no-facility'), member('viewer', {
+        permissions: ['clinical.read'],
+        facilityIds: []
+      })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-malformed-scope'), member('viewer', {
+        permissions: ['clinical.read'],
+        allFacilities: 'true',
+        facilityIds: 'facility-alpha'
+      })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-malformed-permission'), member('viewer', {
+        permissions: 'clinical.read'
+      })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-inactive'), member('medical_auditor', {
+        active: false,
+        permissions: ['clinical.read']
+      })),
       setDoc(doc(db, 'organizations/wmgj/members/inactive'), member('auditor', {
         active: false,
         allFacilities: true,
@@ -67,6 +90,23 @@ async function seed() {
       })),
       setDoc(doc(db, 'organizations/legacy-org'), { name: 'Missing active flag' }),
       setDoc(doc(db, 'organizations/legacy-org/members/org-active-missing'), member('org_admin', {
+        allFacilities: true,
+        facilityIds: []
+      })),
+      setDoc(doc(db, 'organizations/clinical-disabled'), {
+        name: 'Clinical disabled',
+        active: true,
+        clinicalSensitiveEnabled: false
+      }),
+      setDoc(doc(db, 'organizations/clinical-disabled/members/admin'), member('org_admin', {
+        allFacilities: true,
+        facilityIds: []
+      })),
+      setDoc(doc(db, 'organizations/clinical-missing'), {
+        name: 'Clinical flag missing',
+        active: true
+      }),
+      setDoc(doc(db, 'organizations/clinical-missing/members/admin'), member('org_admin', {
         allFacilities: true,
         facilityIds: []
       })),
@@ -124,6 +164,26 @@ async function seed() {
         orgId: 'wmgj',
         facilityId: 'facility-beta',
         status: 'OPEN'
+      }),
+      setDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-alpha'), {
+        orgId: 'wmgj',
+        facilityId: 'facility-alpha',
+        sensitivity: 'CLINICAL_SENSITIVE'
+      }),
+      setDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-beta'), {
+        orgId: 'wmgj',
+        facilityId: 'facility-beta',
+        sensitivity: 'CLINICAL_SENSITIVE'
+      }),
+      setDoc(doc(db, 'organizations/clinical-disabled/clinicalEvidence/clinical-disabled'), {
+        orgId: 'clinical-disabled',
+        facilityId: 'facility-alpha',
+        sensitivity: 'CLINICAL_SENSITIVE'
+      }),
+      setDoc(doc(db, 'organizations/clinical-missing/clinicalEvidence/clinical-missing'), {
+        orgId: 'clinical-missing',
+        facilityId: 'facility-alpha',
+        sensitivity: 'CLINICAL_SENSITIVE'
       }),
       setDoc(doc(db, 'organizations/inactive-org/productivityRecords/op-disabled'), {
         orgId: 'inactive-org',
@@ -295,6 +355,47 @@ test('auditor médico não recebe financeiro ou operação por padrão', async (
   );
   await assertFails(
     getDoc(doc(db, 'organizations/wmgj/productivityRecords/op-alpha'))
+  );
+});
+
+for (const uid of ['medical', 'clinical-reader']) {
+  test(`clinicalEvidence permite ${uid} no orçamento real de expressões, apenas na unidade`, async () => {
+    const db = env.authenticatedContext(uid).firestore();
+    await assertSucceeds(
+      getDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-alpha'))
+    );
+    await assertFails(
+      getDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-beta'))
+    );
+  });
+}
+
+for (const uid of [
+  'operator', 'clinical-no-facility', 'clinical-malformed-scope',
+  'clinical-malformed-permission', 'clinical-inactive', 'no-membership'
+]) {
+  test(`clinicalEvidence nega ${uid} sem reduzir os gates para caber no orçamento`, async () => {
+    const db = env.authenticatedContext(uid).firestore();
+    await assertFails(
+      getDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-alpha'))
+    );
+  });
+}
+
+test('clinicalEvidence falha fechado quando gate clínico é false ou ausente', async () => {
+  const db = env.authenticatedContext('admin').firestore();
+
+  await assertFails(
+    getDoc(doc(
+      db,
+      'organizations/clinical-disabled/clinicalEvidence/clinical-disabled'
+    ))
+  );
+  await assertFails(
+    getDoc(doc(
+      db,
+      'organizations/clinical-missing/clinicalEvidence/clinical-missing'
+    ))
   );
 });
 
