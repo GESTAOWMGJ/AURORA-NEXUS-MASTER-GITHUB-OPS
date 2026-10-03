@@ -6,18 +6,56 @@ o piloto. Baseline remota verificada em 03/10/2026: `main`
 
 ## Fato novo e contenção
 
-A `main` contém a request histórica v7 e originou o run `37093409122`, ainda
-aguardando o ambiente `firebase-homologation`. Esse run não deve ser aprovado
-nem reexecutado. O commit que o disparou alterou workflow, request e teste; por
-isso o primeiro gate request-only deve falhar antes de qualquer mutação. Mesmo
-assim, o snapshot v7 conserva rotação de keyring e janela global de escrita e
-não deve ser usado como caminho operacional.
+A segunda tentativa do [run v7 37093409122](https://github.com/GESTAOWMGJ/automacao-gestao-wmgj/actions/runs/37093409122/attempts/2),
+no SHA `91665cc94c4bde9b82a75cd39905263c60e02191`, terminou em falha
+em 03/10/2026, 11:41 BRT. O job `111221038336` e seus logs foram consultados
+em leitura. Esta revisão não disparou nem aprovou a execução.
 
-A request v7 permanece byte a byte inalterada. O próximo contrato possível é
-v8, somente após os pré-requisitos abaixo. O run v6 `37092175109` continua
-histórico: restore e cleanup passaram; Hosting/Rules/indexes foram publicados;
-o gate HMAC falhou com exit 77; não houve amostra real, reconciliação, SHADOW ou
-Native Intelligence.
+### Comprovado nesta tentativa
+
+- WIF, pré-requisitos, restore e cleanup concluíram com sucesso nos passos do job.
+- A etapa de Hosting/Rules/indexes concluiu com mensagem de deploy completo;
+  isso não comprova smoke autenticado ou homologação de toda a aplicação.
+- Às 11:41:16 BRT, o Secret Manager confirmou a criação de uma nova versão do
+  keyring existente. Portanto houve mutação parcial no HML; não descrever este
+  run como sem alterações.
+- Às 11:41:44 BRT, o redeploy pelo Firebase CLI falhou com HTTP 403,
+  `secretmanager.secrets.setIamPolicy` negado no recurso do keyring.
+  A mensagem não demonstra ausência do segredo; a criação de versão foi
+  confirmada separadamente.
+- Amostra real, reconciliação, SHADOW, teste de inteligência, verificação final
+  do kill switch e upload de artefato ficaram skipped. Não há recibo de
+  ingestão deste run nem comprovação atual do estado final do DRY_RUN.
+
+O gate inicial foi registrado como success. A previsão anterior de que ele
+impediria toda mutação não se confirmou e foi retirada deste documento.
+Não aprovar ou reexecutar a v7 como remediação: ela pode gerar outra versão
+de segredo e repetir alterações já concluídas.
+
+### Pendência material de reconciliação do keyring/runtime
+
+| Campo | Registro |
+| --- | --- |
+| Estado | FALHA COMPROVADA de autorização IAM durante o redeploy; consistência entre versão do segredo, revisão ativa da Function e ponte Apps Script DESCONHECIDA |
+| Evidência | run/attempt/job acima; criação de versão seguida de HTTP 403; etapas de ingestão skipped |
+| Risco | consumir uma versão diferente da ponte ou repetir rotação sem concluir o redeploy; não foi comprovado que esse descompasso ocorreu |
+| Responsável sugerido | plataforma/segurança, com mantenedor Firebase/Apps Script |
+| Próxima ação | inspecionar somente metadados das versões do keyring, secretEnvironmentVariables/revision/service account da Function e policy do segredo; conferir estado sanitizado da ponte e DRY_RUN por canal autorizado |
+| Critério de aceite | versão canônica e consumidores reconciliados, acesso mínimo efetivo comprovado, revisão implantada identificada e prova HMAC sem escrita aprovada; depois preencher IDs da candidata |
+| Bloqueador real | Firebase CLI solicitou setIamPolicy e recebeu 403; falta leitura administrativa atual para determinar binding existente e remediação mínima; gcloud indisponível neste runner |
+| Limite da ação | não conceder papéis amplos, alterar IAM, gerar nova chave/versão, reiniciar fluxo, publicar Function ou modificar ponte automaticamente |
+
+No PR #107 a v8 já separa publicação do runtime e consumo do keyring; seus
+testes impedem criação de versões, alterações de IAM e redeploy de ingestão
+dentro do RC1.1. Isso evita esse caminho na candidata, mas não corrige a
+permissão nem reconcilia o estado cloud por si só. O deploy protegido próprio
+também exige avaliação de IAM antes de qualquer execução autorizada.
+
+A request operacional v7 permanece byte a byte inalterada. O modelo v8 em
+`docs/requests/aurora-rc11-v8.candidate.json` continua inativo, com aprovações
+false e valores não comprovados null. Nenhuma autorização antiga preenche
+automaticamente seus gates. O histórico v6 permanece apenas como evidência
+anterior; não substitui esta observação mais recente.
 
 ## Ordem obrigatória
 
@@ -64,16 +102,16 @@ redeploy de Function e reconfiguração da ponte permanecem fora do escopo.
 | Código/CI | PRs #95, #98 e #99 reconciliados; novos heads exigem CI próprio | checks verdes e revisão humana nos SHAs finais |
 | Workflow | YAML e 12 blocos shell validados; hardening ainda draft | teste integral, unicidade dos passos e CodeQL no head final |
 | Billing/orçamento | DESCONHECIDO nesta sessão | leitura atual de billing e orçamento/alertas |
-| WIF/service account | WIF funcionou no run v6; menor privilégio não revalidado | revisar identidade e permissões efetivas |
-| Secret/keyring | v6 rejeitou formato; v7 não deve executar | keyring canônico existente e escopo verificado sem expor valor |
+| WIF/service account | WIF funcionou na tentativa 2 da v7; setIamPolicy foi negado no redeploy | revisar identidade e permissões efetivas |
+| Secret/keyring | v7 criou versão, mas redeploy falhou; consumidores ainda não reconciliados | keyring canônico existente e escopo verificado sem expor valor |
 | Apps Script | acesso `MYSELF` ainda não implantado/provado | deployer canônico executa nondev; terceiros não executam |
 | Usuários/MFA/App Check | DESCONHECIDO | smoke autenticado, nega anônimo/outro tenant e valida MFA |
-| Backup/restore | comprovado apenas no run v6 | repetir gate de backup e restore no run v8 aprovado |
+| Backup/restore | restore e cleanup concluídos na tentativa 2 da v7 | repetir gate de backup e restore no run v8 aprovado |
 | GitHub | branch retornou sem proteção; ambiente permitia self-review/bypass | required checks e aprovador humano separado |
 | DNS/HTTPS/SSL | issue #32 continua pendente | evidência atual dos destinos autorizados |
 | Mac/iMac | PR #95 reconciliado; instalação/round-trip/restart/rollback pendentes | ensaio nativo autorizado com saída correlacionada |
 
 Ausência de acesso é DESCONHECIDO, não falha comprovada. CI, merge, deploy,
 ingestão, instalação local e release comercial são estados separados. Nenhuma
-request v8 deve ser criada enquanto o hardening, o deploy e a evidência do par
+request operacional v8 deve ser criada enquanto o hardening, o deploy e a evidência do par
 não estiverem concluídos.
