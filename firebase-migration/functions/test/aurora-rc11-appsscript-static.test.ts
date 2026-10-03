@@ -57,7 +57,7 @@ test("RC1.1 cleanup tolerates Firestore post-restore finalization", () => {
 });
 
 
-test("RC1.1 reuses or one-shot bootstraps the existing HML HMAC without mutating Secret Manager", () => {
+test("RC1.1 migrates legacy HML HMAC only behind explicit Secret Manager approval", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
   assert.match(workflow, /Build and validate existing HMAC contract/);
   assert.match(workflow, /gcloud secrets describe "\$secret_name"/);
@@ -65,8 +65,11 @@ test("RC1.1 reuses or one-shot bootstraps the existing HML HMAC without mutating
   assert.match(workflow, /auroraRc11InspecionarConfiguracao/);
   assert.match(workflow, /auroraRc11ConfigurarEndpointExistente/);
   assert.match(workflow, /auroraRc11ConfigurarIngestao/);
+  assert.match(workflow, /secretManagerKeyringMigrationApproved/);
+  assert.match(workflow, /\^\[A-Fa-f0-9\]\{64\}\$/);
+  assert.match(workflow, /gcloud secrets versions add "WMGJ_INGEST_HMAC_KEYRING"/);
+  assert.match(workflow, /functions:ingestWmgjEvent/);
   assert.match(workflow, /::add-mask::\$hmac_secret/);
-  assert.doesNotMatch(workflow, /gcloud secrets versions add/);
   assert.doesNotMatch(workflow, /functions:secrets:set WMGJ_INGEST_HMAC_KEYRING/);
   assert.doesNotMatch(workflow, /gcloud secrets update/);
   assert.doesNotMatch(workflow, /gcloud secrets create/);
