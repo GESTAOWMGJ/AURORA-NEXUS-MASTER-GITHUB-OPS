@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
-import { canonicalHmacV2Payload, type HmacV2Headers } from "../src/security.ts";
+import { canonicalHmacV2Payload, signHmacV2, type HmacV2Headers } from "../src/security.ts";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const migrationRoot = path.resolve(testDir, "../..");
@@ -20,8 +20,21 @@ function appsScriptContext(): Record<string, unknown> {
         const data = Array.isArray(value) ? Buffer.from(value) : Buffer.from(String(value), "utf8");
         return [...createHash("sha256").update(data).digest()];
       },
-      computeHmacSha256Signature(value: string, secret: string) {
-        return [...createHmac("sha256", secret).update(value).digest()];
+      computeHmacSha256Signature(value: string | number[], secret: string | number[]) {
+        const message = Array.isArray(value)
+          ? Buffer.from(value.map((item) => item < 0 ? item + 256 : item))
+          : Buffer.from(String(value), "utf8");
+        const key = Array.isArray(secret)
+          ? Buffer.from(secret.map((item) => item < 0 ? item + 256 : item))
+          : Buffer.from(String(secret), "utf8");
+        return [...createHmac("sha256", key).update(message).digest()];
+      },
+      newBlob(value: string) {
+        return {
+          getBytes() {
+            return [...Buffer.from(String(value), "utf8")].map((item) => item > 127 ? item - 256 : item);
+          }
+        };
       },
       getUuid() { return "0f719f5a-0806-4b2b-a40c-717371d275ee"; }
     }
@@ -196,6 +209,29 @@ test("canonical HMAC v2 do Apps Script é idêntico ao servidor", () => {
   const bridge = context.wmgjFirestoreCanonicalHmacV2_(body, headers);
   const server = canonicalHmacV2Payload(Buffer.from(body, "utf8"), headers);
   assert.equal(bridge, server);
+});
+
+test("bridge usa os 32 bytes do segredo hex exatamente como o backend", () => {
+  const context = appsScriptContext() as any;
+  const body = JSON.stringify({ orgId: "wmgj", idempotencyKey: "idem-hex-1", probe: true });
+  const headers: HmacV2Headers = {
+    signatureVersion: "v2",
+    timestamp: "1787767200",
+    nonce: "0f719f5a-0806-4b2b-a40c-717371d275ee",
+    keyId: "apps-script-homolog-2026-08",
+    orgId: "wmgj",
+    idempotencyKey: "idem-hex-1",
+    signature: "",
+    method: "POST",
+    contentType: "application/json"
+  };
+  const secretHex = "0123456789abcdef".repeat(4);
+  const canonical = context.wmgjFirestoreCanonicalHmacV2_(body, headers);
+  const bridgeSignature = context.wmgjFirestoreHmacHex_(canonical, secretHex);
+  const serverSignature = signHmacV2(Buffer.from(body, "utf8"), headers, secretHex);
+  assert.equal(bridgeSignature, serverSignature);
+  assert.equal(context.wmgjFirestoreHexKeyBytes_(secretHex).length, 32);
+  assert.throws(() => context.wmgjFirestoreHexKeyBytes_("not-hex"), /HMAC_SECRET_HEX_INVALIDO/);
 });
 
 test("bridge só aceita resposta 2xx com confirmação inequívoca", () => {
