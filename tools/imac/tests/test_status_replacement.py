@@ -30,7 +30,9 @@ class StatusReplacementTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="helper-replacement-test-")
         self.addCleanup(self.tmp.cleanup)
-        self.home = Path(self.tmp.name) / "synthetic account"
+        # macOS exposes its temp root through /var -> /private/var. Resolve only
+        # the fixture root, keeping production symlink rejection unchanged.
+        self.home = Path(self.tmp.name).resolve() / "synthetic account"
         self.target = self.home / ".TRIGGERcmdData/jfn_status_mac.sh"
         self.target.parent.mkdir(parents=True)
         self.original = b"#!/bin/bash\necho ORIGINAL\n"
