@@ -5,6 +5,8 @@ on:
     paths:
       - "firebase-migration/**"
       - "app-foundation/contracts/**"
+      - ".github/requests/aurora-rc11-run.json"
+      - ".github/workflows/aurora-rc11-recovery-real-ingest.yml"
       - ".github/workflows/validate-firestore-migration.yml"
       - ".github/workflows/deploy-aurora-firebase.yml"
   push:
@@ -14,6 +16,8 @@ on:
     paths:
       - "firebase-migration/**"
       - "app-foundation/contracts/**"
+      - ".github/requests/aurora-rc11-run.json"
+      - ".github/workflows/aurora-rc11-recovery-real-ingest.yml"
       - ".github/workflows/validate-firestore-migration.yml"
       - ".github/workflows/deploy-aurora-firebase.yml"
   workflow_dispatch:

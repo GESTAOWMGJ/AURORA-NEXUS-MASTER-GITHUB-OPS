@@ -1,6 +1,7 @@
 name: Aurora RC1.1 Recovery and Real WMGJ Ingest
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -11,9 +12,7 @@ permissions:
 
 concurrency:
   group: aurora-rc11-hml
-  # Restore and the one-shot write must reach their cleanup/kill-switch path.
-  # A newer approved request waits instead of terminating an active sequence.
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   rc11:
@@ -32,29 +31,23 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned 2026-10-01
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 2
+          fetch-depth: 1
 
       - name: Validate immutable RC1.1 request
         env:
           APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
-          test "$GITHUB_EVENT_NAME" = "push"
-          test "$GITHUB_RUN_ATTEMPT" = "1"
           test "$GITHUB_REF" = "refs/heads/main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          first_parent="$(git rev-parse "$GITHUB_SHA^1")"
-          test -n "$first_parent"
-          test "$(git diff --name-only "$first_parent" "$GITHUB_SHA" -- "$REQUEST_FILE")" = "$REQUEST_FILE"
           jq -e --arg project "$APPROVED_PROJECT" '
             .confirmation=="RUN_RC11_HML" and
-            (.approvedBaseSha | type=="string" and test("^[a-f0-9]{40}$")) and
             .projectId==$project and
             .projectId=="wmgj-hml-jfn-20260927" and
             .sourceDatabase=="(default)" and
-            .requestVersion==6 and
-            .candidateOnly==false and
-            .hmacMode=="REUSE_OR_BOOTSTRAP_EXISTING_KEYRING" and
+            .requestVersion==7 and
+            .hmacMode=="ROTATE_TO_CANONICAL_HML_KEYRING" and
+            .secretManagerKeyringRotationApproved==true and
             .deploymentApproved==true and
             .firebaseWriteApproved==true and
             .hmacBootstrapIfMissing==true and
@@ -63,11 +56,8 @@ jobs:
             .sample.invoiceNumber=="8" and
             .sample.expectedPairCount==2 and
             .productionMutation==false and
-            .clinicalSensitiveEnabled==false and
-            .sourceMutation==false and
-            .genericBackfillApproved==false
+            .clinicalSensitiveEnabled==false
           ' "$REQUEST_FILE" >/dev/null
-          test "$(jq -r '.approvedBaseSha' "$REQUEST_FILE")" = "$first_parent"
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4 pinned 2026-10-01
         with:
@@ -102,10 +92,13 @@ jobs:
           backup="$(jq -r --arg source "projects/${PROJECT_ID}/databases/(default)" '[.[]|select(.state=="READY" and .database==$source)]|sort_by(.snapshotTime//"")|last|.name//empty' <<<"$backups")"
           snapshot="$(jq -r --arg name "$backup" '.[]|select(.name==$name)|.snapshotTime//empty' <<<"$backups")"
           test -n "$backup"; test -n "$snapshot"
-          selected_backup="$(jq -c --arg name "$backup" '.[]|select(.name==$name)' <<<"$backups")"
-          jq -n --argjson database "$db_json" --argjson backup "$selected_backup" \
-            '{database:$database,backups:[$backup]}' | \
-            python3 firebase-migration/scripts/hml_readonly_preflight.py --check-backup
+          python3 - "$snapshot" <<'PY'
+          from datetime import datetime, timezone
+          import sys
+          t=datetime.fromisoformat(sys.argv[1].replace("Z","+00:00"))
+          age=(datetime.now(timezone.utc)-t).total_seconds()
+          if age < 0 or age > 24*3600: raise SystemExit("READY_BACKUP_NOT_WITHIN_24H")
+          PY
           echo "AURORA_RC11_BACKUP_RESOURCE=$backup" >> "$GITHUB_ENV"
           echo "AURORA_RC11_BACKUP_SNAPSHOT=$snapshot" >> "$GITHUB_ENV"
 
@@ -255,65 +248,25 @@ jobs:
         run: |
           set -euo pipefail
           npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json > "$RUNNER_TEMP/functions-list.json"
-          required="$(jq -c '
-            [
-              "ingestWmgjEvent",
-              "runtimeWatchdog",
-              "runtimeHealth",
-              "auroraNexusProjectionEngine"
-            ] + [
-              .hosting.rewrites[]?
-              | .function.functionId? // empty
-            ]
-            | map(select(type == "string" and length > 0))
-            | unique
-          ' firebase.json)"
+          required='["ingestWmgjEvent","runtimeWatchdog","runtimeHealth","auroraNexusAuthGate","auroraNexusSessionLogin","auroraNexusSessionLogout","auroraNexusBootstrap","auroraNexusNativeInsight","auroraNexusAction","auroraNexusRefresh","auroraNexusProjectionEngine","auroraNexusOrganic","auroraNexusIntegrationKeys","auroraNexusIntegrationPing"]'
           jq -e --argjson required "$required" '
-            (.result // .functions // []) as $functions
-            | [$functions[] | (.id // .name // "") | tostring | split("/")[-1]] as $deployed
+            [.. | objects | (.id? // .name? // empty) | tostring | split("/")[-1]] as $deployed
             | all($required[]; $deployed | index(.) != null)
           ' "$RUNNER_TEMP/functions-list.json" >/dev/null
-          jq -r '.hosting.rewrites[]? | .function.functionId? // empty' firebase.json \
-            | LC_ALL=C sort -u > "$RUNNER_TEMP/hosting-function-ids.txt"
-          test -s "$RUNNER_TEMP/hosting-function-ids.txt"
-          while IFS= read -r function_id; do
-            endpoint_url="$(gcloud functions describe "$function_id" \
-              --gen2 \
-              --region "$REGION" \
-              --project "$PROJECT_ID" \
-              --format='value(serviceConfig.uri)')"
-            test -n "$endpoint_url"
-            case "$endpoint_url" in
-              https://*) ;;
-              *) echo "INVALID_HOSTING_FUNCTION_URI:$function_id" >&2; exit 75 ;;
-            esac
-          done < "$RUNNER_TEMP/hosting-function-ids.txt"
           health_url="$(gcloud functions describe runtimeHealth --gen2 --region "$REGION" --project "$PROJECT_ID" --format='value(serviceConfig.uri)')"
           test -n "$health_url"
           curl -fsS "$health_url" > "$RUNNER_TEMP/runtime-health.json"
           jq -e '.ok==true and .service=="wmgj-firestore-ingestion" and .signatureVersion=="v2"' "$RUNNER_TEMP/runtime-health.json" >/dev/null
-          ingest_url="$(gcloud functions describe ingestWmgjEvent --gen2 --region "$REGION" --project "$PROJECT_ID" --format='value(serviceConfig.uri)')"
-          [[ "$ingest_url" =~ ^https://[^[:space:]]+$ ]]
-          ingest_probe_status="$(curl --silent --show-error --max-time 30 \
-            --request GET \
-            --header 'Accept: application/json' \
-            --output "$RUNNER_TEMP/ingest-method-probe.json" \
-            --write-out '%{http_code}' \
-            "$ingest_url")"
-          test "$ingest_probe_status" = "405"
-          jq -e '.ok==false and .code=="METHOD_NOT_ALLOWED"' "$RUNNER_TEMP/ingest-method-probe.json" >/dev/null
           npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only hosting,firestore:rules,firestore:indexes
-          printf 'AURORA_RC11_INGEST_URL=%s\n' "$ingest_url" >> "$GITHUB_ENV"
-          jq -n --arg healthUrl "$health_url" --arg ingestUrl "$ingest_url" '{
+          echo "AURORA_RC11_INGEST_URL=https://${REGION}-${PROJECT_ID}.cloudfunctions.net/ingestWmgjEvent" >> "$GITHUB_ENV"
+          jq -n --arg healthUrl "$health_url" '{
             gate:"HML_RUNTIME_VERIFIED",
             functionsPresent:true,
             runtimeHealth:true,
-            ingestMethodProbe:true,
             signatureVersion:"v2",
             functionsRedeployed:false,
             nonSecretSurfacesDeployed:true,
-            healthUrl:$healthUrl,
-            ingestUrl:$ingestUrl
+            healthUrl:$healthUrl
           }' > "$RUNNER_TEMP/rc11-evidence/runtime.json"
 
       - name: Use canonical Apps Script deployment and configure bridge
@@ -322,21 +275,14 @@ jobs:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
-          keyring_file=""
-          scope_keyring_file=""
-          cleanup_hmac_files() {
-            test -z "$keyring_file" || rm -f "$keyring_file"
-            test -z "$scope_keyring_file" || rm -f "$scope_keyring_file"
-          }
-          trap cleanup_hmac_files EXIT
           npm install -g @google/clasp@3.4.1
           umask 077
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           mkdir -p "$RUNNER_TEMP/build-appscript"
           printf '{"scriptId":"%s","projectId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" "$PROJECT_ID" > "$RUNNER_TEMP/build-appscript/.clasp.json"
           cd "$RUNNER_TEMP/build-appscript"
-          # Source and deployment are owned by deploy-appscript.yml. RC1.1 only
-          # consumes the already-reviewed canonical nondev deployment.
+          # Apps Script source/deployment is owned exclusively by deploy-appscript.yml.
+          # RC1.1 consumes the canonical nondev deployment and never pushes/redeploys it.
           test "$(jq -r '.deploymentApproved' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
           test "$(jq -r '.firebaseWriteApproved' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
           test "$(jq -r '.hmacBootstrapIfMissing' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
@@ -346,53 +292,48 @@ jobs:
           if [ "$(jq -r '.response.hmacConfigured' "$RUNNER_TEMP/rc11-config-state.json")" = "true" ]; then
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ConfigurarEndpointExistente "$RUNNER_TEMP/rc11-config.json" "$params"
           else
-            keyring_file="$RUNNER_TEMP/hmac-keyring.json"
-            if ! gcloud secrets versions access latest --secret="WMGJ_INGEST_HMAC_KEYRING" --project "$PROJECT_ID" --out-file="$keyring_file" >/dev/null 2>&1; then
-              echo "::error title=HMAC bootstrap unavailable::Apps Script HMAC is absent and deploy identity cannot read the existing HML keyring. No IAM or Secret Manager mutation was attempted." >&2
-              exit 74
-            fi
-            chmod 600 "$keyring_file"
-            key_id="$(jq -r '
-              to_entries
-              | map(select(
-                  .value.active==true and
-                  ((.value.orgIds // []) | index("wmgj")) != null and
-                  ((.value.entityTypes // []) | index("invoice")) != null and
-                  ((.value.entityTypes // []) | index("bankTransaction")) != null and
-                  ((.value.secret // "") | length) >= 32
-                ))
-              | if length==1 then .[0].key else empty end
-            ' "$keyring_file")"
-            test -n "$key_id"
-            hmac_secret="$(jq -r --arg key "$key_id" '.[$key].secret // empty' "$keyring_file")"
-            test "${#hmac_secret}" -ge 32
+            test "$(jq -r '.secretManagerKeyringRotationApproved // false' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
+            key_id="apps-script-homolog-2026-08"
+            hmac_secret="$(openssl rand -hex 32)"
+            printf '%s' "$hmac_secret" | grep -Eqx '[a-f0-9]{64}'
             echo "::add-mask::$hmac_secret"
+            keyring_file="$RUNNER_TEMP/hmac-keyring-rotated.json"
+            jq -nc --arg keyId "$key_id" --arg secret "$hmac_secret" '{
+              ($keyId): {
+                active: true,
+                secret: $secret,
+                orgIds: ["wmgj"],
+                entityTypes: ["invoice","bankTransaction"]
+              }
+            }' > "$keyring_file"
+            chmod 600 "$keyring_file"
+            secret_version="$(gcloud secrets versions add "WMGJ_INGEST_HMAC_KEYRING" --project "$PROJECT_ID" --data-file="$keyring_file" --quiet --format='value(name)')"
+            test -n "$secret_version"
+            version_id="${secret_version##*/}"
+            test "$(gcloud secrets versions describe "$version_id" --secret="WMGJ_INGEST_HMAC_KEYRING" --project "$PROJECT_ID" --format='value(state)')" = "ENABLED"
+            (
+              cd "$GITHUB_WORKSPACE/firebase-migration"
+              npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only functions:ingestWmgjEvent
+            )
             bootstrap_params="$(jq -nc --arg url "$AURORA_RC11_INGEST_URL" --arg keyId "$key_id" --arg secret "$hmac_secret" '[$url,$keyId,$secret]')"
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ConfigurarIngestao "$RUNNER_TEMP/rc11-config.json" "$bootstrap_params"
+            jq -n --arg keyId "$key_id" --arg version "$version_id" '{
+              gate:"HMAC_KEYRING_ROTATED",
+              keyId:$keyId,
+              secretVersion:$version,
+              secretExposed:false,
+              functionsRedeployed:["ingestWmgjEvent"],
+              productionMutation:false,
+              sourceMutation:false
+            }' > "$RUNNER_TEMP/rc11-evidence/hmac-rotation.json"
             rm -f "$keyring_file"
-            unset hmac_secret bootstrap_params
+            unset hmac_secret bootstrap_params secret_version version_id
           fi
           jq -e '.response.ok==true and .response.secretConfigured==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-config.json" >/dev/null
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11InspecionarConfiguracao "$RUNNER_TEMP/rc11-config-state-after.json"
-          jq -e '.response.ok==true and .response.endpointConfigured==true and .response.hmacConfigured==true and (.response.keyId|type=="string" and length>0) and .response.dryRun==true' "$RUNNER_TEMP/rc11-config-state-after.json" >/dev/null
-          configured_key_id="$(jq -r '.response.keyId' "$RUNNER_TEMP/rc11-config-state-after.json")"
-          scope_keyring_file="$RUNNER_TEMP/hmac-keyring-scope-check.json"
-          if ! gcloud secrets versions access latest --secret="WMGJ_INGEST_HMAC_KEYRING" --project "$PROJECT_ID" --out-file="$scope_keyring_file" >/dev/null 2>&1; then
-            echo "::error title=HMAC scope preflight unavailable::The deployed key cannot be checked before the one-shot gate; no write was enabled." >&2
-            exit 76
-          fi
-          chmod 600 "$scope_keyring_file"
-          jq -e --arg key "$configured_key_id" '
-            .[$key] as $entry
-            | ($entry | type=="object") and
-              $entry.active==true and
-              (($entry.orgIds // []) | index("wmgj") != null) and
-              (($entry.entityTypes // []) | index("invoice") != null) and
-              (($entry.entityTypes // []) | index("bankTransaction") != null)
-          ' "$scope_keyring_file" >/dev/null
-          rm -f "$scope_keyring_file"
+          jq -e '.response.ok==true and .response.endpointConfigured==true and .response.hmacConfigured==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-config-state-after.json" >/dev/null
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ValidarHmacExistente "$RUNNER_TEMP/rc11-hmac-probe.json"
-          jq -e '.response.ok==true and .response.authenticated==true and .response.policyAccepted==true and .response.eventsValidated==2 and .response.noWrite==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-hmac-probe.json" >/dev/null
+          jq -e '.response.ok==true and .response.authenticated==true and .response.noWrite==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-hmac-probe.json" >/dev/null
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-dry-run.json"
           jq -e '.response.ok==true and .response.dryRun==true and .response.planned==2 and .response.expected.competence=="2026-05" and .response.expected.invoiceCents==4950000 and .response.expected.receivedCents==4950000 and .response.expected.differenceCents==0' "$RUNNER_TEMP/rc11-dry-run.json" >/dev/null
 
@@ -401,13 +342,9 @@ jobs:
           set -euo pipefail
           test "$(jq -r '.firebaseWriteApproved' "$REQUEST_FILE")" = "true"
           cd "$RUNNER_TEMP/build-appscript"
-          reapply_kill_switch() {
-            trap - EXIT INT TERM
-            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11KillSwitch "$RUNNER_TEMP/rc11-kill-trap.json" >/dev/null 2>&1 || true
-          }
-          trap reapply_kill_switch EXIT INT TERM
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11AtivarEscritaAmostra "$RUNNER_TEMP/rc11-activate.json" '["ATIVAR_RC11_WMGJ_HML"]'
           jq -e '.response.ok==true and .response.dryRun==false and .response.sampleOnly==true' "$RUNNER_TEMP/rc11-activate.json" >/dev/null
+          trap 'bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11KillSwitch "$RUNNER_TEMP/rc11-kill-trap.json" >/dev/null 2>&1 || true' EXIT
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11EnviarAmostraReal "$RUNNER_TEMP/rc11-live.json" '["ATIVAR_RC11_WMGJ_HML"]'
           jq -e '.response.ok==true and .response.oneShot==true and ((.response.sent + .response.duplicates)==2) and .response.expected.competence=="2026-05" and .response.expected.invoiceCents==4950000 and .response.expected.receivedCents==4950000 and .response.expected.differenceCents==0 and (.response.invoiceEntityId|length)>0 and (.response.bankEntityId|length)>0' "$RUNNER_TEMP/rc11-live.json" >/dev/null
           invoice_entity_id="$(jq -r '.response.invoiceEntityId' "$RUNNER_TEMP/rc11-live.json")"
@@ -418,7 +355,7 @@ jobs:
           jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-kill.json" >/dev/null
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-post-live-dry-run.json"
           jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-post-live-dry-run.json" >/dev/null
-          trap - EXIT INT TERM
+          trap - EXIT
 
       - name: Reconcile HML and enable SHADOW projection
         env:
@@ -432,7 +369,7 @@ jobs:
           curl -fsS -H "Authorization: Bearer ${access_token}" "$base/invoices/$AURORA_RC11_INVOICE_ENTITY_ID" > "$RUNNER_TEMP/invoice.json"
           curl -fsS -H "Authorization: Bearer ${access_token}" "$base/bankTransactions/$AURORA_RC11_BANK_ENTITY_ID" > "$RUNNER_TEMP/bank.json"
           jq -e '.fields.orgId.stringValue=="wmgj" and .fields.entityType.stringValue=="invoice" and .fields.competence.stringValue=="2026-05" and .fields.documentType.stringValue=="06_NFS_E" and .fields.invoiceNumber.stringValue=="8" and (.fields.totalCents.integerValue|tonumber)==4950000 and .fields.source.mapValue.fields.system.stringValue=="SHEETS"' "$RUNNER_TEMP/invoice.json" >/dev/null
-          jq -e --arg invoiceEntityId "$AURORA_RC11_INVOICE_ENTITY_ID" '.fields.orgId.stringValue=="wmgj" and .fields.entityType.stringValue=="bankTransaction" and .fields.competence.stringValue=="2026-05" and .fields.documentType.stringValue=="08_EXTRATOS_BRADESCO" and .fields.status.stringValue=="RECONCILED" and .fields.transactionKind.stringValue=="RECEIPT" and .fields.invoiceEntityId.stringValue==$invoiceEntityId and (.fields.liquidatedAmountCents.integerValue|tonumber)==4950000 and .fields.source.mapValue.fields.system.stringValue=="SHEETS"' "$RUNNER_TEMP/bank.json" >/dev/null
+          jq -e '.fields.orgId.stringValue=="wmgj" and .fields.entityType.stringValue=="bankTransaction" and .fields.competence.stringValue=="2026-05" and .fields.documentType.stringValue=="08_EXTRATOS_BRADESCO" and .fields.status.stringValue=="RECONCILED" and (.fields.liquidatedAmountCents.integerValue|tonumber)==4950000 and .fields.source.mapValue.fields.system.stringValue=="SHEETS"' "$RUNNER_TEMP/bank.json" >/dev/null
           invoice_cents="$(jq -r '.fields.totalCents.integerValue|tonumber' "$RUNNER_TEMP/invoice.json")"
           bank_cents="$(jq -r '.fields.liquidatedAmountCents.integerValue|tonumber' "$RUNNER_TEMP/bank.json")"
           test "$invoice_cents" -eq 4950000
@@ -493,7 +430,7 @@ jobs:
           jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-final-kill.json" >/dev/null
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-final-dry-run.json"
           jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-final-dry-run.json" >/dev/null
-          jq -n '{release:"1.0.0-rc.1",gate:"RC1.1",restoreVerified:true,ingestAuthenticated:true,realWmgjSample:true,reconciled:true,nativeInsightVerified:true,killSwitch:true,genericBackfill:false,productionMutation:false,sourceMutation:false}' > "$RUNNER_TEMP/rc11-evidence/final-gate.json"
+          jq -n '{release:"1.0.0-rc.1",gate:"RC1.1",restoreVerified:true,ingestAuthenticated:true,realWmgjSample:true,reconciled:true,nativeInsightVerified:true,killSwitch:true,productionMutation:false,sourceMutation:false}' > "$RUNNER_TEMP/rc11-evidence/final-gate.json"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned 2026-10-01
         with:

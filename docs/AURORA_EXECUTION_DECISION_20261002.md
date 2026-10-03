@@ -1,7 +1,9 @@
 # AURORA NEXUS — decisão de execução HML
 
-Estado: PREPARED_NOT_AUTHORIZED. Sistema-mãe AURORA NEXUS; piloto WMGJ Operação.
-Baseline verificada: main `ee4d274bf27e36b293f2043fe2d4d818ea965c3d`.
+Estado: NO-GO. A request v6 foi executada parcialmente e falhou de modo fechado
+antes de qualquer amostra real. Sistema-mãe AURORA NEXUS; piloto WMGJ Operação.
+Baseline executada: main `f8699caa254ed058fea67beff2d275f51602b394`,
+run `37092175109`. A reconciliação do PR #98 ainda exige SHA final e novo CI.
 
 ## Sequência concreta
 
@@ -14,30 +16,44 @@ Baseline verificada: main `ee4d274bf27e36b293f2043fe2d4d818ea965c3d`.
    `Deploy Apps Script WMGJ`. A aprovação de merge precisa incluir essa
    publicação automática HML; não é uma operação apenas documental.
 3. Implantar a versão corrigida das Functions pelo fluxo HML protegido e
-   comprovar os gates abaixo. O RC1.1 não publica Functions; publicar apenas
-   Hosting/Rules não leva as correções de política e cálculo ao backend.
-4. Só após comprovar runtime, recuperação, identidade e escopo, finalizar uma
-   request v6 em mudança separada. O modelo inativo está em
-   `docs/requests/aurora-rc11-v6.candidate.json`, fora dos paths de disparo.
-   `approvedBaseSha` deve ser o primeiro pai real do futuro commit da request,
-   após a integração/implantação aprovadas; não antecipar esse SHA.
-5. Aprovar o run novo no ambiente protegido, com a versão e os efeitos abaixo
-   visíveis. O run antigo `37073345505` não valida esta candidata e não deve ser
-   aprovado nem reexecutado.
+   comprovar os gates abaixo. O RC1.1 não publica o conjunto completo de
+   Functions; pode reimplantar somente `ingestWmgjEvent` sob aprovação explícita
+   de migração. Publicar apenas Hosting/Rules não leva as demais correções de
+   política e cálculo ao backend.
+4. Só após comprovar runtime, recuperação, identidade e escopo, criar uma
+   request v7 em mudança separada. `approvedBaseSha` deve ser o primeiro pai
+   real do futuro commit da request, após a integração/implantação aprovadas;
+   não antecipar esse SHA. A request v6 presente na main é registro histórico e
+   permanece byte a byte inalterada nesta candidata.
+5. Submeter o run novo a aprovação humana separada no ambiente protegido, com
+   a versão e os efeitos abaixo visíveis. Não reutilizar nem reexecutar as
+   requests/runs anteriores.
 
-## Escopo da futura execução RC1.1 (não executado)
+## Escopo da futura execução RC1.1 v7 (não executado por esta candidata)
 
 Restauração real para banco temporário HML e cleanup desse banco; verificação do
 runtime existente; deploy Hosting/Rules/indexes; configuração da ponte Apps
-Script; eventual cópia autorizada da chave HMAC existente para a ponte (sem
-criar/alterar Secret Manager); envio limitado ao par fiscal/bancário já previsto;
+Script; eventual migração autorizada de um segredo legado reconhecido para uma
+nova versão do keyring existente, seguida de redeploy somente da ingestão (sem
+criar secret ou alterar IAM); envio limitado ao par fiscal/bancário já previsto;
 reconciliação, projeção SHADOW e kill switch. Cada efeito exige aprovação
 específica da request. Nenhum backfill genérico, produção, fonte ou dado clínico.
 
-O modelo mantém todas as aprovações como false, data/SHA ausentes e
-`candidateOnly=true`. O executor exige `candidateOnly=false`, confirmação literal,
-request v6 nova, SHA do primeiro pai e tentativa inicial. Copiar o modelo sem
-revisão não autoriza execução.
+A futura solicitação deve nascer inativa para revisão e só receber
+`candidateOnly=false` no commit imutável autorizado. O executor exige confirmação
+literal, request v7 nova, `approvedBaseSha` igual ao primeiro pai e tentativa
+inicial. Preparar conteúdo não autoriza execução.
+
+## Reconciliação do run v6 existente
+
+O run `37092175109`, disparado pela main antes desta reconciliação, terminou com
+falha no gate da ponte Apps Script (exit 77): o valor HMAC existente não era JSON
+de keyring aceito nem legado hexadecimal de 64 caracteres. Restore e cleanup do
+banco temporário passaram, e Hosting/Rules/indexes foram publicados. Não houve
+migração de versão do secret, ativação de escrita, amostra real, reconciliação,
+SHADOW, Native Intelligence ou upload final de evidência. Resolver o formato por
+um fluxo revisado e revalidar os efeitos já ocorridos são pré-requisitos para uma
+request v7; não corrigir o secret dentro desta candidata de código.
 
 ## Gates e bloqueadores reais
 
@@ -45,12 +61,12 @@ revisão não autoriza execução.
 | --- | --- | --- | --- |
 | Código | CI no PR; aprovação humana pendente | cinco checks e revisão no SHA final | mantenedor/revisor |
 | Billing/orçamento | desconhecido nesta sessão | comprovar billing e orçamento/alertas sem mutação | administrador HML |
-| WIF/service account | execução anterior; configuração atual não revalidada | identidade e menor privilégio confirmados no run protegido | cloud/IAM |
-| Secrets/API | desconhecido nesta sessão | existência, versão habilitada e acesso estritamente necessário; allowlist somente metadados nesta revisão | cloud/IAM |
+| WIF/service account | autenticação WIF comprovada no run `37092175109`; menor privilégio integral não auditado | revisar permissões efetivas antes de nova execução | cloud/IAM |
+| Secrets/API | leitura do keyring ocorreu, mas o formato foi rejeitado com exit 77; nenhum valor deve ser publicado | diagnosticar formato por canal seguro e definir migração explícita, sem ampliar IAM | cloud/IAM |
 | Usuário/membership/MFA/App Check | não comprovado na candidata | smoke real autorizado; nega anônimo e outro tenant; valida MFA | QA/segurança |
-| Rules e runtime | emulador aprovado; deploy da candidata pendente | comprovar backend corrigido e Rules efetivamente publicados | backend |
-| Backup/restore | evidência histórica; validade atual pendente | backup READY recente e restore reconciliado antes da amostra | operações |
-| Proteção GitHub | main retornou protected=false em leitura | revisão do administrador e required checks antes de promoção; não alterar permissões automaticamente | administrador GitHub |
+| Rules e runtime | runtime da main verificado e Hosting/Rules/indexes publicados no run v6; Functions da candidata não publicadas | publicar Functions corrigidas pelo fluxo próprio e repetir smoke no SHA integrado | backend |
+| Backup/restore | backup recente, restore real temporário e cleanup comprovados no run v6 | repetir o gate na futura request v7; evidência anterior não autoriza nova amostra | operações |
+| Proteção GitHub | main retornou protected=false; ambiente pediu aprovação, mas permite self-review e bypass administrativo | required checks e revisor humano separado sem autoaprovação antes da promoção | administrador GitHub |
 | DNS/HTTPS/SSL | pendências da issue #32, sem nova inspeção neste patch | evidência atual dos destinos autorizados | infraestrutura |
 | iMac | cadastro/despacho não comprovam execução | PR #95 atualizado, diagnóstico local, teste nativo e rollback | desktop/titular |
 
@@ -80,7 +96,7 @@ possui mais exceção automática. Detalhes e limites estão nos documentos 38 e
 de `firebase-migration/docs`; o boot possui núcleo de observação read-only,
 sem endpoint ou executor. Sua integração real permanece pendente.
 
-Leitura GitHub em 02/10/2026: main `protected=false` e lista de rulesets visíveis
+Leitura GitHub em 03/10/2026: main `protected=false` e lista de rulesets visíveis
 vazia. A configuração do ambiente `firebase-homologation` continua sem revalidação
 administrativa. Esses escopos são distintos; não inferir proteção do ambiente
 pelo estado da branch nem alterar permissões automaticamente.

@@ -24,7 +24,10 @@
 ## Bloqueios objetivos
 
 ### Ingestão real
-Não liberar enquanto faltar ensaio real de restore e promoção governada da identidade/keyring de ingestão.
+
+Restore real e cleanup foram comprovados no run `37092175109`. Não liberar
+enquanto o formato do keyring permanecer incompatível e faltarem amostra real,
+reconciliação e projeção governada.
 
 ### Desktop
 Não tratar launcher HML como sucessor do aplicativo funcional. Inspecionar a baseline instalada e validar atualização in-place/rollback.
@@ -56,9 +59,10 @@ Toda solicitação relevante deve:
 Estado: `TESTED_LOCAL`, candidato em revisão; **NO-GO para escrita real e
 liberação comercial**. Este registro não altera os gates históricos acima.
 
-- Baseline remota revalidada: `ee4d274bf27e36b293f2043fe2d4d818ea965c3d`.
+- Baseline remota reconciliada: `f8699caa254ed058fea67beff2d275f51602b394`.
 - Origem do patch preservada: `0a5e13ba4ddf97e11f7ab2aff1f38b565c95a712`.
-- Reexecução isolada: Functions 288/288, lint e build; API 39/39;
+- Reexecução isolada histórica no patch `0a5e13b`: Functions 288/288, lint e
+  build; API 39/39;
   três evals contratuais offline; dashboard estático 3/3; coletor 68/68;
   Rules estáticas 1/1; auditoria de fronteiras Apps Script e sintaxe shell.
 - Emulador Firestore pendente no ambiente local (Java 17; requerido Java 21).
@@ -74,12 +78,14 @@ Gen2. Não existe novo executor multiplataforma do boot patcher nesta entrega.
 
 ### Limites de execução
 
-A autorização versionada `.github/requests/aurora-rc11-run.json` permanece
-inalterada. O workflow corrigido recusa a versão 5: uma futura execução requer
-request v6 separado, vinculado à baseline aprovada e nova revisão do ambiente.
-O run `37073345505`, baseado no código anterior, não deve ser aprovado nem
-reexecutado para validar este patch. Publicação de branch/PR draft aciona apenas
-validações de código; não autoriza merge, deploy, dados reais ou mudança de segredo.
+A request v6 presente em `.github/requests/aurora-rc11-run.json` permanece
+inalterada em relação à main reconciliada. O workflow candidato recusa essa
+versão histórica: uma futura execução requer request v7 separado, vinculado à
+baseline aprovada e nova revisão do ambiente. O run `37092175109` falhou no gate
+HMAC após restore/cleanup e publicação de Hosting/Rules/indexes; não realizou
+amostra real, reconciliação, SHADOW ou migração do secret. Não o reexecutar para
+validar este patch. Publicação de branch/PR draft aciona apenas validações de
+código; não autoriza merge, deploy, dados reais ou mudança de segredo.
 
 ### Pendências para decisão
 
@@ -90,6 +96,7 @@ validações de código; não autoriza merge, deploy, dados reais ou mudança de
 | Local do organic-patcher | COMPROVADO na main: `firebase-migration/schemas` | duplicação de contrato | plataforma | manter fonte canônica e ativação bloqueada | nenhum para localização; runtime permanece separado |
 | Runtime boot patcher | PENDENTE: contrato não é executor web/PWA/desktop/mobile | patch indevido ou cruzamento de tenant | plataforma/segurança | manifesto server-side por orgId/clientSkill; auditoria, rollback e nenhum segredo no frontend | implementação e ensaio integrado não comprovados |
 | Smoke sem produção | PARCIAL: testes offline; sem ensaio nativo do iMac nesta etapa | despacho confundido com instalação | QA/plataforma | revalidar PR #95 na main atual, retorno sanitizado do dispositivo e rollback nativo | ausência de canal com resultado verificável do iMac |
+| Keyring HMAC/ponte | BLOQUEADO: formato não reconhecido no run `37092175109`; exit 77; nenhuma versão criada | migração incorreta ou indisponibilidade da ingestão | cloud/IAM e backend | diagnosticar o formato sem expor conteúdo, preparar correção protegida e somente então emitir request v7 | keyring incompatível e ausência de nova aprovação |
 
 Billing/orçamento, Secret Manager/API, presença de `AURORA_NEXUS_ALLOWED_EMAILS`
 (sem ler valor), identidade/WIF, usuários/memberships/MFA, App Check, Rules,
@@ -148,10 +155,10 @@ candidato desfaz este incremento de código; não houve mutação cloud a revert
 
 ### Observação server-side do boot — 02/10/2026, America/Sao_Paulo
 
-Produto 1.0.0-rc.1; módulo AURORA-ORG-001/API; base main
-`ee4d274bf27e36b293f2043fe2d4d818ea965c3d`. Incremento sobre o PR #98 no SHA
-`f25efddd29f8822795bb05f95f3fce7e2481b84e`, cujos cinco workflows concluíram com
-sucesso (incluindo 22 testes de preflight). CI do incremento exige novo SHA.
+Produto 1.0.0-rc.1; módulo AURORA-ORG-001/API; candidata do PR #98 reconciliada
+sobre a main `f8699caa254ed058fea67beff2d275f51602b394`. O incremento original no SHA
+`f25efddd29f8822795bb05f95f3fce7e2481b84e` concluiu cinco workflows com sucesso
+(incluindo 22 testes de preflight); o merge-forward exige CI novo no SHA final.
 
 - IMPLEMENTED: núcleo read-only na API existente, usando o schema canônico,
   contexto server-side, evidência independente, limites de validade/tamanho,

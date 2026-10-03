@@ -2,8 +2,9 @@
 
 Incremento `hml-readonly-preflight.v1`, release train `1.0.0-rc.1`.
 AURORA NEXUS é o sistema-mãe; WMGJ Operação é o piloto. Preparado em
-02/10/2026 (America/Sao_Paulo), sobre a candidata PR #98 `8b8e4fd` e main
-`ee4d274bf27e36b293f2043fe2d4d818ea965c3d`. Não requer Mac.
+02/10/2026 (America/Sao_Paulo) e reconciliado em 03/10/2026 sobre a main
+`f8699caa254ed058fea67beff2d275f51602b394`. O SHA final da candidata depende do
+CI pós-merge-forward. Não requer Mac.
 
 ## Uso e efeitos
 
@@ -83,6 +84,16 @@ O CI de Firestore executa essa suíte. Testes não fazem chamadas cloud.
 Rollback: reverter o commit candidato antes de integração; nenhuma mudança
 cloud foi feita por esta preparação. Não dispensar o gate de recuperação para
 contornar um erro de validação: revisar o metadado e a origem do bloqueio.
+
+## Evidência operacional posterior e limite
+
+O run protegido v6 `37092175109`, separado deste coletor, comprovou backup READY,
+restore real em banco temporário e cleanup. Também publicou Hosting, Rules e
+indexes da main. Em seguida falhou fechado com exit 77 porque o keyring HMAC não
+estava em um dos formatos aceitos; não houve nova versão do secret, redeploy da
+Function de ingestão nem amostra real. Isso não transforma o preflight read-only
+em executor e não autoriza reexecução. Uma futura request v7 deve ser criada em
+commit separado somente após correção revisada do gate e CI do SHA final.
 
 ## Referências técnicas consultadas em 02/10/2026
 
