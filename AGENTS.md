@@ -1,5 +1,11 @@
 # AURORA NEXUS — modus operandi do repositório
 
+## Invariante de produto
+
+Toda rotina, agendamento ou habilidade operacional WMGJ promovida ao AURORA NEXUS deve possuir representação no registro nativo do motor e na inteligência. Executor legado permanece `LEGACY_MIRRORED` até migração com paridade, teste, CI, HML e rollback. Nunca ativar dois executores equivalentes em paralelo.
+
+O aprendizado entre clientes reutiliza somente capacidade abstrata validada. Nenhum dado bruto, evidência identificável ou valor financeiro cruza tenants.
+
 ## Fonte mestre operacional
 
 Antes de qualquer alteração em operação, automação, faturamento, auditoria, ingestão, workflow, SLA, dashboard ou governança, ler `docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md` e `skills/aurora-nexus-continuous-dev/SKILL.md`.
