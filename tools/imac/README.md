@@ -2,8 +2,9 @@
 
 Componente: `imac-bootstrap-hardening-1`. Produto permanece no release train
 AURORA NEXUS `1.0.0-rc.1`; este patch não publica release nem atualiza o .app.
-Baseline reconciliada: PR #95 `ad50a0b4484d4d399a845513a40d57c52cff269e`, sobre a main
-`ee4d274bf27e36b293f2043fe2d4d818ea965c3d`. WMGJ Operação é o piloto.
+Baseline histórica: PR #95 `ad50a0b4484d4d399a845513a40d57c52cff269e`.
+Reconciliação de 03/10/2026 incorpora a main
+`5dcaddc88b27b54a7f24f9042b05e9799205fb1a`. WMGJ Operação é o piloto.
 
 ## Plano sem efeitos externos
 
@@ -103,13 +104,46 @@ confirmar ausência de execução antes de remover exclusivamente o diretório v
 
 ## Evidência e próximo gate
 
+### Retorno automático comprovado — 03/10/2026
+
+O helper foi validado em High Sierra 10.13.6/x86_64 com Node v16.20.2,
+substituído isoladamente com backup e sem restart. Após ajustar somente
+`JFN Status Mac.voiceReply` para `{{result}}` em commands.json, também com
+backup local, um único disparo TRIGGERcmd retornou diretamente ao conector:
+
+```text
+JFN_MAC timestamp=2026-10-03T15:27:42Z host=iMac-de-Joao.local macOS=10.13.6 arch=x86_64 disco=19% triggercmd=PROCESS_PRESENT managed_pid=1337 REMOTE_CONNECTIVITY=UNKNOWN
+```
+
+Chamada: 15:27:32.654Z–15:27:44.135Z (12:27 BRT). Isso comprova o retorno textual
+dessa execução. O conector não forneceu código de saída nativo nem streams
+separados de stdout/stderr. O campo UNKNOWN é a observação do helper, que não
+testa a rede; a prova de ida e volta pertence à chamada registrada.
+
+O candidato agora gera o mesmo `voiceReply={{result}}`. Somente o comando
+JFN Status Mac teve esse retorno homologado; os outros comandos não recebem
+essa evidência por extensão. Não reaplicar todo o bootstrap para repetir o
+ajuste já realizado no iMac. Os ensaios completos de instalação, reinício,
+rollback, aplicativo e autenticação HML permanecem separados e pendentes.
+O preflight anterior continua vinculado ao SHA 8b9846ee, não ao head corrente.
+
+Contrato do fornecedor: [Voice/MCP Reply](https://github.com/rvmey/triggercmd-docs/blob/master/Commands.md)
+com `{{result}}` recebe o texto enviado por sendresult.sh durante o comando.
+Esse mecanismo não captura automaticamente o exit code do processo.
+
 ### Troca isolada autorizada do helper
 
 `REPLACE_STATUS_HELPER.js` executa somente a troca de `jfn_status_mac.sh`.
 O titular autorizou essa etapa após a validação nativa do helper em 03/10/2026
 às 11:40:56 BRT. Não autoriza aplicar todo o bootstrap, reiniciar ou fazer merge.
-O código exige o blob de origem `437ad44144701fc176eadf7a099893875f9762b4`,
-correspondente ao helper validado no SHA `552962885a89192c9ff053834493deeecb8d1df9`.
+O código aceita exatamente dois blobs revisados do instalador:
+`437ad44144701fc176eadf7a099893875f9762b4` (origem nativa) e
+`6171703ee14c70916cff88588c69edc472c1fd63` (somente voiceReply corrigido).
+Ambos contêm o mesmo helper validado no SHA
+`552962885a89192c9ff053834493deeecb8d1df9`, com SHA-256
+`2b297b67682fae05e8128e5051a18ac52c5217d116357d0ae387d72ee73d6b5f`.
+Não há aceitação genérica de fontes novas. Recibo, backup, repetição e rollback
+do helper anterior permanecem compatíveis, pois os bytes do helper não mudam.
 
 No checkout fixado/revisado, usando o Node 16 existente:
 
@@ -163,12 +197,13 @@ do agente. Toda resposta inclui timestamp UTC, PID sanitizado e
 `REMOTE_CONNECTIVITY=UNKNOWN`. Timestamp ajuda a correlacionar uma execução;
 não é recibo remoto nem prova de autenticação. Status 0 do LaunchAgent não basta.
 
-Este patch altera o helper que será gerado pelo candidato. Não modifica o script
-já instalado. As checagens de proteção e pós-apply do bootstrap permanecem com
+O helper revisado já foi instalado isoladamente, conforme a evidência acima.
+A correção de voiceReply no candidato não altera seus bytes. As checagens de
+proteção e pós-apply do bootstrap permanecem com
 seus critérios anteriores; este incremento não homologa instalação ou reinício.
-Antes de novo teste remoto, validar o helper no iMac e realizar substituição
-controlada somente quando autorizada, com backup e retorno ao script anterior.
-Nenhum apply ou restart é necessário para revisar/testar o código.
+A validação nativa e a troca isolada concluídas não devem ser repetidas apenas
+para reproduzir o resultado. Nenhum apply ou restart é necessário para revisar
+ou testar o código.
 
 ```sh
 python3 -m unittest discover -s tools/imac/tests -v
@@ -179,8 +214,8 @@ No runner macOS também validam o PLIST com a ferramenta nativa. Não acessam
 Desktop Commander/TRIGGERcmd real, HML, dados ou tokens reais. Node 22 do CI não
 homologa Node 16; runner macOS atual não homologa High Sierra.
 
-Pendente: revisão humana; ensaio autorizado no iMac High Sierra/Node 16 correto;
-retorno remoto verificável; rollback nativo. Responsável sugerido: mantenedor
+Pendente: revisão humana; ensaio nativo do bootstrap completo e rollback nativo.
+Responsável sugerido: mantenedor
 desktop com titular autorizador. Aceite: simulação sem efeitos, instalação
 idempotente, comandos retornando evidência sanitizada e rollback demonstrado,
 preservando o app original. Risco residual: SO/runtime legado e recuperação
