@@ -78,6 +78,10 @@ apply() {
   test "${AURORA_CMEK_CONFIRMATION:-}" = "APPLY_AURORA_CMEK_HML" || {
     echo "BLOCKED_CONFIRMATION" >&2; exit 10;
   }
+  test "${AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED:-}" = "YES" || {
+    echo "BLOCKED_CMEK_ACCESS_CONFIRMATION" >&2; exit 12;
+  }
+  test "$(jq -r '.firestoreCmekFeatureAccessState' "$POLICY")" = "EXTERNALLY_CONFIRMED"
   test -n "$(active_account)" || { echo "BLOCKED_NO_GCLOUD_IDENTITY" >&2; exit 11; }
 
   gcloud services enable firestore.googleapis.com cloudkms.googleapis.com --project "$PROJECT_ID" --quiet

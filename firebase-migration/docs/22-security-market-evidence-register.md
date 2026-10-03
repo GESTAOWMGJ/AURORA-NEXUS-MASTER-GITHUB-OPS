@@ -23,7 +23,7 @@
 | Política de Segurança da Informação | PARTIAL | docs 06, 09, 13 + AURORA-SEC-001 | aprovação corporativa/versionamento |
 | Política de Controle de Acesso | PARTIAL | Security Rules, membership, RBAC | revisão formal periódica + matriz de acesso |
 | Política de Criptografia e Chaves | IMPLEMENTED | docs 23–28; AES-256-GCM envelope + KMS adapter + testes; KMS real ainda depende do gate HML | provisionar KMS e executar self-test MFA |
-| Firestore CMEK HML | IMPLEMENTED | `policy/cmek-hml-baseline-v1.json`, `docs/35-firestore-cmek-hml-spec.md`, `scripts/aurora-cmek-hml.sh`, workflow manual | solicitar/confirmar acesso CMEK, executar apply HML, backup/restore e key-failure test |
+| Firestore CMEK HML | IMPLEMENTED | `policy/cmek-hml-baseline-v1.json`, `docs/35-firestore-cmek-hml-spec.md`, `scripts/aurora-cmek-hml.sh`, workflow manual | acesso HML externamente confirmado (02/10/2026); execução HML separadamente autorizada, cmekConfig, backup/restore e key-failure test |
 | Secure SDLC | PARTIAL | AURORA-DEV-001 + workflows | política formal + métricas |
 | Vulnerability/Patch Management | PARTIAL | CodeQL ativo; `npm audit --omit=dev --audit-level=high` cobre Functions; ruleset de bloqueio ainda não comprovado | ampliar cobertura + ruleset + SLA/exceções |
 | Threat model | IMPLEMENTED | `docs/30-threat-model.md` — STRIDE + abuse cases | revisão humana + pentest/DAST por boundary |
@@ -81,3 +81,9 @@ Bloqueado até envelope encryption homologada, KMS, estratégia CMEK comprovada,
 ### Escala enterprise
 
 Requer evidência recorrente e independente. ISO/IEC 27001, ISO/IEC 27701 e SOC 2 são decisões de posicionamento/procurement; não são declaradas como existentes antes da auditoria competente.
+
+## Reconciliação de acesso Firestore CMEK — 02/10/2026
+
+Fonte: Gmail `1a0fd2f51798e6ef`, Cloud Firestore Engineering Team. Acesso ao recurso externamente confirmado apenas para `wmgj-hml-jfn-20260927`; isso não comprova banco, `cmekConfig`, backup READY, restore reconciliado ou teste de falha/recuperação da chave. Firestore CMEK permanece sem promoção para `HML_VERIFIED`.
+
+`aurora-nexus-prod-wmgj` é candidato: não reconhecido pelo provedor como projeto GCP naquela resposta, sem acesso CMEK concedido. Existência atual exige consulta autenticada bem-sucedida; não inferir inexistência de erro IAM. Allowlist organizacional não foi confirmada. Nenhuma autorização de apply ou produção deriva do e-mail.

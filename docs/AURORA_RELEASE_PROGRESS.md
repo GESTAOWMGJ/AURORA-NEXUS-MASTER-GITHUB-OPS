@@ -50,3 +50,13 @@ Toda solicitação relevante deve:
 4. validar atualização do app Mac instalado;
 5. hardening comercial, domínio, distribuição e documentação;
 6. promover RC aprovada para `1.0.0` GA.
+
+## Incremento candidato — reconciliação CMEK 02/10/2026
+
+- Baseline: `ee4d274bf27e36b293f2043fe2d4d818ea965c3d`; branch/PR draft, sem merge/deploy/apply.
+- Acesso Firestore CMEK HML: EXTERNALLY_CONFIRMED, Gmail `1a0fd2f51798e6ef` (02/10/2026), somente `wmgj-hml-jfn-20260927`.
+- CMEK operacional: PENDING_HML_VERIFICATION. Exigir banco `aurora-hml-cmek`, cmekConfig/versões ativas, backup READY, restore/sentinel e falha/recuperação de chave. CLINICAL_SENSITIVE permanece BLOCKED.
+- Produção: candidato `aurora-nexus-prod-wmgj`, não reconhecido pelo Google na resposta. Request bloqueado até validação de projeto existente e autorização explícita; workflow somente manual; bootstrap não cria projeto.
+- Validação: testes locais e CI devem ser vinculados ao SHA final; nenhum resultado HML ou de produção é inferido.
+- Próximo gate: consulta autenticada read-only do banco HML e projeto de produção; depois planejar execução HML separadamente autorizada.
+- Rollback: reverter o commit do patch em PR revisado; não remover os bloqueios em operação sem reconciliação da evidência.

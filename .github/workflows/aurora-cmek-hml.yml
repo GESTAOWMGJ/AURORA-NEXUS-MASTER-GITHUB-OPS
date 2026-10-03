@@ -18,6 +18,11 @@ on:
           - restore-test
           - key-failure-test
         default: plan
+      cmek_access_confirmed:
+        description: "Confirm project-scoped CMEK access evidence before apply"
+        required: false
+        type: boolean
+        default: false
       confirmation:
         description: "Exact confirmation required for mutating modes"
         required: false
@@ -54,6 +59,7 @@ jobs:
       - name: Resolve guarded request
         env:
           EVENT_NAME: ${{ github.event_name }}
+          INPUT_CMEK_ACCESS_CONFIRMED: ${{ inputs.cmek_access_confirmed }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_CONFIRMATION: ${{ inputs.confirmation }}
         run: |
@@ -70,8 +76,10 @@ jobs:
               (.mode=="plan" or .mode=="apply" or .mode=="restore-test" or .mode=="key-failure-test")
             ' "$REQUEST_FILE" >/dev/null
             mode="$(jq -r '.mode' "$REQUEST_FILE")"
+            access_confirmed="$(jq -r '.cmekAccessConfirmed // false' "$REQUEST_FILE")"
             confirmation="$(jq -r '.confirmation // ""' "$REQUEST_FILE")"
           else
+            access_confirmed="$INPUT_CMEK_ACCESS_CONFIRMED"
             mode="$INPUT_MODE"
             confirmation="$INPUT_CONFIRMATION"
           fi
@@ -81,6 +89,7 @@ jobs:
               test -z "$confirmation"
               ;;
             apply)
+              test "$access_confirmed" = "true"
               test "$confirmation" = "APPLY_AURORA_CMEK_HML"
               ;;
             restore-test)
@@ -95,6 +104,7 @@ jobs:
           esac
 
           {
+            if [ "$mode" = "apply" ]; then echo "AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED=YES"; fi
             echo "MODE=$mode"
             echo "AURORA_CMEK_CONFIRMATION=$confirmation"
           } >> "$GITHUB_ENV"

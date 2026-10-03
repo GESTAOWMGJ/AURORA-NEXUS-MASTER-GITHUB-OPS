@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 const workflow = readFileSync(new URL("../../../.github/workflows/aurora-cmek-hml.yml", import.meta.url), "utf8");
 const script = readFileSync(new URL("../../scripts/aurora-cmek-hml.sh", import.meta.url), "utf8");
@@ -31,8 +35,8 @@ test("CMEK HML policy forbids production, clinical data and destruction", () => 
   assert.equal(policy.realDataAllowed, false);
   assert.equal(policy.destructiveOperationsAllowed, false);
   assert.equal(policy.keyDestructionAllowed, false);
-  assert.equal(policy.firestoreCmekFeatureAccessRequired, false);
-  assert.equal(policy.firestoreCmekFeatureAccessState, "RUNTIME_VERIFIED_BY_DATABASE_CREATE_OR_EXISTING_CMEK_DATABASE");
+  assert.equal(policy.firestoreCmekFeatureAccessRequired, true);
+  assert.equal(policy.firestoreCmekFeatureAccessState, "EXTERNALLY_CONFIRMED");
   assert.equal(policy.projectId, "wmgj-hml-jfn-20260927");
   assert.equal(policy.databaseId, "aurora-hml-cmek");
   assert.equal(policy.location, "southamerica-east1");
@@ -65,4 +69,29 @@ test("CMEK HML script prepares guarded database, backup, restore and reversible 
     "projects delete",
     "billing projects unlink"
   ]) assert.ok(!script.includes(forbidden), forbidden);
+});
+
+
+test("external access does not promote runtime evidence or authorize apply", () => {
+  assert.equal(policy.firestoreCmekOperationalState, "PENDING_HML_VERIFICATION");
+  assert.equal(policy.firestoreCmekFeatureAccessEvidence.messageId, "1a0fd2f51798e6ef");
+  assert.equal(policy.firestoreCmekFeatureAccessEvidence.projectId, policy.projectId);
+  assert.match(workflow, /cmek_access_confirmed:[\s\S]*default: false/);
+  assert.match(workflow, /apply\)[\s\S]*test "\$access_confirmed" = "true"/);
+  const apply = script.slice(script.indexOf("apply() {"), script.indexOf("restore_test() {"));
+  assert.ok(apply.indexOf("BLOCKED_CMEK_ACCESS_CONFIRMATION") < apply.indexOf("gcloud services enable"));
+});
+
+
+test("apply without access confirmation makes no cloud call", () => {
+  const dir = mkdtempSync(join(tmpdir(), "aurora-cmek-gate-"));
+  try {
+    writeFileSync(join(dir, "gcloud"), "#!/bin/sh\necho UNEXPECTED_CLOUD_CALL >&2\nexit 99\n", { mode: 0o755 });
+    const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, AURORA_CMEK_CONFIRMATION: "APPLY_AURORA_CMEK_HML" };
+    delete env.AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED;
+    const result = spawnSync("bash", [new URL("../../scripts/aurora-cmek-hml.sh", import.meta.url).pathname, "apply"], { env, encoding: "utf8" });
+    assert.equal(result.status, 12);
+    assert.match(result.stderr, /BLOCKED_CMEK_ACCESS_CONFIRMATION/);
+    assert.doesNotMatch(result.stderr, /UNEXPECTED_CLOUD_CALL/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
