@@ -527,6 +527,8 @@ evento operacional validado
 → promoção ao registro nativo ou descarte
 ```
 
+Nenhum dado bruto de um cliente é transferido, disponibilizado ou reutilizado em outro tenant.
+
 Nenhum dado bruto, identificador, valor financeiro particular, regra contratual específica ou evidência sensível de um cliente é transferido a outro cliente. O que pode ser promovido é somente a capacidade diagnóstica/operacional abstraída, versionada e testável.
 
 ## 22. Fechamento mensal simplificado para gestor
