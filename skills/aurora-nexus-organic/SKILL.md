@@ -78,6 +78,14 @@ Pacote HML sem assinatura/notarização não é distribuição comercial. Não d
 
 Manter PR #38 draft até validação. Nenhum merge/deploy/publicação apenas por sucesso de teste de domínio. Não criar banco separado para contornar gates de backup/restore: resolver a incompatibilidade do procedimento com a restrição atual antes do deploy. Mac indisponível não impede build em runner, mas impede afirmar instalação. Trigger sent não é confirmação de execução. Artefato CI restrito não é publicação no portal.
 
+## Rotinas nativas e aprendizado entre tenants
+
+Toda rotina ou agendamento operacional aprendido com WMGJ deve existir no registro nativo do motor antes de ser considerado capacidade AURORA. Enquanto o executor permanecer Apps Script/legado, usar estado `LEGACY_MIRRORED`; não declarar migração concluída nem ativar executor duplicado.
+
+Novos clientes podem alimentar propostas orgânicas apenas por sinais e outcomes sanitizados e validados. Nenhum dado bruto, saldo, contrato, paciente, documento, transação ou identificador de um cliente pode ser transferido para outro tenant. A promoção transfere capacidade abstrata, configuração e regra testável, com revisão humana e rollback.
+
+O fechamento AURORA-FIN-SOC-001 e a decisão societária de distribuição pertencem ao mesmo motor. Aprovação do gestor é evidência de decisão; não é instrução de pagamento nem movimentação bancária.
+
 ## Critério de conclusão e prompt de retomada
 
 Declarar separadamente: especificado; implementado; testado localmente; CI; emulador/identidade real; integrado em código; instalado; implantado; publicado. Citar SHA/run/artefato correspondente. Não usar teste de commit antigo como aprovação do novo. Nunca inventar DNS, SSL, login, assinatura, credencial ou confirmação remota.
