@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const source = readFileSync(new URL("../../../src/34_AURORA_RC11_FIRESTORE_CONTROL.gs", import.meta.url), "utf8");
@@ -57,7 +59,7 @@ test("RC1.1 cleanup tolerates Firestore post-restore finalization", () => {
 });
 
 
-test("RC1.1 reuses or one-shot bootstraps the existing HML HMAC without mutating Secret Manager", () => {
+test("RC1.1 migrates legacy HML HMAC only behind explicit Secret Manager approval", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
   assert.match(workflow, /Build and validate existing HMAC contract/);
   assert.match(workflow, /gcloud secrets describe "\$secret_name"/);
@@ -65,8 +67,11 @@ test("RC1.1 reuses or one-shot bootstraps the existing HML HMAC without mutating
   assert.match(workflow, /auroraRc11InspecionarConfiguracao/);
   assert.match(workflow, /auroraRc11ConfigurarEndpointExistente/);
   assert.match(workflow, /auroraRc11ConfigurarIngestao/);
+  assert.match(workflow, /secretManagerKeyringMigrationApproved/);
+  assert.match(workflow, /\^\[A-Fa-f0-9\]\{64\}\$/);
+  assert.match(workflow, /gcloud secrets versions add "WMGJ_INGEST_HMAC_KEYRING"/);
+  assert.match(workflow, /functions:ingestWmgjEvent/);
   assert.match(workflow, /::add-mask::\$hmac_secret/);
-  assert.doesNotMatch(workflow, /gcloud secrets versions add/);
   assert.doesNotMatch(workflow, /functions:secrets:set WMGJ_INGEST_HMAC_KEYRING/);
   assert.doesNotMatch(workflow, /gcloud secrets update/);
   assert.doesNotMatch(workflow, /gcloud secrets create/);
@@ -95,13 +100,15 @@ test("RC1.1 HMAC probe is authenticated, dry-run and non-mutating", () => {
 test("RC1.1 request explicitly selects existing-HMAC probe mode", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
   const request = JSON.parse(readFileSync(new URL("../../../.github/requests/aurora-rc11-run.json", import.meta.url), "utf8"));
-  assert.equal(request.requestVersion, 5);
-  assert.equal(request.hmacMode, "REUSE_OR_BOOTSTRAP_EXISTING_KEYRING");
+  assert.equal(request.requestVersion, 6);
+  assert.equal(request.hmacMode, "MIGRATE_LEGACY_OR_REUSE_CURRENT_KEYRING");
+  assert.equal(request.secretManagerKeyringMigrationApproved, true);
   assert.equal(request.deploymentApproved, true);
   assert.equal(request.firebaseWriteApproved, true);
   assert.equal(request.hmacBootstrapIfMissing, true);
-  assert.match(workflow, /\.requestVersion==5/);
-  assert.match(workflow, /\.hmacMode=="REUSE_OR_BOOTSTRAP_EXISTING_KEYRING"/);
+  assert.match(workflow, /\.requestVersion==6/);
+  assert.match(workflow, /\.hmacMode=="MIGRATE_LEGACY_OR_REUSE_CURRENT_KEYRING"/);
+  assert.match(workflow, /\.secretManagerKeyringMigrationApproved==true/);
   assert.match(workflow, /\.deploymentApproved==true/);
   assert.match(workflow, /\.firebaseWriteApproved==true/);
   assert.match(workflow, /\.hmacBootstrapIfMissing==true/);
@@ -117,14 +124,19 @@ test("RC1.1 workflow cannot auto-run from implementation changes", () => {
 });
 
 
-test("RC1.1 verifies existing Functions runtime without secret IAM mutation", () => {
+test("RC1.1 keeps baseline runtime non-secret and gates ingest redeploy behind approved keyring migration", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
   assert.match(workflow, /Verify existing HML runtime and deploy non-secret surfaces/);
   assert.match(workflow, /firebase-tools@14\.17\.0 functions:list/);
   assert.match(workflow, /gcloud functions describe runtimeHealth/);
   assert.match(workflow, /signatureVersion=="v2"/);
   assert.match(workflow, /--only hosting,firestore:rules,firestore:indexes/);
-  assert.doesNotMatch(workflow, /--only functions:ingestWmgjEvent/);
+  assert.match(workflow, /secretManagerKeyringMigrationApproved/);
+  assert.match(workflow, /--only functions:ingestWmgjEvent/);
+  const approvalIndex = workflow.indexOf('secretManagerKeyringMigrationApproved');
+  const redeployIndex = workflow.indexOf('--only functions:ingestWmgjEvent');
+  assert.ok(approvalIndex >= 0 && redeployIndex > approvalIndex);
+  assert.doesNotMatch(workflow, /--only functions(?!:ingestWmgjEvent)/);
   assert.doesNotMatch(workflow, /secretmanager\.secrets\.setIamPolicy/);
   assert.match(workflow, /functionsRedeployed:false/);
 });
@@ -146,6 +158,23 @@ test("RC1.1 treats clasp execution as a fail-closed nondev gate", () => {
   assert.match(runner, /exit 71/);
   assert.match(deployWorkflow, /ensure-appscript-execution-deployment\.sh/);
   assert.match(deployWorkflow, /Publish canonical Apps Script Execution API deployment/);
+});
+
+test("RC1.1 workflow parses as YAML", () => {
+  const workflowPath = fileURLToPath(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
+  const ruby = "require 'yaml'; begin; YAML.load_file(ARGV[0]); puts 'YAML_OK'; rescue => e; STDERR.puts('LINE=' + (e.respond_to?(:line) ? e.line.to_s : '0')); STDERR.puts('COLUMN=' + (e.respond_to?(:column) ? e.column.to_s : '0')); STDERR.puts(e.message); end";
+  const parsed = spawnSync("ruby", ["-e", ruby, workflowPath], { encoding: "utf8" });
+  assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
+  assert.equal(parsed.stdout.includes("YAML_OK"), true, parsed.stderr || parsed.stdout);
+});
+
+test("RC1.1 canonical bridge shell block has valid bash syntax", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const match = workflow.match(/      - name: Use canonical Apps Script deployment and configure bridge[\s\S]*?        run: \|\n([\s\S]*?)\n\n      - name: Send one real sample/);
+  assert.ok(match?.[1]);
+  const script = match[1].split("\n").map((line) => line.replace(/^          /, "")).join("\n");
+  const checked = spawnSync("bash", ["-n"], { input: script, encoding: "utf8" });
+  assert.equal(checked.status, 0, checked.stderr);
 });
 
 test("RC1.1 reconciles the exact entity ids returned by real ingestion", () => {
