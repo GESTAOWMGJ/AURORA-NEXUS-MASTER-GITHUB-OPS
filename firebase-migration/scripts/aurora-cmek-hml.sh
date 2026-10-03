@@ -6,7 +6,7 @@ POLICY="$ROOT/firebase-migration/policy/cmek-hml-baseline-v1.json"
 MODE="${1:-plan}"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "MISSING_TOOL:$1" >&2; exit 2; }; }
-for tool in jq gcloud curl sha256sum; do need "$tool"; done
+for tool in jq gcloud curl sha256sum date; do need "$tool"; done
 test -f "$POLICY"
 
 PROJECT_ID="$(jq -r '.projectId' "$POLICY")"
@@ -93,7 +93,11 @@ apply() {
   fi
 
   if ! gcloud kms keys describe "$KEY" --project "$PROJECT_ID" --location "$LOCATION" --keyring "$KEYRING" >/dev/null 2>&1; then
-    gcloud kms keys create "$KEY"       --project "$PROJECT_ID"       --location "$LOCATION"       --keyring "$KEYRING"       --purpose=encryption       --rotation-period="${ROTATION_DAYS}d"       --protection-level=software       --labels=environment=hml,system=aurora-nexus,purpose=firestore-cmek
+    local rotation_epoch next_rotation_time
+    rotation_epoch="$(( $(date -u +%s) + ROTATION_DAYS * 86400 ))"
+    # GNU date (Cloud Shell/CI) and BSD date (macOS), always RFC3339 UTC.
+    next_rotation_time="$(date -u -d "@$rotation_epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$rotation_epoch" +%Y-%m-%dT%H:%M:%SZ)"
+    gcloud kms keys create "$KEY"       --project "$PROJECT_ID"       --location "$LOCATION"       --keyring "$KEYRING"       --purpose=encryption       --rotation-period="${ROTATION_DAYS}d"       --next-rotation-time="$next_rotation_time"       --protection-level=software       --labels=environment=hml,system=aurora-nexus,purpose=firestore-cmek
   fi
 
   gcloud kms keys add-iam-policy-binding "$KEY"     --project "$PROJECT_ID"     --location "$LOCATION"     --keyring "$KEYRING"     --member="serviceAccount:$SERVICE_AGENT"     --role=roles/cloudkms.cryptoKeyEncrypterDecrypter     --quiet >/dev/null

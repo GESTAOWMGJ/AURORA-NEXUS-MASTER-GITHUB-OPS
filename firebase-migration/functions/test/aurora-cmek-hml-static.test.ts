@@ -10,6 +10,35 @@ const workflow = readFileSync(new URL("../../../.github/workflows/aurora-cmek-hm
 const script = readFileSync(new URL("../../scripts/aurora-cmek-hml.sh", import.meta.url), "utf8");
 const policy = JSON.parse(readFileSync(new URL("../../policy/cmek-hml-baseline-v1.json", import.meta.url), "utf8"));
 
+test("key creation supplies a future RFC3339 first rotation with the period", () => {
+  const dir = mkdtempSync(join(tmpdir(), "aurora-cmek-rotation-"));
+  try {
+    writeFileSync(join(dir, "gcloud"), `#!/bin/bash
+case "$*" in
+  "auth list"*) echo test-account ;;
+  "projects describe"*) echo 299889357292 ;;
+  "kms keys describe"*) exit 1 ;;
+  "kms keys create"*) printf '%s\\n' "$@" > "$AURORA_TEST_ARGS"; exit 77 ;;
+  *) exit 0 ;;
+esac
+`, { mode: 0o755 });
+    const argsPath = join(dir, "args");
+    const before = Date.now();
+    const result = spawnSync("bash", [new URL("../../scripts/aurora-cmek-hml.sh", import.meta.url).pathname, "apply"], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, AURORA_TEST_ARGS: argsPath,
+        AURORA_CMEK_CONFIRMATION: "APPLY_AURORA_CMEK_HML", AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED: "YES" },
+      encoding: "utf8"
+    });
+    assert.equal(result.status, 77, result.stderr);
+    const args = readFileSync(argsPath, "utf8").split("\n");
+    assert.ok(args.includes("--rotation-period=90d"));
+    const time = args.find(arg => arg.startsWith("--next-rotation-time="))?.split("=")[1];
+    assert.match(time || "", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    const expected = before + 90 * 86400000;
+    assert.ok(Math.abs(Date.parse(time!) - expected) < 5000);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("CMEK HML workflow is manual or one-shot request only and protected", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /push:/);

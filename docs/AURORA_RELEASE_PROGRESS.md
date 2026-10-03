@@ -71,3 +71,9 @@ Toda solicitação relevante deve:
 - HMAC: job `111225779429` do run `37093409122` falhou no probe com HTTP 401 / RC11_HMAC_INVALIDO (saída 73). PR #109 corrige interpretação da chave hexadecimal para 32 bytes em paridade com o backend; deploy Apps Script `37132639621` foi aprovado. Hipótese de segredo antigo não comprovada. Correção implantada não equivale a probe HML aprovado.
 - Na consulta de acompanhamento, job `111230961385` da tentativa 4 estava em restore; probe HMAC, ingestão, reconciliação e inteligência nativa ainda pendentes. Não disparada nova tentativa neste trabalho.
 - CMEK permanece PENDING_HML_VERIFICATION; banco, cmekConfig, versões de chave, backup/restore CMEK e falha/recuperação da chave não comprovados. Nenhum apply, recurso cloud, merge ou deploy executado por este patch.
+
+### Correção de provisionamento KMS — 03/10/2026
+
+- Apply autorizado pelo titular iniciou em Cloud Shell; APIs/identidade de serviço avançaram, criação da CryptoKey falhou com INVALID_ARGUMENT: next_rotation_time obrigatório para rotation_schedule. Banco CMEK não comprovado.
+- Executor agora fornece primeira rotação em RFC3339 UTC, 90 dias após execução, junto do período de rotação. Compatível com date GNU/BSD. Teste offline captura argumentos reais de criação e interrompe antes de IAM/banco; não chama GCP.
+- Retomada somente no SHA corrigido; PENDING_HML_VERIFICATION permanece até provas operacionais completas.
