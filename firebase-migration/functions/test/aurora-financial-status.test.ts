@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { buildLayFinancialStatus } from "../src/auroraFinancialStatus.ts";
+import { buildLayFinancialStatus, distributionDecisionGuard, financialClosingHash } from "../src/auroraFinancialStatus.ts";
 
 const closing = {
   orgId: "wmgj",
@@ -79,6 +79,44 @@ test("fonte incompleta ou gate não elegível bloqueia aprovação, mas rejeiç�
   assert.equal(blocked.canApproveDistribution, false);
 });
 
+
+test("mudança da evidência entre pré-validação e commit invalida a aprovação mesmo com fechamento imutável", () => {
+  const beforeClosing = { ...closing, financialCents: { ...closing.financialCents } };
+  const duringCommitClosing = { ...closing, financialCents: { ...closing.financialCents } };
+  const before = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-09",
+    closing: beforeClosing,
+    financialEntries: [
+      { _id: "pay-1", workflowState: "VALIDATED", kind: "PAYABLE", status: "OPEN", amountCents: 100000, dueDate: "2026-10-10" }
+    ],
+    taxObligations: [],
+    invoices: []
+  }) as any;
+
+  assert.equal(before.canApproveDistribution, true);
+  assert.equal(distributionDecisionGuard(before, before.snapshotHash, "APPROVE"), null);
+  assert.equal(financialClosingHash(beforeClosing), financialClosingHash(duringCommitClosing));
+
+  const duringCommit = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-09",
+    closing: duringCommitClosing,
+    financialEntries: [
+      { _id: "pay-1", workflowState: "VALIDATED", kind: "PAYABLE", status: "OPEN", amountCents: 110000, dueDate: "2026-10-10" }
+    ],
+    taxObligations: [],
+    invoices: []
+  }) as any;
+
+  assert.equal(duringCommit.canApproveDistribution, true);
+  assert.notEqual(duringCommit.snapshotHash, before.snapshotHash);
+  assert.equal(
+    distributionDecisionGuard(duringCommit, before.snapshotHash, "APPROVE"),
+    "STALE_FINANCIAL_SNAPSHOT"
+  );
+});
+
 test("runtime de decisão registra aprovação, nunca pagamento ou transferência", () => {
   const runtime = fs.readFileSync("src/auroraFinancialDecisionRuntime.ts", "utf8");
   assert.match(runtime, /APPROVED_FOR_DISTRIBUTION/);
@@ -86,6 +124,10 @@ test("runtime de decisão registra aprovação, nunca pagamento ou transferênci
   assert.match(runtime, /moneyMoved:\s*false/);
   assert.match(runtime, /automaticPayment:\s*false/);
   assert.match(runtime, /automaticDistribution:\s*false/);
+  assert.match(runtime, /tx\.get\(financialEntriesQuery\)/);
+  assert.match(runtime, /tx\.get\(taxObligationsQuery\)/);
+  assert.match(runtime, /tx\.get\(invoicesQuery\)/);
+  assert.match(runtime, /distributionDecisionGuard\(transactionalSummary, snapshotHash, decision\)/);
   assert.doesNotMatch(runtime, /executePayment|pix\(|bankTransfer|transferFunds/);
 });
 
