@@ -49,7 +49,7 @@ Nunca registrar “Gemini” ou “GPT” como origem quando foi usado fallback 
 
 ### Relatório financeiro aos sócios
 
-A habilidade `AURORA-FIN-SOC-001` deriva somente de um fechamento mensal canônico. O snapshot `monthlyClosings/{YYYY-MM}` deve expor `financialCents` com centavos inteiros ou `null` quando não houver evidência suficiente: `forecastCents`, `billableCents`, `billedCents`, `receivableCents`, `receivedCents`, `recoverableCents`, `glossCents`, `expensesCents`, `taxesCents`, `transfersCents` e `closingResultCents`.
+A habilidade `AURORA-FIN-SOC-001` deriva somente de um fechamento mensal canônico. O snapshot `monthlyClosings/{YYYY-MM}` deve expor `financialCents` com centavos inteiros ou `null` quando não houver evidência suficiente: `forecastCents`, `billableCents`, `billedCents`, `receivableCents`, `receivedCents`, `recoverableCents`, `glossCents`, `expensesCents`, `taxesCents`, `transfersCents`, `closingResultCents`, `cashBalanceCents` e `distributableCents`.
 
 `exceptionSummary.openCount` e `exceptionSummary.openAmountCents` representam somente exemplares canônicos não sobrepostos.
 
