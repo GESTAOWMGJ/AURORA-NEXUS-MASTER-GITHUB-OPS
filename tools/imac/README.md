@@ -103,6 +103,30 @@ confirmar ausência de execução antes de remover exclusivamente o diretório v
 
 ## Evidência e próximo gate
 
+### Detecção de processo revisada — 03/10/2026
+
+O status gerado consulta o PID do label exato `com.jfn.triggercmd.imac` em
+`launchctl list` e confere executável e estado com `ps`, sem ler argumentos,
+credenciais ou logs brutos. Não depende de `agent.js --console`: a baseline
+observada inicia via Bash e apresenta um PID Node.
+
+- `PROCESS_PRESENT`: PID gerenciado corresponde ao Node 16 esperado e não é zumbi.
+- `PROCESS_ABSENT`: serviço sem PID/ausente na lista consultada, ou processo zumbi.
+- `PROCESS_UNKNOWN`: consulta falhou, PID ambíguo, corrida com saída do processo,
+  shell ainda intermediário ou executável diferente. Não classificar como offline.
+
+O campo `triggercmd` descreve somente presença do processo gerenciado, não saúde
+do agente. Toda resposta inclui timestamp UTC, PID sanitizado e
+`REMOTE_CONNECTIVITY=UNKNOWN`. Timestamp ajuda a correlacionar uma execução;
+não é recibo remoto nem prova de autenticação. Status 0 do LaunchAgent não basta.
+
+Este patch altera o helper que será gerado pelo candidato. Não modifica o script
+já instalado. As checagens de proteção e pós-apply do bootstrap permanecem com
+seus critérios anteriores; este incremento não homologa instalação ou reinício.
+Antes de novo teste remoto, validar o helper no iMac e realizar substituição
+controlada somente quando autorizada, com backup e retorno ao script anterior.
+Nenhum apply ou restart é necessário para revisar/testar o código.
+
 ```sh
 python3 -m unittest discover -s tools/imac/tests -v
 ```
