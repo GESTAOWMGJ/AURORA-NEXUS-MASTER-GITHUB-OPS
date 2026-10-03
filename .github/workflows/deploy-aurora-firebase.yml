@@ -339,7 +339,7 @@ jobs:
           test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
           git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
-          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,hosting,firestore:rules,firestore:indexes --non-interactive
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -361,7 +361,10 @@ jobs:
             "auroraNexusIntegrationKeys",
             "auroraNexusIntegrationPing",
             "auroraNexusIntegrationDocuments",
-            "auroraNexusDocumentWatchdog"
+            "auroraNexusDocumentWatchdog",
+            "auroraNexusShareholderReportGenerator",
+            "auroraNexusShareholderReport",
+            "auroraNexusDistributionDecision"
           ]' '
             (.result // .functions // []) as $functions |
             [$functions[] | (.id // .name // "") | split("/")[-1]] | sort == ($expected | sort)
@@ -394,6 +397,22 @@ jobs:
             --write-out '%{http_code}' \
             "https://${PROJECT_ID}.web.app/organic?format=json")"
           test "$organic_status" = "401"
+          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+          shareholder_status="$(curl --silent --show-error --max-time 30 \
+            -H 'Accept: application/json' \
+            --output "$negative_response" \
+            --write-out '%{http_code}' \
+            "https://${PROJECT_ID}.web.app/reports/shareholders?format=json&competence=2026-10")"
+          test "$shareholder_status" = "401"
+          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+          distribution_status="$(curl --silent --show-error --max-time 30 \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            --data '{"competence":"2026-10","snapshotHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","decision":"REJECT","reason":"negative smoke","expectedRevision":0}' \
+            --output "$negative_response" \
+            --write-out '%{http_code}' \
+            "https://${PROJECT_ID}.web.app/api/distribution-approval")"
+          test "$distribution_status" = "401"
           jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
       - name: Authenticated smoke test without stored password
         env:
