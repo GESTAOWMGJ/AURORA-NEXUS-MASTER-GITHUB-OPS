@@ -45,8 +45,11 @@ jobs:
             .projectId==$project and
             .projectId=="wmgj-hml-jfn-20260927" and
             .sourceDatabase=="(default)" and
-            .requestVersion==4 and
-            .hmacMode=="REUSE_EXISTING_WITH_AUTH_PROBE" and
+            .requestVersion==5 and
+            .hmacMode=="REUSE_OR_BOOTSTRAP_EXISTING_KEYRING" and
+            .deploymentApproved==true and
+            .firebaseWriteApproved==true and
+            .hmacBootstrapIfMissing==true and
             .restoreDatabasePrefix=="rc11-restore" and
             .competence=="2026-05" and
             .sample.invoiceNumber=="8" and
@@ -265,7 +268,7 @@ jobs:
             healthUrl:$healthUrl
           }' > "$RUNNER_TEMP/rc11-evidence/runtime.json"
 
-      - name: Push bridge and configure Apps Script
+      - name: Use canonical Apps Script deployment and configure bridge
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
@@ -275,15 +278,48 @@ jobs:
           umask 077
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           mkdir -p "$RUNNER_TEMP/build-appscript"
-          cp appsscript.json "$RUNNER_TEMP/build-appscript/appsscript.json"
-          cp src/*.gs "$RUNNER_TEMP/build-appscript/"
           printf '{"scriptId":"%s","projectId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" "$PROJECT_ID" > "$RUNNER_TEMP/build-appscript/.clasp.json"
           cd "$RUNNER_TEMP/build-appscript"
-          clasp push --force
-          bash "$GITHUB_WORKSPACE/tools/ensure-appscript-execution-deployment.sh" "$RUNNER_TEMP/rc11-appscript-deployment.json"
+          # Apps Script source/deployment is owned exclusively by deploy-appscript.yml.
+          # RC1.1 consumes the canonical nondev deployment and never pushes/redeploys it.
+          test "$(jq -r '.deploymentApproved' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
+          test "$(jq -r '.firebaseWriteApproved' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
+          test "$(jq -r '.hmacBootstrapIfMissing' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
           params="$(jq -nc --arg url "$AURORA_RC11_INGEST_URL" '[$url]')"
-          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ConfigurarEndpointExistente "$RUNNER_TEMP/rc11-config.json" "$params"
-          jq -e '.response.ok==true and .response.endpointConfigured==true and .response.secretConfigured==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-config.json" >/dev/null
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11InspecionarConfiguracao "$RUNNER_TEMP/rc11-config-state.json"
+          jq -e '.response.ok==true and .response.sourceMutation==false' "$RUNNER_TEMP/rc11-config-state.json" >/dev/null
+          if [ "$(jq -r '.response.hmacConfigured' "$RUNNER_TEMP/rc11-config-state.json")" = "true" ]; then
+            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ConfigurarEndpointExistente "$RUNNER_TEMP/rc11-config.json" "$params"
+          else
+            keyring_file="$RUNNER_TEMP/hmac-keyring.json"
+            if ! gcloud secrets versions access latest --secret="WMGJ_INGEST_HMAC_KEYRING" --project "$PROJECT_ID" --out-file="$keyring_file" >/dev/null 2>&1; then
+              echo "::error title=HMAC bootstrap unavailable::Apps Script HMAC is absent and deploy identity cannot read the existing HML keyring. No IAM or Secret Manager mutation was attempted." >&2
+              exit 74
+            fi
+            chmod 600 "$keyring_file"
+            key_id="$(jq -r '
+              to_entries
+              | map(select(
+                  .value.active==true and
+                  ((.value.orgIds // []) | index("wmgj")) != null and
+                  ((.value.entityTypes // []) | index("invoice")) != null and
+                  ((.value.entityTypes // []) | index("bankTransaction")) != null and
+                  ((.value.secret // "") | length) >= 32
+                ))
+              | if length==1 then .[0].key else empty end
+            ' "$keyring_file")"
+            test -n "$key_id"
+            hmac_secret="$(jq -r --arg key "$key_id" '.[$key].secret // empty' "$keyring_file")"
+            test "${#hmac_secret}" -ge 32
+            echo "::add-mask::$hmac_secret"
+            bootstrap_params="$(jq -nc --arg url "$AURORA_RC11_INGEST_URL" --arg keyId "$key_id" --arg secret "$hmac_secret" '[$url,$keyId,$secret]')"
+            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ConfigurarIngestao "$RUNNER_TEMP/rc11-config.json" "$bootstrap_params"
+            rm -f "$keyring_file"
+            unset hmac_secret bootstrap_params
+          fi
+          jq -e '.response.ok==true and .response.secretConfigured==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-config.json" >/dev/null
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11InspecionarConfiguracao "$RUNNER_TEMP/rc11-config-state-after.json"
+          jq -e '.response.ok==true and .response.endpointConfigured==true and .response.hmacConfigured==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-config-state-after.json" >/dev/null
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ValidarHmacExistente "$RUNNER_TEMP/rc11-hmac-probe.json"
           jq -e '.response.ok==true and .response.authenticated==true and .response.noWrite==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-hmac-probe.json" >/dev/null
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-dry-run.json"
@@ -292,6 +328,7 @@ jobs:
       - name: Send one real sample and reapply kill switch
         run: |
           set -euo pipefail
+          test "$(jq -r '.firebaseWriteApproved' "$REQUEST_FILE")" = "true"
           cd "$RUNNER_TEMP/build-appscript"
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11AtivarEscritaAmostra "$RUNNER_TEMP/rc11-activate.json" '["ATIVAR_RC11_WMGJ_HML"]'
           jq -e '.response.ok==true and .response.dryRun==false and .response.sampleOnly==true' "$RUNNER_TEMP/rc11-activate.json" >/dev/null

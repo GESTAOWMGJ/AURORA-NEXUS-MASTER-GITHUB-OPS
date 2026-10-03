@@ -11,9 +11,9 @@ if [ "$#" -eq 2 ] && [ "$1" = "--confirm-host" ]; then
 fi
 if [ "$#" -ne 0 ]; then echo "ERRO_ARGUMENTOS" >&2; exit 2; fi
 case "$MODE" in
-  --dry-run|--apply) ;;
+  --dry-run|--preflight|--apply) ;;
   --help)
-    echo 'Uso: bash INSTALL_AURORA_TRIGGERCMD_BASE.sh [--dry-run | --apply --confirm-host HOST]'
+    echo 'Uso: bash INSTALL_AURORA_TRIGGERCMD_BASE.sh [--dry-run | --preflight --confirm-host HOST | --apply --confirm-host HOST]'
     exit 0 ;;
   *) echo "ERRO_MODO_INVALIDO" >&2; exit 2 ;;
 esac
@@ -77,6 +77,8 @@ for required in "$NODE" "$AGENT_SRC/agent.js" "$DATA/token.tkn" "$DATA/computeri
 done
 
 [ -x "$NODE" ] || fail "ERRO_NODE_NAO_EXECUTAVEL"
+NODE_MAJOR="$("$NODE" -p 'process.versions.node.split(".")[0]')" || fail "ERRO_NODE_RUNTIME"
+[ "$NODE_MAJOR" = 16 ] || fail "ERRO_NODE16_OBRIGATORIO"
 
 if [ ! -s "$DATA/computerid.cfg" ]; then
   echo "ERRO_COMPUTER_ID_VAZIO" >&2
@@ -90,6 +92,14 @@ if [ "$WAS_LOADED" -eq 1 ]; then
   [ -f "$PLIST" ] || fail "ERRO_PLIST_ORIGINAL_AUSENTE"
 elif pgrep -f "$AGENT_SRC/agent.js --console" >/dev/null 2>&1; then
   fail "ERRO_AGENTE_NAO_GERENCIADO_REQUER_REVISAO"
+fi
+
+if [ "$MODE" = "--preflight" ]; then
+  echo "AURORA_IMAC_NATIVE_PREFLIGHT_OK"
+  echo "writes=NO network=NO restart=NO mirror_sync=NO app_update=NO"
+  echo "node_major=16 credential_metadata=PRESENT launchagent_loaded=$WAS_LOADED"
+  echo "REMOTE_CONNECTIVITY=UNKNOWN APP_RUNTIME=UNKNOWN HML_AUTH=UNKNOWN"
+  exit 0
 fi
 
 mkdir -p "$DATA" "$SUPPORT" "$LOG_DIR" "$PLIST_DIR"

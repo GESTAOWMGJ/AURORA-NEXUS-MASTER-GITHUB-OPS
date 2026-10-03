@@ -56,7 +56,8 @@ class BootstrapTests(unittest.TestCase):
     def harness(self):
         node = self.home / "Applications/node16/bin/node"
         node.parent.mkdir(parents=True)
-        node.symlink_to(shutil.which("node"))
+        node.write_text('#!/bin/bash\nif [ "$1" = -p ]; then echo "${AURORA_TEST_NODE_MAJOR:-16}"; exit 0; fi\nexec "' + shutil.which("node") + '" "$@"\n')
+        node.chmod(0o700)
         agent = self.home / "Applications/TRIGGERcmd-headless/src/agent.js"
         agent.parent.mkdir(parents=True)
         agent.write_text("// inert fixture\n")
@@ -119,6 +120,26 @@ esac''')
                      ["--dry-run", "unexpected"]):
             self.assertNotEqual(run(["bash", str(fixture)] + args, env=self.env).returncode, 0)
         self.assertFalse(self.support.exists())
+
+    def test_native_preflight_has_no_writes_or_service_calls(self):
+        fixture = self.harness()
+        before = sorted(str(p.relative_to(self.home)) for p in self.home.rglob("*"))
+        result = run(["bash", str(fixture), "--preflight", "--confirm-host", "authorized-imac"], env=self.env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("AURORA_IMAC_NATIVE_PREFLIGHT_OK", result.stdout)
+        self.assertIn("REMOTE_CONNECTIVITY=UNKNOWN", result.stdout)
+        self.assertEqual(self.trace.read_text().splitlines(), ["list"])
+        self.assertEqual(before, sorted(str(p.relative_to(self.home)) for p in self.home.rglob("*")))
+        self.assertNotIn("SYNTHETIC_NOT_A_CREDENTIAL", result.stdout + result.stderr)
+
+    def test_wrong_node_major_blocks_before_any_write(self):
+        self.harness()
+        self.env["AURORA_TEST_NODE_MAJOR"] = "22"
+        result = self.apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ERRO_NODE16_OBRIGATORIO", result.stderr)
+        self.assertFalse(self.support.exists())
+        self.assertFalse(self.trace.exists())
 
     def test_apply_preserves_commands_and_validates_escaped_plist(self):
         self.harness()

@@ -57,19 +57,26 @@ test("RC1.1 cleanup tolerates Firestore post-restore finalization", () => {
 });
 
 
-test("RC1.1 reuses provisioned HMAC and never mutates Secret Manager", () => {
+test("RC1.1 reuses or one-shot bootstraps the existing HML HMAC without mutating Secret Manager", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
   assert.match(workflow, /Build and validate existing HMAC contract/);
   assert.match(workflow, /gcloud secrets describe "\$secret_name"/);
+  assert.match(workflow, /gcloud secrets versions access latest/);
+  assert.match(workflow, /auroraRc11InspecionarConfiguracao/);
+  assert.match(workflow, /auroraRc11ConfigurarEndpointExistente/);
+  assert.match(workflow, /auroraRc11ConfigurarIngestao/);
+  assert.match(workflow, /::add-mask::\$hmac_secret/);
   assert.doesNotMatch(workflow, /gcloud secrets versions add/);
   assert.doesNotMatch(workflow, /functions:secrets:set WMGJ_INGEST_HMAC_KEYRING/);
   assert.doesNotMatch(workflow, /gcloud secrets update/);
   assert.doesNotMatch(workflow, /gcloud secrets create/);
-  assert.match(workflow, /auroraRc11ConfigurarEndpointExistente/);
+  assert.doesNotMatch(workflow, /add-iam-policy-binding/);
   assert.match(workflow, /auroraRc11ValidarHmacExistente/);
 });
 
 test("RC1.1 HMAC probe is authenticated, dry-run and non-mutating", () => {
+  assert.match(source, /function auroraRc11InspecionarConfiguracao\(\)/);
+  assert.match(source, /hmacConfigured:/);
   assert.match(source, /function auroraRc11ValidarHmacExistente\(\)/);
   assert.match(source, /RC11_DRY_RUN_OBRIGATORIO/);
   assert.match(source, /code === 400 && parsed && parsed\.code === 'VALIDATION_ERROR'/);
@@ -88,10 +95,16 @@ test("RC1.1 HMAC probe is authenticated, dry-run and non-mutating", () => {
 test("RC1.1 request explicitly selects existing-HMAC probe mode", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
   const request = JSON.parse(readFileSync(new URL("../../../.github/requests/aurora-rc11-run.json", import.meta.url), "utf8"));
-  assert.equal(request.requestVersion, 4);
-  assert.equal(request.hmacMode, "REUSE_EXISTING_WITH_AUTH_PROBE");
-  assert.match(workflow, /\.requestVersion==4/);
-  assert.match(workflow, /\.hmacMode=="REUSE_EXISTING_WITH_AUTH_PROBE"/);
+  assert.equal(request.requestVersion, 5);
+  assert.equal(request.hmacMode, "REUSE_OR_BOOTSTRAP_EXISTING_KEYRING");
+  assert.equal(request.deploymentApproved, true);
+  assert.equal(request.firebaseWriteApproved, true);
+  assert.equal(request.hmacBootstrapIfMissing, true);
+  assert.match(workflow, /\.requestVersion==5/);
+  assert.match(workflow, /\.hmacMode=="REUSE_OR_BOOTSTRAP_EXISTING_KEYRING"/);
+  assert.match(workflow, /\.deploymentApproved==true/);
+  assert.match(workflow, /\.firebaseWriteApproved==true/);
+  assert.match(workflow, /\.hmacBootstrapIfMissing==true/);
 });
 
 
@@ -120,18 +133,19 @@ test("RC1.1 verifies existing Functions runtime without secret IAM mutation", ()
 test("RC1.1 treats clasp execution as a fail-closed nondev gate", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
   const runner = readFileSync(new URL("../../../tools/run-clasp-checked.sh", import.meta.url), "utf8");
-  const deployment = readFileSync(new URL("../../../tools/ensure-appscript-execution-deployment.sh", import.meta.url), "utf8");
-  assert.match(workflow, /ensure-appscript-execution-deployment\.sh/);
+  const deployWorkflow = readFileSync(new URL("../../../.github/workflows/deploy-appscript.yml", import.meta.url), "utf8");
+  assert.doesNotMatch(workflow, /ensure-appscript-execution-deployment\.sh/);
+  assert.doesNotMatch(workflow, /clasp push --force/);
   assert.match(workflow, /run-clasp-checked\.sh/);
+  assert.match(workflow, /auroraRc11InspecionarConfiguracao/);
   assert.doesNotMatch(workflow, /clasp run auroraRc11/);
   assert.match(runner, /--nondev/);
   assert.match(runner, /--json/);
   assert.match(runner, /Unable to run script function/);
   assert.match(runner, /NOT_AUTHORIZED/);
   assert.match(runner, /exit 71/);
-  assert.match(deployment, /AURORA_EXECUTION_API_CANONICAL/);
-  assert.match(deployment, /clasp redeploy/);
-  assert.match(deployment, /clasp deploy/);
+  assert.match(deployWorkflow, /ensure-appscript-execution-deployment\.sh/);
+  assert.match(deployWorkflow, /Publish canonical Apps Script Execution API deployment/);
 });
 
 test("RC1.1 reconciles the exact entity ids returned by real ingestion", () => {

@@ -55,8 +55,8 @@ Toda solicitação relevante deve:
 ## Candidato desktop — 02/10/2026 — PR #95
 
 Componente `imac-bootstrap-hardening-1`, sem alterar o release train do produto.
-Baseline da branch: `06d25eada900f28eb64384623e500344272620db`; main revalidada:
-`968c071fa6bd27c44c491af19b0852b8058c1060`.
+Baseline da branch preservada: `ad50a0b4484d4d399a845513a40d57c52cff269e`; main reconciliada:
+`ee4d274bf27e36b293f2043fe2d4d818ea965c3d`.
 
 - Implementado no candidato: dry-run por padrão; apply/host explícitos; staging;
   validação shell/JSON/PLIST; backups; rollback em falha; espelho fast-forward-only.
@@ -67,3 +67,6 @@ Baseline da branch: `06d25eada900f28eb64384623e500344272620db`; main revalidada:
   Node 16/High Sierra, retorno remoto e rollback nativo comprovado.
 - Não é atualização do .app original, instalação realizada, ingestão ou deploy.
   Runbook/limites e responsável sugerido em `tools/imac/README.md`.
+- Preflight nativo somente leitura disponível; Node major 16 é obrigatório antes
+  de qualquer escrita. Inventário após despacho de reinício não comprova reinício
+  concluído, disponibilidade atual ou retorno remoto de conteúdo.

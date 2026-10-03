@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "AURORA-IMAC-REMOTE-BASE-001",
-  "status": "ACTIVE_REMOTE_BASE_HARDENING_PENDING",
+  "status": "REGISTERED_BASE_NATIVE_VALIDATION_PENDING",
   "role": "PRIMARY_REMOTE_OPERATIONAL_NODE",
   "target": {
     "hostname": "iMac-de-Joao.local",
@@ -58,8 +58,10 @@
       "JFN Reiniciar Agente"
     ],
     "triggerDispatchVerified": true,
-    "restartSurvivalVerified": true,
+    "restartSurvivalVerified": null,
+    "inventoryObservedAfterRestartDispatch": true,
+    "nativePreflightVerified": false,
     "commandOutputRoundTripVerified": false,
-    "note": "TRIGGERcmd connector verified publication and trigger dispatch. It does not expose command stdout/result payload through the generic run tool."
+    "note": "Prior inventory and accepted dispatch are recorded observations, not current liveness or proof of a completed restart. The generic TRIGGERcmd run tool exposes no stdout/result payload. Native preflight, restart completion and command round-trip remain unverified."
   }
 }

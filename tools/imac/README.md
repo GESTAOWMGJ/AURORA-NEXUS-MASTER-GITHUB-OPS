@@ -2,8 +2,8 @@
 
 Componente: `imac-bootstrap-hardening-1`. Produto permanece no release train
 AURORA NEXUS `1.0.0-rc.1`; este patch não publica release nem atualiza o .app.
-Baseline: PR #95 `06d25eada900f28eb64384623e500344272620db`, sobre a main
-`968c071fa6bd27c44c491af19b0852b8058c1060`. WMGJ Operação é o piloto.
+Baseline reconciliada: PR #95 `ad50a0b4484d4d399a845513a40d57c52cff269e`, sobre a main
+`ee4d274bf27e36b293f2043fe2d4d818ea965c3d`. WMGJ Operação é o piloto.
 
 ## Plano sem efeitos externos
 
@@ -14,6 +14,21 @@ bash tools/imac/INSTALL_AURORA_TRIGGERCMD_BASE.sh --dry-run
 Sem argumento também é `--dry-run`. Apenas imprime o plano: sem escrita,
 rede, leitura de credenciais, sincronização, reinício ou instalação.
 Não é atestado de prontidão: os pré-requisitos são checados no apply autorizado.
+
+## Preflight nativo somente leitura
+
+No checkout revisado e no iMac identificado, o modo abaixo verifica plataforma,
+host, caminhos, presença de arquivos sem ler credenciais, Node major 16 e estado
+do LaunchAgent. Não escreve, instala, reinicia nem consulta a rede:
+
+```sh
+bash tools/imac/INSTALL_AURORA_TRIGGERCMD_BASE.sh --preflight --confirm-host iMac-de-Joao.local
+```
+
+O aceite é exit code 0 e `AURORA_IMAC_NATIVE_PREFLIGHT_OK`. Host divergente ou
+Node diferente bloqueiam antes de qualquer escrita. Não substituir o host por
+expansão automática. Retorno de preflight não prova login, app ou conexão remota.
+O ensaio sintético do modo usa Node 22 com major simulado; não homologa Node 16.
 
 ## Aplicação futura, somente com autorização para o equipamento identificado
 
