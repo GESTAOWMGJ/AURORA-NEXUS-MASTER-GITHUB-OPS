@@ -114,7 +114,7 @@ function render(data){
 }
 async function submitDistributionDecision(decision,button){
   if(sessionBlocked||!capabilities.approveDistribution)return;
-  const reason=document.getElementById('distribution-reason').value.replace(/\s+/g,' ').trim();
+  const reason=document.getElementById('distribution-reason').value.replace(/\\s+/g,' ').trim();
   if(reason.length<5){notice.hidden=false;notice.className='card empty error';notice.textContent='Informe um motivo objetivo para a decisão.';return}
   if(!activeCompetence||!activeFinancialSnapshotHash){notice.hidden=false;notice.className='card empty error';notice.textContent='O fechamento atual não possui snapshot confirmado para decisão.';return}
   mutationsInFlight++;button.disabled=true;
