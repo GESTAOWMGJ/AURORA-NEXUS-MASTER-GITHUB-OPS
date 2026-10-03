@@ -46,3 +46,11 @@ Nunca registrar “Gemini” ou “GPT” como origem quando foi usado fallback 
 - aprovações exigidas;
 - hashes das regras, dados e relatório;
 - status `OPEN`, `BLOCKED`, `PENDING_APPROVAL` ou `CLOSED`.
+
+### Relatório financeiro aos sócios
+
+A habilidade `AURORA-FIN-SOC-001` deriva somente de um fechamento mensal canônico. O snapshot `monthlyClosings/{YYYY-MM}` deve expor `financialCents` com centavos inteiros ou `null` quando não houver evidência suficiente: `forecastCents`, `billableCents`, `billedCents`, `receivableCents`, `receivedCents`, `recoverableCents`, `glossCents`, `expensesCents`, `taxesCents`, `transfersCents` e `closingResultCents`.
+
+`exceptionSummary.openCount` e `exceptionSummary.openAmountCents` representam somente exemplares canônicos não sobrepostos.
+
+Quando o fechamento transita para `CLOSED`, o motor cria `shareholderReportVersions/{reportId}` como versão imutável e atualiza `shareholderReports/{YYYY-MM}` como ponteiro canônico. A geração não autoriza distribuição, pagamento, aceite de glosa, cobrança externa, baixa de recebível ou mutação de documento-fonte.
