@@ -147,6 +147,55 @@ test("política clínica preserva campos operacionais e métricas agregadas", ()
   assert.equal(result.ok, true, result.errors.join("; "));
 });
 
+test("amostra RC1.1 financeira permanece dentro do contrato positivo", () => {
+  const common = {
+    source: {
+      system: "SHEETS",
+      sourceId: "sheet:tab:2",
+      parentId: "sheet-id",
+      contentHash: "a".repeat(64),
+      hashMethod: "row_sha256"
+    },
+    metadata: {
+      sourceSheet: "06_NFS_E",
+      sourceRow: 2,
+      nonDestructive: true
+    },
+    competence: "2026-05"
+  };
+
+  const invoice = validateEvent(event({
+    ...common,
+    entityType: "invoice",
+    entityKey: "06_NFS_E:nfe-hash-ref",
+    documentType: "06_NFS_E",
+    record: {
+      totalCents: 4_950_000,
+      reconciliationStatus: "RECONCILED_SOURCE_EVIDENCE"
+    }
+  }), 1000);
+
+  const bank = validateEvent(event({
+    ...common,
+    entityType: "bankTransaction",
+    entityKey: "08_EXTRATOS_BRADESCO:doc-ref",
+    documentType: "08_EXTRATOS_BRADESCO",
+    record: {
+      status: "RECONCILED",
+      amountCents: 4_950_000,
+      liquidatedAmountCents: 4_950_000
+    },
+    metadata: {
+      sourceSheet: "08_EXTRATOS_BRADESCO",
+      sourceRow: 2,
+      nonDestructive: true
+    }
+  }), 1000);
+
+  assert.equal(invoice.ok, true, invoice.errors.join("; "));
+  assert.equal(bank.ok, true, bank.errors.join("; "));
+});
+
 test("contrato positivo bloqueia PHI renomeada para campos genéricos", () => {
   const result = validateEvent(event({
     sensitivity: "INTERNAL",

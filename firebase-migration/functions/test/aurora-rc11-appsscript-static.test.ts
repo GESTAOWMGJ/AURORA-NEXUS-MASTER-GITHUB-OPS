@@ -22,6 +22,16 @@ test("RC1.1 uses reconciled invoice and bank entities", () => {
 });
 
 
+test("RC1.1 real payload excludes fields outside the positive nonclinical contract", () => {
+  assert.doesNotMatch(source, /invoiceNumber\s*:/);
+  assert.doesNotMatch(source, /transactionKind\s*:/);
+  assert.doesNotMatch(source, /rc11Sample\s*:/);
+  assert.match(source, /totalCents: cents/);
+  assert.match(source, /liquidatedAmountCents: cents/);
+  assert.match(source, /reconciliationStatus: 'RECONCILED_SOURCE_EVIDENCE'/);
+  assert.match(source, /metadata: \{ sourceSheet:/);
+});
+
 test("RC1.1 workflow uses supported synchronous Firestore restore", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
   assert.match(workflow, /gcloud firestore databases restore/);
