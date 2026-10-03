@@ -46,10 +46,10 @@ class StatusReplacementTests(unittest.TestCase):
         self.protected = self.target.parent / "token.tkn"
         self.protected.write_text("SYNTHETIC_CREDENTIAL_DO_NOT_READ")
 
-    def call(self, mode="--apply", **extra):
+    def call(self, mode="--apply", source=None, **extra):
         config = dict(mode=mode, home=str(self.home), **extra)
         return subprocess.run(["node", "-e", HARNESS, str(ROOT / "REPLACE_STATUS_HELPER.js"),
-                               json.dumps(config), str(ROOT / "INSTALL_AURORA_TRIGGERCMD_BASE.sh")],
+                               json.dumps(config), str(source or ROOT / "INSTALL_AURORA_TRIGGERCMD_BASE.sh")],
                               capture_output=True, text=True, timeout=20)
 
     def test_replace_preserves_backup_mode_and_unrelated_files(self):
@@ -70,6 +70,32 @@ class StatusReplacementTests(unittest.TestCase):
         self.assertIn("HELPER_ALREADY_REPLACED", result.stdout)
         self.assertEqual(self.state.read_bytes(), before)
         self.assertEqual(len(list(self.support.glob("status-helper-backup.*"))), 1)
+
+    def test_previous_source_receipt_backup_and_rollback_remain_compatible(self):
+        legacy = self.home / "legacy-installer.sh"
+        source = (ROOT / "INSTALL_AURORA_TRIGGERCMD_BASE.sh").read_text()
+        legacy.write_text(source.replace('voiceReply: "{{result}}",',
+                         'voiceReply: "Verificação solicitada; confira o retorno do Mac",', 1))
+        self.assertEqual(self.call(source=legacy).returncode, 0)
+        before = self.state.read_bytes()
+        helper = self.target.read_bytes()
+        result = self.call()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("HELPER_ALREADY_REPLACED", result.stdout)
+        self.assertEqual(self.state.read_bytes(), before)
+        self.assertEqual(self.target.read_bytes(), helper)
+        self.assertEqual(self.call("--receipt").returncode, 0)
+        self.assertEqual(self.call("--rollback").returncode, 0)
+        self.assertEqual(self.target.read_bytes(), self.original)
+
+    def test_unreviewed_installer_source_is_rejected_before_writes(self):
+        source = self.home / "unreviewed-installer.sh"
+        source.write_text((ROOT / "INSTALL_AURORA_TRIGGERCMD_BASE.sh").read_text() + "\n# unreviewed\n")
+        result = self.call(source=source)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("VALIDATED_SOURCE_MISMATCH", result.stdout)
+        self.assertEqual(self.target.read_bytes(), self.original)
+        self.assertFalse(self.support.exists())
 
     def test_failed_native_validation_restores_original(self):
         result = self.call(failNative=True)
