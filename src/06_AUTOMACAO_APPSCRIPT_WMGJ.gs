@@ -79,30 +79,60 @@ function executarAutomacaoOperacionalWMGJ() {
   }
 }
 
-function instalarGatilhoAutomacaoWMGJ() {
+function instalarGatilhoAutomacaoWMGJ(opcoes) {
+  opcoes = opcoes || {};
   var auditoriaAntes = auditarOrganizarAppsScriptWMGJ({ modo: 'PRE_INSTALACAO' });
-  var removidos = removerGatilhosAutomacaoWMGJ_({ removerLegados: true, removerPrincipal: true });
+  var preservarPrincipalExistente = opcoes.preservarPrincipalExistente === true;
+  var gatilhoExistente = null;
+  if (preservarPrincipalExistente) {
+    ScriptApp.getProjectTriggers().some(function(trigger) {
+      if (trigger.getHandlerFunction && trigger.getHandlerFunction() === WMGJ_FUNCAO_AUTOMACAO_PRINCIPAL) {
+        gatilhoExistente = trigger;
+        return true;
+      }
+      return false;
+    });
+  }
+  var removidos = removerGatilhosAutomacaoWMGJ_({
+    removerLegados: true,
+    removerPrincipal: !preservarPrincipalExistente
+  });
+  var gatilhoCriado = null;
 
-  ScriptApp.newTrigger(WMGJ_FUNCAO_AUTOMACAO_PRINCIPAL)
-    .timeBased()
-    .everyMinutes(15)
-    .create();
+  if (!gatilhoExistente) {
+    gatilhoCriado = ScriptApp.newTrigger(WMGJ_FUNCAO_AUTOMACAO_PRINCIPAL)
+      .timeBased()
+      .everyMinutes(15)
+      .create();
+  }
 
-  var resultado = {
-    ok: true,
-    versao: WMGJ_AUTOMACAO_APPSCRIPT_VERSAO,
-    etapa: 'instalarGatilhoAutomacaoWMGJ',
-    funcaoPrincipal: WMGJ_FUNCAO_AUTOMACAO_PRINCIPAL,
-    incluiRoboGmailDashboard: typeof executarRoboGmailDashboardWMGJ === 'function',
-    frequencia: '15_MINUTOS',
-    auditoriaAntes: auditoriaAntes,
-    removidosAntesInstalacao: removidos,
-    instaladoEm: new Date().toISOString()
-  };
-
-  registrarStatusAutomacaoWMGJ_(resultado);
-  registrarLogAutomacaoWMGJ_('OK', 'instalarGatilhoAutomacaoWMGJ', resultado);
-  return resultado;
+  try {
+    var resultado = {
+      ok: true,
+      versao: WMGJ_AUTOMACAO_APPSCRIPT_VERSAO,
+      etapa: 'instalarGatilhoAutomacaoWMGJ',
+      funcaoPrincipal: WMGJ_FUNCAO_AUTOMACAO_PRINCIPAL,
+      incluiRoboGmailDashboard: typeof executarRoboGmailDashboardWMGJ === 'function',
+      frequencia: '15_MINUTOS',
+      createdByCall: !!gatilhoCriado,
+      triggerId: String((gatilhoCriado || gatilhoExistente).getUniqueId()),
+      auditoriaAntes: auditoriaAntes,
+      removidosAntesInstalacao: removidos,
+      instaladoEm: new Date().toISOString()
+    };
+    registrarStatusAutomacaoWMGJ_(resultado);
+    registrarLogAutomacaoWMGJ_('OK', 'instalarGatilhoAutomacaoWMGJ', resultado);
+    return resultado;
+  } catch (installationError) {
+    if (gatilhoCriado) {
+      try {
+        ScriptApp.deleteTrigger(gatilhoCriado);
+      } catch (rollbackError) {
+        throw new Error('AURORA_AUTOMATION_TRIGGER_ROLLBACK_FAILED: ' + (rollbackError && rollbackError.message ? rollbackError.message : String(rollbackError)));
+      }
+    }
+    throw installationError;
+  }
 }
 
 function removerGatilhosAutomacaoWMGJ() {

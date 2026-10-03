@@ -1,115 +1,79 @@
 # AURORA NEXUS — decisão de execução HML
 
-Estado: NO-GO. A request v6 foi executada parcialmente e falhou de modo fechado
-antes de qualquer amostra real. Sistema-mãe AURORA NEXUS; piloto WMGJ Operação.
-Baseline executada: main `f8699caa254ed058fea67beff2d275f51602b394`,
-run `37092175109`. A reconciliação do PR #98 ainda exige SHA final e novo CI.
+Estado: **NO-GO**. AURORA NEXUS permanece o sistema-mãe; WMGJ Operação,
+o piloto. Baseline remota verificada em 03/10/2026: `main`
+`91665cc94c4bde9b82a75cd39905263c60e02191`.
 
-## Sequência concreta
+## Fato novo e contenção
 
-1. Revisar o SHA final do PR #98 e os cinco checks; não reutilizar CI de SHA
-   anterior. Os três alertas CodeQL encontrados nesta revisão dizem respeito a
-   expressões regulares de URLs em testes estáticos. As verificações foram
-   convertidas em comparações literais do código-fonte; aguardar novo scan.
-2. Aprovar separadamente a integração da candidata e a publicação HML. Atenção:
-   integrar arquivos `src/*.gs` ou `tools/*.sh` na main aciona o workflow
-   `Deploy Apps Script WMGJ`. A aprovação de merge precisa incluir essa
-   publicação automática HML; não é uma operação apenas documental.
-3. Implantar a versão corrigida das Functions pelo fluxo HML protegido e
-   comprovar os gates abaixo. O RC1.1 não publica o conjunto completo de
-   Functions; pode reimplantar somente `ingestWmgjEvent` sob aprovação explícita
-   de migração. Publicar apenas Hosting/Rules não leva as demais correções de
-   política e cálculo ao backend.
-4. Só após comprovar runtime, recuperação, identidade e escopo, criar uma
-   request v7 em mudança separada. `approvedBaseSha` deve ser o primeiro pai
-   real do futuro commit da request, após a integração/implantação aprovadas;
-   não antecipar esse SHA. A request v6 presente na main é registro histórico e
-   permanece byte a byte inalterada nesta candidata.
-5. Submeter o run novo a aprovação humana separada no ambiente protegido, com
-   a versão e os efeitos abaixo visíveis. Não reutilizar nem reexecutar as
-   requests/runs anteriores.
+A `main` contém a request histórica v7 e originou o run `37093409122`, ainda
+aguardando o ambiente `firebase-homologation`. Esse run não deve ser aprovado
+nem reexecutado. O commit que o disparou alterou workflow, request e teste; por
+isso o primeiro gate request-only deve falhar antes de qualquer mutação. Mesmo
+assim, o snapshot v7 conserva rotação de keyring e janela global de escrita e
+não deve ser usado como caminho operacional.
 
-## Escopo da futura execução RC1.1 v7 (não executado por esta candidata)
+A request v7 permanece byte a byte inalterada. O próximo contrato possível é
+v8, somente após os pré-requisitos abaixo. O run v6 `37092175109` continua
+histórico: restore e cleanup passaram; Hosting/Rules/indexes foram publicados;
+o gate HMAC falhou com exit 77; não houve amostra real, reconciliação, SHADOW ou
+Native Intelligence.
 
-Restauração real para banco temporário HML e cleanup desse banco; verificação do
-runtime existente; deploy Hosting/Rules/indexes; configuração da ponte Apps
-Script; eventual migração autorizada de um segredo legado reconhecido para uma
-nova versão do keyring existente, seguida de redeploy somente da ingestão (sem
-criar secret ou alterar IAM); envio limitado ao par fiscal/bancário já previsto;
-reconciliação, projeção SHADOW e kill switch. Cada efeito exige aprovação
-específica da request. Nenhum backfill genérico, produção, fonte ou dado clínico.
+## Ordem obrigatória
 
-A futura solicitação deve nascer inativa para revisão e só receber
-`candidateOnly=false` no commit imutável autorizado. O executor exige confirmação
-literal, request v7 nova, `approvedBaseSha` igual ao primeiro pai e tentativa
-inicial. Preparar conteúdo não autoriza execução.
+1. Revisar e integrar separadamente o PR #98, já reconciliado com a `main`.
+2. Revisar o hardening v8 empilhado: nenhuma mudança em request; acesso da
+   Execution API restrito ao implantador; DRY_RUN global sempre preservado;
+   par exato vinculado a hashes/linhas/idempotência; autorização HMAC efêmera;
+   receipt durável reivindicado como `IN_PROGRESS` antes do primeiro POST e
+   consumido somente após os dois envios; runtime e deployment pinados.
+3. Confirmar no deploy protegido que `CLASPRC_JSON` pertence ao implantador
+   compatível com `executionApi.access=MYSELF`. Falha mantém NO-GO.
+4. Publicar Apps Script e backend pelo fluxo próprio, em SHA revisado, sem usar
+   RC1.1 para criar segredo, alterar IAM, configurar ponte ou publicar Function.
+5. Executar a inspeção **somente leitura** do par candidato, revisar por humano
+   as duas linhas e registrar o contrato fechado: parent hash, row/content hash,
+   hashes de idempotência e `pairBindingSha256`.
+6. Criar a request v8 em um commit request-only cujo primeiro pai seja exatamente
+   o SHA implantado. O predecessor v7 precisa conservar SHA-256
+   `42b2a0628b8b8debd3a1becc462724b69fa5762208d64c8852fb2e1e26369c10`.
+7. Somente depois submeter o run a aprovação humana separada no ambiente
+   protegido. O autor da request não deve autoaprovar nem usar bypass.
 
-## Reconciliação do run v6 existente
+## Escopo permitido da futura v8
 
-O run `37092175109`, disparado pela main antes desta reconciliação, terminou com
-falha no gate da ponte Apps Script (exit 77): o valor HMAC existente não era JSON
-de keyring aceito nem legado hexadecimal de 64 caracteres. Restore e cleanup do
-banco temporário passaram, e Hosting/Rules/indexes foram publicados. Não houve
-migração de versão do secret, ativação de escrita, amostra real, reconciliação,
-SHADOW, Native Intelligence ou upload final de evidência. Resolver o formato por
-um fluxo revisado e revalidar os efeitos já ocorridos são pré-requisitos para uma
-request v7; não corrigir o secret dentro desta candidata de código.
+- restaurar backup elegível em banco temporário e comprovar cleanup;
+- validar runtime já publicado e implantar apenas Hosting/Rules/indexes;
+- consumir keyring canônico existente, sem Secret Manager mutation;
+- validar deployment Apps Script e revisão de `ingestWmgjEvent` pinados;
+- manter o DRY_RUN global em `true` durante toda a execução;
+- enviar exatamente um par fiscal/bancário previamente atestado e consumir um
+  receipt ligado ao SHA/request e ao binding do par;
+- reconciliar documentos, habilitar somente projeção SHADOW e testar a
+  inteligência nativa.
 
-## Gates e bloqueadores reais
+Os dois POSTs são idempotentes, porém **não atômicos**. Falha parcial deixa o
+receipt bloqueado e exige nova request/revisão humana; não autoriza retry cego.
+Backfill genérico, produção, dado clínico, mutação da fonte, segredo/IAM,
+redeploy de Function e reconfiguração da ponte permanecem fora do escopo.
 
-| Gate | Evidência atual | Próxima ação / aceite | Responsável sugerido |
-| --- | --- | --- | --- |
-| Código | CI no PR; aprovação humana pendente | cinco checks e revisão no SHA final | mantenedor/revisor |
-| Billing/orçamento | desconhecido nesta sessão | comprovar billing e orçamento/alertas sem mutação | administrador HML |
-| WIF/service account | autenticação WIF comprovada no run `37092175109`; menor privilégio integral não auditado | revisar permissões efetivas antes de nova execução | cloud/IAM |
-| Secrets/API | leitura do keyring ocorreu, mas o formato foi rejeitado com exit 77; nenhum valor deve ser publicado | diagnosticar formato por canal seguro e definir migração explícita, sem ampliar IAM | cloud/IAM |
-| Usuário/membership/MFA/App Check | não comprovado na candidata | smoke real autorizado; nega anônimo e outro tenant; valida MFA | QA/segurança |
-| Rules e runtime | runtime da main verificado e Hosting/Rules/indexes publicados no run v6; Functions da candidata não publicadas | publicar Functions corrigidas pelo fluxo próprio e repetir smoke no SHA integrado | backend |
-| Backup/restore | backup recente, restore real temporário e cleanup comprovados no run v6 | repetir o gate na futura request v7; evidência anterior não autoriza nova amostra | operações |
-| Proteção GitHub | main retornou protected=false; ambiente pediu aprovação, mas permite self-review e bypass administrativo | required checks e revisor humano separado sem autoaprovação antes da promoção | administrador GitHub |
-| DNS/HTTPS/SSL | pendências da issue #32, sem nova inspeção neste patch | evidência atual dos destinos autorizados | infraestrutura |
-| iMac | cadastro/despacho não comprovam execução | PR #95 atualizado, diagnóstico local, teste nativo e rollback | desktop/titular |
+## Gates vigentes
 
-Não há gcloud autenticado ou API Firebase administrativa disponível neste
-ambiente de execução. Isso impede verificar gates cloud atuais por leitura;
-não prova falta de recurso. O smoke real e o ensaio Mac precisam devolver
-resultado verificável. Não registrar credenciais, e-mails, dados clínicos ou
-links privados no PR.
+| Gate | Estado | Aceite antes da v8 |
+| --- | --- | --- |
+| Código/CI | PRs #95, #98 e #99 reconciliados; novos heads exigem CI próprio | checks verdes e revisão humana nos SHAs finais |
+| Workflow | YAML e 12 blocos shell validados; hardening ainda draft | teste integral, unicidade dos passos e CodeQL no head final |
+| Billing/orçamento | DESCONHECIDO nesta sessão | leitura atual de billing e orçamento/alertas |
+| WIF/service account | WIF funcionou no run v6; menor privilégio não revalidado | revisar identidade e permissões efetivas |
+| Secret/keyring | v6 rejeitou formato; v7 não deve executar | keyring canônico existente e escopo verificado sem expor valor |
+| Apps Script | acesso `MYSELF` ainda não implantado/provado | deployer canônico executa nondev; terceiros não executam |
+| Usuários/MFA/App Check | DESCONHECIDO | smoke autenticado, nega anônimo/outro tenant e valida MFA |
+| Backup/restore | comprovado apenas no run v6 | repetir gate de backup e restore no run v8 aprovado |
+| GitHub | branch retornou sem proteção; ambiente permitia self-review/bypass | required checks e aprovador humano separado |
+| DNS/HTTPS/SSL | issue #32 continua pendente | evidência atual dos destinos autorizados |
+| Mac/iMac | PR #95 reconciliado; instalação/round-trip/restart/rollback pendentes | ensaio nativo autorizado com saída correlacionada |
 
-## Limites de aceite
-
-CI, revisão de código, implantação, instalação local, ingestão real e release
-comercial são estados separados. Boot patcher multiplataforma, App Check ponta a
-ponta e instalação nativa continuam sem comprovação de execução. Não promover
-essas capacidades por existência de contrato, documentação ou disparo remoto.
-
-## Incremento sem Mac
-
-O coletor `firebase-migration/scripts/hml_readonly_preflight.py` permite auditar
-metadados do HML sem ler valores de secrets. Não substitui o preflight protegido
-do deploy nem comprova acesso efetivo do runtime. Nesta sessão retornou
-`GCLOUD_UNAVAILABLE`; nenhum dos gates cloud foi promovido.
-
-O gate de backup compartilhado agora exige validade de até 24h, expiração futura
-e mesmo databaseUid, antes de deploy ou restore. Deploy sem backup elegível não
-possui mais exceção automática. Detalhes e limites estão nos documentos 38 e 39
-de `firebase-migration/docs`; o boot possui núcleo de observação read-only,
-sem endpoint ou executor. Sua integração real permanece pendente.
-
-Leitura GitHub em 03/10/2026: main `protected=false` e lista de rulesets visíveis
-vazia. A configuração do ambiente `firebase-homologation` continua sem revalidação
-administrativa. Esses escopos são distintos; não inferir proteção do ambiente
-pelo estado da branch nem alterar permissões automaticamente.
-
-## Núcleo de observação do boot — candidata
-
-O módulo `api/wmgj_api/boot_observer.py` valida o contrato canônico e o vínculo
-entre contexto server-side, manifesto e evidências. A saída pública é minimizada;
-o evento de auditoria é apenas uma intenção privada com persisted=false.
-Nenhuma rota, fonte real, escrita ou atualização de aplicativo foi conectada.
-Os testes exercitam fontes sintéticas; não validam Auth/App Check/Firestore reais.
-
-Próximo gate de código: adaptador consistente sobre o checkpoint existente,
-revogação atual, empacotamento da fonte canônica e transporte que exponha somente
-public_status. Próximo gate operacional: smoke autenticado autorizado em HML.
-O Release Cockpit não recebe promoção de prontidão operacional por esse núcleo.
+Ausência de acesso é DESCONHECIDO, não falha comprovada. CI, merge, deploy,
+ingestão, instalação local e release comercial são estados separados. Nenhuma
+request v8 deve ser criada enquanto o hardening, o deploy e a evidência do par
+não estiverem concluídos.

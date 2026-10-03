@@ -9,6 +9,23 @@
 - Piloto de referência: **WMGJ Operação**
 - Baseline de código: `main` pós-PR #39
 
+## Situação vigente — 03/10/2026
+
+- Baseline remota: `91665cc94c4bde9b82a75cd39905263c60e02191`.
+- PRs #95, #98 e #99 foram reconciliados com essa `main`, permanecem draft e
+  exigem CI/revisão nos novos heads.
+- A request v7 é registro imutável. O run `37093409122` permanece sem aprovação;
+  o commit de disparo não é request-only e deve falhar no primeiro gate, mas o
+  snapshot não deve ser aprovado nem reutilizado.
+- A próxima versão possível é v8, somente depois do hardening, merge, deploy
+  protegido, inspeção read-only do par exato e atestação humana separada.
+- O hardening mantém DRY_RUN global, não altera Secret Manager/IAM/Function,
+  restringe Execution API ao implantador e usa autorização HMAC + receipt
+  request-bound antes de dois POSTs idempotentes e não atômicos.
+
+As seções datadas abaixo preservam evidência histórica e não substituem este
+gate vigente.
+
 ## O que já é produto
 
 - login-first, sessão e membership;
@@ -26,8 +43,9 @@
 ### Ingestão real
 
 Restore real e cleanup foram comprovados no run `37092175109`. Não liberar
-enquanto o formato do keyring permanecer incompatível e faltarem amostra real,
-reconciliação e projeção governada.
+enquanto o keyring canônico existente, o runtime pinado, o par exato atestado e
+a autorização request-bound não forem comprovados; continuam faltando amostra
+real, reconciliação e projeção governada.
 
 ### Desktop
 Não tratar launcher HML como sucessor do aplicativo funcional. Inspecionar a baseline instalada e validar atualização in-place/rollback.
@@ -96,7 +114,7 @@ código; não autoriza merge, deploy, dados reais ou mudança de segredo.
 | Local do organic-patcher | COMPROVADO na main: `firebase-migration/schemas` | duplicação de contrato | plataforma | manter fonte canônica e ativação bloqueada | nenhum para localização; runtime permanece separado |
 | Runtime boot patcher | PENDENTE: contrato não é executor web/PWA/desktop/mobile | patch indevido ou cruzamento de tenant | plataforma/segurança | manifesto server-side por orgId/clientSkill; auditoria, rollback e nenhum segredo no frontend | implementação e ensaio integrado não comprovados |
 | Smoke sem produção | PARCIAL: testes offline; sem ensaio nativo do iMac nesta etapa | despacho confundido com instalação | QA/plataforma | revalidar PR #95 na main atual, retorno sanitizado do dispositivo e rollback nativo | ausência de canal com resultado verificável do iMac |
-| Keyring HMAC/ponte | BLOQUEADO: formato não reconhecido no run `37092175109`; exit 77; nenhuma versão criada | migração incorreta ou indisponibilidade da ingestão | cloud/IAM e backend | diagnosticar o formato sem expor conteúdo, preparar correção protegida e somente então emitir request v7 | keyring incompatível e ausência de nova aprovação |
+| Keyring HMAC/ponte | BLOQUEADO: v6 falhou no formato; v7 não deve ser aprovada | rotação indevida, ponte divergente ou escrita fora do par | cloud/IAM e backend | comprovar keyring/ponte já configurados, sem mutação, e somente então preparar v8 | hardening/deploy/evidência humana ainda pendentes |
 
 Billing/orçamento, Secret Manager/API, presença de `AURORA_NEXUS_ALLOWED_EMAILS`
 (sem ler valor), identidade/WIF, usuários/memberships/MFA, App Check, Rules,

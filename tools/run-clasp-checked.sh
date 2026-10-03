@@ -9,6 +9,7 @@ fi
 function_name="$1"
 output_json="$2"
 params_json="${3-}"
+execution_deployment_id="${APPS_SCRIPT_EXECUTION_DEPLOYMENT_ID-}"
 
 if [[ ! "$function_name" =~ ^[A-Za-z_][A-Za-z0-9_]{0,127}$ ]]; then
   echo "::error title=Apps Script invalid function name::The requested function name is outside the fail-closed allowlist." >&2
@@ -18,11 +19,27 @@ if [ -n "$params_json" ] && ! jq -e 'type == "array"' <<<"$params_json" >/dev/nu
   echo "::error title=Apps Script invalid parameters::Function parameters must be one valid JSON array." >&2
   exit 64
 fi
+if [[ ! "$execution_deployment_id" =~ ^[A-Za-z0-9_-]{20,512}$ ]]; then
+  echo "::error title=Apps Script deployment ID missing::A canonical API-executable deployment ID is required." >&2
+  exit 64
+fi
+if [ ! -f .clasp.json ] || ! jq -e 'type=="object" and (.scriptId|type=="string" and length>0)' .clasp.json >/dev/null 2>&1; then
+  echo "::error title=Apps Script project configuration missing::A valid project .clasp.json is required." >&2
+  exit 64
+fi
 
 tmp_out="$(mktemp)"
 tmp_err="$(mktemp)"
-cleanup() { rm -f "$tmp_out" "$tmp_err"; }
+tmp_project="$(mktemp -d)"
+cleanup() { rm -f "$tmp_out" "$tmp_err"; rm -rf "$tmp_project"; }
 trap cleanup EXIT
+
+# clasp 3.4.1 passes .clasp.json's scriptId to scripts.run. The Execution API
+# requires the API-executable deployment ID, not the mutable project script ID.
+# Keep list/push configuration untouched and run from an isolated config.
+jq --arg deployment "$execution_deployment_id" \
+  '.scriptId=$deployment | .rootDir="."' .clasp.json > "$tmp_project/.clasp.json"
+chmod 600 "$tmp_project/.clasp.json"
 
 # --json is a clasp global option. Put it before the canonical command name so
 # aliases/Commander parsing cannot silently fall back to human-oriented output.
@@ -32,7 +49,10 @@ if [ -n "$params_json" ]; then
 fi
 
 set +e
-CI=1 NO_COLOR=1 "${cmd[@]}" >"$tmp_out" 2>"$tmp_err"
+(
+  cd "$tmp_project"
+  CI=1 NO_COLOR=1 "${cmd[@]}"
+) >"$tmp_out" 2>"$tmp_err"
 rc=$?
 set -e
 

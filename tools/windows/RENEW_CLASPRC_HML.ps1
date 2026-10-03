@@ -6,6 +6,7 @@ $ErrorActionPreference = "Stop"
 $ProjectId = "wmgj-hml-jfn-20260927"
 $ProjectNumber = "299889357292"
 $ScriptId = "1_fQPqaq0EjaugyIF6jyuENDhJ2c2oTFm1kC-wdjmfaDqyRzy_uqwtiSW"
+$ExecutionDeploymentPrefix = "AURORA_EXECUTION_API_CANONICAL"
 $Repo = "GESTAOWMGJ/automacao-gestao-wmgj"
 $Root = Join-Path $env:TEMP ("aurora-clasp-renew-" + [guid]::NewGuid().ToString("N"))
 $Backup = $null
@@ -138,11 +139,44 @@ try {
     $who = $whoRaw | ConvertFrom-Json
     if (-not $who.email) { throw "Usuario OAuth nao identificado." }
 
-    $statusRaw = & clasp run obterStatusWMGJ --nondev --json
-    if ($LASTEXITCODE -ne 0) { throw "clasp run obterStatusWMGJ falhou." }
-    $status = $statusRaw | ConvertFrom-Json
-    if (-not $status.response.ok -or $status.response.status -ne "ONLINE" -or $status.response.sistema -ne "WMGJ") {
-      throw "Execution API respondeu, mas o status WMGJ nao foi validado."
+    $deploymentsRaw = & clasp --json list-deployments
+    if ($LASTEXITCODE -ne 0) { throw "Nao foi possivel localizar o deployment canonico da Execution API." }
+    try {
+      $deployments = ($deploymentsRaw -join [Environment]::NewLine) | ConvertFrom-Json
+    } catch {
+      throw "A lista de deployments da Execution API nao retornou JSON valido."
+    }
+    $executionDeployment = $deployments |
+      Where-Object {
+        $_.description -like "$ExecutionDeploymentPrefix*" -and
+        ($null -ne ($_.versionNumber -as [int])) -and
+        [int]$_.versionNumber -ge 1
+      } |
+      Sort-Object { [int]$_.versionNumber } |
+      Select-Object -Last 1
+    $executionDeploymentId = [string]$executionDeployment.deploymentId
+    if ($executionDeploymentId -notmatch '^[A-Za-z0-9_-]{20,512}$') {
+      throw "Deployment canonico da Execution API ausente ou invalido."
+    }
+
+    $executionRoot = Join-Path $Root "execution-api"
+    New-Item -ItemType Directory -Force -Path $executionRoot | Out-Null
+    @{
+      scriptId = $executionDeploymentId
+      projectId = $ProjectId
+      rootDir = "."
+    } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $executionRoot ".clasp.json")
+
+    Push-Location $executionRoot
+    try {
+      $statusRaw = & clasp --json run-function obterStatusWMGJ --nondev
+      if ($LASTEXITCODE -ne 0) { throw "Execution API nao validada pelo deployment canonico." }
+      $status = ($statusRaw -join [Environment]::NewLine) | ConvertFrom-Json
+      if (-not $status.response.ok -or $status.response.status -ne "ONLINE" -or $status.response.sistema -ne "WMGJ") {
+        throw "Execution API respondeu, mas o status WMGJ nao foi validado."
+      }
+    } finally {
+      Pop-Location
     }
   } finally {
     Pop-Location

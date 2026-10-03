@@ -60,6 +60,33 @@ function auroraFontesDocumentaisConfiguradas_() {
   return fallback ? [{ sourceId: 'drive-primary', system: 'DRIVE', mode: 'DRIVE_FOLDER', folderId: fallback, slaMinutes: 1440, active: true }] : [];
 }
 
+function auroraIdsGatilhosAutomacao_() {
+  var ids = {};
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    var handler = trigger && trigger.getHandlerFunction && trigger.getHandlerFunction();
+    var triggerId = trigger && trigger.getUniqueId && String(trigger.getUniqueId() || '');
+    if (handler === WMGJ_FUNCAO_AUTOMACAO_PRINCIPAL && triggerId) ids[triggerId] = true;
+  });
+  return ids;
+}
+
+function auroraRemoverGatilhoAutomacaoCriado_(instalacao, idsAntes) {
+  if (instalacao && instalacao.createdByCall === false) return 0;
+  var triggerIdCriado = instalacao && instalacao.createdByCall === true
+    ? String(instalacao.triggerId || '')
+    : '';
+  var removidos = 0;
+  ScriptApp.getProjectTriggers().forEach(function(trigger) {
+    var handler = trigger && trigger.getHandlerFunction && trigger.getHandlerFunction();
+    var triggerId = trigger && trigger.getUniqueId && String(trigger.getUniqueId() || '');
+    if (handler !== WMGJ_FUNCAO_AUTOMACAO_PRINCIPAL || !triggerId || idsAntes[triggerId]) return;
+    if (triggerIdCriado && triggerId !== triggerIdCriado) return;
+    ScriptApp.deleteTrigger(trigger);
+    removidos += 1;
+  });
+  return removidos;
+}
+
 
 function auroraConfigurarConectoresPlugAndPlay(config) {
   config = config || {};
@@ -109,12 +136,52 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
     values.AURORA_EXTERNAL_BASE_URL = externalBaseUrl;
     values.AURORA_EXTERNAL_API_KEY = externalApiKey;
   }
-  props.setProperties(values, false);
-
+  if (activate && typeof instalarGatilhoAutomacaoWMGJ !== 'function') {
+    throw new Error('AURORA_AUTOMATION_INSTALLER_MISSING');
+  }
+  var configLock = LockService.getScriptLock();
+  if (!configLock.tryLock(30000)) throw new Error('AURORA_CONNECTOR_CONFIG_LOCK_UNAVAILABLE');
   var trigger = null;
-  if (activate) {
-    if (typeof instalarGatilhoAutomacaoWMGJ !== 'function') throw new Error('AURORA_AUTOMATION_INSTALLER_MISSING');
-    trigger = instalarGatilhoAutomacaoWMGJ();
+  var safeValues = null;
+  var triggerIdsBefore = null;
+  try {
+    if (activate) {
+      // Enquanto o trigger é instalado, qualquer produtor existente continua
+      // inerte. Somente a instalação concluída permite o commit live final.
+      safeValues = {};
+      Object.keys(values).forEach(function(key) { safeValues[key] = values[key]; });
+      safeValues.WMGJ_FIRESTORE_DRY_RUN = 'true';
+      safeValues.AURORA_FIRESTORE_MIRROR_REQUIRED = 'false';
+      props.setProperties(safeValues, false);
+      triggerIdsBefore = auroraIdsGatilhosAutomacao_();
+      trigger = instalarGatilhoAutomacaoWMGJ({ preservarPrincipalExistente: true });
+      if (!trigger || typeof trigger.createdByCall !== 'boolean' || !trigger.triggerId) {
+        throw new Error('AURORA_AUTOMATION_TRIGGER_NOT_CONFIRMED');
+      }
+    }
+    props.setProperties(values, false);
+  } catch (activationError) {
+    if (safeValues) {
+      var rollbackErrors = [];
+      try {
+        props.setProperties(safeValues, false);
+      } catch (safeRollbackError) {
+        rollbackErrors.push('SAFE_CONFIG: ' + (safeRollbackError && safeRollbackError.message ? safeRollbackError.message : String(safeRollbackError)));
+      }
+      if (triggerIdsBefore) {
+        try {
+          auroraRemoverGatilhoAutomacaoCriado_(trigger, triggerIdsBefore);
+        } catch (triggerRollbackError) {
+          rollbackErrors.push('TRIGGER: ' + (triggerRollbackError && triggerRollbackError.message ? triggerRollbackError.message : String(triggerRollbackError)));
+        }
+      }
+      if (rollbackErrors.length) {
+        throw new Error('AURORA_AUTOMATION_ACTIVATION_ROLLBACK_FAILED: ' + rollbackErrors.join('; '));
+      }
+    }
+    throw activationError;
+  } finally {
+    configLock.releaseLock();
   }
 
   var result = {

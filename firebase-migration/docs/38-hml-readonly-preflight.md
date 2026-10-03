@@ -3,7 +3,7 @@
 Incremento `hml-readonly-preflight.v1`, release train `1.0.0-rc.1`.
 AURORA NEXUS é o sistema-mãe; WMGJ Operação é o piloto. Preparado em
 02/10/2026 (America/Sao_Paulo) e reconciliado em 03/10/2026 sobre a main
-`f8699caa254ed058fea67beff2d275f51602b394`. O SHA final da candidata depende do
+`91665cc94c4bde9b82a75cd39905263c60e02191`. O SHA final da candidata depende do
 CI pós-merge-forward. Não requer Mac.
 
 ## Uso e efeitos
@@ -92,8 +92,13 @@ restore real em banco temporário e cleanup. Também publicou Hosting, Rules e
 indexes da main. Em seguida falhou fechado com exit 77 porque o keyring HMAC não
 estava em um dos formatos aceitos; não houve nova versão do secret, redeploy da
 Function de ingestão nem amostra real. Isso não transforma o preflight read-only
-em executor e não autoriza reexecução. Uma futura request v7 deve ser criada em
-commit separado somente após correção revisada do gate e CI do SHA final.
+em executor e não autoriza reexecução. A request v7 posterior já existe e gerou
+o run `37093409122`, ainda sem aprovação. Como o commit de disparo também alterou
+workflow e teste, o gate request-only deve falhar antes de mutação; ainda assim,
+não aprovar nem reutilizar esse snapshot. Uma futura request v8 só pode nascer em
+commit separado após hardening, merge, deploy pinado, inspeção read-only do par
+exato e atestação humana independente. O RC v8 apenas consome keyring e ponte já
+configurados; não altera Secret Manager, IAM, Function ou DRY_RUN global.
 
 ## Referências técnicas consultadas em 02/10/2026
 

@@ -12,7 +12,7 @@
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8",
   "executionApi": {
-    "access": "ANYONE"
+    "access": "MYSELF"
   },
   "oauthScopes": [
     "https://www.googleapis.com/auth/script.external_request",

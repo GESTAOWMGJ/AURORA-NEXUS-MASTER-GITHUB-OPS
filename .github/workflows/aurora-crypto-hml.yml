@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: aurora-crypto-hml
+  group: aurora-hml-runtime-mutation
   cancel-in-progress: false
 
 jobs:

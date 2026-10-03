@@ -27,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: aurora-cmek-hml
+  group: aurora-hml-runtime-mutation
   cancel-in-progress: false
 
 jobs:

@@ -172,7 +172,7 @@ Workflows de referência:
 - `validate-firestore-migration.yml`: build, Rules, dependências, FastAPI/OpenAI contracts e validação sem deploy;
 - `validate-aurora-organic.yml`: integração orgânica;
 - `aurora-hml-auth-smoke-once.yml`: smoke de autenticação HML;
-- `aurora-rc11-recovery-real-ingest.yml`: Recovery Gate → HMAC → runtime → amostra real → reconciliação → Native Intelligence → kill switch;
+- `aurora-rc11-recovery-real-ingest.yml`: Recovery Gate → HMAC → runtime pinado → par request-bound com receipt → reconciliação → Native Intelligence → verificação final de DRY_RUN;
 - workflows de instaladores/onboarding permanecem gates separados de validação.
 
 Deploy de código e execução operacional são pipelines distintos.

@@ -22,8 +22,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: aurora-firebase-homologation
-  cancel-in-progress: true
+  group: aurora-hml-runtime-mutation
+  cancel-in-progress: false
 
 jobs:
   validate:
@@ -189,15 +189,12 @@ jobs:
           active_account="$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')"
           test "$active_account" = "$DEPLOY_SERVICE_ACCOUNT"
 
-          umask 077
-          secrets_dir="$(mktemp -d "${RUNNER_TEMP}/aurora-secret-preflight.XXXXXX")"
-          cleanup_secret_preflight() {
-            find "$secrets_dir" -type f -delete
-            rmdir "$secrets_dir"
-          }
-          trap cleanup_secret_preflight EXIT
+          # Validate only Secret Manager metadata. In particular, never read
+          # AURORA_NEXUS_ALLOWED_EMAILS in CI; authentication smoke tests prove
+          # behavior without exposing or copying the allowlist value.
           for secret in AURORA_NEXUS_ALLOWED_EMAILS AURORA_NEXUS_CSRF_HMAC_KEY; do
-            gcloud secrets describe "$secret" --project "$PROJECT_ID" --format='value(name)' >/dev/null
+            secret_name="$(gcloud secrets describe "$secret" --project "$PROJECT_ID" --format='value(name)')"
+            test -n "$secret_name"
             latest_version_json="$(
               gcloud secrets versions describe latest \
                 --secret "$secret" \
@@ -209,40 +206,8 @@ jobs:
             test -n "$version_name"
             version_id="${version_name##*/}"
             [[ "$version_id" =~ ^[0-9]+$ ]]
-            secret_file="$secrets_dir/$secret"
-            gcloud secrets versions access "$version_id" \
-              --secret "$secret" \
-              --project "$PROJECT_ID" \
-              --out-file="$secret_file"
-            test -s "$secret_file"
-
-            case "$secret" in
-              AURORA_NEXUS_ALLOWED_EMAILS)
-                node -e '
-                  const fs = require("node:fs");
-                  const values = fs.readFileSync(process.argv[1], "utf8").split(/[\s,;]+/).filter(Boolean);
-                  process.exit(values.some((value) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)) ? 0 : 1);
-                ' "$secret_file"
-                ;;
-              AURORA_NEXUS_CSRF_HMAC_KEY)
-                grep -Eq '^[A-Fa-f0-9]{64}$' "$secret_file"
-                ;;
-              *)
-                exit 49
-                ;;
-            esac
           done
-
-          node -e '
-            const fs = require("node:fs");
-            const allowed = fs.readFileSync(process.argv[1], "utf8")
-              .split(/[\s,;]+/).map((value) => value.trim().toLowerCase()).filter(Boolean);
-            const email = process.argv[2].trim().toLowerCase();
-            process.exit(email && allowed.includes(email) ? 0 : 1);
-          ' "$secrets_dir/AURORA_NEXUS_ALLOWED_EMAILS" "$SMOKE_EMAIL"
           smoke_uid="$SMOKE_UID"
-          cleanup_secret_preflight
-          trap - EXIT
 
           db_json="$(gcloud firestore databases describe --database='(default)' --project "$PROJECT_ID" --format=json)"
           test "$(jq -r '.locationId // empty' <<<"$db_json")" = "southamerica-east1"
@@ -342,7 +307,39 @@ jobs:
           test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
           git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
-          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,hosting,firestore:rules,firestore:indexes --non-interactive
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:ingestWmgjEvent,functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,hosting,firestore:rules,firestore:indexes --non-interactive
+
+      - name: Capture immutable ingest runtime evidence
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          VALIDATED_SHA: ${{ needs.validate.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          gcloud functions describe ingestWmgjEvent \
+            --gen2 \
+            --region southamerica-east1 \
+            --project "$PROJECT_ID" \
+            --format=json > "$RUNNER_TEMP/ingest-function.json"
+          ingest_url="$(jq -r '.serviceConfig.uri // empty' "$RUNNER_TEMP/ingest-function.json")"
+          ingest_revision="$(jq -r '.serviceConfig.revision // empty' "$RUNNER_TEMP/ingest-function.json")"
+          [[ "$ingest_url" =~ ^https://[^[:space:]]+$ ]]
+          [[ "$ingest_revision" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,255}$ ]]
+          test "$GITHUB_SHA" = "$VALIDATED_SHA"
+          jq -n \
+            --arg sourceSha "$VALIDATED_SHA" \
+            --arg projectId "$PROJECT_ID" \
+            --arg ingestUrl "$ingest_url" \
+            --arg ingestRevision "$ingest_revision" \
+            '{sourceSha:$sourceSha,projectId:$projectId,ingestUrl:$ingestUrl,ingestRevision:$ingestRevision,secretValueRead:false}' \
+            > "$RUNNER_TEMP/aurora-hml-runtime-evidence.json"
+
+      - name: Upload sanitized HML runtime evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned 2026-10-01
+        with:
+          name: aurora-hml-runtime-${{ github.sha }}
+          path: ${{ runner.temp }}/aurora-hml-runtime-evidence.json
+          if-no-files-found: error
+          retention-days: 30
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}

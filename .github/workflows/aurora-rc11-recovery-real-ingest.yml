@@ -1,7 +1,6 @@
 name: Aurora RC1.1 Recovery and Real WMGJ Ingest
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -11,8 +10,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: aurora-rc11-hml
-  cancel-in-progress: true
+  group: aurora-hml-runtime-mutation
+  # Restore and the receipt-bound pair must reach their cleanup/evidence path.
+  # A newer approved request waits instead of terminating an active sequence.
+  cancel-in-progress: false
 
 jobs:
   rc11:
@@ -31,33 +32,99 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned 2026-10-01
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 1
+          fetch-depth: 2
 
       - name: Validate immutable RC1.1 request
         env:
           APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "push"
+          test "$GITHUB_RUN_ATTEMPT" = "1"
           test "$GITHUB_REF" = "refs/heads/main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          first_parent="$(git rev-parse "$GITHUB_SHA^1")"
+          test -n "$first_parent"
+          test "$(git diff --name-only "$first_parent" "$GITHUB_SHA")" = "$REQUEST_FILE"
+          test "$(git show "$first_parent:$REQUEST_FILE" | jq -r '.requestVersion')" = "7"
+          test "$(git show "$first_parent:$REQUEST_FILE" | sha256sum | awk '{print $1}')" = "42b2a0628b8b8debd3a1becc462724b69fa5762208d64c8852fb2e1e26369c10"
+          read -r request_mode request_type request_object request_path < <(git ls-tree "$GITHUB_SHA" -- "$REQUEST_FILE")
+          test "$request_mode" = "100644"
+          test "$request_type" = "blob"
+          [[ "$request_object" =~ ^[a-f0-9]{40,64}$ ]]
+          test "$request_path" = "$REQUEST_FILE"
+          umask 077
+          request_snapshot="$(mktemp "$RUNNER_TEMP/aurora-rc11-request.XXXXXX.json")"
+          git cat-file blob "$request_object" > "$request_snapshot"
+          test "$(git hash-object "$request_snapshot")" = "$request_object"
+          request_sha256="$(sha256sum "$request_snapshot" | awk '{print $1}')"
+          [[ "$request_sha256" =~ ^[a-f0-9]{64}$ ]]
+          chmod 0400 "$request_snapshot"
+          test "$(stat -c '%a' "$request_snapshot")" = "400"
+          printf 'AURORA_RC11_REQUEST_SNAPSHOT=%s\n' "$request_snapshot" >> "$GITHUB_ENV"
+          printf 'AURORA_RC11_REQUEST_BLOB=%s\n' "$request_object" >> "$GITHUB_ENV"
+          printf 'AURORA_RC11_REQUEST_SHA256=%s\n' "$request_sha256" >> "$GITHUB_ENV"
           jq -e --arg project "$APPROVED_PROJECT" '
+            (keys | sort) == ([
+              "approvedBaseSha","candidateOnly","clinicalSensitiveEnabled","competence",
+              "confirmation","deploymentApproved","firebaseWriteApproved","genericBackfillApproved",
+              "hmacBootstrapIfMissing","hmacMode","expectedAppsScriptDeploymentId",
+              "expectedAppsScriptDeploymentVersion","expectedIngestRevision","productionMutation",
+              "projectId","requestReason","requestVersion","requestedAt","restoreDatabasePrefix","sample",
+              "secretManagerMutationApproved","sourceDatabase","sourceMutation"
+            ] | sort) and
             .confirmation=="RUN_RC11_HML" and
+            (.approvedBaseSha | type=="string" and test("^[a-f0-9]{40}$")) and
             .projectId==$project and
             .projectId=="wmgj-hml-jfn-20260927" and
             .sourceDatabase=="(default)" and
-            .requestVersion==7 and
-            .hmacMode=="ROTATE_TO_CANONICAL_HML_KEYRING" and
-            .secretManagerKeyringRotationApproved==true and
+            .requestVersion==8 and
+            .candidateOnly==false and
+            .hmacMode=="REUSE_CURRENT_KEYRING_ONLY" and
+            .secretManagerMutationApproved==false and
+            (.secretManagerKeyringMigrationApproved // false)==false and
+            (.secretManagerKeyringRotationApproved // false)==false and
             .deploymentApproved==true and
             .firebaseWriteApproved==true and
-            .hmacBootstrapIfMissing==true and
+            .hmacBootstrapIfMissing==false and
             .restoreDatabasePrefix=="rc11-restore" and
             .competence=="2026-05" and
+            .requestReason=="RC11_HML_V8_REUSE_VERIFIED_RUNTIME" and
+            (.expectedAppsScriptDeploymentId | type=="string" and test("^[A-Za-z0-9_-]{20,512}$")) and
+            (.expectedAppsScriptDeploymentVersion | type)=="number" and
+            (.expectedAppsScriptDeploymentVersion | floor)==.expectedAppsScriptDeploymentVersion and
+            .expectedAppsScriptDeploymentVersion>=1 and
+            (.expectedIngestRevision | type=="string" and test("^[A-Za-z0-9][A-Za-z0-9._-]{2,255}$")) and
+            (.requestedAt | type=="string" and test("^202[0-9]-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+            (.sample | keys | sort) == ([
+              "bank","bankIdempotencySha256","expectedPairCount","invoice",
+              "invoiceIdempotencySha256","invoiceNumber","pairBindingSha256",
+              "pairContractVersion","pairEvidenceAttested","sourceParentSha256"
+            ] | sort) and
+            (.sample.invoice | keys | sort) == (["contentHash","sourceRow"] | sort) and
+            (.sample.bank | keys | sort) == (["contentHash","sourceRow"] | sort) and
+            .sample.pairContractVersion==1 and
             .sample.invoiceNumber=="8" and
             .sample.expectedPairCount==2 and
+            .sample.pairEvidenceAttested==true and
+            (.sample.sourceParentSha256 | type=="string" and test("^[a-f0-9]{64}$")) and
+            (.sample.invoice.contentHash | type=="string" and test("^[a-f0-9]{64}$")) and
+            (.sample.bank.contentHash | type=="string" and test("^[a-f0-9]{64}$")) and
+            (.sample.invoiceIdempotencySha256 | type=="string" and test("^[a-f0-9]{64}$")) and
+            (.sample.bankIdempotencySha256 | type=="string" and test("^[a-f0-9]{64}$")) and
+            (.sample.pairBindingSha256 | type=="string" and test("^[a-f0-9]{64}$")) and
+            (.sample.invoice.sourceRow | type)=="number" and
+            (.sample.invoice.sourceRow | floor)==.sample.invoice.sourceRow and
+            .sample.invoice.sourceRow>=2 and
+            (.sample.bank.sourceRow | type)=="number" and
+            (.sample.bank.sourceRow | floor)==.sample.bank.sourceRow and
+            .sample.bank.sourceRow>=2 and
             .productionMutation==false and
-            .clinicalSensitiveEnabled==false
-          ' "$REQUEST_FILE" >/dev/null
+            .clinicalSensitiveEnabled==false and
+            .sourceMutation==false and
+            .genericBackfillApproved==false
+          ' "$request_snapshot" >/dev/null
+          test "$(jq -r '.approvedBaseSha' "$request_snapshot")" = "$first_parent"
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4 pinned 2026-10-01
         with:
@@ -104,7 +171,7 @@ jobs:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
-          restore_prefix="$(jq -r '.restoreDatabasePrefix' "$REQUEST_FILE")"
+          restore_prefix="$(jq -r '.restoreDatabasePrefix' "$AURORA_RC11_REQUEST_SNAPSHOT")"
           [[ "$restore_prefix" =~ ^[a-z0-9][a-z0-9-]{2,30}$ ]]
           restore_db="${restore_prefix}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           [[ "$restore_db" =~ ^[a-z0-9][a-z0-9-]{3,62}$ ]]
@@ -171,7 +238,13 @@ jobs:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
-          restore_prefix="$(jq -r '.restoreDatabasePrefix' "$REQUEST_FILE")"
+          if [ -z "${AURORA_RC11_REQUEST_SNAPSHOT:-}" ]; then
+            exit 0
+          fi
+          test "$(stat -c '%a' "$AURORA_RC11_REQUEST_SNAPSHOT")" = "400"
+          test "$(git hash-object "$AURORA_RC11_REQUEST_SNAPSHOT")" = "$AURORA_RC11_REQUEST_BLOB"
+          test "$(sha256sum "$AURORA_RC11_REQUEST_SNAPSHOT" | awk '{print $1}')" = "$AURORA_RC11_REQUEST_SHA256"
+          restore_prefix="$(jq -r '.restoreDatabasePrefix' "$AURORA_RC11_REQUEST_SNAPSHOT")"
           restore_db="${restore_prefix}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           if restored="$(gcloud firestore databases describe --database="$restore_db" --project "$PROJECT_ID" --format=json 2>/dev/null)"; then
             source_backup="$(jq -r '.sourceInfo.backup.backup // empty' <<<"$restored")"
@@ -245,114 +318,231 @@ jobs:
         run: |
           set -euo pipefail
           npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json > "$RUNNER_TEMP/functions-list.json"
-          required='["ingestWmgjEvent","runtimeWatchdog","runtimeHealth","auroraNexusAuthGate","auroraNexusSessionLogin","auroraNexusSessionLogout","auroraNexusBootstrap","auroraNexusNativeInsight","auroraNexusAction","auroraNexusRefresh","auroraNexusProjectionEngine","auroraNexusOrganic","auroraNexusIntegrationKeys","auroraNexusIntegrationPing"]'
+          required="$(jq -c '
+            [
+              "ingestWmgjEvent",
+              "runtimeWatchdog",
+              "runtimeHealth",
+              "auroraNexusProjectionEngine"
+            ] + [
+              .hosting.rewrites[]?
+              | .function.functionId? // empty
+            ]
+            | map(select(type == "string" and length > 0))
+            | unique
+          ' firebase.json)"
           jq -e --argjson required "$required" '
-            [.. | objects | (.id? // .name? // empty) | tostring | split("/")[-1]] as $deployed
+            (.result // .functions // []) as $functions
+            | [$functions[] | (.id // .name // "") | tostring | split("/")[-1]] as $deployed
             | all($required[]; $deployed | index(.) != null)
           ' "$RUNNER_TEMP/functions-list.json" >/dev/null
+          jq -r '.hosting.rewrites[]? | .function.functionId? // empty' firebase.json \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/hosting-function-ids.txt"
+          test -s "$RUNNER_TEMP/hosting-function-ids.txt"
+          while IFS= read -r function_id; do
+            endpoint_url="$(gcloud functions describe "$function_id" \
+              --gen2 \
+              --region "$REGION" \
+              --project "$PROJECT_ID" \
+              --format='value(serviceConfig.uri)')"
+            test -n "$endpoint_url"
+            case "$endpoint_url" in
+              https://*) ;;
+              *) echo "INVALID_HOSTING_FUNCTION_URI:$function_id" >&2; exit 75 ;;
+            esac
+          done < "$RUNNER_TEMP/hosting-function-ids.txt"
           health_url="$(gcloud functions describe runtimeHealth --gen2 --region "$REGION" --project "$PROJECT_ID" --format='value(serviceConfig.uri)')"
           test -n "$health_url"
           curl -fsS "$health_url" > "$RUNNER_TEMP/runtime-health.json"
           jq -e '.ok==true and .service=="wmgj-firestore-ingestion" and .signatureVersion=="v2"' "$RUNNER_TEMP/runtime-health.json" >/dev/null
+          gcloud functions describe ingestWmgjEvent --gen2 --region "$REGION" --project "$PROJECT_ID" --format=json > "$RUNNER_TEMP/ingest-function.json"
+          ingest_url="$(jq -r '.serviceConfig.uri // empty' "$RUNNER_TEMP/ingest-function.json")"
+          ingest_revision="$(jq -r '.serviceConfig.revision // empty' "$RUNNER_TEMP/ingest-function.json")"
+          [[ "$ingest_url" =~ ^https://[^[:space:]]+$ ]]
+          test -n "$ingest_revision"
+          test "$ingest_revision" = "$(jq -r '.expectedIngestRevision' "$AURORA_RC11_REQUEST_SNAPSHOT")"
+          ingest_probe_status="$(curl --silent --show-error --max-time 30 \
+            --request GET \
+            --header 'Accept: application/json' \
+            --output "$RUNNER_TEMP/ingest-method-probe.json" \
+            --write-out '%{http_code}' \
+            "$ingest_url")"
+          test "$ingest_probe_status" = "405"
+          jq -e '.ok==false and .code=="METHOD_NOT_ALLOWED"' "$RUNNER_TEMP/ingest-method-probe.json" >/dev/null
           npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only hosting,firestore:rules,firestore:indexes
-          echo "AURORA_RC11_INGEST_URL=https://${REGION}-${PROJECT_ID}.cloudfunctions.net/ingestWmgjEvent" >> "$GITHUB_ENV"
-          jq -n --arg healthUrl "$health_url" '{
+          printf 'AURORA_RC11_INGEST_URL=%s\n' "$ingest_url" >> "$GITHUB_ENV"
+          printf 'AURORA_RC11_INGEST_REVISION=%s\n' "$ingest_revision" >> "$GITHUB_ENV"
+          jq -n --arg healthUrl "$health_url" --arg ingestUrl "$ingest_url" --arg ingestRevision "$ingest_revision" '{
             gate:"HML_RUNTIME_VERIFIED",
             functionsPresent:true,
             runtimeHealth:true,
+            ingestMethodProbe:true,
             signatureVersion:"v2",
-            functionsRedeployed:false,
+            functionsRedeployedInThisStep:false,
             nonSecretSurfacesDeployed:true,
-            healthUrl:$healthUrl
+            healthUrl:$healthUrl,
+            ingestUrl:$ingestUrl,
+            ingestRevision:$ingestRevision
           }' > "$RUNNER_TEMP/rc11-evidence/runtime.json"
 
-      - name: Use canonical Apps Script deployment and configure bridge
+      - name: Verify canonical Apps Script deployment and existing bridge
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
+          keyring_file=""
+          cleanup_hmac_files() {
+            test -z "$keyring_file" || rm -f "$keyring_file"
+          }
+          trap cleanup_hmac_files EXIT
           npm install -g @google/clasp@3.4.1
           umask 077
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
           mkdir -p "$RUNNER_TEMP/build-appscript"
           printf '{"scriptId":"%s","projectId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" "$PROJECT_ID" > "$RUNNER_TEMP/build-appscript/.clasp.json"
           cd "$RUNNER_TEMP/build-appscript"
-          # Apps Script source/deployment is owned exclusively by deploy-appscript.yml.
-          # RC1.1 consumes the canonical nondev deployment and never pushes/redeploys it.
-          test "$(jq -r '.deploymentApproved' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
-          test "$(jq -r '.firebaseWriteApproved' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
-          test "$(jq -r '.hmacBootstrapIfMissing' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
+          # Source and deployment are owned by deploy-appscript.yml. RC1.1 only
+          # consumes the already-reviewed canonical nondev deployment.
+          test "$(jq -r '.deploymentApproved' "$AURORA_RC11_REQUEST_SNAPSHOT")" = "true"
+          test "$(jq -r '.firebaseWriteApproved' "$AURORA_RC11_REQUEST_SNAPSHOT")" = "true"
+          test "$(jq -r '.hmacBootstrapIfMissing' "$AURORA_RC11_REQUEST_SNAPSHOT")" = "false"
+          approved_base_sha="$(jq -r '.approvedBaseSha' "$AURORA_RC11_REQUEST_SNAPSHOT")"
+          expected_deployment_description="AURORA_EXECUTION_API_CANONICAL ${approved_base_sha}"
+          expected_deployment_id="$(jq -r '.expectedAppsScriptDeploymentId' "$AURORA_RC11_REQUEST_SNAPSHOT")"
+          expected_deployment_version="$(jq -r '.expectedAppsScriptDeploymentVersion' "$AURORA_RC11_REQUEST_SNAPSHOT")"
+          clasp --json list-deployments > "$RUNNER_TEMP/appscript-deployments.json"
+          jq -e 'type=="array"' "$RUNNER_TEMP/appscript-deployments.json" >/dev/null
+          canonical_deployment="$(jq -c \
+            --arg description "$expected_deployment_description" \
+            --arg deploymentId "$expected_deployment_id" \
+            --argjson version "$expected_deployment_version" '
+            [.[] | select(
+              .description==$description and
+              .deploymentId==$deploymentId and
+              (.versionNumber | tonumber?)==$version
+            )]
+            | if length==1 then .[0] else empty end
+          ' "$RUNNER_TEMP/appscript-deployments.json")"
+          test -n "$canonical_deployment"
+          canonical_deployment_id="$(jq -r '.deploymentId // empty' <<<"$canonical_deployment")"
+          canonical_version="$(jq -r '.versionNumber | tonumber' <<<"$canonical_deployment")"
+          test "$canonical_deployment_id" = "$expected_deployment_id"
+          test "$canonical_version" = "$expected_deployment_version"
+          test "$(jq -r '.description // empty' <<<"$canonical_deployment")" = "$expected_deployment_description"
+          printf 'AURORA_RC11_APPS_SCRIPT_DEPLOYMENT_ID=%s\n' "$canonical_deployment_id" >> "$GITHUB_ENV"
+          printf 'AURORA_RC11_APPS_SCRIPT_VERSION=%s\n' "$canonical_version" >> "$GITHUB_ENV"
+          export APPS_SCRIPT_EXECUTION_DEPLOYMENT_ID="$canonical_deployment_id"
+          printf 'APPS_SCRIPT_EXECUTION_DEPLOYMENT_ID=%s\n' "$canonical_deployment_id" >> "$GITHUB_ENV"
           params="$(jq -nc --arg url "$AURORA_RC11_INGEST_URL" '[$url]')"
-          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11InspecionarConfiguracao "$RUNNER_TEMP/rc11-config-state.json"
-          jq -e '.response.ok==true and .response.sourceMutation==false' "$RUNNER_TEMP/rc11-config-state.json" >/dev/null
-          if [ "$(jq -r '.response.hmacConfigured' "$RUNNER_TEMP/rc11-config-state.json")" = "true" ]; then
-            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ConfigurarEndpointExistente "$RUNNER_TEMP/rc11-config.json" "$params"
-          else
-            test "$(jq -r '.secretManagerKeyringRotationApproved // false' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
-            key_id="apps-script-homolog-2026-08"
-            hmac_secret="$(openssl rand -hex 32)"
-            printf '%s' "$hmac_secret" | grep -Eqx '[a-f0-9]{64}'
-            echo "::add-mask::$hmac_secret"
-            keyring_file="$RUNNER_TEMP/hmac-keyring-rotated.json"
-            jq -nc --arg keyId "$key_id" --arg secret "$hmac_secret" '{
-              ($keyId): {
-                active: true,
-                secret: $secret,
-                orgIds: ["wmgj"],
-                entityTypes: ["invoice","bankTransaction"]
-              }
-            }' > "$keyring_file"
-            chmod 600 "$keyring_file"
-            secret_version="$(gcloud secrets versions add "WMGJ_INGEST_HMAC_KEYRING" --project "$PROJECT_ID" --data-file="$keyring_file" --quiet --format='value(name)')"
-            test -n "$secret_version"
-            version_id="${secret_version##*/}"
-            test "$(gcloud secrets versions describe "$version_id" --secret="WMGJ_INGEST_HMAC_KEYRING" --project "$PROJECT_ID" --format='value(state)')" = "ENABLED"
-            (
-              cd "$GITHUB_WORKSPACE/firebase-migration"
-              npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only functions:ingestWmgjEvent
-            )
-            bootstrap_params="$(jq -nc --arg url "$AURORA_RC11_INGEST_URL" --arg keyId "$key_id" --arg secret "$hmac_secret" '[$url,$keyId,$secret]')"
-            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ConfigurarIngestao "$RUNNER_TEMP/rc11-config.json" "$bootstrap_params"
-            jq -n --arg keyId "$key_id" --arg version "$version_id" '{
-              gate:"HMAC_KEYRING_ROTATED",
-              keyId:$keyId,
-              secretVersion:$version,
-              secretExposed:false,
-              functionsRedeployed:["ingestWmgjEvent"],
-              productionMutation:false,
-              sourceMutation:false
-            }' > "$RUNNER_TEMP/rc11-evidence/hmac-rotation.json"
-            rm -f "$keyring_file"
-            unset hmac_secret bootstrap_params secret_version version_id
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11InspecionarConfiguracao "$RUNNER_TEMP/rc11-config-state.json" "$params"
+          jq -e '.response.ok==true and .response.endpointConfigured==true and .response.endpointMatches==true and .response.hmacConfigured==true and (.response.keyId|type=="string" and length>0) and .response.dryRun==true and .response.sourceMutation==false' "$RUNNER_TEMP/rc11-config-state.json" >/dev/null
+          configured_key_id="$(jq -r '.response.keyId' "$RUNNER_TEMP/rc11-config-state.json")"
+          keyring_file="$RUNNER_TEMP/hmac-keyring-scope-check.json"
+          if ! gcloud secrets versions access latest --secret="WMGJ_INGEST_HMAC_KEYRING" --project "$PROJECT_ID" --out-file="$keyring_file" >/dev/null 2>&1; then
+            echo "::error title=HMAC scope preflight unavailable::The deployed key cannot be checked before the one-shot gate; no write was enabled." >&2
+            exit 76
           fi
-          jq -e '.response.ok==true and .response.secretConfigured==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-config.json" >/dev/null
-          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11InspecionarConfiguracao "$RUNNER_TEMP/rc11-config-state-after.json"
-          jq -e '.response.ok==true and .response.endpointConfigured==true and .response.hmacConfigured==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-config-state-after.json" >/dev/null
-          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ValidarHmacExistente "$RUNNER_TEMP/rc11-hmac-probe.json"
-          jq -e '.response.ok==true and .response.authenticated==true and .response.noWrite==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-hmac-probe.json" >/dev/null
-          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-dry-run.json"
-          jq -e '.response.ok==true and .response.dryRun==true and .response.planned==2 and .response.expected.competence=="2026-05" and .response.expected.invoiceCents==4950000 and .response.expected.receivedCents==4950000 and .response.expected.differenceCents==0' "$RUNNER_TEMP/rc11-dry-run.json" >/dev/null
+          chmod 600 "$keyring_file"
+          jq -e --arg key "$configured_key_id" '
+            .[$key] as $entry
+            | ($entry | type=="object") and
+              $entry.active==true and
+              (($entry.orgIds // []) | index("wmgj") != null) and
+              (($entry.entityTypes // []) | index("invoice") != null) and
+              (($entry.entityTypes // []) | index("bankTransaction") != null) and
+              (($entry.secret // "") | test("^[A-Fa-f0-9]{64}$"))
+          ' "$keyring_file" >/dev/null
+          sample_contract="$(jq -c '.sample' "$AURORA_RC11_REQUEST_SNAPSHOT")"
+          contract_params="$(jq -nc --argjson sample "$sample_contract" --arg key "$configured_key_id" '[$sample,$key]')"
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ValidarHmacExistente "$RUNNER_TEMP/rc11-hmac-probe.json" "$contract_params"
+          jq -e --arg binding "$(jq -r '.sample.pairBindingSha256' "$AURORA_RC11_REQUEST_SNAPSHOT")" '.response.ok==true and .response.authenticated==true and .response.policyAccepted==true and .response.eventsValidated==2 and .response.noWrite==true and .response.dryRun==true and .response.pairBindingSha256==$binding' "$RUNNER_TEMP/rc11-hmac-probe.json" >/dev/null
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-dry-run.json" "$contract_params"
+          jq -e --arg binding "$(jq -r '.sample.pairBindingSha256' "$AURORA_RC11_REQUEST_SNAPSHOT")" '.response.ok==true and .response.dryRun==true and .response.planned==2 and .response.expected.competence=="2026-05" and .response.expected.invoiceCents==4950000 and .response.expected.receivedCents==4950000 and .response.expected.differenceCents==0 and .response.expected.pairBindingSha256==$binding' "$RUNNER_TEMP/rc11-dry-run.json" >/dev/null
+          auth_expires_at="$(( $(date +%s) + 600 ))"
+          pair_binding="$(jq -r '.sample.pairBindingSha256' "$AURORA_RC11_REQUEST_SNAPSHOT")"
+          authorization_hmac="$(node - "$keyring_file" "$configured_key_id" "$AURORA_RC11_INGEST_URL" "$GITHUB_SHA" "$auth_expires_at" "$pair_binding" <<'NODE'
+          const { createHmac } = require('node:crypto');
+          const { readFileSync } = require('node:fs');
+          const [keyringPath, keyId, rawUrl, requestSha, expiresAt, pairBinding] = process.argv.slice(2);
+          const keyring = JSON.parse(readFileSync(keyringPath, 'utf8'));
+          const secret = keyring[keyId] && keyring[keyId].secret;
+          if (!/^[A-Fa-f0-9]{64}$/.test(String(secret || ''))) process.exit(76);
+          const key = Buffer.from(String(secret), 'hex');
+          if (key.length !== 32) process.exit(76);
+          const canonical = [
+            'AURORA_RC11_AUTH_V1', 'wmgj', '2026-05', rawUrl.replace(/\/$/, ''),
+            keyId, requestSha, expiresAt, pairBinding
+          ].join('\n');
+          process.stdout.write(createHmac('sha256', key).update(canonical, 'utf8').digest('hex'));
+          NODE
+          )"
+          [[ "$authorization_hmac" =~ ^[a-f0-9]{64}$ ]]
+          echo "::add-mask::$authorization_hmac"
+          printf 'AURORA_RC11_CONFIGURED_KEY_ID=%s\n' "$configured_key_id" >> "$GITHUB_ENV"
+          printf 'AURORA_RC11_AUTH_EXPIRES_AT=%s\n' "$auth_expires_at" >> "$GITHUB_ENV"
+          printf 'AURORA_RC11_AUTH_HMAC=%s\n' "$authorization_hmac" >> "$GITHUB_ENV"
+          rm -f "$keyring_file"
+          keyring_file=""
+          unset sample_contract contract_params authorization_hmac
+          jq -n --arg sourceSha "$approved_base_sha" --arg ingestRevision "$AURORA_RC11_INGEST_REVISION" --arg deploymentId "$canonical_deployment_id" --argjson version "$canonical_version" --arg keyId "$configured_key_id" --arg binding "$pair_binding" '{gate:"HML_KEYRING_BRIDGE_VERIFIED",sourceSha:$sourceSha,ingestRevision:$ingestRevision,secretManagerMutation:false,appsScriptConfigurationMutation:false,ingestFunctionRedeployed:false,bridgeConfigured:true,dryRun:true,executionDeploymentId:$deploymentId,executionVersion:$version,keyId:$keyId,pairBindingSha256:$binding}' \
+            > "$RUNNER_TEMP/rc11-evidence/keyring-bridge.json"
 
-      - name: Send one real sample and reapply kill switch
+      - name: Send one isolated sample pair with global dry-run preserved
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
-          test "$(jq -r '.firebaseWriteApproved' "$REQUEST_FILE")" = "true"
+          test -f "$AURORA_RC11_REQUEST_SNAPSHOT"
+          test "$(stat -c '%a' "$AURORA_RC11_REQUEST_SNAPSHOT")" = "400"
+          test "$(git hash-object "$AURORA_RC11_REQUEST_SNAPSHOT")" = "$AURORA_RC11_REQUEST_BLOB"
+          test "$(sha256sum "$AURORA_RC11_REQUEST_SNAPSHOT" | awk '{print $1}')" = "$AURORA_RC11_REQUEST_SHA256"
+          test "$(jq -r '.firebaseWriteApproved' "$AURORA_RC11_REQUEST_SNAPSHOT")" = "true"
           cd "$RUNNER_TEMP/build-appscript"
-          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11AtivarEscritaAmostra "$RUNNER_TEMP/rc11-activate.json" '["ATIVAR_RC11_WMGJ_HML"]'
-          jq -e '.response.ok==true and .response.dryRun==false and .response.sampleOnly==true' "$RUNNER_TEMP/rc11-activate.json" >/dev/null
-          trap 'bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11KillSwitch "$RUNNER_TEMP/rc11-kill-trap.json" >/dev/null 2>&1 || true' EXIT
-          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11EnviarAmostraReal "$RUNNER_TEMP/rc11-live.json" '["ATIVAR_RC11_WMGJ_HML"]'
-          jq -e '.response.ok==true and .response.oneShot==true and ((.response.sent + .response.duplicates)==2) and .response.expected.competence=="2026-05" and .response.expected.invoiceCents==4950000 and .response.expected.receivedCents==4950000 and .response.expected.differenceCents==0 and (.response.invoiceEntityId|length)>0 and (.response.bankEntityId|length)>0' "$RUNNER_TEMP/rc11-live.json" >/dev/null
+          clasp --json list-deployments > "$RUNNER_TEMP/appscript-deployments-live.json"
+          jq -e 'type=="array"' "$RUNNER_TEMP/appscript-deployments-live.json" >/dev/null
+          live_deployment="$(jq -c \
+            --arg description "AURORA_EXECUTION_API_CANONICAL $(jq -r '.approvedBaseSha' "$AURORA_RC11_REQUEST_SNAPSHOT")" \
+            --arg deploymentId "$AURORA_RC11_APPS_SCRIPT_DEPLOYMENT_ID" \
+            --argjson version "$AURORA_RC11_APPS_SCRIPT_VERSION" '
+            [.[] | select(
+              .description==$description and
+              .deploymentId==$deploymentId and
+              (.versionNumber | tonumber?)==$version
+            )]
+            | if length==1 then .[0] else empty end
+          ' "$RUNNER_TEMP/appscript-deployments-live.json")"
+          test -n "$live_deployment"
+          test "$(jq -r '.deploymentId // empty' <<<"$live_deployment")" = "$AURORA_RC11_APPS_SCRIPT_DEPLOYMENT_ID"
+          test "$(jq -r '.versionNumber | tonumber' <<<"$live_deployment")" = "$AURORA_RC11_APPS_SCRIPT_VERSION"
+          test "$(jq -r '.description // empty' <<<"$live_deployment")" = "AURORA_EXECUTION_API_CANONICAL $(jq -r '.approvedBaseSha' "$AURORA_RC11_REQUEST_SNAPSHOT")"
+          gcloud functions describe ingestWmgjEvent --gen2 --region "$REGION" --project "$PROJECT_ID" --format=json > "$RUNNER_TEMP/ingest-function-live.json"
+          test "$(jq -r '.serviceConfig.uri // empty' "$RUNNER_TEMP/ingest-function-live.json")" = "$AURORA_RC11_INGEST_URL"
+          test "$(jq -r '.serviceConfig.revision // empty' "$RUNNER_TEMP/ingest-function-live.json")" = "$AURORA_RC11_INGEST_REVISION"
+          test "$(date +%s)" -lt "$AURORA_RC11_AUTH_EXPIRES_AT"
+          sample_contract="$(jq -c '.sample' "$AURORA_RC11_REQUEST_SNAPSHOT")"
+          sample_params="$(jq -nc \
+            --arg confirmation 'ATIVAR_RC11_WMGJ_HML' \
+            --arg url "$AURORA_RC11_INGEST_URL" \
+            --arg key "$AURORA_RC11_CONFIGURED_KEY_ID" \
+            --arg requestSha "$GITHUB_SHA" \
+            --arg expiresAt "$AURORA_RC11_AUTH_EXPIRES_AT" \
+            --arg authorizationHmac "$AURORA_RC11_AUTH_HMAC" \
+            --argjson sample "$sample_contract" \
+            '[$confirmation,$url,$key,$requestSha,$expiresAt,$authorizationHmac,$sample]')"
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11EnviarAmostraReal "$RUNNER_TEMP/rc11-live.json" "$sample_params"
+          unset sample_params sample_contract AURORA_RC11_AUTH_HMAC
+          expected_binding="$(jq -r '.sample.pairBindingSha256' "$AURORA_RC11_REQUEST_SNAPSHOT")"
+          expected_receipt_sha="$(printf '%s%s' "$GITHUB_SHA" "$expected_binding" | sha256sum | awk '{print $1}')"
+          jq -e --arg binding "$expected_binding" --arg receipt "$expected_receipt_sha" '.response.ok==true and .response.oneShot==true and .response.receiptState=="CONSUMED" and .response.ephemeralWrite==true and .response.globalDryRun==true and .response.atomic==false and ((.response.sent + .response.duplicates)==2) and .response.expected.competence=="2026-05" and .response.expected.invoiceCents==4950000 and .response.expected.receivedCents==4950000 and .response.expected.differenceCents==0 and .response.expected.pairBindingSha256==$binding and .response.pairBindingSha256==$binding and .response.sampleContract.pairBindingSha256==$binding and .response.pairEvidenceAttested==true and .response.receiptSha256==$receipt and (.response.invoiceEntityId|length)>0 and (.response.bankEntityId|length)>0' "$RUNNER_TEMP/rc11-live.json" >/dev/null
           invoice_entity_id="$(jq -r '.response.invoiceEntityId' "$RUNNER_TEMP/rc11-live.json")"
           bank_entity_id="$(jq -r '.response.bankEntityId' "$RUNNER_TEMP/rc11-live.json")"
           echo "AURORA_RC11_INVOICE_ENTITY_ID=$invoice_entity_id" >> "$GITHUB_ENV"
           echo "AURORA_RC11_BANK_ENTITY_ID=$bank_entity_id" >> "$GITHUB_ENV"
-          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11KillSwitch "$RUNNER_TEMP/rc11-kill.json"
-          jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-kill.json" >/dev/null
-          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-post-live-dry-run.json"
-          jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-post-live-dry-run.json" >/dev/null
-          trap - EXIT
+          post_params="$(jq -nc --argjson sample "$(jq -c '.sample' "$AURORA_RC11_REQUEST_SNAPSHOT")" --arg key "$AURORA_RC11_CONFIGURED_KEY_ID" '[$sample,$key]')"
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-post-live-dry-run.json" "$post_params"
+          unset post_params
+          jq -e --arg binding "$expected_binding" '.response.ok==true and .response.dryRun==true and .response.expected.pairBindingSha256==$binding' "$RUNNER_TEMP/rc11-post-live-dry-run.json" >/dev/null
 
       - name: Reconcile HML and enable SHADOW projection
         env:
@@ -366,7 +556,7 @@ jobs:
           curl -fsS -H "Authorization: Bearer ${access_token}" "$base/invoices/$AURORA_RC11_INVOICE_ENTITY_ID" > "$RUNNER_TEMP/invoice.json"
           curl -fsS -H "Authorization: Bearer ${access_token}" "$base/bankTransactions/$AURORA_RC11_BANK_ENTITY_ID" > "$RUNNER_TEMP/bank.json"
           jq -e '.fields.orgId.stringValue=="wmgj" and .fields.entityType.stringValue=="invoice" and .fields.competence.stringValue=="2026-05" and .fields.documentType.stringValue=="06_NFS_E" and .fields.invoiceNumber.stringValue=="8" and (.fields.totalCents.integerValue|tonumber)==4950000 and .fields.source.mapValue.fields.system.stringValue=="SHEETS"' "$RUNNER_TEMP/invoice.json" >/dev/null
-          jq -e '.fields.orgId.stringValue=="wmgj" and .fields.entityType.stringValue=="bankTransaction" and .fields.competence.stringValue=="2026-05" and .fields.documentType.stringValue=="08_EXTRATOS_BRADESCO" and .fields.status.stringValue=="RECONCILED" and (.fields.liquidatedAmountCents.integerValue|tonumber)==4950000 and .fields.source.mapValue.fields.system.stringValue=="SHEETS"' "$RUNNER_TEMP/bank.json" >/dev/null
+          jq -e --arg invoiceEntityId "$AURORA_RC11_INVOICE_ENTITY_ID" '.fields.orgId.stringValue=="wmgj" and .fields.entityType.stringValue=="bankTransaction" and .fields.competence.stringValue=="2026-05" and .fields.documentType.stringValue=="08_EXTRATOS_BRADESCO" and .fields.status.stringValue=="RECONCILED" and .fields.transactionKind.stringValue=="RECEIPT" and .fields.invoiceEntityId.stringValue==$invoiceEntityId and (.fields.liquidatedAmountCents.integerValue|tonumber)==4950000 and .fields.source.mapValue.fields.system.stringValue=="SHEETS"' "$RUNNER_TEMP/bank.json" >/dev/null
           invoice_cents="$(jq -r '.fields.totalCents.integerValue|tonumber' "$RUNNER_TEMP/invoice.json")"
           bank_cents="$(jq -r '.fields.liquidatedAmountCents.integerValue|tonumber' "$RUNNER_TEMP/bank.json")"
           test "$invoice_cents" -eq 4950000
@@ -419,19 +609,24 @@ jobs:
           jq -e '[.insight.findings[]?|select(.code=="SLA_OVERDUE")]|length==0' "$d/SLA_RISK.json" >/dev/null
           jq -n --arg r "$(jq -r '.insight.headline' "$d/REVENUE_RISK.json")" --arg s "$(jq -r '.insight.headline' "$d/SLA_RISK.json")" --arg n "$(jq -r '.insight.headline' "$d/NEXT_ACTION.json")" --arg e "$(jq -r '.insight.headline' "$d/EXECUTIVE.json")" '{gate:"NATIVE_INSIGHT_VERIFIED",externalProviderUsed:false,revenueHeadline:$r,slaHeadline:$s,nextActionHeadline:$n,executiveHeadline:$e}' > "$RUNNER_TEMP/rc11-evidence/native-intelligence.json"
 
-      - name: Final kill switch and evidence
+      - name: Final global dry-run verification and evidence
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/build-appscript"
-          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11KillSwitch "$RUNNER_TEMP/rc11-final-kill.json"
-          jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-final-kill.json" >/dev/null
-          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-final-dry-run.json"
-          jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-final-dry-run.json" >/dev/null
-          jq -n '{release:"1.0.0-rc.1",gate:"RC1.1",restoreVerified:true,ingestAuthenticated:true,realWmgjSample:true,reconciled:true,nativeInsightVerified:true,killSwitch:true,productionMutation:false,sourceMutation:false}' > "$RUNNER_TEMP/rc11-evidence/final-gate.json"
+          final_params="$(jq -nc --arg url "$AURORA_RC11_INGEST_URL" '[$url]')"
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11InspecionarConfiguracao "$RUNNER_TEMP/rc11-final-config.json" "$final_params"
+          unset final_params
+          jq -e '.response.ok==true and .response.endpointMatches==true and .response.hmacConfigured==true and .response.dryRun==true and .response.sourceMutation==false' "$RUNNER_TEMP/rc11-final-config.json" >/dev/null
+          final_dry_params="$(jq -nc --argjson sample "$(jq -c '.sample' "$AURORA_RC11_REQUEST_SNAPSHOT")" --arg key "$AURORA_RC11_CONFIGURED_KEY_ID" '[$sample,$key]')"
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11DryRunAmostra "$RUNNER_TEMP/rc11-final-dry-run.json" "$final_dry_params"
+          unset final_dry_params
+          jq -e --arg binding "$(jq -r '.sample.pairBindingSha256' "$AURORA_RC11_REQUEST_SNAPSHOT")" '.response.ok==true and .response.dryRun==true and .response.expected.pairBindingSha256==$binding' "$RUNNER_TEMP/rc11-final-dry-run.json" >/dev/null
+          jq -n '{release:"1.0.0-rc.1",gate:"RC1.1",restoreVerified:true,ingestAuthenticated:true,realWmgjSample:true,reconciled:true,nativeInsightVerified:true,globalDryRunPreserved:true,requestReceiptConsumed:true,appsScriptReceiptMutation:true,boundedIdempotentPair:true,atomic:false,genericBackfill:false,productionMutation:false,sourceMutation:false}' > "$RUNNER_TEMP/rc11-evidence/final-gate.json"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned 2026-10-01
+        if: ${{ always() }}
         with:
           name: aurora-rc11-evidence
           path: ${{ runner.temp }}/rc11-evidence/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30

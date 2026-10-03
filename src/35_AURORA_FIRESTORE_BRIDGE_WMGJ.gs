@@ -6,6 +6,13 @@
 
 var WMGJ_FIRESTORE_BRIDGE_VERSION = 'v1.0.0-firestore-bridge';
 var WMGJ_FIRESTORE_SIGNATURE_VERSION = 'v2';
+var WMGJ_FIRESTORE_AMBIENT_TRANSPORT_CAPABILITY_ = {};
+var WMGJ_FIRESTORE_RC11_TRANSPORT_CAPABILITY_ = {};
+var WMGJ_FIRESTORE_RC11_EPHEMERAL_CAPABILITY_ = {};
+
+function wmgjFirestoreHmacSecretValido_(secret) {
+  return /^[A-Fa-f0-9]{64}$/.test(String(secret || ''));
+}
 
 function wmgjFirestoreConfig_() {
   var props = PropertiesService.getScriptProperties();
@@ -22,14 +29,14 @@ function wmgjFirestoreConfig_() {
 function wmgjFirestoreDiagnostico() {
   var cfg = wmgjFirestoreConfig_();
   var productionReady = Boolean(
-    cfg.url && cfg.keyId && cfg.secret.length >= 32 && cfg.orgId
+    cfg.url && cfg.keyId && wmgjFirestoreHmacSecretValido_(cfg.secret) && cfg.orgId
   );
   var result = {
     ok: cfg.dryRun ? Boolean(cfg.orgId) : productionReady,
     version: WMGJ_FIRESTORE_BRIDGE_VERSION,
     urlConfigured: Boolean(cfg.url),
     keyIdConfigured: Boolean(cfg.keyId),
-    secretConfigured: cfg.secret.length >= 32,
+    secretConfigured: wmgjFirestoreHmacSecretValido_(cfg.secret),
     orgId: cfg.orgId,
     dryRun: cfg.dryRun,
     maxRows: cfg.maxRows,
@@ -41,10 +48,61 @@ function wmgjFirestoreDiagnostico() {
 }
 
 function wmgjFirestoreEnviarEvento_(event) {
-  var cfg = wmgjFirestoreConfig_();
-  if (!event || !event.idempotencyKey || !event.orgId) {
-    throw new Error('EVENTO_FIRESTORE_INVALIDO');
+  // O caminho ambiente nunca aceita configuração injetada. A cada envio ele
+  // relê o DRY_RUN persistido, usado pelos triggers regulares.
+  return wmgjFirestoreTransport_(event, null, WMGJ_FIRESTORE_AMBIENT_TRANSPORT_CAPABILITY_);
+}
+
+function wmgjFirestoreValidarEventoTransportavel_(event) {
+  if (
+    !event || !event.eventId || !event.idempotencyKey || !event.orgId ||
+    !event.entityType || !event.entityKey || !event.record || !event.source ||
+    !event.source.sourceId || !event.source.contentHash
+  ) throw new Error('EVENTO_FIRESTORE_INVALIDO');
+}
+
+// Único boundary interno que aceita configuração efêmera. Ele recebe o par
+// completo, na ordem canônica, e não expõe um sender live genérico ao RC1.1.
+function wmgjFirestoreEnviarParRc11_(invoice, bank, cfg, capability) {
+  if (capability !== WMGJ_FIRESTORE_RC11_EPHEMERAL_CAPABILITY_) {
+    throw new Error('RC11_CAPACIDADE_EFEMERA_INVALIDA');
   }
+  cfg = cfg || {};
+  if (cfg.ephemeralWrite !== true || cfg.dryRun !== false || cfg.maxRows !== 2) {
+    throw new Error('RC11_CONFIG_EFEMERA_INVALIDA');
+  }
+  if (
+    !invoice || invoice.orgId !== 'wmgj' || invoice.entityType !== 'invoice' ||
+    invoice.competence !== '2026-05' || !invoice.metadata || invoice.metadata.rc11Sample !== true ||
+    !bank || bank.orgId !== 'wmgj' || bank.entityType !== 'bankTransaction' ||
+    bank.competence !== '2026-05' || !bank.metadata || bank.metadata.rc11Sample !== true ||
+    !bank.record || bank.record.transactionKind !== 'RECEIPT' ||
+    bank.record.invoiceEntityId !== wmgjFirestoreHashString_('invoice:' + invoice.entityKey).slice(0, 48) ||
+    invoice.idempotencyKey === bank.idempotencyKey
+  ) throw new Error('RC11_PAR_EFEMERO_INVALIDO');
+  // Valide integralmente ambos os envelopes antes de permitir o primeiro POST.
+  wmgjFirestoreValidarEventoTransportavel_(invoice);
+  wmgjFirestoreValidarEventoTransportavel_(bank);
+  return {
+    invoiceResult: wmgjFirestoreTransport_(invoice, cfg, WMGJ_FIRESTORE_RC11_TRANSPORT_CAPABILITY_),
+    bankResult: wmgjFirestoreTransport_(bank, cfg, WMGJ_FIRESTORE_RC11_TRANSPORT_CAPABILITY_)
+  };
+}
+
+function wmgjFirestoreTransport_(event, cfg, capability) {
+  if (capability === WMGJ_FIRESTORE_AMBIENT_TRANSPORT_CAPABILITY_) {
+    // Mesmo que código interno tente injetar cfg live, o caminho ambiente só
+    // confia no estado persistido e continua respeitando o DRY_RUN global.
+    cfg = wmgjFirestoreConfig_();
+  } else if (capability === WMGJ_FIRESTORE_RC11_TRANSPORT_CAPABILITY_) {
+    cfg = cfg || {};
+    if (cfg.ephemeralWrite !== true || cfg.dryRun !== false || cfg.maxRows !== 2) {
+      throw new Error('RC11_TRANSPORTE_EFEMERO_INVALIDO');
+    }
+  } else {
+    throw new Error('CAPACIDADE_TRANSPORTE_INVALIDA');
+  }
+  wmgjFirestoreValidarEventoTransportavel_(event);
 
   var body = JSON.stringify(event);
   if (cfg.dryRun) {
@@ -60,7 +118,7 @@ function wmgjFirestoreEnviarEvento_(event) {
     return dry;
   }
 
-  if (!cfg.url || !cfg.keyId || cfg.secret.length < 32) {
+  if (!cfg.url || !cfg.keyId || !wmgjFirestoreHmacSecretValido_(cfg.secret)) {
     throw new Error('CONFIG_FIRESTORE_INCOMPLETA');
   }
 
@@ -324,10 +382,17 @@ function wmgjFirestoreActorId_() {
 }
 
 function wmgjFirestoreHmacHex_(value, secret) {
+  secret = String(secret || '');
+  if (!wmgjFirestoreHmacSecretValido_(secret)) throw new Error('HMAC_SECRET_INVALIDO');
+  var keyBytes = [];
+  for (var i = 0; i < secret.length; i += 2) {
+    var byteValue = parseInt(secret.slice(i, i + 2), 16);
+    keyBytes.push(byteValue > 127 ? byteValue - 256 : byteValue);
+  }
+  var valueBytes = Utilities.newBlob(String(value || ''), 'text/plain').getBytes();
   var signature = Utilities.computeHmacSha256Signature(
-    String(value || ''),
-    String(secret || ''),
-    Utilities.Charset.UTF_8
+    valueBytes,
+    keyBytes
   );
   return wmgjFirestoreBytesHex_(signature);
 }

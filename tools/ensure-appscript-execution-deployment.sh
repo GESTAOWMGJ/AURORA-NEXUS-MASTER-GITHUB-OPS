@@ -8,7 +8,12 @@ fi
 
 output_json="$1"
 prefix="AURORA_EXECUTION_API_CANONICAL"
-description="$prefix ${GITHUB_SHA:-manual}"
+source_sha="${GITHUB_SHA-}"
+if [[ ! "$source_sha" =~ ^[a-f0-9]{40}$ ]]; then
+  echo "::error title=Apps Script source SHA missing::An exact main commit SHA is required to publish an API deployment." >&2
+  exit 64
+fi
+description="$prefix $source_sha"
 
 tmp_dir="$(mktemp -d)"
 cleanup() { rm -rf "$tmp_dir"; }
@@ -35,23 +40,28 @@ if ! jq -e '
   exit 73
 fi
 
-deployment_id="$(jq -r --arg prefix "$prefix" '
-  [.[] | select((.description // "") | startswith($prefix))]
-  | map(select((.versionNumber | tonumber?) >= 1))
-  | sort_by(.versionNumber | tonumber)
-  | last
-  | .deploymentId // empty
+matching_count="$(jq -r --arg description "$description" '
+  [.[] | select(.description == $description and ((.versionNumber | tonumber?) >= 1))]
+  | length
 ' "$tmp_dir/deployments.json")"
+if [ "$matching_count" -gt 1 ]; then
+  echo "::error title=Apps Script ambiguous immutable deployment::More than one API deployment is bound to the exact source SHA." >&2
+  exit 73
+fi
 
 set +e
-if [ -n "$deployment_id" ]; then
-  CI=1 NO_COLOR=1 clasp --json update-deployment "$deployment_id" --description "$description" \
-    >"$tmp_dir/deployment.json" 2>"$tmp_dir/deployment.err"
+if [ "$matching_count" -eq 1 ]; then
+  jq -c --arg description "$description" '
+    [.[] | select(.description == $description and ((.versionNumber | tonumber?) >= 1))][0]
+  ' "$tmp_dir/deployments.json" >"$tmp_dir/deployment.json"
+  deploy_rc=$?
+  reused=true
 else
   CI=1 NO_COLOR=1 clasp --json create-deployment --description "$description" \
     >"$tmp_dir/deployment.json" 2>"$tmp_dir/deployment.err"
+  deploy_rc=$?
+  reused=false
 fi
-deploy_rc=$?
 set -e
 if [ "$deploy_rc" -ne 0 ]; then
   echo "::error title=Apps Script canonical deployment failed::clasp exited with status $deploy_rc; response details were withheld." >&2
@@ -67,5 +77,18 @@ if ! jq -e --arg description "$description" '
   echo "::error title=Apps Script invalid deployment response::clasp did not return the expected canonical JSON deployment; response details were withheld." >&2
   exit 73
 fi
+
+deployment_id="$(jq -r '.deploymentId' "$tmp_dir/deployment.json")"
+version_number="$(jq -r '.versionNumber | tonumber' "$tmp_dir/deployment.json")"
+[[ "$deployment_id" =~ ^[A-Za-z0-9_-]{20,512}$ ]]
+[[ "$version_number" =~ ^[0-9]+$ ]]
+test "$version_number" -ge 1
 umask 077
-cp "$tmp_dir/deployment.json" "$output_json"
+jq -n \
+  --arg deploymentId "$deployment_id" \
+  --argjson versionNumber "$version_number" \
+  --arg description "$description" \
+  --arg sourceSha "$source_sha" \
+  --argjson reused "$reused" \
+  '{deploymentId:$deploymentId,versionNumber:$versionNumber,description:$description,sourceSha:$sourceSha,reused:$reused}' \
+  > "$output_json"

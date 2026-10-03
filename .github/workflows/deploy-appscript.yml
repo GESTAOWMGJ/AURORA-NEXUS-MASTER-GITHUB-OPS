@@ -10,22 +10,41 @@ on:
       - 'tools/**/*.sh'
       - 'appsscript.json'
       - '.github/workflows/deploy-appscript.yml'
-  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-hml-runtime-mutation
+  cancel-in-progress: false
 
 jobs:
   deploy:
     name: Push code to Google Apps Script
     runs-on: ubuntu-latest
+    environment: firebase-homologation
     env:
       APPS_SCRIPT_ID: 1_fQPqaq0EjaugyIF6jyuENDhJ2c2oTFm1kC-wdjmfaDqyRzy_uqwtiSW
       APPS_SCRIPT_GCP_PROJECT_ID: wmgj-hml-jfn-20260927
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - name: Checkout exact push commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned 2026-10-01
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Require exact current main before credentials
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "push"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "$GITHUB_SHA"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4 pinned 2026-10-01
         with:
           node-version: '22'
 
@@ -36,15 +55,21 @@ jobs:
         run: npm install -g @google/clasp@3.4.1
 
       - name: Validate required credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
+          set -euo pipefail
           test -n "$APPS_SCRIPT_ID" || (echo "Missing APPS_SCRIPT_ID" && exit 1)
-          test -n '${{ secrets.CLASPRC_JSON }}' || (echo "Missing CLASPRC_JSON secret" && exit 1)
+          test -n "$CLASPRC_JSON" || (echo "Missing CLASPRC_JSON secret" && exit 1)
 
       - name: Configure clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
-          cat > ~/.clasprc.json <<'EOF'
-          ${{ secrets.CLASPRC_JSON }}
-          EOF
+          set -euo pipefail
+          umask 077
+          test -n "$CLASPRC_JSON"
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
 
       - name: Prepare Apps Script project files
         run: |
@@ -68,7 +93,18 @@ jobs:
         run: |
           set -euo pipefail
           bash "$GITHUB_WORKSPACE/tools/ensure-appscript-execution-deployment.sh" "$RUNNER_TEMP/appscript-deployment.json"
-          jq -e '.deploymentId and (.versionNumber|tonumber) >= 1' "$RUNNER_TEMP/appscript-deployment.json" >/dev/null
+          jq -e --arg sha "$GITHUB_SHA" --arg description "AURORA_EXECUTION_API_CANONICAL $GITHUB_SHA" '
+            (keys | sort) == (["deploymentId","description","reused","sourceSha","versionNumber"] | sort) and
+            (.deploymentId | type=="string" and test("^[A-Za-z0-9_-]{20,512}$")) and
+            (.versionNumber | type)=="number" and
+            (.versionNumber | floor)==.versionNumber and
+            .versionNumber>=1 and
+            .description==$description and
+            .sourceSha==$sha and
+            (.reused | type=="boolean")
+          ' "$RUNNER_TEMP/appscript-deployment.json" >/dev/null
+          execution_deployment_id="$(jq -r '.deploymentId' "$RUNNER_TEMP/appscript-deployment.json")"
+          printf 'APPS_SCRIPT_EXECUTION_DEPLOYMENT_ID=%s\n' "$execution_deployment_id" >> "$GITHUB_ENV"
 
       - name: Verify deployed source
         run: |
@@ -101,3 +137,11 @@ jobs:
           echo "Apps Script source deployed and Execution API validated."
           echo "Operational Gmail/dashboard/trigger routines are intentionally not executed by the deploy workflow."
 
+      - name: Upload sanitized Apps Script deployment evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned 2026-10-01
+        with:
+          name: apps-script-deployment-${{ github.sha }}
+          path: ${{ runner.temp }}/appscript-deployment.json
+          if-no-files-found: warn
+          retention-days: 30
