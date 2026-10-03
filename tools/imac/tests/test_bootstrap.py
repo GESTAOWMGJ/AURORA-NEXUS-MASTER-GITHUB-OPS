@@ -151,6 +151,9 @@ esac''')
         commands = json.loads((self.data / "commands.json").read_text())
         self.assertIn(original[0], commands)
         self.assertEqual(sum(c["trigger"] == "JFN Status Mac" for c in commands), 1)
+        status = next(c for c in commands if c["trigger"] == "JFN Status Mac")
+        # Without this provider placeholder, MCP only acknowledges dispatch.
+        self.assertEqual(status["voiceReply"], "{{result}}")
         with self.plist.open("rb") as f:
             plist = plistlib.load(f)
         self.assertEqual(plist["ProgramArguments"][0], str(self.home / "Applications/node16/bin/node"))
