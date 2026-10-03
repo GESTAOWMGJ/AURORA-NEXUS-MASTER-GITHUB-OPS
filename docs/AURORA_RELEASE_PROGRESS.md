@@ -50,3 +50,10 @@ Toda solicitação relevante deve:
 4. validar atualização do app Mac instalado;
 5. hardening comercial, domínio, distribuição e documentação;
 6. promover RC aprovada para `1.0.0` GA.
+
+## RC1.1 — correção do contrato da amostra 03/10/2026
+
+- Baseline main: `5dcaddc88b27b54a7f24f9042b05e9799205fb1a`. Run `37093409122`, tentativa 4, job `111230961385`: restore/limpeza e probe HMAC aprovados; envio da amostra rejeitado com HTTP 400 por campo fora do contrato não clínico. Reconciliação e inteligência não executadas.
+- Produtor emitia invoiceNumber, transactionKind e metadata.rc11Sample, ausentes no contrato positivo do backend. Substituições: invoiceNumberHash (SHA-256), kind e pipelineVersion. Não ampliar allowlist, não liberar conteúdo clínico nem alterar o request HML.
+- Teste executa ambos os builders com fontes sintéticas e valida os payloads completos no validador real; extensões antigas e conteúdo clínico continuam rejeitados.
+- Gate operacional permanece pendente de deploy canônico aprovado e nova prova HML. Possível escrita parcial anterior exige leitura de auditoria/idempotência, não afirmação de lote vazio. Rollback: reverter somente este patch em revisão; fontes não alteradas.

@@ -197,11 +197,11 @@ function auroraRc11InvoiceEvent_() {
     competence: AURORA_RC11_SAMPLE_COMPETENCE,
     documentType: '06_NFS_E',
     record: {
-      invoiceNumber: '8',
+      invoiceNumberHash: wmgjFirestoreHashString_('8'),
       totalCents: cents,
       reconciliationStatus: 'RECONCILED_SOURCE_EVIDENCE'
     },
-    metadata: { rc11Sample: true, sourceSheet: '06_NFS_E', sourceRow: row.rowNumber, nonDestructive: true }
+    metadata: { pipelineVersion: 'AURORA_RC11_WMGJ', sourceSheet: '06_NFS_E', sourceRow: row.rowNumber, nonDestructive: true }
   };
 }
 
@@ -246,9 +246,9 @@ function auroraRc11BankEvent_() {
       status: 'RECONCILED',
       amountCents: cents,
       liquidatedAmountCents: cents,
-      transactionKind: 'RECEIPT'
+      kind: 'RECEIPT'
     },
-    metadata: { rc11Sample: true, sourceSheet: '08_EXTRATOS_BRADESCO', sourceRow: row.rowNumber, nonDestructive: true }
+    metadata: { pipelineVersion: 'AURORA_RC11_WMGJ', sourceSheet: '08_EXTRATOS_BRADESCO', sourceRow: row.rowNumber, nonDestructive: true }
   };
 }
 
