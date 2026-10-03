@@ -120,14 +120,19 @@ test("RC1.1 workflow cannot auto-run from implementation changes", () => {
 });
 
 
-test("RC1.1 verifies existing Functions runtime without secret IAM mutation", () => {
+test("RC1.1 keeps baseline runtime non-secret and gates ingest redeploy behind approved keyring migration", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
   assert.match(workflow, /Verify existing HML runtime and deploy non-secret surfaces/);
   assert.match(workflow, /firebase-tools@14\.17\.0 functions:list/);
   assert.match(workflow, /gcloud functions describe runtimeHealth/);
   assert.match(workflow, /signatureVersion=="v2"/);
   assert.match(workflow, /--only hosting,firestore:rules,firestore:indexes/);
-  assert.doesNotMatch(workflow, /--only functions:ingestWmgjEvent/);
+  assert.match(workflow, /secretManagerKeyringMigrationApproved/);
+  assert.match(workflow, /--only functions:ingestWmgjEvent/);
+  const approvalIndex = workflow.indexOf('secretManagerKeyringMigrationApproved');
+  const redeployIndex = workflow.indexOf('--only functions:ingestWmgjEvent');
+  assert.ok(approvalIndex >= 0 && redeployIndex > approvalIndex);
+  assert.doesNotMatch(workflow, /--only functions(?!:ingestWmgjEvent)/);
   assert.doesNotMatch(workflow, /secretmanager\.secrets\.setIamPolicy/);
   assert.match(workflow, /functionsRedeployed:false/);
 });
