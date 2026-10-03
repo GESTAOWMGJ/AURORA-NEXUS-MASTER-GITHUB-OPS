@@ -101,6 +101,24 @@ incluindo seus três arquivos de HMAC sem alteração própria. CI deve ser conf
 no SHA final do PR. Não é merge, deploy nem aplicação do bootstrap no iMac.
 Próximo gate: revisão do candidato reconciliado e ensaio nativo autorizado de
 rollback/instalação completa; não repetir o teste remoto de status já aprovado.
+
+## Preparação do ensaio nativo completo — 03/10/2026 — PR #95
+
+Revisão do SHA 1869e75: pós-apply ainda usava pgrep por argumentos, e reversão
+após aplicação bem-sucedida dependia do runbook manual. O pós-apply passa a usar
+o helper de PID/executável validado, sem sendresult. O teste nativo preparado
+faz duas aplicações e restaura os seis alvos da baseline, com hashes, permissões,
+backup privado e verificação do processo. Recusa sobrescrever edição concorrente
+ou usar backup corrompido. Não marca sucesso quando a restauração dos arquivos
+termina mas o serviço não retorna. A origem aceita continua fixa em blobs exatos;
+o helper permanece byte a byte igual ao validado no High Sierra.
+
+Autorização do titular abrange revisão/ensaio de bootstrap e rollback. Não houve
+execução nativa deste novo ensaio ainda: TRIGGERcmd oferece apenas comandos
+cadastrados e Desktop Commander continua sem o iMac. O próximo passo é iniciar
+TEST_NATIVE_BOOTSTRAP.js --exercise no Terminal local, no SHA final com CI aprovado,
+e correlacionar o retorno remoto após restauração. PR permanece draft; não há
+merge, deploy, atualização de app nem homologação HML por este preparo.
 Rollback de código: reverter este incremento na branch; o script instalado
-permanece intacto. Próximo gate: validar helper no iMac antes de substituição
-controlada autorizada e teste remoto com resultado correlacionado.
+permanece intacto. Próximo gate: executar o ensaio completo no iMac e confirmar
+o retorno remoto após a restauração da baseline.
