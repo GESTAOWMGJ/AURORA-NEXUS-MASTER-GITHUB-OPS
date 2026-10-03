@@ -128,3 +128,39 @@ test("aprovação de snapshot anterior deixa de valer e a revisão é preservada
   assert.equal(result.decision, null);
   assert.equal(result.decisionRevision, 4);
 });
+
+
+test("prazo usa o dia civil de São Paulo perto da virada UTC", () => {
+  const result = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-10",
+    closing,
+    financialEntries: [
+      { workflowState: "VALIDATED", kind: "PAYABLE", status: "OPEN", amountCents: 100000, dueDate: "2026-10-03" }
+    ],
+    taxObligations: [],
+    invoices: [],
+    now: new Date("2026-10-04T01:30:00Z")
+  }) as any;
+  assert.equal(result.dueDates.currentDueDate, "2026-10-03");
+  assert.equal(result.dueDates.currentDueDays, 0);
+  assert.equal(result.amounts.overduePayablesCents, 0);
+  assert.equal(result.amounts.upcomingPayablesCents, 100000);
+});
+
+test("lançamento financeiro aberto sem natureza conhecida bloqueia cobertura em vez de sumir da tela", () => {
+  const result = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-10",
+    closing,
+    financialEntries: [
+      { workflowState: "VALIDATED", status: "OPEN", amountCents: 100000, dueDate: "2026-10-05" }
+    ],
+    taxObligations: [],
+    invoices: []
+  }) as any;
+  assert.equal(result.sourceComplete, false);
+  assert.equal(result.counts.invalidOpenPayables, 1);
+  assert.equal(result.amounts.upcomingPayablesCents, null);
+  assert.equal(result.canApproveDistribution, false);
+});
