@@ -90,7 +90,7 @@ WAS_LOADED=0
 if /bin/launchctl list "$LABEL" >/dev/null 2>&1; then WAS_LOADED=1; fi
 if [ "$WAS_LOADED" -eq 1 ]; then
   [ -f "$PLIST" ] || fail "ERRO_PLIST_ORIGINAL_AUSENTE"
-elif pgrep -f "$AGENT_SRC/agent.js --console" >/dev/null 2>&1; then
+elif pgrep -f "$AGENT_SRC/agent.js" >/dev/null 2>&1; then
   fail "ERRO_AGENTE_NAO_GERENCIADO_REQUER_REVISAO"
 fi
 
@@ -435,13 +435,19 @@ SERVICE_TOUCHED=1
 /bin/launchctl load "$PLIST"
 sleep 4
 
-if ! pgrep -f "$AGENT_SRC/agent.js --console" >/dev/null 2>&1; then
-  echo "ERRO_AGENT_NAO_SUBIU" >&2
-  echo "Consulte o log local com sanitizacao; nenhum trecho sera impresso automaticamente." >&2
-  exit 5
-fi
+# Reuse the native-validated PID/executable check, with remote reporting disabled.
+# A matching argv elsewhere must not certify this LaunchAgent.
+POST_STATUS="$(TCMD_COMPUTER_ID= /bin/bash "$DATA/jfn_status_mac.sh")" || POST_STATUS=""
+case "$POST_STATUS" in
+  *' triggercmd=PROCESS_PRESENT '*) ;;
+  *)
+    echo "ERRO_AGENT_NAO_SUBIU" >&2
+    echo "Consulte o log local com sanitizacao; nenhum trecho sera impresso automaticamente." >&2
+    exit 5 ;;
+esac
 
 echo "AURORA_IMAC_FILES_INSTALLED AGENT_PROCESS_PRESENT"
+echo "$POST_STATUS"
 echo "REMOTE_CONNECTIVITY=UNKNOWN APP_INSTALLATION=NOT_PERFORMED HML_AUTH=NOT_TESTED"
 echo "PLIST=$PLIST"
 echo "COMMANDS=$DATA/commands.json"
