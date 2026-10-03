@@ -123,6 +123,13 @@
         }
       },
       {
+        "source": "/api/distribution-approval",
+        "function": {
+          "functionId": "auroraNexusDistributionDecision",
+          "region": "southamerica-east1"
+        }
+      },
+      {
         "source": "**",
         "function": {
           "functionId": "auroraNexusAuthGate",
