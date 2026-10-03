@@ -9,6 +9,8 @@ const SOURCE_BLOB = "437ad44144701fc176eadf7a099893875f9762b4";
 // Reviewed installer differs only in JFN Status Mac.voiceReply. Both exact
 // sources contain the same helper validated at VALIDATED_SHA; no wildcard pin.
 const REPLY_SOURCE_BLOB = "6171703ee14c70916cff88588c69edc472c1fd63";
+// Managed post-apply verification changes the installer, never the helper bytes.
+const NATIVE_TEST_SOURCE_BLOB = "1e18e6b0b8b20bcec3c19a72ee36df2967ce81ef";
 const VALIDATED_SHA = "552962885a89192c9ff053834493deeecb8d1df9";
 const digest = b => crypto.createHash("sha256").update(b).digest("hex");
 const fail = code => { throw new Error(code); };
@@ -33,7 +35,7 @@ function writePrivate(p, bytes, mode = 0o600) {
 }
 function candidate(source) {
   const blob = crypto.createHash("sha1").update("blob " + source.length + "\0").update(source).digest("hex");
-  if (blob !== SOURCE_BLOB && blob !== REPLY_SOURCE_BLOB) fail("VALIDATED_SOURCE_MISMATCH");
+  if (![SOURCE_BLOB, REPLY_SOURCE_BLOB, NATIVE_TEST_SOURCE_BLOB].includes(blob)) fail("VALIDATED_SOURCE_MISMATCH");
   const m = source.toString("utf8").match(/cat > "\$STAGE\/jfn_status_mac\.sh" <<'EOF'\n([\s\S]*?)\nEOF/);
   if (!m) fail("HELPER_NOT_FOUND");
   return Buffer.from(m[1] + "\n");
