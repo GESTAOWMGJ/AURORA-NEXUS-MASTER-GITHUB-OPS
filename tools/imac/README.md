@@ -103,6 +103,49 @@ confirmar ausência de execução antes de remover exclusivamente o diretório v
 
 ## Evidência e próximo gate
 
+### Troca isolada autorizada do helper
+
+`REPLACE_STATUS_HELPER.js` executa somente a troca de `jfn_status_mac.sh`.
+O titular autorizou essa etapa após a validação nativa do helper em 03/10/2026
+às 11:40:56 BRT. Não autoriza aplicar todo o bootstrap, reiniciar ou fazer merge.
+O código exige o blob de origem `437ad44144701fc176eadf7a099893875f9762b4`,
+correspondente ao helper validado no SHA `552962885a89192c9ff053834493deeecb8d1df9`.
+
+No checkout fixado/revisado, usando o Node 16 existente:
+
+```sh
+"$HOME/Applications/node16/bin/node" tools/imac/REPLACE_STATUS_HELPER.js --apply
+```
+
+A operação confirma host/High Sierra/Node 16, recusa symlinks e alteração
+concorrente, preserva bytes/permissões em backup privado e publica por rename.
+Executa teste local com envio de resultado desabilitado; falha restaura o original.
+Não toca em commands.json, PLIST, credenciais, aplicativo ou estado do serviço.
+Repetição conserva backup e marco do log. Queda de energia/SIGKILL não é
+rollback nativo homologado; preservar o backup e revisar antes de repetir.
+
+Após `AURORA_STATUS_HELPER_REPLACED_OK`, registrar localmente o BACKUP e o
+ARMED_AT. Só então disparar uma vez `JFN Status Mac` para o iMac e consultar:
+
+```sh
+"$HOME/Applications/node16/bin/node" tools/imac/REPLACE_STATUS_HELPER.js --receipt
+```
+
+O recibo lê somente o trecho acrescentado após a troca e retorna campos
+permitidos de JFN_MAC. Correlacionar horário e resultado com o disparo observado.
+Rotação/truncamento de log, ausência de resposta ou janela excessiva exigem
+revisão; não imprimir logs brutos. Recibo local não é confirmação de retorno
+ao serviço TRIGGERcmd, nem autenticação HML.
+
+Reversão explícita do helper, sem reinício:
+
+```sh
+"$HOME/Applications/node16/bin/node" tools/imac/REPLACE_STATUS_HELPER.js --rollback
+```
+
+Rollback só ocorre se o destino ainda for a candidata e o backup conferir.
+Edições posteriores bloqueiam restauração automática. Backups são preservados.
+
 ### Detecção de processo revisada — 03/10/2026
 
 O status gerado consulta o PID do label exato `com.jfn.triggercmd.imac` em
