@@ -27,13 +27,14 @@ function sampleEvents() {
 test("actual RC1.1 builders emit invoice and receipt accepted by the backend contract", () => {
   const events = sampleEvents();
   assert.equal(events[0].record.totalCents, 4950000);
-  assert.match(events[0].record.invoiceNumberHash, /^[a-f0-9]{64}$/);
+  assert.equal(Object.hasOwn(events[0].record, "invoiceNumber"), false);
   assert.equal(events[1].record.liquidatedAmountCents, 4950000);
-  assert.equal(events[1].record.kind, "RECEIPT");
+  assert.equal(Object.hasOwn(events[1].record, "transactionKind"), false);
   for (const event of events) {
     const result = validateEvent(event, Buffer.byteLength(JSON.stringify(event)));
     assert.equal(result.ok, true, JSON.stringify(result.errors));
-    assert.equal(event.metadata.pipelineVersion, "AURORA_RC11_WMGJ");
+    assert.equal(event.metadata.nonDestructive, true);
+    assert.equal(Object.hasOwn(event.metadata, "rc11Sample"), false);
   }
 });
 

@@ -51,9 +51,10 @@ Toda solicitação relevante deve:
 5. hardening comercial, domínio, distribuição e documentação;
 6. promover RC aprovada para `1.0.0` GA.
 
-## RC1.1 — correção do contrato da amostra 03/10/2026
+## RC1.1 — validação do payload completo após PR #110
 
-- Baseline main: `5dcaddc88b27b54a7f24f9042b05e9799205fb1a`. Run `37093409122`, tentativa 4, job `111230961385`: restore/limpeza e probe HMAC aprovados; envio da amostra rejeitado com HTTP 400 por campo fora do contrato não clínico. Reconciliação e inteligência não executadas.
-- Produtor emitia invoiceNumber, transactionKind e metadata.rc11Sample, ausentes no contrato positivo do backend. Substituições: invoiceNumberHash (SHA-256), kind e pipelineVersion. Não ampliar allowlist, não liberar conteúdo clínico nem alterar o request HML.
-- Teste executa ambos os builders com fontes sintéticas e valida os payloads completos no validador real; extensões antigas e conteúdo clínico continuam rejeitados.
-- Gate operacional permanece pendente de deploy canônico aprovado e nova prova HML. Possível escrita parcial anterior exige leitura de auditoria/idempotência, não afirmação de lote vazio. Rollback: reverter somente este patch em revisão; fontes não alteradas.
+- Baseline `403e20317e073de6da88d569dc18e66f99447cae`: a main removeu os campos fora de contrato da amostra pelo PR #110. Preservar esse produtor; este incremento adiciona somente teste e evidência, sem mudar request ou contrato.
+- Teste executa ambos os builders Apps Script com fontes sintéticas e submete os eventos completos ao validador real do backend. Campos antigos e conteúdo clínico permanecem rejeitados. Não inferir aceitação runtime a partir do teste.
+- Deploy Apps Script `37134188577` aprovado nesse SHA. Tentativa 5 de `37093409122`, job `111235471017`, ainda em restore na última consulta; amostra/reconciliação não comprovadas.
+- CMEK: saída titular no SHA `6295e9b61c7510905eebfc25cbfcf3c5524ae98e` confirma AURORA_CMEK_HML_APPLIED e backup diário 14d; consulta posterior retornou nenhum backup de aurora-hml-cmek. Estado PENDING_HML_VERIFICATION mantido até backup READY, restore e recuperação da chave.
+- Rollback: reverter somente este incremento de teste/documentação. Sem merge/deploy/rerun automático.
