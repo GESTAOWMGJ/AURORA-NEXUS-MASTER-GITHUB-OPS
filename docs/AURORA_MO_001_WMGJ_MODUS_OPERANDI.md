@@ -485,3 +485,74 @@ DETECTAR NO FIREBASE
 A aprendizagem orgânica não fecha pendência por inferência. Somente resolução validada com evidência pode virar `REWORK`, `VALIDATED_DECISION`, `SECTOR_NEED` ou outro sinal elegível. Pendências criadas pelo watchdog carregam metadados orgânicos controlados; após resolução humana válida, a observação correspondente é registrada automaticamente e de forma idempotente no checkpoint AURORA-ORG-001, sem uma segunda consulta à origem. Ferramentas promovidas continuam limitadas por escopo, revisão, teste, rollback e proibição de mutação autônoma do sistema-fonte.
 
 Essa vigilância é complementar aos módulos já existentes de faturamento, glosa, reconciliação, SLA, governança e auditoria; não cria produto, banco ou motor paralelo.
+
+## 21. Registro nativo de rotinas e agendamentos
+
+Toda rotina recorrente, gatilho operacional ou fechamento pertencente ao modus operandi WMGJ deve ser representado no motor por `firebase-migration/functions/src/auroraNativeRoutines.ts`.
+
+O registro é parte do contexto da Aurora Native Intelligence e deve declarar:
+
+- identificador estável;
+- módulo AURORA;
+- finalidade;
+- cadência;
+- gatilho;
+- escopo `PER_ORG` ou `PLATFORM`;
+- gate humano;
+- proibição ou permissão explícita de mutação de fonte;
+- estado real de execução.
+
+Estados:
+
+- `NATIVE_ACTIVE`: rotina implementada e executada no runtime Firebase;
+- `NATIVE_EVENT`: rotina nativa disparada por mudança de estado/evento canônico;
+- `NATIVE_GOVERNED`: capacidade nativa governada, dependente de evidência/revisão;
+- `LEGACY_MIRRORED`: rotina WMGJ ainda executada em Apps Script, mas já conhecida pelo motor e aguardando migração sem dupla execução.
+
+Regra absoluta: `LEGACY_MIRRORED` nunca pode ser apresentado como `NATIVE_ACTIVE`. A migração deve evitar duplicar execução, notificação, cobrança ou processamento.
+
+Rotinas atualmente materializadas no registro incluem watchdog de runtime, projeção, vigilância documental, fechamento mensal societário `AURORA-FIN-SOC-001`, saneamento de receita `AURORA-REV-SAN-001`, auditoria técnica semanal e espelhamento governado das rotinas Apps Script recorrentes.
+
+Toda nova rotina da WMGJ ou de outro cliente deve seguir:
+
+```text
+evento operacional validado
+→ necessidade recorrente
+→ sinal orgânico sanitizado
+→ proposta tenant-agnostic
+→ teste sintético
+→ revisão humana
+→ piloto isolado no tenant
+→ resultado medido
+→ promoção ao registro nativo ou descarte
+```
+
+Nenhum dado bruto, identificador, valor financeiro particular, regra contratual específica ou evidência sensível de um cliente é transferido a outro cliente. O que pode ser promovido é somente a capacidade diagnóstica/operacional abstraída, versionada e testável.
+
+## 22. Fechamento mensal simplificado para gestor
+
+O AURORA deve manter uma visão leiga e atualizada do fechamento mensal no mesmo web app/PWA, derivada exclusivamente do Firebase canônico.
+
+A página deve responder, sem exigir conhecimento contábil:
+
+- quanto há de contas vencidas;
+- quanto há de contas a vencer;
+- qual é o vencimento aberto mais urgente e seu valor;
+- qual é o próximo vencimento e seu valor;
+- qual é a receita esperada;
+- qual é o saldo em conta comprovado;
+- quanto ainda falta entrar para atingir a receita esperada, somente quando ambos os valores estiverem comprovados;
+- quanto há a receber até o vencimento atual;
+- quanto há a receber até o próximo vencimento;
+- qual é o total recebível;
+- qual é o valor distribuível validado, quando existir.
+
+Invariantes:
+
+- ausência permanece `null / Sem fonte`, nunca zero presumido;
+- saldo bancário não vira lucro distribuível por diferença simples;
+- o valor distribuível deve existir explicitamente no fechamento canônico;
+- aprovação de distribuição exige `distributionGateState=ELIGIBLE`, fechamento `CLOSED`, snapshot atual, cobertura suficiente, usuário autorizado e MFA;
+- o botão de aprovação registra `APPROVED_FOR_DISTRIBUTION` ou `REJECTED` com gestor, função, data, motivo, competência, valor e hash do snapshot;
+- a aprovação não executa PIX, transferência, pagamento, baixa ou distribuição;
+- toda execução financeira permanece externa/manual ou em fluxo futuro com gate próprio, nunca implícita no clique de aprovação.
