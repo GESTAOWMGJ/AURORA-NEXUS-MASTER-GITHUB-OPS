@@ -269,6 +269,9 @@ export const auroraNexusAuthGate = onRequest(
     if (member.allFacilities && (["platform_admin", "org_admin", "director", "auditor"].includes(member.role) || member.permissions.includes("organic.write"))) {
       shell = shell.replace("</nav>", '<a href="/organic">Evolução orgânica e modus operandi</a></nav>');
     }
+    if (member.allFacilities && (["platform_admin", "org_admin", "director"].includes(member.role) || member.permissions.includes("shareholder.report.read"))) {
+      shell = shell.replace("</nav>", '<a href="/reports/shareholders">Relatório financeiro aos sócios</a></nav>');
+    }
     res.status(200).type("html").send(shell);
   }
 );
