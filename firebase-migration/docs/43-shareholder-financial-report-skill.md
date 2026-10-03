@@ -93,3 +93,32 @@ Pontas soltas continuam no motor de saneamento até `ENCERRADO_COM_EVIDÊNCIA`. 
 - a rota privada está antes do catch-all do Hosting;
 - nenhum código de envio, pagamento ou distribuição automática é introduzido;
 - build TypeScript e suíte de Functions devem ficar verdes no SHA final antes de qualquer merge/deploy.
+
+## Visão leiga no app/PWA
+
+O fechamento passa a ter uma página resumida no próprio AURORA NEXUS instalável/PWA, sem exigir leitura do PDF para a rotina diária.
+
+Indicadores:
+
+- contas vencidas;
+- contas a vencer;
+- vencimento atual/mais urgente;
+- próximo vencimento;
+- receita esperada;
+- saldo em conta;
+- diferença ainda a ingressar para atingir a receita esperada;
+- recebíveis até o vencimento atual;
+- recebíveis até o próximo vencimento;
+- total a receber;
+- valor distribuível validado.
+
+O app exibe `Sem fonte` quando a evidência está ausente ou insuficiente. O valor distribuível nunca é inferido de saldo bancário.
+
+### Decisão do gestor
+
+A página oferece dois comandos autenticados:
+
+- **Aprovar liberação para distribuição**;
+- **Não aprovar**.
+
+A decisão exige MFA e registra gestor, função, competência, hash do fechamento, valor distribuível, motivo, revisão e timestamp. O comando não movimenta dinheiro; registra somente a decisão societária. Pagamento/transferência permanece fora deste endpoint.
