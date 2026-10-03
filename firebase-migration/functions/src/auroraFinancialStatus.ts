@@ -94,7 +94,7 @@ function payableRows(
     if (!isValidated(record) || PAYABLE_CLOSED.has(statusOf(record))) return;
     if (!forcedExpense && !explicitExpense(record)) return;
     const date = dueDate(record);
-    const cents = firstCents(record, ["amountCents", "expenseAmountCents", "valorCentavos", "taxAmountCents"]);
+    const cents = firstCents(record, ["amountCents", "amount_cents", "expenseAmountCents", "expense_amount_cents", "valorCentavos", "taxAmountCents", "valor_imposto"]);
     if (!date || cents === null) return;
     rows.push({ date, cents });
   };
@@ -108,7 +108,7 @@ function receivableRows(invoices: Array<Record<string, unknown>>): DatedAmount[]
   for (const record of invoices) {
     if (!isValidated(record) || RECEIVABLE_CLOSED.has(statusOf(record))) continue;
     const date = dueDate(record);
-    const cents = firstCents(record, ["receivableCents", "totalCents", "amountCents", "grossAmountCents", "valorCentavos"]);
+    const cents = firstCents(record, ["receivableCents", "receivable_cents", "totalCents", "total_cents", "amountCents", "amount_cents", "grossAmountCents", "valorCentavos", "valor_total", "valor_nf", "valor_nota", "valor_nfs_e", "valor_nfse"]);
     if (!date || cents === null) continue;
     rows.push({ date, cents });
   }
