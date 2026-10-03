@@ -84,35 +84,44 @@ function explicitExpense(record: Record<string, unknown>): boolean {
 }
 
 type DatedAmount = { date: string; cents: number };
+type DatedCollection = { rows: DatedAmount[]; invalidOpenRecords: number };
 
 function payableRows(
   financialEntries: Array<Record<string, unknown>>,
   taxObligations: Array<Record<string, unknown>>
-): DatedAmount[] {
+): DatedCollection {
   const rows: DatedAmount[] = [];
+  let invalidOpenRecords = 0;
   const add = (record: Record<string, unknown>, forcedExpense: boolean) => {
     if (!isValidated(record) || PAYABLE_CLOSED.has(statusOf(record))) return;
     if (!forcedExpense && !explicitExpense(record)) return;
     const date = dueDate(record);
     const cents = firstCents(record, ["amountCents", "amount_cents", "expenseAmountCents", "expense_amount_cents", "valorCentavos", "taxAmountCents", "valor_imposto"]);
-    if (!date || cents === null) return;
+    if (!date || cents === null) {
+      invalidOpenRecords += 1;
+      return;
+    }
     rows.push({ date, cents });
   };
   financialEntries.forEach((record) => add(record, false));
   taxObligations.forEach((record) => add(record, true));
-  return rows;
+  return { rows, invalidOpenRecords };
 }
 
-function receivableRows(invoices: Array<Record<string, unknown>>): DatedAmount[] {
+function receivableRows(invoices: Array<Record<string, unknown>>): DatedCollection {
   const rows: DatedAmount[] = [];
+  let invalidOpenRecords = 0;
   for (const record of invoices) {
     if (!isValidated(record) || RECEIVABLE_CLOSED.has(statusOf(record))) continue;
     const date = dueDate(record);
     const cents = firstCents(record, ["receivableCents", "receivable_cents", "totalCents", "total_cents", "amountCents", "amount_cents", "grossAmountCents", "valorCentavos", "valor_total", "valor_nf", "valor_nota", "valor_nfs_e", "valor_nfse"]);
-    if (!date || cents === null) continue;
+    if (!date || cents === null) {
+      invalidOpenRecords += 1;
+      continue;
+    }
     rows.push({ date, cents });
   }
-  return rows;
+  return { rows, invalidOpenRecords };
 }
 
 function safeSum(values: number[]): number | null {
@@ -182,9 +191,13 @@ export function buildLayFinancialStatus(input: {
   const closing = input.closing;
   const hash = financialClosingHash(closing);
   const financial = closingFinancial(closing);
-  const sourceComplete = input.sourceComplete !== false;
-  const payables = sourceComplete ? payableRows(input.financialEntries, input.taxObligations) : [];
-  const receivables = sourceComplete ? receivableRows(input.invoices) : [];
+  const payableCollection = payableRows(input.financialEntries, input.taxObligations);
+  const receivableCollection = receivableRows(input.invoices);
+  const sourceComplete = input.sourceComplete !== false
+    && payableCollection.invalidOpenRecords === 0
+    && receivableCollection.invalidOpenRecords === 0;
+  const payables = sourceComplete ? payableCollection.rows : [];
+  const receivables = sourceComplete ? receivableCollection.rows : [];
   const dates = [...new Set(payables.map((row) => row.date))].sort();
   const currentDueDate = sourceComplete ? dates[0] ?? null : null;
   const nextDueDate = sourceComplete ? dates[1] ?? null : null;
@@ -230,11 +243,16 @@ export function buildLayFinancialStatus(input: {
     },
     dueDates: { currentDueDate, nextDueDate },
     counts: {
-      openPayables: payables.length,
-      openReceivablesWithDueDate: receivables.length
+      openPayables: sourceComplete ? payables.length : null,
+      openReceivablesWithDueDate: sourceComplete ? receivables.length : null,
+      invalidOpenPayables: payableCollection.invalidOpenRecords,
+      invalidOpenReceivables: receivableCollection.invalidOpenRecords
     },
     canApproveDistribution,
     decision: currentDecisionView(input.currentDecision ?? null, hash),
+    decisionRevision: input.currentDecision && Number.isSafeInteger(input.currentDecision.revision)
+      ? Number(input.currentDecision.revision)
+      : 0,
     sourceComplete,
     governance: {
       absenceIsZero: false,
