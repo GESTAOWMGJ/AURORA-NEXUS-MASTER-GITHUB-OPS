@@ -72,7 +72,9 @@ function reportHtml(report: Record<string, unknown>, nonce: string): string {
     ["Despesas", financial.expensesCents],
     ["Tributos", financial.taxesCents],
     ["Repasses", financial.transfersCents],
-    ["Resultado de fechamento", financial.closingResultCents]
+    ["Saldo em conta", financial.cashBalanceCents],
+    ["Resultado de fechamento", financial.closingResultCents],
+    ["Valor distribuível validado", financial.distributableCents]
   ];
 
   return `<!doctype html>
