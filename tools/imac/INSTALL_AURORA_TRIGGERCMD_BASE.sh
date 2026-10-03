@@ -277,7 +277,7 @@ const incoming = [
     command: "\"$HOME/.TRIGGERcmdData/jfn_status_mac.sh\"",
     ground: "foreground",
     voice: "j f n status mac",
-    voiceReply: "Verificação solicitada; confira o retorno do Mac",
+    voiceReply: "{{result}}",
     allowParams: false,
     mcpToolDescription: "Retorna status operacional do iMac JFN.",
     icon: ""
