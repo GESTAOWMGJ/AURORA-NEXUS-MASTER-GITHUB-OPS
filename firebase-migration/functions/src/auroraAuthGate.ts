@@ -255,14 +255,15 @@ export const auroraNexusAuthGate = onRequest(
       action: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.action),
       refresh: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.refresh),
       integrationKey: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.integrationKey),
+      distributionApproval: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.distributionApproval),
       logout: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.logout)
     };
-    if (!csrfTokens.action || !csrfTokens.refresh || !csrfTokens.integrationKey || !csrfTokens.logout) {
+    if (!csrfTokens.action || !csrfTokens.refresh || !csrfTokens.integrationKey || !csrfTokens.distributionApproval || !csrfTokens.logout) {
       logger.error("Aurora Nexus CSRF key is not configured");
       res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança."));
       return;
     }
-    let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; integrationKey: string; logout: string });
+    let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; integrationKey: string; distributionApproval: string; logout: string });
     if (["platform_admin", "org_admin", "director"].includes(member.role) || member.permissions.includes("downloads.hml.read")) {
       shell = shell.replace("</nav>", '<a href="/downloads">Instaladores Mac e Windows</a></nav>');
     }
