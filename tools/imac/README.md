@@ -136,10 +136,11 @@ Esse mecanismo não captura automaticamente o exit code do processo.
 `REPLACE_STATUS_HELPER.js` executa somente a troca de `jfn_status_mac.sh`.
 O titular autorizou essa etapa após a validação nativa do helper em 03/10/2026
 às 11:40:56 BRT. Não autoriza aplicar todo o bootstrap, reiniciar ou fazer merge.
-O código aceita exatamente dois blobs revisados do instalador:
+O código aceita exatamente três blobs revisados do instalador:
 `437ad44144701fc176eadf7a099893875f9762b4` (origem nativa) e
-`6171703ee14c70916cff88588c69edc472c1fd63` (somente voiceReply corrigido).
-Ambos contêm o mesmo helper validado no SHA
+`6171703ee14c70916cff88588c69edc472c1fd63` (somente voiceReply corrigido), mais
+`1e18e6b0b8b20bcec3c19a72ee36df2967ce81ef` (pós-apply com PID gerenciado).
+Todos contêm o mesmo helper validado no SHA
 `552962885a89192c9ff053834493deeecb8d1df9`, com SHA-256
 `2b297b67682fae05e8128e5051a18ac52c5217d116357d0ae387d72ee73d6b5f`.
 Não há aceitação genérica de fontes novas. Recibo, backup, repetição e rollback
@@ -198,9 +199,11 @@ do agente. Toda resposta inclui timestamp UTC, PID sanitizado e
 não é recibo remoto nem prova de autenticação. Status 0 do LaunchAgent não basta.
 
 O helper revisado já foi instalado isoladamente, conforme a evidência acima.
-A correção de voiceReply no candidato não altera seus bytes. As checagens de
-proteção e pós-apply do bootstrap permanecem com
-seus critérios anteriores; este incremento não homologa instalação ou reinício.
+A correção de voiceReply no candidato não altera seus bytes. O pós-apply agora
+executa esse mesmo helper com envio remoto desabilitado e exige PROCESS_PRESENT.
+O bloqueio de agente não gerenciado procura o caminho agent.js independentemente
+de --console. A proteção impede continuar ao detectar esse processo sem o label;
+não tenta encerrá-lo. O candidato ainda exige homologação nativa do apply completo.
 A validação nativa e a troca isolada concluídas não devem ser repetidas apenas
 para reproduzir o resultado. Nenhum apply ou restart é necessário para revisar
 ou testar o código.
@@ -220,3 +223,55 @@ desktop com titular autorizador. Aceite: simulação sem efeitos, instalação
 idempotente, comandos retornando evidência sanitizada e rollback demonstrado,
 preservando o app original. Risco residual: SO/runtime legado e recuperação
 após queda de energia ainda não homologados. Nenhum gate HML/comercial é liberado.
+
+### Ensaio completo com restauração da baseline — preparado, não executado
+
+O titular solicitou revisão e ensaio nativo de bootstrap completo/rollback em
+03/10/2026. `TEST_NATIVE_BOOTSTRAP.js` atende essa etapa, usando somente o
+instalador exato de blob `1e18e6b0b8b20bcec3c19a72ee36df2967ce81ef`.
+CLI exige iMac-de-Joao.local, High Sierra 10.13.6, x64 e Node 16. Exige serviço
+gerenciado funcional, helper previamente validado e PLIST com o label esperado.
+
+No checkout fixado no SHA com CI aprovado:
+
+```sh
+"$HOME/Applications/node16/bin/node" tools/imac/TEST_NATIVE_BOOTSTRAP.js --exercise
+```
+
+O ensaio cria snapshot privado dos seis alvos da tabela anterior, registra hashes
+e permissões, aplica o bootstrap duas vezes, verifica a igualdade dos arquivos
+entre aplicações e o PID gerenciado, e restaura a configuração inicial. Ao final
+confere bytes, modos e processo da baseline. O teste **reinicia o agente** nas
+aplicações e na restauração, com breve interrupção e reconexão ao TRIGGERcmd.
+Não edite esses arquivos nem execute outros comandos de manutenção durante o teste.
+Não sincroniza o espelho, executa comandos de terceiros, altera o .app, faz deploy
+ou lê o conteúdo de tokens. stdout/stderr do instalador ficam em logs privados;
+o Terminal recebe códigos, marcadores e caminhos locais de recuperação.
+
+Aceite local: dois BOOTSTRAP_APPLY_N_EXIT_CODE=0, BOOTSTRAP_FILE_IDEMPOTENCE_OK,
+BASELINE_RESTORED_OK e AURORA_NATIVE_BOOTSTRAP_ROLLBACK_OK, com código final 0.
+Depois é necessário um único JFN Status Mac via conector para comprovar o retorno
+remoto da configuração restaurada. Presença do processo após cada apply, sozinha,
+não prova que o candidato chegou ao serviço remoto.
+
+Falha da segunda aplicação ainda tenta restaurar o snapshot inicial; falha não
+é promovida a sucesso apenas porque o rollback funcionou. Backup divergente ou
+edição concorrente bloqueia restauração antes de sobrescrever; todas as cópias
+são preservadas. Um arquivo antes ausente é movido para a pasta de recuperação.
+
+Recuperação explícita com o mesmo checkout, quando há registro íntegro:
+
+```sh
+"$HOME/Applications/node16/bin/node" tools/imac/TEST_NATIVE_BOOTSTRAP.js --restore "CAMINHO_EXATO_DE_NATIVE_BACKUP"
+```
+
+O caminho precisa ser um diretório native-bootstrap-test.* no suporte do Aurora.
+Arquivos já restaurados com serviço ainda ausente permitem recarregar somente o
+PLIST original. Se a primeira aplicação falhou antes de registrar a candidata,
+o programa aceita a baseline já restaurada pelo bootstrap; estado desconhecido
+exige revisar o backup do próprio bootstrap. Falta de energia/SIGKILL e retomada
+após interrupção arbitrária não estão homologadas. Lock residual exige confirmar
+ausência do teste/bootstrap antes de remover exclusivamente o diretório vazio.
+
+Os testes automatizados desta rotina usam contas e service manager simulados;
+não substituem o resultado a ser coletado no iMac nem a confirmação remota final.
