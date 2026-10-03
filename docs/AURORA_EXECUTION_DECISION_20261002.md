@@ -77,9 +77,23 @@ do deploy nem comprova acesso efetivo do runtime. Nesta sessão retornou
 O gate de backup compartilhado agora exige validade de até 24h, expiração futura
 e mesmo databaseUid, antes de deploy ou restore. Deploy sem backup elegível não
 possui mais exceção automática. Detalhes e limites estão nos documentos 38 e 39
-de `firebase-migration/docs`; o runtime boot permanece especificado, sem executor.
+de `firebase-migration/docs`; o boot possui núcleo de observação read-only,
+sem endpoint ou executor. Sua integração real permanece pendente.
 
 Leitura GitHub em 02/10/2026: main `protected=false` e lista de rulesets visíveis
 vazia. A configuração do ambiente `firebase-homologation` continua sem revalidação
 administrativa. Esses escopos são distintos; não inferir proteção do ambiente
 pelo estado da branch nem alterar permissões automaticamente.
+
+## Núcleo de observação do boot — candidata
+
+O módulo `api/wmgj_api/boot_observer.py` valida o contrato canônico e o vínculo
+entre contexto server-side, manifesto e evidências. A saída pública é minimizada;
+o evento de auditoria é apenas uma intenção privada com persisted=false.
+Nenhuma rota, fonte real, escrita ou atualização de aplicativo foi conectada.
+Os testes exercitam fontes sintéticas; não validam Auth/App Check/Firestore reais.
+
+Próximo gate de código: adaptador consistente sobre o checkpoint existente,
+revogação atual, empacotamento da fonte canônica e transporte que exponha somente
+public_status. Próximo gate operacional: smoke autenticado autorizado em HML.
+O Release Cockpit não recebe promoção de prontidão operacional por esse núcleo.

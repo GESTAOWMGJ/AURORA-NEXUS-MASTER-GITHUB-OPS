@@ -145,3 +145,27 @@ Prioridades: (1) comprovar metadados/gates HML por canal autorizado, cloud/IAM;
 operações; (3) implementar observação autenticada do boot patcher, plataforma.
 CI atual, estado real e aceite comercial continuam separados. Reverter o commit
 candidato desfaz este incremento de código; não houve mutação cloud a reverter.
+
+### Observação server-side do boot — 02/10/2026, America/Sao_Paulo
+
+Produto 1.0.0-rc.1; módulo AURORA-ORG-001/API; base main
+`ee4d274bf27e36b293f2043fe2d4d818ea965c3d`. Incremento sobre o PR #98 no SHA
+`f25efddd29f8822795bb05f95f3fce7e2481b84e`, cujos cinco workflows concluíram com
+sucesso (incluindo 22 testes de preflight). CI do incremento exige novo SHA.
+
+- IMPLEMENTED: núcleo read-only na API existente, usando o schema canônico,
+  contexto server-side, evidência independente, limites de validade/tamanho,
+  revalidação final e projeção pública minimizada. Nenhuma ativação ou mutação.
+- TESTED_LOCAL: testes sintéticos de isolamento, versões, revogação, MFA de
+  revisão, alterações concorrentes, integridade, privacidade e limites.
+  A execução e contagens finais ficam na evidência do PR vinculada ao SHA.
+- PENDENTE: adaptador Auth/App Check/checkpoint real, revisão consistente,
+  auditoria persistida, empacotamento da fonte canônica e smoke integrado.
+  Não houve execução em web/PWA/Mac/mobile nem promoção a HML_VERIFIED.
+
+Release Cockpit: gates operacionais mantidos; módulo/teste não comprova runtime,
+instalação, patch aplicado, ingestão, release comercial ou resultado financeiro.
+Rollback: reverter este incremento na candidata, sem estado cloud a desfazer.
+Detalhes e fila obrigatória no documento 39. Prioridades: (1) adaptar identidade,
+checkpoint e auditoria existentes; (2) comprovar os gates HML por canal de leitura
+autorizado; (3) executar smoke integrado somente com seus pré-requisitos atendidos.
