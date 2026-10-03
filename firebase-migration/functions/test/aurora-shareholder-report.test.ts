@@ -21,7 +21,9 @@ function closed(overrides: Record<string, unknown> = {}): Record<string, unknown
       expensesCents: 1500000,
       taxesCents: 450000,
       transfersCents: 900000,
-      closingResultCents: 750000
+      closingResultCents: 750000,
+      cashBalanceCents: 3600000,
+      distributableCents: 750000
     },
     exceptionSummary: { openCount: 3, openAmountCents: 350000 },
     ...overrides
@@ -33,6 +35,9 @@ test("relatório societário preserva centavos canônicos e fica pronto somente 
   assert.equal(report.skillId, "AURORA-FIN-SOC-001");
   assert.equal(report.state, "READY_FOR_PDF");
   assert.equal(report.financialCents.receivedCents, 3600000);
+  assert.equal(report.financialCents.cashBalanceCents, 3600000);
+  assert.equal(report.financialCents.distributableCents, 750000);
+  assert.equal(report.completeness.completeFinancialSnapshot, true);
   assert.equal(report.closing.evidenceCount, 2);
   assert.equal(report.governance.automaticDistributionAllowed, false);
   assert.equal(report.pdf.autoSend, false);
