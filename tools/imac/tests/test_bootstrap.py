@@ -66,6 +66,7 @@ class BootstrapTests(unittest.TestCase):
         (self.data / "computerid.cfg").write_text("synthetic-device")
         self.stub("uname", "echo Darwin")
         self.stub("hostname", "echo authorized-imac")
+        self.stub("sw_vers", "echo 10.13.6")
         self.stub("pgrep", 'test -e "$AURORA_TEST_ROOT/agent-running"')
         self.stub("sleep", "exit 0")
         sysctl = self.stub("sysctl", "echo iMac-fixture")
@@ -73,13 +74,21 @@ class BootstrapTests(unittest.TestCase):
         launchctl = self.stub("launchctl", '''
 echo "$1" >> "$AURORA_TEST_TRACE"
 case "$1" in
-  list) test -e "$AURORA_TEST_ROOT/loaded" ;;
+  list)
+    test -e "$AURORA_TEST_ROOT/loaded" || exit 1
+    if [ "$#" -eq 1 ]; then echo '9001 0 com.jfn.triggercmd.imac'; fi ;;
   unload) /bin/rm -f "$AURORA_TEST_ROOT/loaded" "$AURORA_TEST_ROOT/agent-running" ;;
   load)
     if [ -e "$AURORA_TEST_ROOT/fail-load-once" ]; then
       /bin/rm "$AURORA_TEST_ROOT/fail-load-once"; exit 7
     fi
     touch "$AURORA_TEST_ROOT/loaded" "$AURORA_TEST_ROOT/agent-running" ;;
+esac''')
+        ps = self.stub("ps", '''
+test -e "$AURORA_TEST_ROOT/agent-running" || exit 1
+case "$4" in
+  comm=) echo "$AURORA_TEST_ROOT/Applications/node16/bin/node" ;;
+  stat=) echo "${AURORA_TEST_PROCESS_STATE:-S}" ;;
 esac''')
         # Validate generated XML with stdlib; native plutil is also exercised on macOS.
         validator = self.root / "validate_plist.py"
@@ -89,6 +98,8 @@ esac''')
         plutil = self.stub("plutil", native + f'"{py}" "{validator}" "$2"')
         text = SOURCE.replace('HOME_DIR="$HOME"', 'HOME_DIR="$AURORA_TEST_ROOT"')
         text = text.replace("/usr/sbin/sysctl", sysctl).replace("/bin/launchctl", launchctl)
+        text = text.replace("/bin/ps", ps)
+        text = text.replace('$HOME/Applications/node16/bin/node', '$AURORA_TEST_ROOT/Applications/node16/bin/node')
         text = text.replace("/usr/bin/plutil", plutil)
         self.fixture = self.root / "bootstrap.sh"
         self.fixture.write_text(text)
@@ -172,6 +183,15 @@ esac''')
         result = self.apply()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(before, [p.read_bytes() for p in targets])
+
+    def test_zombie_managed_pid_fails_even_when_pgrep_matches(self):
+        self.harness()
+        self.env["AURORA_TEST_PROCESS_STATE"] = "Z"
+        result = self.apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ERRO_AGENT_NAO_SUBIU", result.stderr)
+        self.assertIn("ROLLBACK_FILES_OK=1", result.stderr)
+        self.assertFalse(self.plist.exists())
 
     def test_invalid_commands_fails_before_install_and_is_sanitized(self):
         self.harness()
