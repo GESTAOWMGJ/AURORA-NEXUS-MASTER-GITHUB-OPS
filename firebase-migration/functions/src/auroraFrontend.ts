@@ -65,7 +65,7 @@ async function revokeIntegration(keyId,button){if(!capabilities.manageIntegratio
 function renderFinancialClosing(status){
   const s=status&&typeof status==='object'?status:{},a=s.amounts||{},d=s.dueDates||{},decision=s.decision||null;
   activeFinancialSnapshotHash=typeof s.snapshotHash==='string'?s.snapshotHash:'';
-  activeDistributionRevision=decision&&Number.isInteger(decision.revision)?decision.revision:0;
+  activeDistributionRevision=Number.isInteger(s.decisionRevision)?s.decisionRevision:(decision&&Number.isInteger(decision.revision)?decision.revision:0);
   activeDistributionEligible=s.canApproveDistribution===true;
   txt('closing-overdue-payables',money(a.overduePayablesCents));txt('closing-upcoming-payables',money(a.upcomingPayablesCents));txt('closing-expected-revenue',money(a.expectedRevenueCents));txt('closing-cash-balance',money(a.cashBalanceCents));txt('closing-current-due-amount',money(a.currentDueCents));txt('closing-current-due-date',shortDate(d.currentDueDate));txt('closing-next-due-amount',money(a.nextDueCents));txt('closing-next-due-date',shortDate(d.nextDueDate));txt('closing-receivable-current',money(a.receivableUntilCurrentDueCents));txt('closing-receivable-next',money(a.receivableUntilNextDueCents));txt('closing-revenue-gap',money(a.revenueToCashGapCents));txt('closing-total-receivable',money(a.totalReceivableCents));txt('closing-distributable',money(a.distributableCents));txt('closing-distribution-gate',s.distributionGateState||'Não validado');
   const approve=document.getElementById('distribution-approve'),reject=document.getElementById('distribution-reject');
