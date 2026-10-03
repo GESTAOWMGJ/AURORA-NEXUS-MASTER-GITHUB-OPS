@@ -35,6 +35,36 @@ export function financialClosingHash(closing: Record<string, unknown>): string {
   return createHash("sha256").update(JSON.stringify(stable(closing))).digest("hex");
 }
 
+function canonicalRecordList(records: Array<Record<string, unknown>>): string[] {
+  return records.map((record) => JSON.stringify(stable(record))).sort();
+}
+
+export function financialEvidenceHash(input: {
+  closing: Record<string, unknown>;
+  financialEntries: Array<Record<string, unknown>>;
+  taxObligations: Array<Record<string, unknown>>;
+  invoices: Array<Record<string, unknown>>;
+  sourceComplete: boolean;
+}): string {
+  return createHash("sha256").update(JSON.stringify({
+    closing: stable(input.closing),
+    financialEntries: canonicalRecordList(input.financialEntries),
+    taxObligations: canonicalRecordList(input.taxObligations),
+    invoices: canonicalRecordList(input.invoices),
+    sourceComplete: input.sourceComplete
+  })).digest("hex");
+}
+
+export function distributionDecisionGuard(
+  summary: Record<string, unknown>,
+  expectedSnapshotHash: string,
+  decision: DistributionDecision
+): "STALE_FINANCIAL_SNAPSHOT" | "DISTRIBUTION_GATE_NOT_ELIGIBLE" | null {
+  if (summary.snapshotHash !== expectedSnapshotHash) return "STALE_FINANCIAL_SNAPSHOT";
+  if (decision === "APPROVE" && summary.canApproveDistribution !== true) return "DISTRIBUTION_GATE_NOT_ELIGIBLE";
+  return null;
+}
+
 function safeCents(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
@@ -214,11 +244,18 @@ export function buildLayFinancialStatus(input: {
   }
 
   const closing = input.closing;
-  const hash = financialClosingHash(closing);
+  const rawSourceComplete = input.sourceComplete !== false;
+  const hash = financialEvidenceHash({
+    closing,
+    financialEntries: input.financialEntries,
+    taxObligations: input.taxObligations,
+    invoices: input.invoices,
+    sourceComplete: rawSourceComplete
+  });
   const financial = closingFinancial(closing);
   const payableCollection = payableRows(input.financialEntries, input.taxObligations);
   const receivableCollection = receivableRows(input.invoices);
-  const sourceComplete = input.sourceComplete !== false
+  const sourceComplete = rawSourceComplete
     && payableCollection.invalidOpenRecords === 0
     && receivableCollection.invalidOpenRecords === 0;
   const payables = sourceComplete ? payableCollection.rows : [];
