@@ -18,6 +18,7 @@ import { buildProjection, parseActionCommand, type ProjectionSource } from "./au
 import { generateNativeInsight, parseNativeInsightIntent } from "./auroraNativeIntelligence.js";
 import { buildReleaseStatus } from "./auroraReleaseStatus.js";
 import { autoObserveResolvedDocumentAction } from "./auroraOrganicAutoObserve.js";
+import { loadFinancialClosingStatus } from "./auroraFinancialDecisionRuntime.js";
 import { auroraDb } from "./firebase.js";
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
@@ -180,6 +181,7 @@ export const auroraNexusBootstrap = onRequest(
     const member = await requireAccess(req, res); if (!member) return;
     if (!can(member, "dashboard.read", ["platform_admin", "org_admin", "director", "auditor", "operator", "finance", "viewer"])) { res.status(403).json({ ok: false, code: "PERMISSION_DENIED" }); return; }
     const mayReadActions = can(member, "actions.read", ["platform_admin", "org_admin", "director", "auditor", "operator", "finance"]);
+    const mayReadFinancialStatus = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
     const [org, snapshot, actions] = await Promise.all([
       auroraDb.doc(`organizations/${member.orgId}`).get(),
       auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get(),
@@ -189,6 +191,18 @@ export const auroraNexusBootstrap = onRequest(
     ]);
     const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
     const competence = safeString(org.data()?.projectionCompetence, 7) ?? new Date().toISOString().slice(0, 7);
+    let financialStatus: Record<string, unknown> | null = null;
+    if (mayReadFinancialStatus) {
+      try {
+        financialStatus = await loadFinancialClosingStatus(member.orgId, competence);
+      } catch (error) {
+        logger.warn("Financial closing status unavailable", {
+          orgId: member.orgId,
+          competence,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
     const rawProjection = snapshot.exists
       ? { ...snapshot.data(), generatedAt: snapshot.data()?.generatedAt?.toDate?.().toISOString?.() ?? null }
       : { ...buildProjection(empty, new Date(), { orgId: member.orgId, competence }), generatedAt: null };
@@ -229,6 +243,7 @@ export const auroraNexusBootstrap = onRequest(
       organization: { id: member.orgId, name: String(org.data()?.name ?? "WMGJ") },
       member: { email: member.email, role: member.role, mfaVerified: member.mfaVerified },
       projection: visibleProjection(rawProjection, member),
+      financialStatus,
       release: buildReleaseStatus(org.data() ?? {}),
       actions: safeActions,
       actionSummary,
