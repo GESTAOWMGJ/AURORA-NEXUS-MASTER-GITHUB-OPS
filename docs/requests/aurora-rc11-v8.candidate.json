@@ -1,0 +1,42 @@
+{
+  "approvedBaseSha": null,
+  "candidateOnly": true,
+  "clinicalSensitiveEnabled": false,
+  "competence": "2026-05",
+  "confirmation": "RUN_RC11_HML",
+  "deploymentApproved": false,
+  "firebaseWriteApproved": false,
+  "genericBackfillApproved": false,
+  "hmacBootstrapIfMissing": false,
+  "hmacMode": "REUSE_CURRENT_KEYRING_ONLY",
+  "expectedAppsScriptDeploymentId": null,
+  "expectedAppsScriptDeploymentVersion": null,
+  "expectedIngestRevision": null,
+  "productionMutation": false,
+  "projectId": "wmgj-hml-jfn-20260927",
+  "requestReason": "RC11_HML_V8_REUSE_VERIFIED_RUNTIME",
+  "requestVersion": 8,
+  "requestedAt": null,
+  "restoreDatabasePrefix": "rc11-restore",
+  "sample": {
+    "pairContractVersion": 1,
+    "invoiceNumber": "8",
+    "expectedPairCount": 2,
+    "sourceParentSha256": null,
+    "invoice": {
+      "contentHash": null,
+      "sourceRow": null
+    },
+    "bank": {
+      "contentHash": null,
+      "sourceRow": null
+    },
+    "invoiceIdempotencySha256": null,
+    "bankIdempotencySha256": null,
+    "pairBindingSha256": null,
+    "pairEvidenceAttested": false
+  },
+  "secretManagerMutationApproved": false,
+  "sourceDatabase": "(default)",
+  "sourceMutation": false
+}
