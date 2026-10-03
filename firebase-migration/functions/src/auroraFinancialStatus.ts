@@ -6,6 +6,7 @@ const CLOSED_WORKFLOW = new Set(["VALIDATED", "CLOSED"]);
 const PAYABLE_CLOSED = new Set(["PAID", "SETTLED", "LIQUIDATED", "CLOSED", "PAGO", "QUITADO", "CANCELLED", "CANCELADO"]);
 const RECEIVABLE_CLOSED = new Set(["RECEIVED", "PAID", "SETTLED", "LIQUIDATED", "CLOSED", "RECEBIDO", "PAGO", "QUITADO", "CANCELLED", "CANCELADO"]);
 const EXPENSE_KINDS = new Set(["EXPENSE", "PAYABLE", "DESPESA", "CONTA_A_PAGAR", "COST", "CUSTO", "TAX", "TRIBUTO", "IMPOSTO"]);
+const REVENUE_KINDS = new Set(["REVENUE", "RECEIVABLE", "RECEITA", "CONTA_A_RECEBER", "INCOME", "FATURAMENTO"]);
 
 function normalized(value: unknown): string {
   return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
@@ -65,6 +66,25 @@ function dueDate(record: Record<string, unknown>): string | null {
   return null;
 }
 
+function localDateOnly(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function dateOrdinal(date: string): number {
+  return Math.floor(Date.parse(date + "T12:00:00Z") / 86400000);
+}
+
+function daysFromToday(date: string | null, today: string): number | null {
+  return date ? dateOrdinal(date) - dateOrdinal(today) : null;
+}
+
 function statusOf(record: Record<string, unknown>): string {
   for (const key of ["status", "workflowState", "workflow_state", "state", "situacao"]) {
     const value = normalized(record[key]);
@@ -94,7 +114,12 @@ function payableRows(
   let invalidOpenRecords = 0;
   const add = (record: Record<string, unknown>, forcedExpense: boolean) => {
     if (!isValidated(record) || PAYABLE_CLOSED.has(statusOf(record))) return;
-    if (!forcedExpense && !explicitExpense(record)) return;
+    if (!forcedExpense && !explicitExpense(record)) {
+      const declaredKind = normalized(record.kind ?? record.type ?? record.category ?? record.nature ?? record.natureza);
+      if (REVENUE_KINDS.has(declaredKind)) return;
+      invalidOpenRecords += 1;
+      return;
+    }
     const date = dueDate(record);
     const cents = firstCents(record, ["amountCents", "amount_cents", "expenseAmountCents", "expense_amount_cents", "valorCentavos", "taxAmountCents", "valor_imposto"]);
     if (!date || cents === null) {
@@ -171,7 +196,7 @@ export function buildLayFinancialStatus(input: {
   now?: Date;
 }): Record<string, unknown> {
   const now = input.now ?? new Date();
-  const today = now.toISOString().slice(0, 10);
+  const today = localDateOnly(now);
   if (!input.closing) {
     return {
       schemaVersion: 1,
@@ -199,8 +224,16 @@ export function buildLayFinancialStatus(input: {
   const payables = sourceComplete ? payableCollection.rows : [];
   const receivables = sourceComplete ? receivableCollection.rows : [];
   const dates = [...new Set(payables.map((row) => row.date))].sort();
-  const currentDueDate = sourceComplete ? dates[0] ?? null : null;
-  const nextDueDate = sourceComplete ? dates[1] ?? null : null;
+  const overdueDates = dates.filter((date) => date < today);
+  const upcomingDates = dates.filter((date) => date >= today);
+  const currentDueDate = sourceComplete
+    ? (overdueDates[0] ?? upcomingDates[0] ?? null)
+    : null;
+  const nextDueDate = sourceComplete
+    ? (overdueDates.length > 0
+        ? (upcomingDates[0] ?? overdueDates[1] ?? null)
+        : (upcomingDates[1] ?? null))
+    : null;
   const overdue = sourceComplete ? safeSum(payables.filter((row) => row.date < today).map((row) => row.cents)) : null;
   const upcoming = sourceComplete ? safeSum(payables.filter((row) => row.date >= today).map((row) => row.cents)) : null;
   const currentDueCents = sourceComplete && currentDueDate ? safeSum(payables.filter((row) => row.date === currentDueDate).map((row) => row.cents)) : null;
@@ -241,7 +274,12 @@ export function buildLayFinancialStatus(input: {
       totalReceivableCents: safeCents(financial.receivableCents),
       distributableCents
     },
-    dueDates: { currentDueDate, nextDueDate },
+    dueDates: {
+      currentDueDate,
+      currentDueDays: daysFromToday(currentDueDate, today),
+      nextDueDate,
+      nextDueDays: daysFromToday(nextDueDate, today)
+    },
     counts: {
       openPayables: sourceComplete ? payables.length : null,
       openReceivablesWithDueDate: sourceComplete ? receivables.length : null,
