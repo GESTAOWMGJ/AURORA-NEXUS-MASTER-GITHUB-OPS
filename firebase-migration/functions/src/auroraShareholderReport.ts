@@ -20,7 +20,9 @@ type FinancialKey =
   | "expensesCents"
   | "taxesCents"
   | "transfersCents"
-  | "closingResultCents";
+  | "closingResultCents"
+  | "cashBalanceCents"
+  | "distributableCents";
 
 const FINANCIAL_KEYS: FinancialKey[] = [
   "forecastCents",
@@ -33,7 +35,9 @@ const FINANCIAL_KEYS: FinancialKey[] = [
   "expensesCents",
   "taxesCents",
   "transfersCents",
-  "closingResultCents"
+  "closingResultCents",
+  "cashBalanceCents",
+  "distributableCents"
 ];
 
 const LABELS: Record<FinancialKey, string> = {
@@ -47,7 +51,9 @@ const LABELS: Record<FinancialKey, string> = {
   expensesCents: "Despesas",
   taxesCents: "Tributos",
   transfersCents: "Repasses",
-  closingResultCents: "Resultado de fechamento"
+  closingResultCents: "Resultado de fechamento",
+  cashBalanceCents: "Saldo em conta",
+  distributableCents: "Valor distribuível validado"
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
