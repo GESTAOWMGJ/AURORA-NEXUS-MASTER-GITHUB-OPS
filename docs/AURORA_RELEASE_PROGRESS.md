@@ -83,6 +83,24 @@ Validação local: 39 testes offline aprovados (12 novos), incluindo Node sem
 argumento console, wrapper ainda em shell, PID inválido/duplicado, processo zumbi
 e falhas de consulta. CI do novo SHA e homologação High Sierra ainda são gates
 separados. Nenhuma instalação, reinício ou novo disparo remoto neste incremento.
+
+## Retorno automático de status do iMac — 03/10/2026 — PR #95
+
+Atualiza o estado histórico das seções anteriores. Helper validado no High Sierra
+10.13.6/x86_64, Node v16.20.2, a partir do SHA 55296288; substituição isolada com
+backup usando 2bb6672, sem reinício. A falta de `{{result}}` em voiceReply impedia
+o retorno esperado. Após o ajuste local, o TRIGGERcmd devolveu diretamente o
+JFN_MAC timestamp=2026-10-03T15:27:42Z, PROCESS_PRESENT, managed_pid=1337.
+Janela da chamada: 15:27:32.654Z–15:27:44.135Z. Evidência de uma resposta textual,
+sem código de saída nativo e sem homologação de app, HML ou disponibilidade contínua.
+
+O candidato incorpora o mesmo voiceReply. A origem do helper conserva dois blobs
+exatos revisados, ambos com o mesmo helper; recibos e backups anteriores continuam
+compatíveis. A branch incorpora a main 5dcaddc88b27b54a7f24f9042b05e9799205fb1a,
+incluindo seus três arquivos de HMAC sem alteração própria. CI deve ser conferido
+no SHA final do PR. Não é merge, deploy nem aplicação do bootstrap no iMac.
+Próximo gate: revisão do candidato reconciliado e ensaio nativo autorizado de
+rollback/instalação completa; não repetir o teste remoto de status já aprovado.
 Rollback de código: reverter este incremento na branch; o script instalado
 permanece intacto. Próximo gate: validar helper no iMac antes de substituição
 controlada autorizada e teste remoto com resultado correlacionado.
