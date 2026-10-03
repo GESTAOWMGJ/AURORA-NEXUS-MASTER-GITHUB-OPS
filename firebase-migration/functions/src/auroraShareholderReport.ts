@@ -41,19 +41,19 @@ const FINANCIAL_KEYS: FinancialKey[] = [
 ];
 
 const LABELS: Record<FinancialKey, string> = {
-  forecastCents: "Receita prevista",
-  billableCents: "Receita faturável",
-  billedCents: "Receita faturada",
-  receivableCents: "Recebível",
-  receivedCents: "Recebido",
-  recoverableCents: "Receita recuperável",
-  glossCents: "Glosas/divergências informadas",
+  forecastCents: "O que esperávamos receber",
+  billableCents: "O que estava pronto para faturar",
+  billedCents: "O que já faturamos",
+  receivableCents: "O que ainda temos a receber",
+  receivedCents: "O que já entrou",
+  recoverableCents: "Valores ainda recuperáveis",
+  glossCents: "Glosas e divergências em análise",
   expensesCents: "Despesas",
   taxesCents: "Tributos",
   transfersCents: "Repasses",
-  closingResultCents: "Resultado de fechamento",
+  closingResultCents: "Resultado apurado no fechamento",
   cashBalanceCents: "Saldo em conta",
-  distributableCents: "Valor distribuível validado"
+  distributableCents: "Quanto pode ser distribuído após validação"
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -137,6 +137,8 @@ function reportMarkdown(
   const lines = [
     "# AURORA NEXUS",
     "## Relatório Financeiro aos Sócios",
+    "",
+    "Este documento responde, de forma simples, quanto era esperado, quanto entrou, quanto ainda falta receber e quanto pode ser distribuído somente após validação.",
     "",
     `**Organização:** ${orgId}`,
     `**Competência:** ${competence}`,
