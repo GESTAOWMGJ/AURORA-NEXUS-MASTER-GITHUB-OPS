@@ -70,3 +70,19 @@ Baseline da branch preservada: `ad50a0b4484d4d399a845513a40d57c52cff269e`; main 
 - Preflight nativo somente leitura disponível; Node major 16 é obrigatório antes
   de qualquer escrita. Inventário após despacho de reinício não comprova reinício
   concluído, disponibilidade atual ou retorno remoto de conteúdo.
+
+## Correção candidata de status do iMac — 03/10/2026 — PR #95
+
+Baseline: head `8a23778e7886b34a963b138294292b2a0dec5c39`, contendo a main
+`91665cc94c4bde9b82a75cd39905263c60e02191`. Produto permanece 1.0.0-rc.1.
+M08/M10: o helper de status troca a busca textual de argumentos pela consulta
+do PID gerenciado, executável Node e estado. Emite PRESENT/ABSENT/UNKNOWN como
+presença de processo, horário UTC e conectividade UNKNOWN; não emite ONLINE/OFFLINE.
+
+Validação local: 39 testes offline aprovados (12 novos), incluindo Node sem
+argumento console, wrapper ainda em shell, PID inválido/duplicado, processo zumbi
+e falhas de consulta. CI do novo SHA e homologação High Sierra ainda são gates
+separados. Nenhuma instalação, reinício ou novo disparo remoto neste incremento.
+Rollback de código: reverter este incremento na branch; o script instalado
+permanece intacto. Próximo gate: validar helper no iMac antes de substituição
+controlada autorizada e teste remoto com resultado correlacionado.
