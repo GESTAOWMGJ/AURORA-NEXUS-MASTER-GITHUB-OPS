@@ -168,13 +168,71 @@ test("RC1.1 workflow parses as YAML", () => {
   assert.equal(parsed.stdout.includes("YAML_OK"), true, parsed.stderr || parsed.stdout);
 });
 
-test("RC1.1 canonical bridge shell block has valid bash syntax", () => {
+test("RC1.1 validates every shell block and keeps critical steps unique", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
-  const match = workflow.match(/      - name: Use canonical Apps Script deployment and configure bridge[\s\S]*?        run: \|\n([\s\S]*?)\n\n      - name: Send one real sample/);
-  assert.ok(match?.[1]);
-  const script = match[1].split("\n").map((line) => line.replace(/^          /, "")).join("\n");
-  const checked = spawnSync("bash", ["-n"], { input: script, encoding: "utf8" });
-  assert.equal(checked.status, 0, checked.stderr);
+  const lines = workflow.split("\n");
+  const shellBlocks: Array<{ line: number; script: string }> = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const runMatch = /^(\s*)run:\s*\|\s*$/.exec(lines[index]);
+    if (!runMatch) continue;
+
+    const runIndent = runMatch[1].length;
+    const body: string[] = [];
+    let contentIndent: number | undefined;
+
+    for (let bodyIndex = index + 1; bodyIndex < lines.length; bodyIndex += 1) {
+      const line = lines[bodyIndex];
+      if (line.trim() === "") {
+        body.push("");
+        continue;
+      }
+
+      const lineIndent = /^(\s*)/.exec(line)?.[1].length ?? 0;
+      if (lineIndent <= runIndent) break;
+      contentIndent = contentIndent === undefined ? lineIndent : Math.min(contentIndent, lineIndent);
+      body.push(line);
+    }
+
+    assert.ok(contentIndent !== undefined, `run block at line ${index + 1} is empty`);
+    shellBlocks.push({
+      line: index + 1,
+      script: body.map((line) => line === "" ? "" : line.slice(contentIndent)).join("\n"),
+    });
+  }
+
+  assert.equal(shellBlocks.length, 12, "unexpected RC1.1 shell block count");
+  for (const block of shellBlocks) {
+    const checked = spawnSync("bash", ["-n"], { input: block.script, encoding: "utf8" });
+    assert.equal(checked.status, 0, `invalid bash in run block at line ${block.line}: ${checked.stderr}`);
+  }
+
+  const criticalSteps = [
+    "Validate immutable RC1.1 request",
+    "Verify recovery prerequisites",
+    "Execute and prove real restore",
+    "Cleanup temporary restore database",
+    "Build and validate existing HMAC contract",
+    "Verify existing HML runtime and deploy non-secret surfaces",
+    "Use canonical Apps Script deployment and configure bridge",
+    "Send one real sample and reapply kill switch",
+    "Reconcile HML and enable SHADOW projection",
+    "Wait for governed projection",
+    "Test native intelligence against real HML data",
+    "Final kill switch and evidence",
+  ];
+
+  for (const name of criticalSteps) {
+    const count = lines.filter((line) => line.trim() === `- name: ${name}`).length;
+    assert.equal(count, 1, `critical step must occur once: ${name}`);
+  }
+
+  assert.equal(
+    lines.filter((line) => /^- uses: actions\/upload-artifact@/.test(line.trim())).length,
+    1,
+    "evidence upload must occur once",
+  );
+  assert.doesNotMatch(workflow, /^\s*"\$keyring_file"; then\s*$/m);
 });
 
 test("RC1.1 reconciles the exact entity ids returned by real ingestion", () => {
