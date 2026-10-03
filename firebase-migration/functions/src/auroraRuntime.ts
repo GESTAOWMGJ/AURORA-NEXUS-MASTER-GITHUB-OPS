@@ -182,6 +182,7 @@ export const auroraNexusBootstrap = onRequest(
     if (!can(member, "dashboard.read", ["platform_admin", "org_admin", "director", "auditor", "operator", "finance", "viewer"])) { res.status(403).json({ ok: false, code: "PERMISSION_DENIED" }); return; }
     const mayReadActions = can(member, "actions.read", ["platform_admin", "org_admin", "director", "auditor", "operator", "finance"]);
     const mayReadFinancialStatus = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
+    const mayReadFinancialStatus = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
     const [org, snapshot, actions] = await Promise.all([
       auroraDb.doc(`organizations/${member.orgId}`).get(),
       auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get(),
@@ -236,6 +237,9 @@ export const auroraNexusBootstrap = onRequest(
       riskLevel: item.riskLevel,
       at: item.updatedAt ?? item.createdAt ?? null
     }));
+    const financialStatus = mayReadFinancialStatus
+      ? await loadFinancialClosingStatus(member.orgId, competence)
+      : null;
     res.status(200).json({
       ok: true,
       environment: "HOMOLOGATION",
