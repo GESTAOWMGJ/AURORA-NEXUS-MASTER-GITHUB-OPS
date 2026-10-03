@@ -62,19 +62,19 @@ function reportHtml(report: Record<string, unknown>, nonce: string): string {
     : {};
 
   const rows: Array<[string, unknown]> = [
-    ["Receita prevista", financial.forecastCents],
-    ["Receita faturável", financial.billableCents],
-    ["Receita faturada", financial.billedCents],
-    ["Recebível", financial.receivableCents],
-    ["Recebido", financial.receivedCents],
-    ["Receita recuperável", financial.recoverableCents],
-    ["Glosas/divergências informadas", financial.glossCents],
+    ["O que esperávamos receber", financial.forecastCents],
+    ["O que estava pronto para faturar", financial.billableCents],
+    ["O que já faturamos", financial.billedCents],
+    ["O que ainda temos a receber", financial.receivableCents],
+    ["O que já entrou", financial.receivedCents],
+    ["Valores ainda recuperáveis", financial.recoverableCents],
+    ["Glosas e divergências em análise", financial.glossCents],
     ["Despesas", financial.expensesCents],
     ["Tributos", financial.taxesCents],
     ["Repasses", financial.transfersCents],
     ["Saldo em conta", financial.cashBalanceCents],
-    ["Resultado de fechamento", financial.closingResultCents],
-    ["Valor distribuível validado", financial.distributableCents]
+    ["Resultado apurado no fechamento", financial.closingResultCents],
+    ["Quanto pode ser distribuído após validação", financial.distributableCents]
   ];
 
   return `<!doctype html>
@@ -85,9 +85,9 @@ function reportHtml(report: Record<string, unknown>, nonce: string): string {
 </style></head><body><main class="page">
 <div class="toolbar"><button class="btn" id="print">Exportar / imprimir PDF</button></div>
 <div class="brand">AURORA NEXUS · AURORA-FIN-SOC-001</div>
-<section class="hero"><div><h1>Relatório Financeiro aos Sócios</h1><p>Competência ${escapeHtml(report.competence)} · organização ${escapeHtml(report.orgId)}</p></div><span class="badge">${escapeHtml(report.state)}</span></section>
+<section class="hero"><div><h1>Relatório Financeiro aos Sócios</h1><p>Competência ${escapeHtml(report.competence)} · organização ${escapeHtml(report.orgId)}<br>Resumo simples: quanto esperávamos, quanto entrou, quanto falta receber e o que pode ser distribuído após validação.</p></div><span class="badge">${escapeHtml(report.state)}</span></section>
 <div class="grid">
-<section class="card"><h2>Síntese financeira</h2><table>${rows.map(([label,value])=>`<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(money(value))}</td></tr>`).join("")}</table></section>
+<section class="card"><h2>Resumo financeiro em linguagem simples</h2><table>${rows.map(([label,value])=>`<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(money(value))}</td></tr>`).join("")}</table></section>
 <section class="card warn"><h2>Fechamento e evidência</h2>
 <p><strong>Status do fechamento:</strong> ${escapeHtml(closing.status ?? "Não comprovado")}</p>
 <p><strong>Fechado em:</strong> ${escapeHtml(closing.closedAt ?? "Não comprovado")}</p>
