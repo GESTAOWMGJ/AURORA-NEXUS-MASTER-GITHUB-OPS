@@ -4,7 +4,7 @@ import { setImmediate } from 'node:timers/promises';
 import test from 'node:test';
 import { auroraProtectedShell } from '../src/auroraFrontend.ts';
 
-const member = { uid: 'synthetic-u1', email: 'synthetic@example.test', orgId: 'wmgj', role: 'director' as const, permissions: [], facilityIds: [], allFacilities: true, mfaVerified: true };
+const member = { uid: 'synthetic-u1', email: 'synthetic@example.test', orgId: 'wmgj', role: 'auditor' as const, permissions: ['distribution.approve'], facilityIds: [], allFacilities: true, mfaVerified: true };
 const html = auroraProtectedShell(member, { action: 'synthetic-action', refresh: 'synthetic-refresh', integrationKey: 'synthetic-integration', distributionApproval: 'synthetic-distribution', logout: 'synthetic-logout' });
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
 const snapshot = { projection: { competence: '2026-08', generatedAt: '2026-09-28T11:00:00Z', financialCents: { invoicedCents: 12345, receivedCents: 0, glossCents: null }, operations: { overdueActions: 0, openActions: 0 }, coverage: { evidencePercent: null, reconciliationPercent: 0 }, modules: [] }, actions: [] };
