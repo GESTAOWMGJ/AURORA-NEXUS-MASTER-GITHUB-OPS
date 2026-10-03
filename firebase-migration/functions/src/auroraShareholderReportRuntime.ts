@@ -103,7 +103,6 @@ function reportHtml(report: Record<string, unknown>, nonce: string): string {
 export const auroraNexusShareholderReportGenerator = onDocumentWritten(
   "organizations/{orgId}/monthlyClosings/{competence}",
   async (event) => {
-    const before = event.data?.before;
     const after = event.data?.after;
     if (!after?.exists) return;
 
@@ -114,10 +113,9 @@ export const auroraNexusShareholderReportGenerator = onDocumentWritten(
       return;
     }
 
-    const beforeStatus = before?.exists ? String(before.data()?.status ?? "").trim().toUpperCase() : "";
     const afterData = after.data() as Record<string, unknown>;
     const afterStatus = String(afterData.status ?? "").trim().toUpperCase();
-    if (afterStatus !== "CLOSED" || beforeStatus === "CLOSED") return;
+    if (afterStatus !== "CLOSED") return;
 
     const report = buildShareholderReport({ ...afterData, orgId, competence });
     const reportId = String(report.reportId);
