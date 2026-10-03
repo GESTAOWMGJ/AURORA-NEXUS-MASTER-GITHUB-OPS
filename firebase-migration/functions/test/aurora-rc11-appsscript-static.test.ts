@@ -98,13 +98,15 @@ test("RC1.1 HMAC probe is authenticated, dry-run and non-mutating", () => {
 test("RC1.1 request explicitly selects existing-HMAC probe mode", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
   const request = JSON.parse(readFileSync(new URL("../../../.github/requests/aurora-rc11-run.json", import.meta.url), "utf8"));
-  assert.equal(request.requestVersion, 5);
-  assert.equal(request.hmacMode, "REUSE_OR_BOOTSTRAP_EXISTING_KEYRING");
+  assert.equal(request.requestVersion, 6);
+  assert.equal(request.hmacMode, "MIGRATE_LEGACY_OR_REUSE_CURRENT_KEYRING");
+  assert.equal(request.secretManagerKeyringMigrationApproved, true);
   assert.equal(request.deploymentApproved, true);
   assert.equal(request.firebaseWriteApproved, true);
   assert.equal(request.hmacBootstrapIfMissing, true);
-  assert.match(workflow, /\.requestVersion==5/);
-  assert.match(workflow, /\.hmacMode=="REUSE_OR_BOOTSTRAP_EXISTING_KEYRING"/);
+  assert.match(workflow, /\.requestVersion==6/);
+  assert.match(workflow, /\.hmacMode=="MIGRATE_LEGACY_OR_REUSE_CURRENT_KEYRING"/);
+  assert.match(workflow, /\.secretManagerKeyringMigrationApproved==true/);
   assert.match(workflow, /\.deploymentApproved==true/);
   assert.match(workflow, /\.firebaseWriteApproved==true/);
   assert.match(workflow, /\.hmacBootstrapIfMissing==true/);
