@@ -12,6 +12,7 @@ export const CSRF_PURPOSES = {
   organic: "POST:/organic",
   crypto: "POST:/api/crypto/self-test",
   integrationKey: "POST:/api/integration-keys",
+  distributionApproval: "POST:/api/distribution-approval",
   logout: "POST:/__sessionLogout"
 } as const;
 export type CsrfPurpose = typeof CSRF_PURPOSES[keyof typeof CSRF_PURPOSES];
