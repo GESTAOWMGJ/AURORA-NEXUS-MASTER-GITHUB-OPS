@@ -45,9 +45,9 @@ jobs:
             .projectId==$project and
             .projectId=="wmgj-hml-jfn-20260927" and
             .sourceDatabase=="(default)" and
-            .requestVersion==6 and
-            .hmacMode=="MIGRATE_LEGACY_OR_REUSE_CURRENT_KEYRING" and
-            .secretManagerKeyringMigrationApproved==true and
+            .requestVersion==7 and
+            .hmacMode=="ROTATE_TO_CANONICAL_HML_KEYRING" and
+            .secretManagerKeyringRotationApproved==true and
             .deploymentApproved==true and
             .firebaseWriteApproved==true and
             .hmacBootstrapIfMissing==true and
@@ -292,73 +292,42 @@ jobs:
           if [ "$(jq -r '.response.hmacConfigured' "$RUNNER_TEMP/rc11-config-state.json")" = "true" ]; then
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ConfigurarEndpointExistente "$RUNNER_TEMP/rc11-config.json" "$params"
           else
-            keyring_file="$RUNNER_TEMP/hmac-keyring.json"
-            if ! gcloud secrets versions access latest --secret="WMGJ_INGEST_HMAC_KEYRING" --project "$PROJECT_ID" --out-file="$keyring_file" >/dev/null 2>&1; then
-              echo "::error title=HMAC bootstrap unavailable::Apps Script HMAC is absent and deploy identity cannot read the existing HML keyring. No IAM or Secret Manager mutation was attempted." >&2
-              exit 74
-            fi
-            chmod 600 "$keyring_file"
-            if jq -e '
-              type=="object" and length>=1 and
-              ([to_entries[] | select(
-                .value.active==true and
-                ((.value.orgIds // []) | index("wmgj")) != null and
-                ((.value.entityTypes // []) | index("invoice")) != null and
-                ((.value.entityTypes // []) | index("bankTransaction")) != null and
-                ((.value.secret // "") | test("^[A-Fa-f0-9]{64}$"))
-              )] | length)==1
-            ' "$keyring_file" >/dev/null 2>&1; then
-              key_id="$(jq -r '
-                [to_entries[] | select(
-                  .value.active==true and
-                  ((.value.orgIds // []) | index("wmgj")) != null and
-                  ((.value.entityTypes // []) | index("invoice")) != null and
-                  ((.value.entityTypes // []) | index("bankTransaction")) != null and
-                  ((.value.secret // "") | test("^[A-Fa-f0-9]{64}$"))
-                )] | .[0].key
-              ' "$keyring_file")"
-              hmac_secret="$(jq -r --arg key "$key_id" '.[$key].secret' "$keyring_file")"
-            elif grep -Eqx '[A-Fa-f0-9]{64}' "$keyring_file"; then
-              test "$(jq -r '.secretManagerKeyringMigrationApproved // false' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true" || {
-                echo "::error title=Legacy HMAC keyring requires approval::Explicit immutable approval is required before creating a new secret version." >&2
-                exit 75
-              }
-              key_id="apps-script-homolog-2026-08"
-              hmac_secret="$(tr -d '\r\n' < "$keyring_file")"
-              secret_len="$(printf '%s' "$hmac_secret" | wc -c | tr -d ' ')"
-              test "$secret_len" -eq 64
-              echo "::add-mask::$hmac_secret"
-              migrated_keyring="$RUNNER_TEMP/hmac-keyring-migrated.json"
-              jq -nc --arg keyId "$key_id" --arg secret "$hmac_secret" '{
-                ($keyId): {
-                  active: true,
-                  secret: $secret,
-                  orgIds: ["wmgj"],
-                  entityTypes: ["sourceDocument","invoice","bankTransaction","gloss","reconciliation"]
-                }
-              }' > "$migrated_keyring"
-              chmod 600 "$migrated_keyring"
-              if ! gcloud secrets versions add "WMGJ_INGEST_HMAC_KEYRING" --project "$PROJECT_ID" --data-file="$migrated_keyring" --quiet >/dev/null; then
-                echo "::error title=HML secret migration permission required::Could not add the migrated keyring version. No IAM mutation was attempted." >&2
-                exit 76
-              fi
-              (
-                cd "$GITHUB_WORKSPACE/firebase-migration"
-                npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only functions:ingestWmgjEvent
-              )
-              rm -f "$migrated_keyring"
-            else
-              echo "::error title=Unsupported HML HMAC format::Existing keyring is neither current JSON nor recognized 64-hex legacy format." >&2
-              exit 77
-            fi
-            test -n "$key_id"
-            secret_len="$(printf '%s' "$hmac_secret" | wc -c | tr -d ' ')"
-            test "$secret_len" -eq 64
+            test "$(jq -r '.secretManagerKeyringRotationApproved // false' "$GITHUB_WORKSPACE/$REQUEST_FILE")" = "true"
+            key_id="apps-script-homolog-2026-08"
+            hmac_secret="$(openssl rand -hex 32)"
+            printf '%s' "$hmac_secret" | grep -Eqx '[a-f0-9]{64}'
             echo "::add-mask::$hmac_secret"
+            keyring_file="$RUNNER_TEMP/hmac-keyring-rotated.json"
+            jq -nc --arg keyId "$key_id" --arg secret "$hmac_secret" '{
+              ($keyId): {
+                active: true,
+                secret: $secret,
+                orgIds: ["wmgj"],
+                entityTypes: ["invoice","bankTransaction"]
+              }
+            }' > "$keyring_file"
+            chmod 600 "$keyring_file"
+            secret_version="$(gcloud secrets versions add "WMGJ_INGEST_HMAC_KEYRING" --project "$PROJECT_ID" --data-file="$keyring_file" --quiet --format='value(name)')"
+            test -n "$secret_version"
+            version_id="${secret_version##*/}"
+            test "$(gcloud secrets versions describe "$version_id" --secret="WMGJ_INGEST_HMAC_KEYRING" --project "$PROJECT_ID" --format='value(state)')" = "ENABLED"
+            (
+              cd "$GITHUB_WORKSPACE/firebase-migration"
+              npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only functions:ingestWmgjEvent
+            )
             bootstrap_params="$(jq -nc --arg url "$AURORA_RC11_INGEST_URL" --arg keyId "$key_id" --arg secret "$hmac_secret" '[$url,$keyId,$secret]')"
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11ConfigurarIngestao "$RUNNER_TEMP/rc11-config.json" "$bootstrap_params"
+            jq -n --arg keyId "$key_id" --arg version "$version_id" '{
+              gate:"HMAC_KEYRING_ROTATED",
+              keyId:$keyId,
+              secretVersion:$version,
+              secretExposed:false,
+              functionsRedeployed:["ingestWmgjEvent"],
+              productionMutation:false,
+              sourceMutation:false
+            }' > "$RUNNER_TEMP/rc11-evidence/hmac-rotation.json"
             rm -f "$keyring_file"
-            unset hmac_secret bootstrap_params secret_len
+            unset hmac_secret bootstrap_params secret_version version_id
           fi
           jq -e '.response.ok==true and .response.secretConfigured==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-config.json" >/dev/null
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11InspecionarConfiguracao "$RUNNER_TEMP/rc11-config-state-after.json"
