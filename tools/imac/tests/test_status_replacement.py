@@ -74,6 +74,17 @@ class StatusReplacementTests(unittest.TestCase):
     def test_previous_source_receipt_backup_and_rollback_remain_compatible(self):
         legacy = self.home / "legacy-installer.sh"
         source = (ROOT / "INSTALL_AURORA_TRIGGERCMD_BASE.sh").read_text()
+        source = source.replace('elif pgrep -f "$AGENT_SRC/agent.js"',
+                                'elif pgrep -f "$AGENT_SRC/agent.js --console"')
+        start = source.index('# Reuse the native-validated PID/executable check,')
+        end = source.index('\necho "AURORA_IMAC_FILES_INSTALLED', start)
+        source = source[:start] + '''if ! pgrep -f "$AGENT_SRC/agent.js --console" >/dev/null 2>&1; then
+  echo "ERRO_AGENT_NAO_SUBIU" >&2
+  echo "Consulte o log local com sanitizacao; nenhum trecho sera impresso automaticamente." >&2
+  exit 5
+fi
+''' + source[end:]
+        source = source.replace('\necho "$POST_STATUS"', '')
         legacy.write_text(source.replace('voiceReply: "{{result}}",',
                          'voiceReply: "Verificação solicitada; confira o retorno do Mac",', 1))
         self.assertEqual(self.call(source=legacy).returncode, 0)
