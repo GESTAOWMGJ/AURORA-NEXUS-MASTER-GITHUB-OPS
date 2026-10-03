@@ -162,7 +162,8 @@ test("RC1.1 treats clasp execution as a fail-closed nondev gate", () => {
 
 test("RC1.1 workflow parses as YAML", () => {
   const workflowPath = fileURLToPath(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
-  const parsed = spawnSync("ruby", ["-e", "require 'yaml'; YAML.load_file(ARGV.fetch(0)); puts 'YAML_OK'", workflowPath], { encoding: "utf8" });
+  const ruby = "require 'yaml'; begin; YAML.load_file(ARGV[0]); puts 'YAML_OK'; rescue => e; STDERR.puts('LINE=' + (e.respond_to?(:line) ? e.line.to_s : '0')); STDERR.puts('COLUMN=' + (e.respond_to?(:column) ? e.column.to_s : '0')); STDERR.puts(e.message); end";
+  const parsed = spawnSync("ruby", ["-e", ruby, workflowPath], { encoding: "utf8" });
   assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
   assert.match(parsed.stdout, /YAML_OK/);
 });
