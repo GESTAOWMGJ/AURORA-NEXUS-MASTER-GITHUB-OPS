@@ -53,6 +53,7 @@ jobs:
             .projectId=="wmgj-hml-jfn-20260927" and
             .sourceDatabase=="(default)" and
             .requestVersion==6 and
+            .candidateOnly==false and
             .hmacMode=="REUSE_OR_BOOTSTRAP_EXISTING_KEYRING" and
             .deploymentApproved==true and
             .firebaseWriteApproved==true and

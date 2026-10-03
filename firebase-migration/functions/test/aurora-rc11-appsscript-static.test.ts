@@ -175,7 +175,7 @@ test("RC1.1 verifies existing Functions runtime without secret IAM mutation", ()
   assert.match(workflow, /serviceConfig\.uri/);
   assert.match(workflow, /ingest_probe_status/);
   assert.match(workflow, /METHOD_NOT_ALLOWED/);
-  assert.doesNotMatch(workflow, /cloudfunctions\.net\/ingestWmgjEvent/);
+  assert.equal(workflow.includes("cloudfunctions.net/ingestWmgjEvent"), false);
   assert.match(workflow, /signatureVersion=="v2"/);
   assert.match(workflow, /--only hosting,firestore:rules,firestore:indexes/);
   assert.doesNotMatch(workflow, /--only functions:ingestWmgjEvent/);
