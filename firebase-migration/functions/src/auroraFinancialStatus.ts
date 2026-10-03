@@ -182,15 +182,16 @@ export function buildLayFinancialStatus(input: {
   const closing = input.closing;
   const hash = financialClosingHash(closing);
   const financial = closingFinancial(closing);
-  const payables = payableRows(input.financialEntries, input.taxObligations);
-  const receivables = receivableRows(input.invoices);
+  const sourceComplete = input.sourceComplete !== false;
+  const payables = sourceComplete ? payableRows(input.financialEntries, input.taxObligations) : [];
+  const receivables = sourceComplete ? receivableRows(input.invoices) : [];
   const dates = [...new Set(payables.map((row) => row.date))].sort();
-  const currentDueDate = dates[0] ?? null;
-  const nextDueDate = dates[1] ?? null;
-  const overdue = safeSum(payables.filter((row) => row.date < today).map((row) => row.cents));
-  const upcoming = safeSum(payables.filter((row) => row.date >= today).map((row) => row.cents));
-  const currentDueCents = currentDueDate ? safeSum(payables.filter((row) => row.date === currentDueDate).map((row) => row.cents)) : null;
-  const nextDueCents = nextDueDate ? safeSum(payables.filter((row) => row.date === nextDueDate).map((row) => row.cents)) : null;
+  const currentDueDate = sourceComplete ? dates[0] ?? null : null;
+  const nextDueDate = sourceComplete ? dates[1] ?? null : null;
+  const overdue = sourceComplete ? safeSum(payables.filter((row) => row.date < today).map((row) => row.cents)) : null;
+  const upcoming = sourceComplete ? safeSum(payables.filter((row) => row.date >= today).map((row) => row.cents)) : null;
+  const currentDueCents = sourceComplete && currentDueDate ? safeSum(payables.filter((row) => row.date === currentDueDate).map((row) => row.cents)) : null;
+  const nextDueCents = sourceComplete && nextDueDate ? safeSum(payables.filter((row) => row.date === nextDueDate).map((row) => row.cents)) : null;
 
   const expectedRevenueCents = safeCents(financial.forecastCents);
   const cashBalanceCents = safeCents(financial.cashBalanceCents);
@@ -200,7 +201,6 @@ export function buildLayFinancialStatus(input: {
     : Math.max(0, expectedRevenueCents - cashBalanceCents);
   const gate = normalized(closing.distributionGateState ?? closing.distributionGate ?? closing.gateStatus);
   const closingStatus = normalized(closing.status);
-  const sourceComplete = input.sourceComplete !== false;
   const canApproveDistribution = sourceComplete
     && closingStatus === "CLOSED"
     && gate === "ELIGIBLE"
@@ -216,8 +216,8 @@ export function buildLayFinancialStatus(input: {
     closingStatus,
     distributionGateState: gate || null,
     amounts: {
-      overduePayablesCents: payables.length ? overdue : null,
-      upcomingPayablesCents: payables.length ? upcoming : null,
+      overduePayablesCents: sourceComplete && payables.length ? overdue : null,
+      upcomingPayablesCents: sourceComplete && payables.length ? upcoming : null,
       currentDueCents,
       nextDueCents,
       expectedRevenueCents,
