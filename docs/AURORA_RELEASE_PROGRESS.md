@@ -83,3 +83,10 @@ Toda solicitação relevante deve:
 - Banco criado às 15:38:29Z com UID `203215ec-1e3e-4a27-a56c-84cd0dc2ab88`, chave CMEK prevista, PITR e proteção de exclusão. CryptoKey primária versão 1 ENABLED, rotação 7776000s, próxima 2027-01-01T15:38:05Z. Backup schedules retornou `[]`.
 - Executor validava activeKeyVersion antes da primeira escrita, interrompendo antes de schedule/sentinel. Validar configuração/região/proteções antes de qualquer escrita; validar versões ativas após sentinel sintético. Ausência de versões retorna estado explícito pendente e código 13, sem promover homologação.
 - Provisionamento permanece parcial até saída completa e backup READY/restore/recuperação comprovados. Nenhum dado real/clínico no banco de ensaio.
+
+
+### CMEK HML — sequência de recuperação protegida (03/10/2026)
+
+Baseline main: `403e20317e073de6da88d569dc18e66f99447cae`. Provisionamento apresentado pelo titular no SHA `6295e9b`; último inventário de backup CMEK ainda vazio. Executor agora oferece `backup-check` e `restore-verify` somente leitura; key-failure revalida backup/restore e limita os recursos compartilhando a chave antes de disable. Falha só é comprovada pelo erro específico de CMEK; reativação e igualdade do sentinel são obrigatórias. Testes locais não substituem execução cloud. CMEK segue `PENDING_HML_VERIFICATION`; produção, dados clínicos e audit logs seguem gates próprios.
+
+Atualização observada: tentativa 5 do run `37093409122`, job `111235471017`, concluiu envio de amostra e reaplicação do kill switch com sucesso; reconciliação falhou (exit 1). Evidência final/upload foram skipped. Restore desse run pertence a `(default)`, não ao banco CMEK.

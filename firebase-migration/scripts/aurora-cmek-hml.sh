@@ -147,85 +147,140 @@ apply() {
   printf '%s' "$KMS_RESOURCE" | sha256sum | awk '{print "kmsResourceSha256="$1}'
 }
 
+ready_backup() {
+  local source backup_json
+  source="projects/${PROJECT_ID}/databases/${DB_ID}"
+  backup_json="$(gcloud firestore backups list --project "$PROJECT_ID" --format=json)"
+  BACKUP="$(jq -r --arg source "$source" '[.[] | select(.state=="READY" and .database==$source)] | sort_by(.snapshotTime // "") | last | .name // empty' <<<"$backup_json")"
+  test -n "$BACKUP" || { echo "BLOCKED_NO_READY_BACKUP" >&2; return 21; }
+}
+
+backup_check() {
+  ready_backup
+  echo "AURORA_CMEK_HML_BACKUP_READY"
+  echo "sourceBackup=$BACKUP"
+}
+
+verify_restore() {
+  local restored backup_json source token original doc
+  test -n "${RESTORE_DB:-}" && [[ "$RESTORE_DB" == "$RESTORE_PREFIX"* ]] && [[ "$RESTORE_DB" =~ ^[a-z0-9-]+$ ]] || {
+    echo "BLOCKED_RESTORE_DATABASE_REQUIRED" >&2; return 22;
+  }
+  restored="$(gcloud firestore databases describe --project "$PROJECT_ID" --database "$RESTORE_DB" --format=json)"
+  jq -e --arg key "$KMS_RESOURCE" --arg loc "$LOCATION" '
+    .locationId==$loc and .type=="FIRESTORE_NATIVE" and
+    .cmekConfig.kmsKeyName==$key and
+    .deleteProtectionState=="DELETE_PROTECTION_ENABLED" and
+    .pointInTimeRecoveryEnablement=="POINT_IN_TIME_RECOVERY_ENABLED" and
+    .sourceInfo.progress=="COMPLETED"
+  ' <<<"$restored" >/dev/null || { echo "BLOCKED_RESTORE_NOT_COMPLETED_CMEK" >&2; return 23; }
+  BACKUP="$(jq -r '.sourceInfo.backup.backup // empty' <<<"$restored")"
+  source="projects/${PROJECT_ID}/databases/${DB_ID}"
+  backup_json="$(gcloud firestore backups list --project "$PROJECT_ID" --format=json)"
+  jq -e --arg backup "$BACKUP" --arg source "$source" 'any(.[]; .name==$backup and .database==$source and .state=="READY")' <<<"$backup_json" >/dev/null || {
+    echo "BLOCKED_RESTORE_SOURCE_BACKUP_NOT_READY" >&2; return 24;
+  }
+  token="$(gcloud auth print-access-token)"
+  original="$(curl -fsS -H "Authorization: Bearer $token" "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${DB_ID}/documents/securityHml/sentinel")"
+  doc="$(curl -fsS -H "Authorization: Bearer $token" "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${RESTORE_DB}/documents/securityHml/sentinel")"
+  jq -e '.fields.kind.stringValue=="AURORA_CMEK_HML_SENTINEL" and .fields.synthetic.booleanValue==true and .fields.clinicalSensitive.booleanValue==false and .fields.productionMutation.booleanValue==false' <<<"$original" >/dev/null
+  test "$(jq -cS '.fields' <<<"$original")" = "$(jq -cS '.fields' <<<"$doc")" || {
+    echo "BLOCKED_RESTORE_SENTINEL_MISMATCH" >&2; return 25;
+  }
+  echo "AURORA_CMEK_HML_RESTORE_VERIFIED"
+  echo "restoreDatabase=$RESTORE_DB"
+  echo "sourceBackup=$BACKUP"
+}
+
 restore_test() {
   test "${AURORA_CMEK_CONFIRMATION:-}" = "RESTORE_AURORA_CMEK_HML" || {
     echo "BLOCKED_CONFIRMATION" >&2; exit 20;
   }
-  backup_json="$(gcloud firestore backups list --project "$PROJECT_ID" --format=json)"
-  source="projects/${PROJECT_ID}/databases/${DB_ID}"
-  backup="$(jq -r --arg source "$source" '[.[] | select(.state=="READY" and .database==$source)] | sort_by(.snapshotTime // .createTime // "") | last | .name // empty' <<<"$backup_json")"
-  test -n "$backup" || { echo "BLOCKED_NO_READY_BACKUP" >&2; exit 21; }
-
+  ready_backup
   suffix="${GITHUB_RUN_ID:-$(date -u +%Y%m%d%H%M%S)}"
   suffix="$(printf '%s' "$suffix" | tr -cd '0-9' | tail -c 14)"
   RESTORE_DB="${RESTORE_PREFIX}${suffix}"
   test "${#RESTORE_DB}" -le 63
-
-  gcloud firestore databases restore     --project "$PROJECT_ID"     --source-backup="$backup"     --destination-database="$RESTORE_DB"     --encryption-type=customer-managed-encryption     --kms-key-name="$KMS_RESOURCE"
-
-  gcloud firestore databases update     --project "$PROJECT_ID"     --database "$RESTORE_DB"     --delete-protection     --enable-pitr     --quiet
-
-  restored="$(gcloud firestore databases describe --project "$PROJECT_ID" --database "$RESTORE_DB" --format=json)"
-  jq -e --arg key "$KMS_RESOURCE" '.cmekConfig.kmsKeyName==$key and .deleteProtectionState=="DELETE_PROTECTION_ENABLED"' <<<"$restored" >/dev/null
-
-  token="$(gcloud auth print-access-token)"
-  doc="$(curl -fsS -H "Authorization: Bearer $token" "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${RESTORE_DB}/documents/securityHml/sentinel")"
-  jq -e '.fields.kind.stringValue=="AURORA_CMEK_HML_SENTINEL" and .fields.synthetic.booleanValue==true' <<<"$doc" >/dev/null
-
-  echo "AURORA_CMEK_HML_RESTORE_VERIFIED"
   echo "restoreDatabase=$RESTORE_DB"
-  echo "sourceBackup=$backup"
+  gcloud firestore databases restore --project "$PROJECT_ID" --source-backup="$BACKUP" --destination-database="$RESTORE_DB" --encryption-type=customer-managed-encryption --kms-key-name="$KMS_RESOURCE"
+  gcloud firestore databases update --project "$PROJECT_ID" --database "$RESTORE_DB" --delete-protection --enable-pitr --quiet
+  verify_restore
 }
 
 key_failure_test() {
   test "${AURORA_CMEK_CONFIRMATION:-}" = "TEST_AURORA_CMEK_KEY_FAILURE_HML" || {
     echo "BLOCKED_CONFIRMATION" >&2; exit 30;
   }
+  RESTORE_DB="${AURORA_CMEK_RESTORE_DATABASE:-}"
+  verify_restore
   db_json="$(describe_db)"
-  version_resource="$(jq -r '.cmekConfig.activeKeyVersion[0] // empty' <<<"$db_json")"
-  test -n "$version_resource" || { echo "BLOCKED_NO_ACTIVE_KEY_VERSION" >&2; exit 31; }
-  version="${version_resource##*/}"
-  reenable() {
-    gcloud kms versions enable "$version" --project "$PROJECT_ID" --location "$LOCATION" --keyring "$KEYRING" --key "$KEY" --quiet >/dev/null 2>&1 || true
+  jq -e --arg key "$KMS_RESOURCE" '.cmekConfig.kmsKeyName==$key and (.cmekConfig.activeKeyVersion | length)==1 and (.cmekConfig.activeKeyVersion[0] | startswith($key + "/cryptoKeyVersions/"))' <<<"$db_json" >/dev/null || {
+    echo "BLOCKED_SINGLE_EXPECTED_ACTIVE_KEY_VERSION_REQUIRED" >&2; exit 31;
   }
-  trap reenable EXIT INT TERM
+  version_resource="$(jq -r '.cmekConfig.activeKeyVersion[0]' <<<"$db_json")"
+  version="${version_resource##*/}"
+  test "$(gcloud kms versions describe "$version" --project "$PROJECT_ID" --location "$LOCATION" --keyring "$KEYRING" --key "$KEY" --format='value(state)')" = "ENABLED"
+  # Reject sharing the test key with a database outside the synthetic HML namespace.
+  inventory="$(gcloud firestore databases list --project "$PROJECT_ID" --format=json)"
+  jq -e --arg key "$KMS_RESOURCE" --arg source "projects/${PROJECT_ID}/databases/${DB_ID}" --arg prefix "projects/${PROJECT_ID}/databases/${RESTORE_PREFIX}" 'all(.[]; .cmekConfig.kmsKeyName!=$key or .name==$source or (.name | startswith($prefix)))' <<<"$inventory" >/dev/null || {
+    echo "BLOCKED_KEY_SHARED_OUTSIDE_SYNTHETIC_HML" >&2; exit 34;
+  }
+  key_test_dir="$(mktemp -d)"
+  reenable() {
+    gcloud kms versions enable "$version" --project "$PROJECT_ID" --location "$LOCATION" --keyring "$KEYRING" --key "$KEY" --quiet >/dev/null
+  }
+  cleanup_key_test() {
+    if ! reenable; then echo "CMEK_REENABLE_FAILED:manual_recovery_required:$version_resource" >&2; fi
+    rm -rf "$key_test_dir"
+  }
+  trap cleanup_key_test EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
   token="$(gcloud auth print-access-token)"
   url="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${DB_ID}/documents/securityHml/sentinel"
-  curl -fsS -H "Authorization: Bearer $token" "$url" >/dev/null
-
+  original="$(curl -fsS -H "Authorization: Bearer $token" "$url")"
+  echo "keyFailureTestStarted=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "keyVersion=$version_resource"
   gcloud kms versions disable "$version" --project "$PROJECT_ID" --location "$LOCATION" --keyring "$KEYRING" --key "$KEY" --quiet
-
   observed=false
   for _ in $(seq 1 "${AURORA_CMEK_FAILURE_POLLS:-20}"); do
-    code="$(curl -sS -o /tmp/aurora-cmek-read.json -w '%{http_code}' -H "Authorization: Bearer $token" "$url" || true)"
-    if [ "$code" != "200" ]; then observed=true; break; fi
+    token="$(gcloud auth print-access-token)"
+    code="$(curl -sS -o "$key_test_dir/failure.json" -w '%{http_code}' -H "Authorization: Bearer $token" "$url" || true)"
+    if [ "$code" = "400" ] && jq -e '.error.status=="FAILED_PRECONDITION" and (.error.message | contains("customer-managed encryption key"))' "$key_test_dir/failure.json" >/dev/null 2>&1; then
+      observed=true; echo "keyUnavailableObserved=$(date -u +%Y-%m-%dT%H:%M:%SZ)"; break
+    fi
     sleep "${AURORA_CMEK_FAILURE_POLL_SECONDS:-30}"
   done
-
   reenable
-  trap - EXIT INT TERM
-
+  test "$(gcloud kms versions describe "$version" --project "$PROJECT_ID" --location "$LOCATION" --keyring "$KEYRING" --key "$KEY" --format='value(state)')" = "ENABLED"
+  echo "keyReenabled=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   recovered=false
   for _ in $(seq 1 "${AURORA_CMEK_RECOVERY_POLLS:-20}"); do
     token="$(gcloud auth print-access-token)"
-    code="$(curl -sS -o /tmp/aurora-cmek-recovery.json -w '%{http_code}' -H "Authorization: Bearer $token" "$url" || true)"
-    if [ "$code" = "200" ]; then recovered=true; break; fi
+    code="$(curl -sS -o "$key_test_dir/recovery.json" -w '%{http_code}' -H "Authorization: Bearer $token" "$url" || true)"
+    if [ "$code" = "200" ] && [ "$(jq -cS '.fields' "$key_test_dir/recovery.json")" = "$(jq -cS '.fields' <<<"$original")" ]; then
+      recovered=true; break
+    fi
     sleep "${AURORA_CMEK_RECOVERY_POLL_SECONDS:-30}"
   done
-
   test "$recovered" = true || { echo "CMEK_RECOVERY_NOT_CONFIRMED" >&2; exit 32; }
+  echo "keyReadRecovered=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  rm -rf "$key_test_dir"
+  trap - EXIT INT TERM
   if [ "$observed" = true ]; then
     echo "AURORA_CMEK_KEY_FAILURE_AND_RECOVERY_VERIFIED"
   else
-    echo "AURORA_CMEK_KEY_FAILURE_PENDING_PROPAGATION"
+    echo "AURORA_CMEK_KEY_FAILURE_PENDING_PROPAGATION"; exit 33
   fi
 }
 
 case "$MODE" in
   plan) plan ;;
   apply) apply ;;
+  backup-check) backup_check ;;
   restore-test) restore_test ;;
+  restore-verify) RESTORE_DB="${AURORA_CMEK_RESTORE_DATABASE:-}"; verify_restore ;;
   key-failure-test) key_failure_test ;;
-  *) echo "usage: $0 {plan|apply|restore-test|key-failure-test}" >&2; exit 64 ;;
+  *) echo "usage: $0 {plan|apply|backup-check|restore-test|restore-verify|key-failure-test}" >&2; exit 64 ;;
 esac

@@ -9,11 +9,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "plan, apply, restore-test or key-failure-test"
+        description: "plan, backup-check, apply, restore-test, restore-verify or key-failure-test"
         required: true
         type: choice
         options:
           - plan
+          - backup-check
+          - restore-verify
           - apply
           - restore-test
           - key-failure-test
@@ -23,6 +25,10 @@ on:
         required: false
         type: boolean
         default: false
+      restore_database:
+        description: "Existing reconciled aurora-hml-restore-* database for verify/key test"
+        required: false
+        type: string
       confirmation:
         description: "Exact confirmation required for mutating modes"
         required: false
@@ -60,6 +66,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_CMEK_ACCESS_CONFIRMED: ${{ inputs.cmek_access_confirmed }}
+          INPUT_RESTORE_DATABASE: ${{ inputs.restore_database }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_CONFIRMATION: ${{ inputs.confirmation }}
         run: |
@@ -73,19 +80,21 @@ jobs:
               .productionMutation==false and
               .clinicalSensitiveEnabled==false and
               .realDataAllowed==false and
-              (.mode=="plan" or .mode=="apply" or .mode=="restore-test" or .mode=="key-failure-test")
+              (.mode=="plan" or .mode=="apply" or .mode=="restore-test" or .mode=="key-failure-test" or .mode=="backup-check" or .mode=="restore-verify")
             ' "$REQUEST_FILE" >/dev/null
+            restore_database="$(jq -r ' .restoreDatabase // "" ' "$REQUEST_FILE")"
             mode="$(jq -r '.mode' "$REQUEST_FILE")"
             access_confirmed="$(jq -r '.cmekAccessConfirmed // false' "$REQUEST_FILE")"
             confirmation="$(jq -r '.confirmation // ""' "$REQUEST_FILE")"
           else
+            restore_database="$INPUT_RESTORE_DATABASE"
             access_confirmed="$INPUT_CMEK_ACCESS_CONFIRMED"
             mode="$INPUT_MODE"
             confirmation="$INPUT_CONFIRMATION"
           fi
 
           case "$mode" in
-            plan)
+            plan|backup-check|restore-verify)
               test -z "$confirmation"
               ;;
             apply)
@@ -103,7 +112,11 @@ jobs:
               ;;
           esac
 
+          if [ "$mode" = "restore-verify" ] || [ "$mode" = "key-failure-test" ]; then
+            [[ "$restore_database" =~ ^aurora-hml-restore-[a-z0-9-]+$ ]]
+          fi
           {
+            echo "AURORA_CMEK_RESTORE_DATABASE=$restore_database"
             if [ "$mode" = "apply" ]; then echo "AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED=YES"; fi
             echo "MODE=$mode"
             echo "AURORA_CMEK_CONFIRMATION=$confirmation"

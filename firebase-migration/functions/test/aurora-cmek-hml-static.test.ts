@@ -116,7 +116,7 @@ test("CMEK HML script prepares guarded database, backup, restore and reversible 
     "--destination-database",
     "kms versions disable",
     "kms versions enable",
-    "trap reenable",
+    "trap cleanup_key_test",
     "AURORA_FIRESTORE_CMEK_RUNTIME_VERIFIED_CREATE",
     "AURORA_CMEK_KEY_FAILURE_PENDING_PROPAGATION",
     "AURORA_CMEK_HML_RESTORE_VERIFIED"
@@ -155,3 +155,59 @@ test("apply without access confirmation makes no cloud call", () => {
     assert.doesNotMatch(result.stderr, /UNEXPECTED_CLOUD_CALL/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("key test blocks before cloud calls without a restore database", () => {
+  const dir = mkdtempSync(join(tmpdir(), "aurora-key-gate-"));
+  try {
+    writeFileSync(join(dir, "gcloud"), '#!/bin/sh\necho UNEXPECTED_CLOUD_CALL >&2\nexit 99\n', {mode:0o755});
+    const env = {...process.env, PATH:`${dir}:${process.env.PATH}`, AURORA_CMEK_CONFIRMATION:"TEST_AURORA_CMEK_KEY_FAILURE_HML"};
+    delete env.AURORA_CMEK_RESTORE_DATABASE;
+    const r=spawnSync("bash",[new URL("../../scripts/aurora-cmek-hml.sh",import.meta.url).pathname,"key-failure-test"],{env,encoding:"utf8"});
+    assert.equal(r.status,22); assert.match(r.stderr,/RESTORE_DATABASE_REQUIRED/); assert.doesNotMatch(r.stderr,/UNEXPECTED_CLOUD_CALL/);
+  } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+for(const errorKind of ["cmek","auth","reenable-failure","wrong-backup"]) {
+  test(`cloud simulation: ${errorKind} cannot produce false recovery evidence`,()=>{
+    const dir=mkdtempSync(join(tmpdir(),"aurora-key-proof-"));
+    try {
+      const key=`projects/${policy.projectId}/locations/${policy.location}/keyRings/${policy.keyRing}/cryptoKeys/${policy.cryptoKey}`;
+      const source=`projects/${policy.projectId}/databases/${policy.databaseId}`;
+      const backup=`projects/${policy.projectId}/locations/${policy.location}/backups/test`;
+      const db={name:source,locationId:policy.location,type:"FIRESTORE_NATIVE",deleteProtectionState:"DELETE_PROTECTION_ENABLED",pointInTimeRecoveryEnablement:"POINT_IN_TIME_RECOVERY_ENABLED",cmekConfig:{kmsKeyName:key,activeKeyVersion:[`${key}/cryptoKeyVersions/1`]},sourceInfo:{progress:"COMPLETED",backup:{backup}}};
+      writeFileSync(join(dir,"db.json"),JSON.stringify(db));
+      writeFileSync(join(dir,"backups.json"),JSON.stringify([{name:backup,database:errorKind==="wrong-backup"?`projects/${policy.projectId}/databases/(default)`:source,state:"READY"}]));
+      writeFileSync(join(dir,"doc.json"),JSON.stringify({fields:{kind:{stringValue:"AURORA_CMEK_HML_SENTINEL"},synthetic:{booleanValue:true},clinicalSensitive:{booleanValue:false},productionMutation:{booleanValue:false}}}));
+      writeFileSync(join(dir,"gcloud"),`#!/bin/bash
+case "$*" in
+ "firestore databases describe"*) cat "$AURORA_TEST_DIR/db.json" ;;
+ "firestore backups list"*) cat "$AURORA_TEST_DIR/backups.json" ;;
+ "firestore databases list"*) echo "[$(cat "$AURORA_TEST_DIR/db.json")]" ;;
+ "auth print-access-token"*) echo test-token ;;
+ "kms versions describe"*) echo ENABLED ;;
+ "kms versions disable"*) echo disable >> "$AURORA_TEST_DIR/calls"; touch "$AURORA_TEST_DIR/disabled" ;;
+ "kms versions enable"*) echo enable >> "$AURORA_TEST_DIR/calls"; if [ "$AURORA_TEST_ERROR" = reenable-failure ]; then exit 77; fi; rm -f "$AURORA_TEST_DIR/disabled" ;;
+ *) exit 99 ;;
+esac
+`,{mode:0o755});
+      writeFileSync(join(dir,"curl"),`#!/bin/bash
+out=""
+while [ "$#" -gt 0 ]; do
+ if [ "$1" = -o ]; then out="$2"; shift; fi
+ shift
+done
+if [ -z "$out" ]; then cat "$AURORA_TEST_DIR/doc.json"; exit; fi
+if [ -f "$AURORA_TEST_DIR/disabled" ]; then
+ if [ "$AURORA_TEST_ERROR" = auth ]; then echo '{"error":{"status":"UNAUTHENTICATED"}}' > "$out"; printf 401
+ else echo '{"error":{"status":"FAILED_PRECONDITION","message":"The customer-managed encryption key required by the requested resource is not accessible"}}' > "$out"; printf 400; fi
+else cat "$AURORA_TEST_DIR/doc.json" > "$out"; printf 200; fi
+`,{mode:0o755});
+      const r=spawnSync("bash",[new URL("../../scripts/aurora-cmek-hml.sh",import.meta.url).pathname,"key-failure-test"],{env:{...process.env,PATH:`${dir}:${process.env.PATH}`,AURORA_TEST_DIR:dir,AURORA_TEST_ERROR:errorKind,AURORA_CMEK_RESTORE_DATABASE:`${policy.restoreDatabasePrefix}123`,AURORA_CMEK_CONFIRMATION:"TEST_AURORA_CMEK_KEY_FAILURE_HML",AURORA_CMEK_FAILURE_POLLS:"1",AURORA_CMEK_FAILURE_POLL_SECONDS:"0",AURORA_CMEK_RECOVERY_POLLS:"1",AURORA_CMEK_RECOVERY_POLL_SECONDS:"0"},encoding:"utf8"});
+      if(errorKind==="wrong-backup") { assert.equal(r.status,24,r.stderr); assert.throws(()=>readFileSync(join(dir,"calls"))); }
+      else { assert.match(readFileSync(join(dir,"calls"),"utf8"),/disable\nenable\n/); assert.equal(r.status,errorKind==="cmek"?0:errorKind==="auth"?33:77,r.stderr); }
+      if(errorKind==="cmek") assert.match(r.stdout,/KEY_FAILURE_AND_RECOVERY_VERIFIED/);
+      else assert.doesNotMatch(r.stdout,/KEY_FAILURE_AND_RECOVERY_VERIFIED/);
+      if(errorKind==="reenable-failure") assert.match(r.stderr,/CMEK_REENABLE_FAILED/);
+    } finally {rmSync(dir,{recursive:true,force:true});}
+  });
+}
