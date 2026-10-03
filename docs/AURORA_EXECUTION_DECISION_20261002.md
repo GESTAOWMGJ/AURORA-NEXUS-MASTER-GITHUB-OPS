@@ -66,3 +66,20 @@ CI, revisão de código, implantação, instalação local, ingestão real e rel
 comercial são estados separados. Boot patcher multiplataforma, App Check ponta a
 ponta e instalação nativa continuam sem comprovação de execução. Não promover
 essas capacidades por existência de contrato, documentação ou disparo remoto.
+
+## Incremento sem Mac
+
+O coletor `firebase-migration/scripts/hml_readonly_preflight.py` permite auditar
+metadados do HML sem ler valores de secrets. Não substitui o preflight protegido
+do deploy nem comprova acesso efetivo do runtime. Nesta sessão retornou
+`GCLOUD_UNAVAILABLE`; nenhum dos gates cloud foi promovido.
+
+O gate de backup compartilhado agora exige validade de até 24h, expiração futura
+e mesmo databaseUid, antes de deploy ou restore. Deploy sem backup elegível não
+possui mais exceção automática. Detalhes e limites estão nos documentos 38 e 39
+de `firebase-migration/docs`; o runtime boot permanece especificado, sem executor.
+
+Leitura GitHub em 02/10/2026: main `protected=false` e lista de rulesets visíveis
+vazia. A configuração do ambiente `firebase-homologation` continua sem revalidação
+administrativa. Esses escopos são distintos; não inferir proteção do ambiente
+pelo estado da branch nem alterar permissões automaticamente.

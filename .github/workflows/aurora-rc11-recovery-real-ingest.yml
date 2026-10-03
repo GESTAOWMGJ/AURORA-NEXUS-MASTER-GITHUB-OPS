@@ -102,13 +102,10 @@ jobs:
           backup="$(jq -r --arg source "projects/${PROJECT_ID}/databases/(default)" '[.[]|select(.state=="READY" and .database==$source)]|sort_by(.snapshotTime//"")|last|.name//empty' <<<"$backups")"
           snapshot="$(jq -r --arg name "$backup" '.[]|select(.name==$name)|.snapshotTime//empty' <<<"$backups")"
           test -n "$backup"; test -n "$snapshot"
-          python3 - "$snapshot" <<'PY'
-          from datetime import datetime, timezone
-          import sys
-          t=datetime.fromisoformat(sys.argv[1].replace("Z","+00:00"))
-          age=(datetime.now(timezone.utc)-t).total_seconds()
-          if age < 0 or age > 24*3600: raise SystemExit("READY_BACKUP_NOT_WITHIN_24H")
-          PY
+          selected_backup="$(jq -c --arg name "$backup" '.[]|select(.name==$name)' <<<"$backups")"
+          jq -n --argjson database "$db_json" --argjson backup "$selected_backup" \
+            '{database:$database,backups:[$backup]}' | \
+            python3 firebase-migration/scripts/hml_readonly_preflight.py --check-backup
           echo "AURORA_RC11_BACKUP_RESOURCE=$backup" >> "$GITHUB_ENV"
           echo "AURORA_RC11_BACKUP_SNAPSHOT=$snapshot" >> "$GITHUB_ENV"
 

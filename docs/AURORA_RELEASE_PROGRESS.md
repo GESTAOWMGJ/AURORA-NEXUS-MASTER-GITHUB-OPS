@@ -117,3 +117,31 @@ vazio/malformado e permissão malformada. Aceite: suíte inteira no emulador, se
 remover negativos; até nova evidência o gate permanece pendente.
 
 Referência técnica: https://firebase.google.com/docs/firestore/security/rules-structure
+
+### Incremento independente do Mac — 02/10/2026, America/Sao_Paulo
+
+O SHA anterior do PR #98 `8b8e4fd1065f69d7a9c318911902d82a95f77a69`
+concluiu cinco workflows: Functions 289, Rules 28, API 39, dashboard 3 e nenhum
+alerta CodeQL novo no código alterado. Essa evidência substitui as pendências de
+CI acima apenas para aquele SHA; nova candidata deve concluir seus próprios runs.
+
+- Preflight `hml-readonly-preflight.v1` implementado com oito consultas de
+  metadados, alvo HML fixo e relatório sanitizado de 20 gates. Plano padrão sem
+  cloud; acesso insuficiente é DESCONHECIDO. Não lê valores de secrets.
+- Gate de backup compartilhado endurecido antes de deploy/restore: READY,
+  snapshot de até 24h não futuro, não expirado e mesmo databaseUid. Removida a
+  exceção de deploy sem backup. Dados de backup não comprovam restore.
+- 22 testes offline deste incremento aprovados localmente; suíte incluída no CI.
+  Gates atuais cloud continuam desconhecidos até coleta autenticada e revisão.
+- PR #43 confirmado fechado/absorvido pelo #66. Decisões de contratos preservadas;
+  fila e especificação do runtime boot estão no documento 39, sem alegar executor.
+
+Runbooks: `firebase-migration/docs/38-hml-readonly-preflight.md` e
+`firebase-migration/docs/39-boot-patcher-runtime-plan.md`. Nenhum deploy, merge
+na main, restore, alteração de segredo ou ativação de conector nesta entrega.
+
+Prioridades: (1) comprovar metadados/gates HML por canal autorizado, cloud/IAM;
+(2) revisar o gate de recuperação e ensaiar restore somente após autorização,
+operações; (3) implementar observação autenticada do boot patcher, plataforma.
+CI atual, estado real e aceite comercial continuam separados. Reverter o commit
+candidato desfaz este incremento de código; não houve mutação cloud a reverter.

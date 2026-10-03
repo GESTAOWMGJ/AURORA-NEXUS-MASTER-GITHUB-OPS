@@ -115,6 +115,11 @@ jobs:
           WMGJ_FIREBASE_TEST_PROJECT_ID: wmgj-firestore-rules-test
         run: bash firebase-migration/scripts/bootstrap-homologacao.sh
 
+      - name: Test HML read-only gate collector with synthetic metadata
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s firebase-migration/scripts/tests -p 'test_hml_readonly_preflight.py' -v
+
       - name: Block high or critical production dependency advisories
         working-directory: firebase-migration/functions
         run: npm audit --omit=dev --audit-level=high
