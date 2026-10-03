@@ -88,3 +88,43 @@ test("runtime de decisão registra aprovação, nunca pagamento ou transferênci
   assert.match(runtime, /automaticDistribution:\s*false/);
   assert.doesNotMatch(runtime, /executePayment|pix\(|bankTransfer|transferFunds/);
 });
+
+
+test("registro aberto sem vencimento bloqueia totais por prazo e aprovação", () => {
+  const result = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-09",
+    closing,
+    financialEntries: [
+      { workflowState: "VALIDATED", kind: "PAYABLE", status: "OPEN", amountCents: 180000, dueDate: "2026-10-10" },
+      { workflowState: "VALIDATED", kind: "EXPENSE", status: "OPEN", amountCents: 120000 }
+    ],
+    taxObligations: [],
+    invoices: [],
+    now: new Date("2026-10-03T12:00:00Z")
+  }) as any;
+  assert.equal(result.sourceComplete, false);
+  assert.equal(result.counts.invalidOpenPayables, 1);
+  assert.equal(result.amounts.overduePayablesCents, null);
+  assert.equal(result.amounts.upcomingPayablesCents, null);
+  assert.equal(result.dueDates.currentDueDate, null);
+  assert.equal(result.canApproveDistribution, false);
+});
+
+test("aprovação de snapshot anterior deixa de valer e a revisão é preservada para nova decisão", () => {
+  const result = buildLayFinancialStatus({
+    orgId: "wmgj",
+    competence: "2026-09",
+    closing,
+    financialEntries: [],
+    taxObligations: [],
+    invoices: [],
+    currentDecision: {
+      snapshotHash: "0".repeat(64),
+      decision: "APPROVED_FOR_DISTRIBUTION",
+      revision: 4
+    }
+  }) as any;
+  assert.equal(result.decision, null);
+  assert.equal(result.decisionRevision, 4);
+});
