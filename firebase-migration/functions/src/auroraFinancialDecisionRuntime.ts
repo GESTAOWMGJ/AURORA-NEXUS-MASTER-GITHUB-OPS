@@ -5,7 +5,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { can, CSRF_PURPOSES, verifyAuroraAccess, validCsrf } from "./auroraAccess.js";
 import { auroraDb } from "./firebase.js";
-import { buildLayFinancialStatus, financialClosingHash, type DistributionDecision } from "./auroraFinancialStatus.js";
+import { buildLayFinancialStatus, distributionDecisionGuard, type DistributionDecision } from "./auroraFinancialStatus.js";
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -151,12 +151,9 @@ export const auroraNexusDistributionDecision = onRequest(
     }
 
     const summary = await loadFinancialClosingStatus(member.orgId, competence);
-    if (summary.snapshotHash !== snapshotHash) {
-      res.status(409).json({ ok: false, code: "STALE_FINANCIAL_SNAPSHOT" });
-      return;
-    }
-    if (decision === "APPROVE" && summary.canApproveDistribution !== true) {
-      res.status(409).json({ ok: false, code: "DISTRIBUTION_GATE_NOT_ELIGIBLE" });
+    const preflightGate = distributionDecisionGuard(summary, snapshotHash, decision);
+    if (preflightGate) {
+      res.status(409).json({ ok: false, code: preflightGate });
       return;
     }
 
@@ -180,15 +177,35 @@ export const auroraNexusDistributionDecision = onRequest(
         const closingRef = auroraDb.doc(`${base}/monthlyClosings/${competence}`);
         const versionRef = auroraDb.doc(`${base}/distributionDecisionVersions/${decisionId}`);
         const auditRef = auroraDb.doc(`${base}/auditEvents/${auditId}`);
-        const [idem, current, closing] = await Promise.all([tx.get(idemRef), tx.get(currentRef), tx.get(closingRef)]);
+        const financialEntriesQuery = auroraDb.collection(`${base}/financialEntries`).limit(SOURCE_LIMIT + 1);
+        const taxObligationsQuery = auroraDb.collection(`${base}/taxObligations`).limit(SOURCE_LIMIT + 1);
+        const invoicesQuery = auroraDb.collection(`${base}/invoices`).limit(SOURCE_LIMIT + 1);
+        const [idem, current, closing, financialEntries, taxObligations, invoices] = await Promise.all([
+          tx.get(idemRef),
+          tx.get(currentRef),
+          tx.get(closingRef),
+          tx.get(financialEntriesQuery),
+          tx.get(taxObligationsQuery),
+          tx.get(invoicesQuery)
+        ]);
 
         if (idem.exists) {
           if (idem.data()?.commandHash !== commandHash) throw new Error("IDEMPOTENCY_CONFLICT");
           return { duplicate: true, data: current.exists ? current.data() ?? {} : {} };
         }
         if (!closing.exists) throw new Error("CLOSING_NOT_FOUND");
-        const currentHash = financialClosingHash(closing.data() ?? {});
-        if (currentHash !== snapshotHash) throw new Error("STALE_FINANCIAL_SNAPSHOT");
+        const transactionalSummary = buildLayFinancialStatus({
+          orgId: member.orgId,
+          competence,
+          closing: closing.data() ?? {},
+          currentDecision: current.exists ? (current.data() ?? {}) : null,
+          financialEntries: financialEntries.docs.slice(0, SOURCE_LIMIT).map((doc) => ({ ...doc.data(), _id: doc.id })),
+          taxObligations: taxObligations.docs.slice(0, SOURCE_LIMIT).map((doc) => ({ ...doc.data(), _id: doc.id })),
+          invoices: invoices.docs.slice(0, SOURCE_LIMIT).map((doc) => ({ ...doc.data(), _id: doc.id })),
+          sourceComplete: financialEntries.size <= SOURCE_LIMIT && taxObligations.size <= SOURCE_LIMIT && invoices.size <= SOURCE_LIMIT
+        });
+        const transactionGate = distributionDecisionGuard(transactionalSummary, snapshotHash, decision);
+        if (transactionGate) throw new Error(transactionGate);
         const revision = current.exists && Number.isSafeInteger(current.data()?.revision) ? Number(current.data()?.revision) : 0;
         if (revision !== expectedRevision) throw new Error("REVISION_CONFLICT");
 
@@ -244,7 +261,7 @@ export const auroraNexusDistributionDecision = onRequest(
       res.status(200).json({ ok: true, duplicate: result.duplicate, decision: publicDecision(result.data) });
     } catch (error) {
       const code = error instanceof Error ? error.message : "DISTRIBUTION_DECISION_FAILED";
-      const known = ["IDEMPOTENCY_CONFLICT", "CLOSING_NOT_FOUND", "STALE_FINANCIAL_SNAPSHOT", "REVISION_CONFLICT"];
+      const known = ["IDEMPOTENCY_CONFLICT", "CLOSING_NOT_FOUND", "STALE_FINANCIAL_SNAPSHOT", "DISTRIBUTION_GATE_NOT_ELIGIBLE", "REVISION_CONFLICT"];
       if (!known.includes(code)) logger.error("Distribution decision failed", { code });
       res.status(known.includes(code) ? 409 : 500).json({ ok: false, code: known.includes(code) ? code : "DISTRIBUTION_DECISION_FAILED" });
     }
