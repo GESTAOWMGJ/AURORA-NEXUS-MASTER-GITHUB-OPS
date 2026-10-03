@@ -77,3 +77,9 @@ Toda solicitação relevante deve:
 - Apply autorizado pelo titular iniciou em Cloud Shell; APIs/identidade de serviço avançaram, criação da CryptoKey falhou com INVALID_ARGUMENT: next_rotation_time obrigatório para rotation_schedule. Banco CMEK não comprovado.
 - Executor agora fornece primeira rotação em RFC3339 UTC, 90 dias após execução, junto do período de rotação. Compatível com date GNU/BSD. Teste offline captura argumentos reais de criação e interrompe antes de IAM/banco; não chama GCP.
 - Retomada somente no SHA corrigido; PENDING_HML_VERIFICATION permanece até provas operacionais completas.
+
+### Provisionamento parcial e primeira escrita sintética — 03/10/2026
+
+- Banco criado às 15:38:29Z com UID `203215ec-1e3e-4a27-a56c-84cd0dc2ab88`, chave CMEK prevista, PITR e proteção de exclusão. CryptoKey primária versão 1 ENABLED, rotação 7776000s, próxima 2027-01-01T15:38:05Z. Backup schedules retornou `[]`.
+- Executor validava activeKeyVersion antes da primeira escrita, interrompendo antes de schedule/sentinel. Validar configuração/região/proteções antes de qualquer escrita; validar versões ativas após sentinel sintético. Ausência de versões retorna estado explícito pendente e código 13, sem promover homologação.
+- Provisionamento permanece parcial até saída completa e backup READY/restore/recuperação comprovados. Nenhum dado real/clínico no banco de ensaio.

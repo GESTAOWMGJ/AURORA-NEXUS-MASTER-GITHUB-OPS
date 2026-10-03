@@ -118,8 +118,7 @@ apply() {
     .type=="FIRESTORE_NATIVE" and
     .deleteProtectionState=="DELETE_PROTECTION_ENABLED" and
     .pointInTimeRecoveryEnablement=="POINT_IN_TIME_RECOVERY_ENABLED" and
-    .cmekConfig.kmsKeyName==$key and
-    (.cmekConfig.activeKeyVersion|length)>=1
+    .cmekConfig.kmsKeyName==$key
   ' <<<"$db_json" >/dev/null
 
   if ! gcloud firestore backups schedules list --project "$PROJECT_ID" --database "$DB_ID" --format=json       | jq -e 'map(select(.dailyRecurrence!=null)) | length >= 1' >/dev/null; then
@@ -129,6 +128,19 @@ apply() {
   token="$(gcloud auth print-access-token)"
   sentinel_payload='{"fields":{"kind":{"stringValue":"AURORA_CMEK_HML_SENTINEL"},"synthetic":{"booleanValue":true},"clinicalSensitive":{"booleanValue":false},"productionMutation":{"booleanValue":false}}}'
   curl -fsS -X PATCH     -H "Authorization: Bearer $token"     -H 'Content-Type: application/json'     --data "$sentinel_payload"     "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/${DB_ID}/documents/securityHml/sentinel" >/dev/null
+
+  # Require active versions after the first synthetic write, not before it.
+  # An absent version still blocks completion; it never promotes HML evidence.
+  db_json="$(describe_db)"
+  if ! jq -e --arg key "$KMS_RESOURCE" '
+    .cmekConfig.kmsKeyName==$key and
+    (.cmekConfig.activeKeyVersion | type)=="array" and
+    (.cmekConfig.activeKeyVersion | length)>=1 and
+    all(.cmekConfig.activeKeyVersion[]; startswith($key + "/cryptoKeyVersions/"))
+  ' <<<"$db_json" >/dev/null; then
+    echo "AURORA_CMEK_ACTIVE_KEY_VERSION_PENDING_AFTER_SYNTHETIC_WRITE" >&2
+    exit 13
+  fi
 
   echo "AURORA_CMEK_HML_APPLIED"
   echo "serviceAgent=$SERVICE_AGENT"

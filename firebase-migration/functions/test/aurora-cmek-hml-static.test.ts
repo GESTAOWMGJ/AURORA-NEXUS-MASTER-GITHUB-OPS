@@ -10,6 +10,37 @@ const workflow = readFileSync(new URL("../../../.github/workflows/aurora-cmek-hm
 const script = readFileSync(new URL("../../scripts/aurora-cmek-hml.sh", import.meta.url), "utf8");
 const policy = JSON.parse(readFileSync(new URL("../../policy/cmek-hml-baseline-v1.json", import.meta.url), "utf8"));
 
+test("initial synthetic write can precede active-version proof but missing proof blocks completion", () => {
+  const dir = mkdtempSync(join(tmpdir(), "aurora-cmek-first-write-"));
+  try {
+    const database = { locationId: policy.location, type: "FIRESTORE_NATIVE",
+      deleteProtectionState: "DELETE_PROTECTION_ENABLED", pointInTimeRecoveryEnablement: "POINT_IN_TIME_RECOVERY_ENABLED",
+      cmekConfig: { kmsKeyName: `projects/${policy.projectId}/locations/${policy.location}/keyRings/${policy.keyRing}/cryptoKeys/${policy.cryptoKey}` } };
+    writeFileSync(join(dir, "db.json"), JSON.stringify(database));
+    writeFileSync(join(dir, "gcloud"), `#!/bin/bash
+case "$*" in
+  "auth list"*) echo test-account ;;
+  "projects describe"*) echo 299889357292 ;;
+  "firestore databases describe"*) cat "$AURORA_TEST_DB" ;;
+  "firestore backups schedules list"*) echo '[]' ;;
+  "firestore backups schedules create"*) echo schedule >> "$AURORA_TEST_CALLS" ;;
+  "auth print-access-token"*) echo synthetic-token ;;
+  *) exit 0 ;;
+esac
+`, { mode: 0o755 });
+    writeFileSync(join(dir, "curl"), '#!/bin/bash\necho sentinel >> "$AURORA_TEST_CALLS"\n', { mode: 0o755 });
+    const result = spawnSync("bash", [new URL("../../scripts/aurora-cmek-hml.sh", import.meta.url).pathname, "apply"], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, AURORA_TEST_DB: join(dir, "db.json"),
+        AURORA_TEST_CALLS: join(dir, "calls"), AURORA_CMEK_CONFIRMATION: "APPLY_AURORA_CMEK_HML",
+        AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED: "YES" }, encoding: "utf8"
+    });
+    assert.equal(result.status, 13, result.stderr);
+    assert.equal(readFileSync(join(dir, "calls"), "utf8"), "schedule\nsentinel\n");
+    assert.match(result.stderr, /ACTIVE_KEY_VERSION_PENDING_AFTER_SYNTHETIC_WRITE/);
+    assert.doesNotMatch(result.stdout, /AURORA_CMEK_HML_APPLIED/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("key creation supplies a future RFC3339 first rotation with the period", () => {
   const dir = mkdtempSync(join(tmpdir(), "aurora-cmek-rotation-"));
   try {
