@@ -68,6 +68,9 @@ test("fonte incompleta ou gate não elegível bloqueia aprovação, mas rejeiç�
     financialEntries: [], taxObligations: [], invoices: [], sourceComplete: false
   }) as any;
   assert.equal(incomplete.canApproveDistribution, false);
+  assert.equal(incomplete.amounts.overduePayablesCents, null);
+  assert.equal(incomplete.amounts.upcomingPayablesCents, null);
+  assert.equal(incomplete.dueDates.currentDueDate, null);
   const blocked = buildLayFinancialStatus({
     orgId: "wmgj", competence: "2026-09",
     closing: { ...closing, distributionGateState: "BLOCKED" },
