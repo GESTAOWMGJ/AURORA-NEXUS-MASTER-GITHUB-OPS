@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const source = readFileSync(new URL("../../../src/34_AURORA_RC11_FIRESTORE_CONTROL.gs", import.meta.url), "utf8");
@@ -157,6 +158,14 @@ test("RC1.1 treats clasp execution as a fail-closed nondev gate", () => {
   assert.match(runner, /exit 71/);
   assert.match(deployWorkflow, /ensure-appscript-execution-deployment\.sh/);
   assert.match(deployWorkflow, /Publish canonical Apps Script Execution API deployment/);
+});
+
+test("RC1.1 workflow parses as YAML", () => {
+  const workflowPath = fileURLToPath(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
+  const ruby = "require 'yaml'; begin; YAML.load_file(ARGV[0]); puts 'YAML_OK'; rescue => e; STDERR.puts('LINE=' + (e.respond_to?(:line) ? e.line.to_s : '0')); STDERR.puts('COLUMN=' + (e.respond_to?(:column) ? e.column.to_s : '0')); STDERR.puts(e.message); end";
+  const parsed = spawnSync("ruby", ["-e", ruby, workflowPath], { encoding: "utf8" });
+  assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
+  assert.equal(parsed.stdout.includes("YAML_OK"), true, parsed.stderr || parsed.stdout);
 });
 
 test("RC1.1 canonical bridge shell block has valid bash syntax", () => {
