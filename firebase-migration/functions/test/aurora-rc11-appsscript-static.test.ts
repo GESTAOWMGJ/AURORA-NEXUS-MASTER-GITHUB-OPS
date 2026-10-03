@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 const source = readFileSync(new URL("../../../src/34_AURORA_RC11_FIRESTORE_CONTROL.gs", import.meta.url), "utf8");
@@ -156,6 +157,15 @@ test("RC1.1 treats clasp execution as a fail-closed nondev gate", () => {
   assert.match(runner, /exit 71/);
   assert.match(deployWorkflow, /ensure-appscript-execution-deployment\.sh/);
   assert.match(deployWorkflow, /Publish canonical Apps Script Execution API deployment/);
+});
+
+test("RC1.1 canonical bridge shell block has valid bash syntax", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const match = workflow.match(/      - name: Use canonical Apps Script deployment and configure bridge[\s\S]*?        run: \|\n([\s\S]*?)\n\n      - name: Send one real sample/);
+  assert.ok(match?.[1]);
+  const script = match[1].split("\n").map((line) => line.replace(/^          /, "")).join("\n");
+  const checked = spawnSync("bash", ["-n"], { input: script, encoding: "utf8" });
+  assert.equal(checked.status, 0, checked.stderr);
 });
 
 test("RC1.1 reconciles the exact entity ids returned by real ingestion", () => {
