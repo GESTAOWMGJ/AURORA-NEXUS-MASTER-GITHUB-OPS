@@ -148,11 +148,7 @@ test("RC1.1 keeps baseline runtime non-secret and gates ingest redeploy behind a
   const redeployIndex = workflow.indexOf('--only functions:ingestWmgjEvent');
   assert.ok(approvalIndex >= 0 && redeployIndex > approvalIndex);
   assert.doesNotMatch(workflow, /--only functions(?:\s|$)/);
-  const functionDeploys = [...workflow.matchAll(/--only (functions:[^\n]+)/g)].map((match) => match[1]);
-  assert.deepEqual(functionDeploys.sort(), [
-    "functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting",
-    "functions:ingestWmgjEvent",
-  ].sort());
+  assert.equal((workflow.match(/--only functions:ingestWmgjEvent/g) ?? []).length, 1);
   assert.doesNotMatch(workflow, /secretmanager\.secrets\.setIamPolicy/);
   assert.match(workflow, /functionsRedeployed:false/);
 });
@@ -215,28 +211,42 @@ test("RC1.1 reconciles the exact entity ids returned by real ingestion", () => {
 
 test("RC1.1 primary workflow repairs stale native routes before authenticated smoke", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
-  const repairIndex = workflow.indexOf("Repair native routes only if Hosting target is stale");
+  const repairIndex = workflow.indexOf("Repair Hosting rewrite targets only if native routes are stale");
   const smokeIndex = workflow.indexOf("Test native intelligence against real HML data");
   assert.ok(repairIndex >= 0 && smokeIndex > repairIndex);
   assert.match(workflow, /session_status.*__sessionLogin/);
   assert.match(workflow, /native_status.*api\/native-insight/);
-  assert.match(workflow, /functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting/);
+  assert.ok(workflow.includes(".hosting.rewrites[]"));
+  assert.ok(workflow.includes('grep -Fq "functions:auroraNexusIntegrationPing"'));
+  assert.ok(workflow.includes('--only "${rewrite_targets},hosting"'));
+  assert.doesNotMatch(workflow, /--only functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting/);
   assert.match(workflow, /SESSION_LOGIN_HTTP_/);
   assert.match(workflow, /NATIVE_INSIGHT_.*_HTTP_/);
-  assert.match(workflow, /targetedDeploy:\["auroraNexusSessionLogin","auroraNexusNativeInsight","hosting"\]/);
+  assert.ok(workflow.includes('targetedDeploy:(($targets | split(",")) + ["hosting"]),'));
 });
 
-test("RC1.1 post-ingest workflow repairs only stale native routes and always verifies kill switch", () => {
+test("RC1.1 post-ingest verifies complete Hosting closure and always checks kill switch", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url), "utf8");
-  assert.match(workflow, /Repair native routes only if Hosting target is stale/);
+  assert.match(workflow, /Repair the complete Hosting function closure before publishing routes/);
   assert.match(workflow, /session_status.*__sessionLogin/);
   assert.match(workflow, /native_status.*api\/native-insight/);
-  assert.match(workflow, /functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting/);
+  assert.match(workflow, /ping_status.*api\/integration\/ping/);
+  assert.ok(workflow.includes('tools/aurora-hosting-surface.mjs'));
+  assert.ok(workflow.includes('targets="$(node "$checker" targets "$config")"'));
+  const functionsIndex = workflow.indexOf('--only "$targets"');
+  const closureIndex = workflow.indexOf('node "$checker" check', functionsIndex);
+  const hostingIndex = workflow.indexOf('--only hosting', functionsIndex);
+  assert.ok(functionsIndex > 0 && closureIndex > functionsIndex && hostingIndex > closureIndex);
+  assert.ok(workflow.includes('.code=="INVALID_INTEGRATION_KEY"'));
+  assert.doesNotMatch(workflow, /--only functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting/);
   assert.doesNotMatch(workflow, /firestore databases restore/);
   assert.doesNotMatch(workflow, /auroraRc11EnviarAmostraReal/);
   assert.doesNotMatch(workflow, /secrets versions add/);
   assert.match(workflow, /Verify final Apps Script kill switch\n        if: always\(\)/);
-  assert.match(workflow, /nativeInsightVerified:\$nativeVerified/);
+  assert.ok(workflow.includes('nativeInsightVerified:($native=="success")'));
+  assert.ok(workflow.includes('realWmgjSample:($rec=="success")'));
+  assert.ok(workflow.includes('ingestedByThisWorkflow:false'));
+  assert.ok(workflow.includes('RECONCILE_OUTCOME: ${{ steps.reconcile.outcome }}'));
 });
 
 test("RC1.1 post-ingest workflow parses as YAML", () => {
