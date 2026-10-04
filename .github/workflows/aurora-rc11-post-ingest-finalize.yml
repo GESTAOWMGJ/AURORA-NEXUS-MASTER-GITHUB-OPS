@@ -180,6 +180,9 @@ jobs:
           rewrite_targets="$(jq -r '[.hosting.rewrites[] | select(.function? != null and .function.functionId? != null) | ("functions:" + .function.functionId)] | unique | join(",")' firebase.json)"
           test -n "$rewrite_targets"
           grep -Fq "functions:auroraNexusIntegrationPing" <<<"$rewrite_targets"
+          npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json > "$RUNNER_TEMP/native-functions-list.json"
+          python3 scripts/validate-hosting-runtime.py --inventory "$RUNNER_TEMP/native-functions-list.json" \
+            --planned "${rewrite_targets//functions:/}"
           repaired=false
           if [ "$session_status" != "405" ] || [ "$native_status" != "401" ]; then
             npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only "${rewrite_targets},hosting"

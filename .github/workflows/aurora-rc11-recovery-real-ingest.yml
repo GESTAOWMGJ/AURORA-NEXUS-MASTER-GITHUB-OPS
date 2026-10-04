@@ -248,11 +248,8 @@ jobs:
         run: |
           set -euo pipefail
           npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json > "$RUNNER_TEMP/functions-list.json"
-          required='["ingestWmgjEvent","runtimeWatchdog","runtimeHealth","auroraNexusAuthGate","auroraNexusSessionLogin","auroraNexusSessionLogout","auroraNexusBootstrap","auroraNexusNativeInsight","auroraNexusAction","auroraNexusRefresh","auroraNexusProjectionEngine","auroraNexusOrganic","auroraNexusIntegrationKeys","auroraNexusIntegrationPing"]'
-          jq -e --argjson required "$required" '
-            [.. | objects | (.id? // .name? // empty) | tostring | split("/")[-1]] as $deployed
-            | all($required[]; $deployed | index(.) != null)
-          ' "$RUNNER_TEMP/functions-list.json" >/dev/null
+          python3 scripts/validate-hosting-runtime.py --inventory "$RUNNER_TEMP/functions-list.json" \
+            --require ingestWmgjEvent,runtimeWatchdog,runtimeHealth,auroraNexusProjectionEngine
           health_url="$(gcloud functions describe runtimeHealth --gen2 --region "$REGION" --project "$PROJECT_ID" --format='value(serviceConfig.uri)')"
           test -n "$health_url"
           curl -fsS "$health_url" > "$RUNNER_TEMP/runtime-health.json"
@@ -432,6 +429,9 @@ jobs:
           rewrite_targets="$(jq -r '[.hosting.rewrites[] | select(.function? != null and .function.functionId? != null) | ("functions:" + .function.functionId)] | unique | join(",")' firebase.json)"
           test -n "$rewrite_targets"
           grep -Fq "functions:auroraNexusIntegrationPing" <<<"$rewrite_targets"
+          npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json > "$RUNNER_TEMP/native-functions-list.json"
+          python3 scripts/validate-hosting-runtime.py --inventory "$RUNNER_TEMP/native-functions-list.json" \
+            --planned "${rewrite_targets//functions:/}"
           repaired=false
           if [ "$session_status" != "405" ] || [ "$native_status" != "401" ]; then
             npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only "${rewrite_targets},hosting"
