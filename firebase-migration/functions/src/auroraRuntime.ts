@@ -16,6 +16,7 @@ import {
 import { validateResolutionEvidence } from "./auroraEvidence.js";
 import { buildProjection, parseActionCommand, type ProjectionSource } from "./auroraEngine.js";
 import { generateNativeInsight, parseNativeInsightIntent } from "./auroraNativeIntelligence.js";
+import { buildMasterOperationalState } from "./auroraMasterEngine.js";
 import { buildReleaseStatus } from "./auroraReleaseStatus.js";
 import { autoObserveResolvedDocumentAction } from "./auroraOrganicAutoObserve.js";
 import { loadFinancialClosingStatus } from "./auroraFinancialDecisionRuntime.js";
@@ -243,6 +244,11 @@ export const auroraNexusBootstrap = onRequest(
       organization: { id: member.orgId, name: String(org.data()?.name ?? "WMGJ") },
       member: { email: member.email, role: member.role, mfaVerified: member.mfaVerified },
       projection: visibleProjection(rawProjection, member),
+      masterEngine: buildMasterOperationalState(visibleProjection(rawProjection, member), {
+        actionSummary,
+        financialStatus,
+        release: buildReleaseStatus(org.data() ?? {})
+      }),
       financialStatus,
       release: buildReleaseStatus(org.data() ?? {}),
       actions: safeActions,
@@ -298,6 +304,59 @@ export const auroraNexusNativeInsight = onRequest(
       sourceAccessDuringInference: false,
       externalAiUsed: false,
       insight: generateNativeInsight(projection, intent)
+    });
+  }
+);
+
+export const auroraNexusMasterEngine = onRequest(
+  { cors: false, secrets: [ALLOWED_EMAILS] },
+  async (req, res) => {
+    apiHeaders(res);
+    if (req.method !== "GET") { res.set("Allow", "GET"); res.status(405).json({ ok: false, code: "METHOD_NOT_ALLOWED" }); return; }
+    const member = await requireAccess(req, res); if (!member) return;
+    if (!can(member, "dashboard.read", ["platform_admin", "org_admin", "director", "auditor", "operator", "finance", "viewer"])) {
+      res.status(403).json({ ok: false, code: "PERMISSION_DENIED" });
+      return;
+    }
+
+    const [snapshot, org] = await Promise.all([
+      auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get(),
+      auroraDb.doc(`organizations/${member.orgId}`).get()
+    ]);
+    if (!snapshot.exists) {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_SNAPSHOT_REQUIRED" });
+      return;
+    }
+    const snapshotData = snapshot.data() ?? {};
+    const generatedAtValue = snapshotData.generatedAt;
+    const generatedAt = generatedAtValue
+      && typeof generatedAtValue === "object"
+      && "toDate" in generatedAtValue
+      && typeof (generatedAtValue as { toDate?: unknown }).toDate === "function"
+        ? (generatedAtValue as { toDate(): Date }).toDate().toISOString()
+        : null;
+    const rawProjection: Record<string, unknown> = { ...snapshotData, generatedAt };
+    const nativeDataPlaneValue = rawProjection["nativeDataPlane"];
+    const nativeDataPlane = nativeDataPlaneValue && typeof nativeDataPlaneValue === "object" && !Array.isArray(nativeDataPlaneValue)
+      ? nativeDataPlaneValue as Record<string, unknown>
+      : {};
+    if (nativeDataPlane.storage !== "FIRESTORE" || nativeDataPlane.sourceAccessDuringInference !== false) {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_CONTRACT_REQUIRED" });
+      return;
+    }
+    const projection = visibleProjection(rawProjection, member);
+    const competence = typeof projection.competence === "string" ? projection.competence : null;
+    const financialStatus = competence
+      ? await loadFinancialClosingStatus(member.orgId, competence)
+      : null;
+    const release = buildReleaseStatus(org.data() ?? {});
+    res.status(200).json({
+      ok: true,
+      environment: "HOMOLOGATION",
+      mode: "AURORA_MASTER_NATIVE",
+      sourceAccessDuringInference: false,
+      externalAiUsed: false,
+      master: buildMasterOperationalState(projection, { financialStatus, release })
     });
   }
 );

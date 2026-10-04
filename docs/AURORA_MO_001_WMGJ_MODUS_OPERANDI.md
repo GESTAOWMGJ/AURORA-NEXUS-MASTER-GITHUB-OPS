@@ -558,3 +558,33 @@ Invariantes:
 - o botão de aprovação registra `APPROVED_FOR_DISTRIBUTION` ou `REJECTED` com gestor, função, data, motivo, competência, valor e hash do snapshot;
 - a aprovação não executa PIX, transferência, pagamento, baixa ou distribuição;
 - toda execução financeira permanece externa/manual ou em fluxo futuro com gate próprio, nunca implícita no clique de aprovação.
+
+## 22. Motor Mestre Operacional Nativo — AURORA-MASTER-OPS-001
+
+O AURORA NEXUS possui um motor mestre operacional nativo para gerir a operação pela própria interface do software, sem dependência obrigatória de GPT, Gemini, OpenAI ou outro provedor externo.
+
+Fluxo:
+
+```text
+SNAPSHOT CANÔNICO FIREBASE
+→ AURORA NATIVE INTELLIGENCE
+→ REGISTRO NATIVO DE ROTINAS
+→ MOTOR MESTRE OPERACIONAL
+→ PRIORIDADE / PRÓXIMA AÇÃO
+→ COMANDO GOVERNADO DA INTERFACE
+→ EVIDÊNCIA / AUDIT LEDGER
+→ AURORA-ORG-001
+```
+
+Invariantes:
+
+1. `externalProviderUsed=false` e `externalAiRequired=false` no caminho operacional padrão;
+2. inferência lê somente o snapshot canônico Firebase e não relê a origem;
+3. o motor não executa código arbitrário, movimentação financeira, decisão clínica ou mutação autônoma do sistema-fonte;
+4. comandos permitidos reutilizam APIs governadas existentes: refresh, ações, integrações e decisão societária;
+5. risco alto/crítico, resolução material, credenciais e decisões financeiras mantêm gate humano/MFA quando aplicável;
+6. todas as rotinas permanecem representadas em `auroraNativeRoutines.ts`;
+7. o aprendizado orgânico recebe apenas desfecho validado e sanitizado;
+8. provedores externos podem existir futuramente como fallback substituível, nunca como requisito para disponibilidade do motor.
+
+A interface deve apresentar o Motor Mestre como visão principal de inteligência operacional, mantendo leituras especializadas de receita, SLA, qualidade e próxima ação como subfunções explicáveis.

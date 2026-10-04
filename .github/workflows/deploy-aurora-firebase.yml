@@ -339,7 +339,7 @@ jobs:
           test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
           git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
-          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -354,6 +354,7 @@ jobs:
             "auroraNexusSessionLogout",
             "auroraNexusBootstrap",
             "auroraNexusNativeInsight",
+            "auroraNexusMasterEngine",
             "auroraNexusAction",
             "auroraNexusRefresh",
             "auroraNexusProjectionEngine",
@@ -391,6 +392,13 @@ jobs:
             --write-out '%{http_code}' \
             "https://${PROJECT_ID}.web.app/api/native-insight?intent=EXECUTIVE")"
           test "$native_status" = "401"
+          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+          master_status="$(curl --silent --show-error --max-time 30 \
+            -H 'Accept: application/json' \
+            --output "$negative_response" \
+            --write-out '%{http_code}' \
+            "https://${PROJECT_ID}.web.app/api/master-engine")"
+          test "$master_status" = "401"
           jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
           organic_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
@@ -436,6 +444,7 @@ jobs:
           private_shell="$smoke_dir/private-shell.html"
           bootstrap_response="$smoke_dir/bootstrap.json"
           native_response="$smoke_dir/native.json"
+          master_response="$smoke_dir/master.json"
           organic_response="$smoke_dir/organic.json"
           cleanup() {
             find "$smoke_dir" -type f -delete
@@ -574,6 +583,39 @@ jobs:
             *)
               cat "$native_response" >&2
               exit 92
+              ;;
+          esac
+          master_status="$(curl --silent --show-error --max-time 30 \
+            -H 'Accept: application/json' \
+            --cookie "$cookie_jar" \
+            --output "$master_response" \
+            --write-out '%{http_code}' \
+            "${base_url}/api/master-engine")"
+          case "$master_status" in
+            200)
+              jq -e '
+                .ok == true and
+                .environment == "HOMOLOGATION" and
+                .mode == "AURORA_MASTER_NATIVE" and
+                .sourceAccessDuringInference == false and
+                .externalAiUsed == false and
+                .master.engine == "AURORA_MASTER_OPERATIONAL_ENGINE" and
+                .master.externalProviderUsed == false and
+                .master.externalAiRequired == false and
+                .master.governance.autonomousSourceMutation == false and
+                .master.governance.autonomousFinancialMovement == false and
+                .master.governance.arbitraryCodeExecution == false
+              ' "$master_response" >/dev/null
+              ;;
+            409)
+              jq -e '
+                .ok == false and
+                (.code == "FIREBASE_NATIVE_SNAPSHOT_REQUIRED" or .code == "FIREBASE_NATIVE_CONTRACT_REQUIRED")
+              ' "$master_response" >/dev/null
+              ;;
+            *)
+              cat "$master_response" >&2
+              exit 96
               ;;
           esac
           curl --fail --silent --show-error --max-time 30 \
