@@ -19,14 +19,15 @@ test("accepted ingestion persists an immutable version snapshot", () => {
   assert.match(backend, /versionCount: FieldValue\.increment\(1\)/);
 });
 
-test("version identity is bound to entity and sourceVersion", () => {
+test("version identity is bound to the canonical entity revision", () => {
   assert.match(
     backend,
-    /sha256Hex\(`v1:\$\{entityType\}:\$\{entityKey\}:\$\{sourceVersion\}`\)\.slice\(0, 48\)/
+    /sha256Hex\(`v1:\$\{entityType\}:\$\{entityKey\}:revision:\$\{revision\}`\)\.slice\(0, 48\)/
   );
+  assert.match(backend, /const revision = nextCanonicalEntityRevision\(previous\?\.revision\)/);
+  assert.match(backend, /revision,\n\s+sourceVersion: event\.sourceVersion/);
   assert.match(backend, /versionId: result\.versionId/);
-  assert.match(backend, /versionId,\n\s+authenticatedKeyId/);
-  assert.match(backend, /versionId,\n\s+eventId: event\.eventId/);
+  assert.match(backend, /revision: result\.revision/);
 });
 
 test("immutable entity versions are not readable or writable by clients", () => {
