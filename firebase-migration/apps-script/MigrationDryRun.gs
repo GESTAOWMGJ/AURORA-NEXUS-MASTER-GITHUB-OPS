@@ -4,7 +4,7 @@
  * Checkpoint só avança quando DRY_RUN=false e o endpoint aceita/identifica duplicata.
  */
 
-var WMGJ_FIRESTORE_MIGRATION_VERSION = 'v1.0.0-backfill-checkpoint';
+var WMGJ_FIRESTORE_MIGRATION_VERSION = 'v1.1.0-continuous-versioning';
 var WMGJ_FIRESTORE_MONEY_NORMALIZATION_VERSION = 'brl-cents-v1';
 
 function wmgjFirestoreMigrationMap_() {
@@ -35,6 +35,7 @@ function wmgjFirestoreMigrationMap_() {
     },
     '08_EXTRATOS_BRADESCO': {
       entityType: 'bankTransaction', sensitivity: 'RESTRICTED',
+      bankStatementAdapter: true,
       moneyFields: {
         amountCents: ['valor', 'valor_lancamento', 'valor_transacao'],
         liquidatedAmountCents: ['valor_liquidado', 'valor_conciliado']
@@ -82,8 +83,19 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
   var checkpointKey = 'WMGJ_FS_MIG_' + sheetName + '_ROW';
   var startRow = Math.max(2, Number(props.getProperty(checkpointKey) || 2));
   var lastRow = sheet.getLastRow();
+  var revisionSweep = false;
+  if (startRow > lastRow) {
+    // Após concluir o backfill, reinicia uma varredura cíclica. Linhas sem
+    // alteração retornam como duplicatas idempotentes; conteúdo alterado é
+    // promovido pelo backend para nova revisão canônica imutável.
+    startRow = 2;
+    revisionSweep = true;
+  }
   var rowsToRead = Math.min(limit, lastRow - startRow + 1);
-  if (rowsToRead <= 0) return { ok: true, complete: true, sent: 0, errors: 0, lastRow: lastRow };
+  if (rowsToRead <= 0) return {
+    ok: true, complete: true, sent: 0, skipped: 0, errors: 0,
+    lastRow: lastRow, revisionSweep: revisionSweep
+  };
 
   var width = sheet.getLastColumn();
   var headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0];
@@ -115,6 +127,7 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
   var rawValues = dataRange.getValues();
   var sent = 0;
   var duplicates = 0;
+  var skipped = 0;
   var errors = 0;
   var planned = 0;
   var lastAcceptedRow = startRow - 1;
@@ -128,7 +141,14 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
       // canônicos em centavos são derivados separadamente, sem alterar a Sheet.
       var sourceRecord = wmgjFirestoreRowObject_(headers, row);
       var rowHash = wmgjFirestoreHashString_(JSON.stringify(sourceRecord));
-      var record = wmgjFirestoreAddCanonicalMoney_(headers, rawValues[offset], row, sourceRecord, config.moneyFields || {});
+      if (config.bankStatementAdapter && wmgjFirestoreSkipBankStatementRow_(sourceRecord)) {
+        skipped++;
+        lastAcceptedRow = rowNumber;
+        return;
+      }
+      var record = config.bankStatementAdapter
+        ? wmgjFirestoreBankStatementRecord_(headers, rawValues[offset], row, sourceRecord, rowHash)
+        : wmgjFirestoreAddCanonicalMoney_(headers, rawValues[offset], row, sourceRecord, config.moneyFields || {});
       var entityKey = wmgjFirestoreEntityKey_(sheetName, record, rowNumber);
       var legacyStatus = String(
         record.status ||
@@ -147,8 +167,9 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
         eventType: 'ENTITY_UPSERT',
         orgId: bridgeConfig.orgId,
         occurredAt: occurredAt.toISOString(),
-        // O primeiro backfill trata a linha legada como versão congelada 1.
-        // Mudanças posteriores falham fechadas até existir versionador durável.
+        // Sheets legadas não oferecem revisão monotônica por linha. O produtor
+        // envia a versão-fonte 1 e o hash do conteúdo; o backend AURORA mantém
+        // a revisão canônica monotônica e imutável da entidade.
         sourceVersion: 1,
         idempotencyKey: [bridgeConfig.orgId, 'SHEETS', ss.getId(), sheetName, rowNumber, rowHash].join(':'),
         entityType: config.entityType,
@@ -186,7 +207,9 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
       if (bridgeConfig.dryRun) return;
       if (response.accepted) sent++;
       if (response.duplicate) duplicates++;
-      if (response.ok && (response.accepted || response.duplicate)) lastAcceptedRow = rowNumber;
+      if (response.ok && (response.accepted || response.duplicate)) {
+        lastAcceptedRow = rowNumber;
+      }
     } catch (error) {
       errors++;
       wmgjFirestoreLog_('MIGRATION_ROW', 'ERRO', {
@@ -209,7 +232,9 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
     planned: planned,
     sent: sent,
     duplicates: duplicates,
+    skipped: skipped,
     errors: errors,
+    revisionSweep: revisionSweep,
     nextRow: bridgeConfig.dryRun ? startRow : Number(props.getProperty(checkpointKey) || startRow)
   };
 }
@@ -273,6 +298,71 @@ function wmgjFirestoreAddCanonicalMoney_(headers, rawRow, displayRow, sourceReco
   return output;
 }
 
+function wmgjFirestoreSkipBankStatementRow_(sourceRecord) {
+  var data = String((sourceRecord || {}).data || '').trim().toUpperCase();
+  var dcto = String((sourceRecord || {}).dcto || '').trim();
+  var categoria = String((sourceRecord || {}).categoria || '').trim().toUpperCase();
+  if (!data || data === 'DATA' || data.indexOf('BLOCO_') === 0 || data.indexOf('MÚLTIPLAS') === 0 || data.indexOf('MULTIPLAS') === 0) return true;
+  if (!dcto) return true;
+  return ['SALDO_INICIAL', 'SALDO_FINAL', 'SALDO_INVESTIMENTO', 'RESUMO_MENSAL', 'RESUMO_DIARIO', 'EVIDENCIA_CONCILIACAO'].indexOf(categoria) >= 0;
+}
+
+function wmgjFirestoreBankStatementRecord_(headers, rawRow, displayRow, sourceRecord, rowHash) {
+  var normalizedHeaders = (headers || []).map(function(header, index) {
+    return wmgjFirestoreNormalizeHeader_(header, index);
+  });
+  function centsFor_(name) {
+    var index = normalizedHeaders.indexOf(name);
+    if (index < 0) return null;
+    return wmgjFirestoreBrlToCents_(rawRow[index], displayRow[index]);
+  }
+
+  var creditCents = centsFor_('credito');
+  var debitCents = centsFor_('debito');
+  if (creditCents !== null && debitCents !== null && creditCents !== 0 && debitCents !== 0) {
+    throw new Error('BANK_CREDIT_DEBIT_CONFLICT');
+  }
+  var amountCents = creditCents !== null && creditCents !== 0
+    ? Math.abs(creditCents)
+    : (debitCents !== null ? -Math.abs(debitCents) : null);
+  if (amountCents === null) throw new Error('BANK_AMOUNT_MISSING');
+
+  var record = {
+    amountCents: amountCents,
+    currency: 'BRL',
+    kind: amountCents >= 0 ? 'CREDIT' : 'DEBIT',
+    source_row_hash: rowHash,
+    classification_source: 'WMGJ_SHEETS_08_EXTRATOS_BRADESCO',
+    // Identidade estável: data + documento bancário. Valor não participa
+    // para que uma correção de montante gere nova versão da mesma entidade.
+    transaction_id_hash: wmgjFirestoreHashString_([
+      sourceRecord.data || '',
+      sourceRecord.dcto || ''
+    ].join('|'))
+  };
+
+  if (sourceRecord.data) record.date = String(sourceRecord.data).slice(0, 64);
+  if (sourceRecord.categoria) record.category = String(sourceRecord.categoria).slice(0, 128);
+  if (sourceRecord.status_conciliacao) {
+    record.status = String(sourceRecord.status_conciliacao).slice(0, 128);
+    record.reconciliation_status = record.status;
+  }
+
+  var competenceCandidates = [
+    sourceRecord.competencia_vinculada,
+    sourceRecord.competencia_assistencial_relacionada,
+    sourceRecord.competencia
+  ];
+  for (var i = 0; i < competenceCandidates.length; i++) {
+    var competence = wmgjFirestoreCompetencia_(competenceCandidates[i]);
+    if (competence) {
+      record.competence = competence;
+      break;
+    }
+  }
+  return record;
+}
+
 function wmgjFirestoreNormalizeHeader_(header, index) {
   var key = String(header || 'col_' + (index + 1))
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -324,7 +414,8 @@ function wmgjFirestoreEntityKey_(sheetName, record, rowNumber) {
     record.id_operacao,
     record.id_origem,
     record.message_id,
-    record.id_drive
+    record.id_drive,
+    record.transaction_id_hash
   ].filter(function(value) { return Boolean(value); });
   if (strongCandidates.length > 0) {
     return [sheetName, strongCandidates[0]].join(':');
@@ -338,6 +429,7 @@ function wmgjFirestoreEntityKey_(sheetName, record, rowNumber) {
 
 function wmgjFirestoreFindCompetence_(record) {
   var fields = [
+    record.competence,
     record.competencia_assistencial,
     record.competencia_faturamento,
     record.competencia_nfs_e,

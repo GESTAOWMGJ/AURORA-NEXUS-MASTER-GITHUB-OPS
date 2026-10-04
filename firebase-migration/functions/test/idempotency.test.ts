@@ -20,6 +20,25 @@ test("idempotência devolve duplicate apenas para o mesmo payloadHash", () => {
   );
 });
 
+test("idempotência preserva versão e revisão canônicas no replay", () => {
+  assert.deepEqual(
+    decideIdempotency({
+      payloadHash: "a".repeat(64),
+      entityId: "entity-1",
+      eventId: "event-1",
+      versionId: "version-1",
+      revision: 4
+    }, "a".repeat(64)),
+    {
+      kind: "DUPLICATE",
+      entityId: "entity-1",
+      eventId: "event-1",
+      versionId: "version-1",
+      revision: 4
+    }
+  );
+});
+
 test("mesma chave com payload diferente é conflito", () => {
   assert.deepEqual(
     decideIdempotency({ payloadHash: "a".repeat(64) }, "b".repeat(64)),

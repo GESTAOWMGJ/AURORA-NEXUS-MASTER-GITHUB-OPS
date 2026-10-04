@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -13,7 +14,15 @@ function source(overrides: Partial<ProjectionSource> = {}): ProjectionSource {
 const context = { orgId: "wmgj", competence: "2026-09" };
 
 function migrationAdapterContext(): Record<string, unknown> {
-  const adapter: Record<string, unknown> = {};
+  const adapter: Record<string, unknown> = {
+    Utilities: {
+      DigestAlgorithm: { SHA_256: "SHA_256" },
+      Charset: { UTF_8: "UTF_8" },
+      computeDigest: (_algorithm: string, value: string) =>
+        [...createHash("sha256").update(String(value), "utf8").digest()]
+          .map((byte) => byte > 127 ? byte - 256 : byte)
+    }
+  };
   vm.createContext(adapter);
   const testDir = path.dirname(fileURLToPath(import.meta.url));
   const migrationRoot = path.resolve(testDir, "../..");
@@ -137,6 +146,72 @@ test("E2E sanitizado adapta Sheet pt-BR e projeta recebimento em centavos", () =
   assert.equal(projection.financial.receivedAmount, 1234.56);
   assert.equal(projection.dataQuality.invalidFinancialRecords, 0);
   assert.equal(projection.sanitized, true);
+});
+
+test("adaptador Bradesco usa crédito/débito real e remove narrativa identificável", () => {
+  const adapter = migrationAdapterContext() as any;
+  const headers = [
+    "DATA", "DESCRICAO", "DCTO", "CREDITO", "DEBITO", "SALDO",
+    "CATEGORIA", "COMPETENCIA_VINCULADA", "FONTE", "SUBCATEGORIA",
+    "COMPETENCIA_ASSISTENCIAL_RELACIONADA", "NF_RELACIONADA",
+    "STATUS_CONCILIACAO", "ID_DRIVE", "OBS"
+  ];
+  const display = [
+    "01/10/2026", "PIX ENVIADO DES: PRESTADOR", "1442376", "",
+    "R$ 6.600,00", "R$ 59.881,73", "REPASSE_MEDICO", "2026-10",
+    "Bradesco_02102026_090336.PDF", "PRESTADOR_PJ", "", "",
+    "PENDENTE_COMPETENCIA_E_DOCUMENTO", "GMAIL:message", "texto operacional"
+  ];
+  const raw = [...display];
+  raw[4] = 6600 as any;
+  raw[5] = 59881.73 as any;
+
+  const sourceRecord = adapter.wmgjFirestoreRowObject_(headers, display);
+  const rowHash = "a".repeat(64);
+  const adapted = adapter.wmgjFirestoreBankStatementRecord_(headers, raw, display, sourceRecord, rowHash);
+
+  assert.equal(adapted.amountCents, -660000);
+  assert.equal(adapted.currency, "BRL");
+  assert.equal(adapted.kind, "DEBIT");
+  assert.equal(adapted.competence, "2026-10");
+  assert.equal(adapted.category, "REPASSE_MEDICO");
+  assert.equal(adapted.status, "PENDENTE_COMPETENCIA_E_DOCUMENTO");
+  assert.match(adapted.transaction_id_hash, /^[a-f0-9]{64}$/);
+  assert.equal(adapted.source_row_hash, rowHash);
+  assert.equal(adapted.descricao, undefined);
+  assert.equal(adapted.dcto, undefined);
+  assert.equal(adapted.saldo, undefined);
+  assert.equal(adapted.obs, undefined);
+  assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_(sourceRecord), false);
+});
+
+test("identidade Bradesco permanece estável quando apenas o valor é corrigido", () => {
+  const adapter = migrationAdapterContext() as any;
+  const headers = ["DATA", "DCTO", "CREDITO", "DEBITO", "CATEGORIA", "COMPETENCIA_VINCULADA", "STATUS_CONCILIACAO"];
+  const firstDisplay = ["01/10/2026", "1442376", "", "R$ 6.600,00", "REPASSE_MEDICO", "2026-10", "PENDENTE"];
+  const correctedDisplay = ["01/10/2026", "1442376", "", "R$ 6.500,00", "REPASSE_MEDICO", "2026-10", "PENDENTE"];
+  const firstRaw = [...firstDisplay];
+  const correctedRaw = [...correctedDisplay];
+  firstRaw[3] = 6600 as any;
+  correctedRaw[3] = 6500 as any;
+
+  const firstSource = adapter.wmgjFirestoreRowObject_(headers, firstDisplay);
+  const correctedSource = adapter.wmgjFirestoreRowObject_(headers, correctedDisplay);
+  const first = adapter.wmgjFirestoreBankStatementRecord_(headers, firstRaw, firstDisplay, firstSource, "a".repeat(64));
+  const corrected = adapter.wmgjFirestoreBankStatementRecord_(headers, correctedRaw, correctedDisplay, correctedSource, "b".repeat(64));
+
+  assert.equal(first.transaction_id_hash, corrected.transaction_id_hash);
+  assert.equal(first.amountCents, -660000);
+  assert.equal(corrected.amountCents, -650000);
+});
+
+test("adaptador Bradesco ignora cabeçalhos, saldos e resumos sem DCTO", () => {
+  const adapter = migrationAdapterContext() as any;
+  assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_({ data: "DATA", dcto: "DCTO" }), true);
+  assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_({ data: "BLOCO_CONCILIACAO_02102026" }), true);
+  assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_({ data: "30/09/2026", categoria: "RESUMO_MENSAL" }), true);
+  assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_({ data: "01/10/2026", categoria: "SALDO_INVESTIMENTO" }), true);
+  assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_({ data: "01/10/2026", dcto: "1443272", categoria: "REPASSE_MEDICO" }), false);
 });
 
 test("motor calcula SLA, cobertura e filtra competência", () => {
