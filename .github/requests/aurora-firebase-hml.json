@@ -2,11 +2,11 @@
   "requestVersion": 1,
   "confirmation": "DEPLOY_HOMOLOGATION",
   "projectId": "wmgj-hml-jfn-20260927",
-  "authorizedScope": "PR108_FIN_SOC_NATIVE_ROUTINES",
-  "expectedSourceSha": "76ca23c9e585750b2cb1360e107ef7b1fb55ed63",
+  "authorizedScope": "PR115_HML_AUTH_CONTRACT_FIX",
+  "expectedSourceSha": "551b3254853fe0b117dd7f1b4d29b3c87e2df911",
   "sourceMutation": false,
   "productionMutation": false,
   "clinicalSensitiveEnabled": false,
-  "requestedAt": "2026-10-03",
-  "requestReason": "PUBLISH_PR108_FIN_SOC_NATIVE_ROUTINES"
+  "requestedAt": "2026-10-04",
+  "requestReason": "PUBLISH_PR115_HML_AUTH_CONTRACT_FIX"
 }

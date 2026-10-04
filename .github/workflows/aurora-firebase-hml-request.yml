@@ -41,7 +41,7 @@ jobs:
             .confirmation == "DEPLOY_HOMOLOGATION" and
             .projectId == $project and
             .projectId == "wmgj-hml-jfn-20260927" and
-            (.authorizedScope == "PR72_APP_PRIMARY_INPUT" or .authorizedScope == "PR70_FIREBASE_NATIVE_DOCUMENTS" or .authorizedScope == "PR108_FIN_SOC_NATIVE_ROUTINES") and
+            (.authorizedScope == "PR72_APP_PRIMARY_INPUT" or .authorizedScope == "PR70_FIREBASE_NATIVE_DOCUMENTS" or .authorizedScope == "PR108_FIN_SOC_NATIVE_ROUTINES" or .authorizedScope == "PR115_HML_AUTH_CONTRACT_FIX") and
             .sourceMutation == false and
             .productionMutation == false and
             .clinicalSensitiveEnabled == false and
