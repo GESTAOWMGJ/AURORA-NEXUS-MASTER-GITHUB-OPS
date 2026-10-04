@@ -250,6 +250,14 @@ test("RC1.1 post-ingest repairs stale runtime, refreshes canonical native projec
   assert.match(workflow, /nativeInsightVerified:\$nativeVerified/);
 });
 
+test("Firebase predeploy installs locked Functions dependencies before build", () => {
+  const config = readFileSync(new URL("../../firebase.json", import.meta.url), "utf8");
+  const installIndex = config.indexOf('npm --prefix \\"$RESOURCE_DIR\\" ci --ignore-scripts');
+  const buildIndex = config.indexOf('npm --prefix \\"$RESOURCE_DIR\\" run build');
+  assert.ok(installIndex >= 0, "locked Functions dependency install must be declared");
+  assert.ok(buildIndex > installIndex, "Functions dependencies must be installed before build");
+});
+
 test("RC1.1 post-ingest workflow parses as YAML", () => {
   const workflowPath = fileURLToPath(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url));
   const ruby = "require 'yaml'; begin; YAML.load_file(ARGV[0]); puts 'YAML_OK'; rescue => e; STDERR.puts(e.message); exit 2; end";
