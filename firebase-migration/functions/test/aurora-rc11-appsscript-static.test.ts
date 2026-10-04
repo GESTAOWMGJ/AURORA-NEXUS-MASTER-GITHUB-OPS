@@ -147,7 +147,12 @@ test("RC1.1 keeps baseline runtime non-secret and gates ingest redeploy behind a
   const approvalIndex = workflow.indexOf('secretManagerKeyringRotationApproved');
   const redeployIndex = workflow.indexOf('--only functions:ingestWmgjEvent');
   assert.ok(approvalIndex >= 0 && redeployIndex > approvalIndex);
-  assert.doesNotMatch(workflow, /--only functions(?!:ingestWmgjEvent)/);
+  assert.doesNotMatch(workflow, /--only functions(?:\s|$)/);
+  const functionDeploys = [...workflow.matchAll(/--only (functions:[^\n]+)/g)].map((match) => match[1]);
+  assert.deepEqual(functionDeploys.sort(), [
+    "functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting",
+    "functions:ingestWmgjEvent",
+  ].sort());
   assert.doesNotMatch(workflow, /secretmanager\.secrets\.setIamPolicy/);
   assert.match(workflow, /functionsRedeployed:false/);
 });
@@ -206,6 +211,19 @@ test("RC1.1 reconciles the exact entity ids returned by real ingestion", () => {
   assert.match(workflow, /projection-patch-response\.json/);
   assert.match(workflow, /RC1\.1 SHADOW PATCH rejected/);
   assert.match(workflow, /projectionEnabled\.booleanValue==true/);
+});
+
+test("RC1.1 primary workflow repairs stale native routes before authenticated smoke", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const repairIndex = workflow.indexOf("Repair native routes only if Hosting target is stale");
+  const smokeIndex = workflow.indexOf("Test native intelligence against real HML data");
+  assert.ok(repairIndex >= 0 && smokeIndex > repairIndex);
+  assert.match(workflow, /session_status.*__sessionLogin/);
+  assert.match(workflow, /native_status.*api\/native-insight/);
+  assert.match(workflow, /functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting/);
+  assert.match(workflow, /SESSION_LOGIN_HTTP_/);
+  assert.match(workflow, /NATIVE_INSIGHT_.*_HTTP_/);
+  assert.match(workflow, /targetedDeploy:\["auroraNexusSessionLogin","auroraNexusNativeInsight","hosting"\]/);
 });
 
 test("RC1.1 post-ingest workflow repairs only stale native routes and always verifies kill switch", () => {
