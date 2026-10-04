@@ -221,6 +221,38 @@ jobs:
             sourceMutation:false
           }' > "$RUNNER_TEMP/rc11-post-evidence/native-routes.json"
 
+      - name: Verify canonical native projection
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          access_token="$(gcloud auth print-access-token)"
+          auth_header="$(printf '%s: %s %s' 'Authorization' 'Bearer' "$access_token")"
+          url="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj/dashboardSnapshots/current"
+          ready=false
+          for _ in $(seq 1 40); do
+            if curl -fsS -H "$auth_header" "$url" > "$RUNNER_TEMP/native-projection.json" 2>/dev/null && jq -e '
+              .fields.competence.stringValue=="2026-05" and
+              .fields.nativeDataPlane.mapValue.fields.storage.stringValue=="FIRESTORE" and
+              .fields.nativeDataPlane.mapValue.fields.sourceAccessDuringInference.booleanValue==false and
+              (.fields.financialCents.mapValue.fields.invoicedCents.integerValue|tonumber)==4950000 and
+              (.fields.financialCents.mapValue.fields.receivedCents.integerValue|tonumber)==4950000 and
+              (.fields.financialCents.mapValue.fields.outstandingCents.integerValue|tonumber)==0 and
+              .fields.dataQuality.mapValue.fields.complete.booleanValue==true
+            ' "$RUNNER_TEMP/native-projection.json" >/dev/null 2>&1; then ready=true; break; fi
+            sleep 30
+          done
+          test "$ready" = true
+          jq '{
+            gate:"CANONICAL_NATIVE_PROJECTION_VERIFIED",
+            snapshotId:.fields.snapshotId.stringValue,
+            competence:.fields.competence.stringValue,
+            storage:.fields.nativeDataPlane.mapValue.fields.storage.stringValue,
+            sourceAccessDuringInference:.fields.nativeDataPlane.mapValue.fields.sourceAccessDuringInference.booleanValue,
+            productionMutation:false,
+            sourceMutation:false
+          }' "$RUNNER_TEMP/native-projection.json" > "$RUNNER_TEMP/rc11-post-evidence/native-projection.json"
+
       - name: Test native intelligence against real HML data
         env:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
@@ -251,39 +283,6 @@ jobs:
 
           private_status="$(curl --silent --show-error --output "$d/private.html" --write-out '%{http_code}' --cookie "$d/cookies.txt" "${base_url}/")"
           test "$private_status" = "200"
-          refresh_csrf="$(python3 -c 'import json,re,sys; html=open(sys.argv[1],encoding="utf-8").read(); match=re.search(r"const csrf=(\{[^;]+\});const capabilities=",html); assert match, "CSRF_BLOCK_MISSING"; token=json.loads(match.group(1)).get("refresh",""); assert token, "REFRESH_CSRF_MISSING"; print(token)' "$d/private.html")"
-          test -n "$refresh_csrf"
-          refresh_status="$(curl --silent --show-error --output "$d/refresh.json" --write-out '%{http_code}' -X POST \
-            -H 'Content-Type: application/json' \
-            -H "Origin: ${base_url}" \
-            -H 'Sec-Fetch-Site: same-origin' \
-            -H "X-Aurora-CSRF: ${refresh_csrf}" \
-            --cookie "$d/cookies.txt" \
-            --data '{}' \
-            "${base_url}/api/refresh")"
-          if [ "$refresh_status" != "200" ]; then
-            echo "NATIVE_REFRESH_HTTP_${refresh_status}" >&2
-            cat "$d/refresh.json" >&2 || true
-            exit 95
-          fi
-          jq -e '
-            .ok==true and
-            .projection.competence=="2026-05" and
-            .projection.nativeDataPlane.storage=="FIRESTORE" and
-            .projection.nativeDataPlane.sourceAccessDuringInference==false and
-            (.projection.financialCents.invoicedCents|tonumber)==4950000 and
-            (.projection.financialCents.receivedCents|tonumber)==4950000 and
-            (.projection.financialCents.outstandingCents|tonumber)==0
-          ' "$d/refresh.json" >/dev/null
-          jq -n '{
-            gate:"CANONICAL_NATIVE_REFRESH_VERIFIED",
-            competence:"2026-05",
-            storage:"FIRESTORE",
-            sourceAccessDuringInference:false,
-            productionMutation:false,
-            sourceMutation:false
-          }' > "$RUNNER_TEMP/rc11-post-evidence/native-refresh.json"
-
           for intent in REVENUE_RISK SLA_RISK NEXT_ACTION EXECUTIVE; do
             native_status="$(curl --silent --show-error --output "$d/${intent}.json" --write-out '%{http_code}' -H 'Accept: application/json' --cookie "$d/cookies.txt" "${base_url}/api/native-insight?intent=${intent}")"
             if [ "$native_status" != "200" ]; then
