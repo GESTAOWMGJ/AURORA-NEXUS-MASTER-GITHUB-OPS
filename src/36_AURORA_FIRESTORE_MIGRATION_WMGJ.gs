@@ -35,6 +35,7 @@ function wmgjFirestoreMigrationMap_() {
     },
     '08_EXTRATOS_BRADESCO': {
       entityType: 'bankTransaction', sensitivity: 'RESTRICTED',
+      bankStatementAdapter: true,
       moneyFields: {
         amountCents: ['valor', 'valor_lancamento', 'valor_transacao'],
         liquidatedAmountCents: ['valor_liquidado', 'valor_conciliado']
@@ -128,7 +129,10 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
       // canônicos em centavos são derivados separadamente, sem alterar a Sheet.
       var sourceRecord = wmgjFirestoreRowObject_(headers, row);
       var rowHash = wmgjFirestoreHashString_(JSON.stringify(sourceRecord));
-      var record = wmgjFirestoreAddCanonicalMoney_(headers, rawValues[offset], row, sourceRecord, config.moneyFields || {});
+      if (config.bankStatementAdapter && wmgjFirestoreSkipBankStatementRow_(sourceRecord)) return;
+      var record = config.bankStatementAdapter
+        ? wmgjFirestoreBankStatementRecord_(headers, rawValues[offset], row, sourceRecord, rowHash)
+        : wmgjFirestoreAddCanonicalMoney_(headers, rawValues[offset], row, sourceRecord, config.moneyFields || {});
       var entityKey = wmgjFirestoreEntityKey_(sheetName, record, rowNumber);
       var legacyStatus = String(
         record.status ||
@@ -273,6 +277,71 @@ function wmgjFirestoreAddCanonicalMoney_(headers, rawRow, displayRow, sourceReco
   return output;
 }
 
+function wmgjFirestoreSkipBankStatementRow_(sourceRecord) {
+  var data = String((sourceRecord || {}).data || '').trim().toUpperCase();
+  var dcto = String((sourceRecord || {}).dcto || '').trim();
+  var categoria = String((sourceRecord || {}).categoria || '').trim().toUpperCase();
+  if (!data || data === 'DATA' || data.indexOf('BLOCO_') === 0 || data.indexOf('MÚLTIPLAS') === 0 || data.indexOf('MULTIPLAS') === 0) return true;
+  if (!dcto) return true;
+  return ['SALDO_INICIAL', 'SALDO_FINAL', 'SALDO_INVESTIMENTO', 'RESUMO_MENSAL', 'RESUMO_DIARIO', 'EVIDENCIA_CONCILIACAO'].indexOf(categoria) >= 0;
+}
+
+function wmgjFirestoreBankStatementRecord_(headers, rawRow, displayRow, sourceRecord, rowHash) {
+  var normalizedHeaders = (headers || []).map(function(header, index) {
+    return wmgjFirestoreNormalizeHeader_(header, index);
+  });
+  function centsFor_(name) {
+    var index = normalizedHeaders.indexOf(name);
+    if (index < 0) return null;
+    return wmgjFirestoreBrlToCents_(rawRow[index], displayRow[index]);
+  }
+
+  var creditCents = centsFor_('credito');
+  var debitCents = centsFor_('debito');
+  if (creditCents !== null && debitCents !== null && creditCents !== 0 && debitCents !== 0) {
+    throw new Error('BANK_CREDIT_DEBIT_CONFLICT');
+  }
+  var amountCents = creditCents !== null && creditCents !== 0
+    ? Math.abs(creditCents)
+    : (debitCents !== null ? -Math.abs(debitCents) : null);
+  if (amountCents === null) throw new Error('BANK_AMOUNT_MISSING');
+
+  var record = {
+    amountCents: amountCents,
+    currency: 'BRL',
+    kind: amountCents >= 0 ? 'CREDIT' : 'DEBIT',
+    source_row_hash: rowHash,
+    classification_source: 'WMGJ_SHEETS_08_EXTRATOS_BRADESCO',
+    transaction_id_hash: wmgjFirestoreHashString_([
+      sourceRecord.data || '',
+      sourceRecord.dcto || '',
+      creditCents === null ? '' : String(creditCents),
+      debitCents === null ? '' : String(debitCents)
+    ].join('|'))
+  };
+
+  if (sourceRecord.data) record.date = String(sourceRecord.data).slice(0, 64);
+  if (sourceRecord.categoria) record.category = String(sourceRecord.categoria).slice(0, 128);
+  if (sourceRecord.status_conciliacao) {
+    record.status = String(sourceRecord.status_conciliacao).slice(0, 128);
+    record.reconciliation_status = record.status;
+  }
+
+  var competenceCandidates = [
+    sourceRecord.competencia_vinculada,
+    sourceRecord.competencia_assistencial_relacionada,
+    sourceRecord.competencia
+  ];
+  for (var i = 0; i < competenceCandidates.length; i++) {
+    var competence = wmgjFirestoreCompetencia_(competenceCandidates[i]);
+    if (competence) {
+      record.competence = competence;
+      break;
+    }
+  }
+  return record;
+}
+
 function wmgjFirestoreNormalizeHeader_(header, index) {
   var key = String(header || 'col_' + (index + 1))
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -324,7 +393,8 @@ function wmgjFirestoreEntityKey_(sheetName, record, rowNumber) {
     record.id_operacao,
     record.id_origem,
     record.message_id,
-    record.id_drive
+    record.id_drive,
+    record.transaction_id_hash
   ].filter(function(value) { return Boolean(value); });
   if (strongCandidates.length > 0) {
     return [sheetName, strongCandidates[0]].join(':');
@@ -338,6 +408,7 @@ function wmgjFirestoreEntityKey_(sheetName, record, rowNumber) {
 
 function wmgjFirestoreFindCompetence_(record) {
   var fields = [
+    record.competence,
     record.competencia_assistencial,
     record.competencia_faturamento,
     record.competencia_nfs_e,
