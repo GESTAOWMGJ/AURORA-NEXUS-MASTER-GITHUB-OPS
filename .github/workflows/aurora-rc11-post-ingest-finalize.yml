@@ -249,21 +249,7 @@ jobs:
 
           private_status="$(curl --silent --show-error --output "$d/private.html" --write-out '%{http_code}' --cookie "$d/cookies.txt" "${base_url}/")"
           test "$private_status" = "200"
-          refresh_csrf="$(python3 - "$d/private.html" <<'PY'
-import json
-import re
-import sys
-
-html = open(sys.argv[1], encoding="utf-8").read()
-match = re.search(r'const csrf=(\{[^;]+\});const capabilities=', html)
-if not match:
-    raise SystemExit(2)
-token = json.loads(match.group(1)).get("refresh", "")
-if not token:
-    raise SystemExit(3)
-print(token)
-PY
-          )"
+          refresh_csrf="$(python3 -c 'import json,re,sys; html=open(sys.argv[1],encoding="utf-8").read(); match=re.search(r"const csrf=(\\{[^;]+\\});const capabilities=",html); assert match, "CSRF_BLOCK_MISSING"; token=json.loads(match.group(1)).get("refresh",""); assert token, "REFRESH_CSRF_MISSING"; print(token)' "$d/private.html")"
           test -n "$refresh_csrf"
           refresh_status="$(curl --silent --show-error --output "$d/refresh.json" --write-out '%{http_code}' -X POST \
             -H 'Content-Type: application/json' \
