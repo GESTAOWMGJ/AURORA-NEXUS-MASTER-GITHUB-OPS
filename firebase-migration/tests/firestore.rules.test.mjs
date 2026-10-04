@@ -55,6 +55,25 @@ async function seed() {
       setDoc(doc(db, 'organizations/wmgj/members/ops-reader'), member('viewer', {
         permissions: ['operations.read']
       })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-reader'), member('viewer', {
+        permissions: ['clinical.read']
+      })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-no-facility'), member('viewer', {
+        permissions: ['clinical.read'],
+        facilityIds: []
+      })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-malformed-scope'), member('viewer', {
+        permissions: ['clinical.read'],
+        allFacilities: 'true',
+        facilityIds: 'facility-alpha'
+      })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-malformed-permission'), member('viewer', {
+        permissions: 'clinical.read'
+      })),
+      setDoc(doc(db, 'organizations/wmgj/members/clinical-inactive'), member('medical_auditor', {
+        active: false,
+        permissions: ['clinical.read']
+      })),
       setDoc(doc(db, 'organizations/wmgj/members/inactive'), member('auditor', {
         active: false,
         allFacilities: true,
@@ -124,6 +143,16 @@ async function seed() {
         orgId: 'wmgj',
         facilityId: 'facility-beta',
         status: 'OPEN'
+      }),
+      setDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-alpha'), {
+        orgId: 'wmgj',
+        facilityId: 'facility-alpha',
+        kind: 'SYNTHETIC'
+      }),
+      setDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-beta'), {
+        orgId: 'wmgj',
+        facilityId: 'facility-beta',
+        kind: 'SYNTHETIC'
       }),
       setDoc(doc(db, 'organizations/inactive-org/productivityRecords/op-disabled'), {
         orgId: 'inactive-org',
@@ -297,6 +326,30 @@ test('auditor médico não recebe financeiro ou operação por padrão', async (
     getDoc(doc(db, 'organizations/wmgj/productivityRecords/op-alpha'))
   );
 });
+
+for (const uid of ['medical', 'clinical-reader']) {
+  test(`clinicalEvidence permite ${uid} no orçamento real de expressões, apenas na unidade`, async () => {
+    const db = env.authenticatedContext(uid).firestore();
+    await assertSucceeds(
+      getDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-alpha'))
+    );
+    await assertFails(
+      getDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-beta'))
+    );
+  });
+}
+
+for (const uid of [
+  'operator', 'clinical-no-facility', 'clinical-malformed-scope',
+  'clinical-malformed-permission', 'clinical-inactive', 'no-membership'
+]) {
+  test(`clinicalEvidence nega ${uid} sem reduzir os gates para caber no orçamento`, async () => {
+    const db = env.authenticatedContext(uid).firestore();
+    await assertFails(
+      getDoc(doc(db, 'organizations/wmgj/clinicalEvidence/clinical-alpha'))
+    );
+  });
+}
 
 test('permissão granular pode liberar somente o domínio operacional', async () => {
   const db = env.authenticatedContext('ops-reader').firestore();
