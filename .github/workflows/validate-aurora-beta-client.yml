@@ -1,0 +1,44 @@
+name: Validate Aurora Beta Client and Hosting Closure
+on:
+  pull_request:
+    paths:
+      - 'desktop/beta/**'
+      - 'tools/windows/validate-aurora-beta.ps1'
+      - 'tools/aurora-hosting-surface.mjs'
+      - 'tests/aurora-*release.test.mjs'
+      - 'tests/aurora-hosting-surface.test.mjs'
+      - '.github/workflows/aurora-rc11-post-ingest-finalize.yml'
+      - '.github/workflows/validate-aurora-beta-client.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/beta/**'
+      - 'tools/windows/validate-aurora-beta.ps1'
+      - 'tools/aurora-hosting-surface.mjs'
+      - 'tests/aurora-*release.test.mjs'
+      - 'tests/aurora-hosting-surface.test.mjs'
+      - '.github/workflows/aurora-rc11-post-ingest-finalize.yml'
+      - '.github/workflows/validate-aurora-beta-client.yml'
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - run: node --test tests/aurora-hosting-surface.test.mjs tests/aurora-beta-release.test.mjs
+      - run: node tools/aurora-hosting-surface.mjs targets firebase-migration/firebase.json
+  windows-parser:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Parse using Windows PowerShell and verify payload without installation
+        shell: bash
+        run: |
+          set -euo pipefail
+          powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File tools/windows/validate-aurora-beta.ps1

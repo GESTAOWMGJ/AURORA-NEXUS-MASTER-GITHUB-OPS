@@ -225,20 +225,28 @@ test("RC1.1 primary workflow repairs stale native routes before authenticated sm
   assert.ok(workflow.includes('targetedDeploy:(($targets | split(",")) + ["hosting"]),'));
 });
 
-test("RC1.1 post-ingest workflow repairs only stale native routes and always verifies kill switch", () => {
+test("RC1.1 post-ingest verifies complete Hosting closure and always checks kill switch", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url), "utf8");
-  assert.match(workflow, /Repair Hosting rewrite targets only if native routes are stale/);
+  assert.match(workflow, /Repair the complete Hosting function closure before publishing routes/);
   assert.match(workflow, /session_status.*__sessionLogin/);
   assert.match(workflow, /native_status.*api\/native-insight/);
-  assert.ok(workflow.includes(".hosting.rewrites[]"));
-  assert.ok(workflow.includes('grep -Fq "functions:auroraNexusIntegrationPing"'));
-  assert.ok(workflow.includes('--only "${rewrite_targets},hosting"'));
+  assert.match(workflow, /ping_status.*api\/integration\/ping/);
+  assert.ok(workflow.includes('tools/aurora-hosting-surface.mjs'));
+  assert.ok(workflow.includes('targets="$(node "$checker" targets "$config")"'));
+  const functionsIndex = workflow.indexOf('--only "$targets"');
+  const closureIndex = workflow.indexOf('node "$checker" check', functionsIndex);
+  const hostingIndex = workflow.indexOf('--only hosting', functionsIndex);
+  assert.ok(functionsIndex > 0 && closureIndex > functionsIndex && hostingIndex > closureIndex);
+  assert.ok(workflow.includes('.code=="INVALID_INTEGRATION_KEY"'));
   assert.doesNotMatch(workflow, /--only functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting/);
   assert.doesNotMatch(workflow, /firestore databases restore/);
   assert.doesNotMatch(workflow, /auroraRc11EnviarAmostraReal/);
   assert.doesNotMatch(workflow, /secrets versions add/);
   assert.match(workflow, /Verify final Apps Script kill switch\n        if: always\(\)/);
-  assert.match(workflow, /nativeInsightVerified:\$nativeVerified/);
+  assert.ok(workflow.includes('nativeInsightVerified:($native=="success")'));
+  assert.ok(workflow.includes('realWmgjSample:($rec=="success")'));
+  assert.ok(workflow.includes('ingestedByThisWorkflow:false'));
+  assert.ok(workflow.includes('RECONCILE_OUTCOME: ${{ steps.reconcile.outcome }}'));
 });
 
 test("RC1.1 post-ingest workflow parses as YAML", () => {

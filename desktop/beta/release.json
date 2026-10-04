@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "product": "AURORA NEXUS",
+  "productVersion": "1.0.0-rc.1",
+  "clientVersion": "0.3.0-beta.20261004.1",
+  "channel": "HOMOLOGATION_BETA",
+  "sourceCommit": "52fb02862e31920d558733d99356e627b4109fd7",
+  "portalUrl": "https://wmgj-hml-jfn-20260927.web.app/",
+  "projectId": "wmgj-hml-jfn-20260927",
+  "orgId": "wmgj",
+  "canonicalStore": "FIRESTORE_HML",
+  "localBootstrapStore": "INFRASTRUCTURE_ONLY_NOT_A_REPLICA",
+  "authenticatedCloudSync": "NOT_VERIFIED",
+  "productionApproved": false,
+  "platforms": {
+    "windows": {
+      "delivery": "EDGE_WEB_CLIENT",
+      "nativeBinary": false
+    },
+    "macos": {
+      "delivery": "EXISTING_APP_PRESERVED",
+      "installedBaseline": "1.6.0",
+      "updateStatus": "REQUIRES_NATIVE_BASELINE_RECONCILIATION"
+    },
+    "ios": {
+      "delivery": "WEB_APP_ADD_TO_HOME_SCREEN",
+      "nativeBinary": false,
+      "deviceTested": false
+    },
+    "web": {
+      "delivery": "EXISTING_AUTHENTICATED_PORTAL",
+      "deployedCommit": "NOT_ATTESTED_BY_THIS_MANIFEST"
+    }
+  }
+}
