@@ -225,19 +225,28 @@ test("RC1.1 primary workflow repairs stale native routes before authenticated sm
   assert.ok(workflow.includes('targetedDeploy:(($targets | split(",")) + ["hosting"]),'));
 });
 
-test("RC1.1 post-ingest workflow repairs only stale native routes and always verifies kill switch", () => {
+test("RC1.1 post-ingest repairs stale runtime, refreshes canonical native projection and preserves truthful final evidence", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url), "utf8");
   assert.match(workflow, /Repair Hosting rewrite targets only if native routes are stale/);
   assert.match(workflow, /session_status.*__sessionLogin/);
   assert.match(workflow, /native_status.*api\/native-insight/);
+  assert.match(workflow, /nativeDataPlane\.mapValue\.fields\.storage\.stringValue=="FIRESTORE"/);
+  assert.match(workflow, /nativeDataPlane\.mapValue\.fields\.sourceAccessDuringInference\.booleanValue==false/);
   assert.ok(workflow.includes(".hosting.rewrites[]"));
   assert.ok(workflow.includes('grep -Fq "functions:auroraNexusIntegrationPing"'));
-  assert.ok(workflow.includes('--only "${rewrite_targets},hosting"'));
-  assert.doesNotMatch(workflow, /--only functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting/);
+  assert.ok(workflow.includes('projection_target="functions:auroraNexusProjectionEngine"'));
+  assert.ok(workflow.includes('--only "${rewrite_targets},${projection_target},hosting"'));
+  assert.match(workflow, /\/api\/refresh/);
+  assert.match(workflow, /X-Aurora-CSRF: \${refresh_csrf}/);
+  assert.match(workflow, /CANONICAL_NATIVE_REFRESH_VERIFIED/);
   assert.doesNotMatch(workflow, /firestore databases restore/);
   assert.doesNotMatch(workflow, /auroraRc11EnviarAmostraReal/);
   assert.doesNotMatch(workflow, /secrets versions add/);
   assert.match(workflow, /Verify final Apps Script kill switch\n        if: always\(\)/);
+  assert.match(workflow, /mkdir -p "\$RUNNER_TEMP\/rc11-post-evidence"/);
+  assert.match(workflow, /realWmgjSample:\$realSample/);
+  assert.match(workflow, /reconciled:\$reconciled/);
+  assert.match(workflow, /shadowVerified:\$shadowVerified/);
   assert.match(workflow, /nativeInsightVerified:\$nativeVerified/);
 });
 
