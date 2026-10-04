@@ -1,0 +1,18 @@
+{
+  "confirmation": "RUN_RC11_POST_INGEST_HML",
+  "requestVersion": 1,
+  "projectId": "wmgj-hml-jfn-20260927",
+  "orgId": "wmgj",
+  "competence": "2026-05",
+  "invoiceEntityId": "2ecf22486a131eb73a6c3461d193065b9159d724409f0021",
+  "bankEntityId": "548ad8845970183fc0c4eb419ca030114ce448000d0b163b",
+  "expectedInvoiceCents": 4950000,
+  "expectedReceivedCents": 4950000,
+  "projectionMode": "SHADOW",
+  "projectionEnabled": true,
+  "productionMutation": false,
+  "sourceMutation": false,
+  "clinicalSensitiveEnabled": false,
+  "requestedAt": "2026-10-04T06:55:00Z",
+  "requestReason": "RC11_POST_INGEST_FINALIZE_AFTER_RECONCILIATION"
+}
