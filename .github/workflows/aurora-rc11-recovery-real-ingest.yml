@@ -434,6 +434,8 @@ jobs:
             --planned "${rewrite_targets//functions:/}"
           repaired=false
           if [ "$session_status" != "405" ] || [ "$native_status" != "401" ]; then
+            npm --prefix functions ci --no-audit --no-fund
+            echo "FUNCTION_DEPENDENCIES_READY"
             npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only "${rewrite_targets},hosting"
             repaired=true
             ready=false
