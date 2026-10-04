@@ -25,6 +25,13 @@ test("aprendizado orgânico promove capacidade, não dados entre clientes", () =
   assert.equal(summary.organicPromotion.validatedOutcomeRequired, true);
   assert.equal(summary.organicPromotion.humanReviewRequired, true);
   assert.equal(summary.organicPromotion.tenantAgnosticAbstractionRequired, true);
+  assert.equal(summary.organicPromotion.everyOperationalChallengeRecorded, true);
+  assert.equal(summary.organicPromotion.unresolvedChallengesRemainOpen, true);
+  assert.equal(summary.organicPromotion.validatedSolutionsFeedBaseEngine, true);
+  assert.equal(summary.organicPromotion.versionedEvidenceAndRegressionRequired, true);
+  assert.equal(summary.ingestionRecoveryPolicy.executorState, "SPECIFIED_PENDING_RUNTIME_VALIDATION");
+  assert.equal(summary.ingestionRecoveryPolicy.automaticBroadReplayAllowed, false);
+  assert.equal(summary.ingestionRecoveryPolicy.observedFindingIsValidatedOutcome, false);
 });
 
 

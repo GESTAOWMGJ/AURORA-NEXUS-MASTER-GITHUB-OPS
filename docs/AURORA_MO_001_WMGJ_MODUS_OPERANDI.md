@@ -1,5 +1,53 @@
 # AURORA-MO-001 — Modus Operandi Mestre WMGJ → AURORA NEXUS
 
+## Diretriz permanente do titular — desafios alimentam o motor
+
+Decisão de 04/10/2026: aplicar este modus operandi a todo desafio e solução relacionados
+à operação AURORA, WMGJ e clientes autorizados. Cada atendimento deve alimentar o mesmo
+organismo operacional: registrar o desafio, fatos e limites de acesso; confrontar fontes;
+formular e testar a menor solução; medir o resultado; incorporar o aprendizado versionado
+ao motor base. Reutilizar primeiro capacidades existentes e preservar a linhagem.
+
+O registro do desafio é obrigatório mesmo quando não houver solução concluída. Nesse caso,
+manter pendência, evidência faltante, responsável e próxima verificação. Proposta, teste local,
+CI, implantação e resultado real são estados distintos. Só desfechos comprovados podem
+fundamentar promoção orgânica. Não transformar hipótese em regra operacional ativa.
+
+Regras gerais, contratos e regressões pertencem à fonte mestre/registro nativo. Evidência
+privada, documentos e valores permanecem no tenant autorizado. O motor aprende capacidades
+abstratas; não acumula dados de clientes no repositório público nem amplia suas permissões.
+Cada entrega deve declarar até onde o aprendizado foi efetivamente persistido ou implantado.
+
+## Aprendizado de ingestão — revisão de 04/10/2026
+
+Regra transversal M01/M08/M10: toda falha de alimentação deve confrontar mensagem-fonte,
+filtro/janela, execução do gatilho na conta proprietária, frescor do índice, contrato de
+colunas, arquivo pelo hash, fila e idempotência. Atualização da planilha ou deploy verde
+não demonstram ingestão. Um watchdog que limpa a trava não demonstra recuperação do trabalho.
+
+O registro nativo expõe `ingestionRecoveryPolicy`, ligado às rotinas legadas existentes.
+Isso é política incorporada ao motor, não executor de replay ativo nem resultado orgânico homologado.
+`diagnosticarMensagemGmailWMGJ(messageId)` realiza inspeção somente leitura por ID exato.
+Não instala gatilhos, não altera mensagens, não escreve documentos nem lança valores.
+
+Cabeçalho divergente ou linhas incompatíveis bloqueiam novas escritas no indexador.
+Não restaurar apenas o cabeçalho de uma tabela mista: preservar snapshot, reconciliar cada
+layout e registrar transformação, antes/depois e revisão. Linhas de erro ou cópia sem
+arquivo não constituem conclusão e não podem suprimir uma retomada.
+
+Replay autorizado deve ler apenas a mensagem indicada; comparar os bytes com hash completo;
+reutilizar a identidade legada para não reinserir eventos antigos; reconciliar arquivos
+órfãos antes de criar; usar exclusão mútua compartilhada por todos os escritores; completar
+somente destinos ausentes; registrar tentativa, etapa, hashes e recibos. Repetição deve
+criar zero documentos, linhas de índice, itens de fila e lançamentos adicionais. Auditoria
+de tentativa pode acrescentar eventos. OCR/parser automático opera apenas nos arquivos do
+manifesto; metadados não comprovam competência ou valor. Não chamar o pipeline global.
+
+Cada caso fica no tenant como achado aberto até resolução comprovada. Apenas regra
+abstrata, teste sintético, revisão e desfecho validado podem alimentar a promoção orgânica.
+Nenhum e-mail, identificador, anexo, saldo ou dado de cliente entra no código público.
+Consultar `docs/AURORA_GMAIL_SINGLE_MESSAGE_RECOVERY.md` para os gates de recuperação.
+
 ## Status
 
 - Código: `AURORA-MO-001`

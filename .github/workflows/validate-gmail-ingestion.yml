@@ -1,0 +1,20 @@
+name: Validate Gmail Ingestion Contract
+on:
+  pull_request:
+    paths:
+      - 'src/09*.gs'
+      - 'tools/test-gmail-ingestion.cjs'
+      - '.github/workflows/validate-gmail-ingestion.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tools/audit-appscript.js
+      - run: node --test tools/test-gmail-ingestion.cjs
