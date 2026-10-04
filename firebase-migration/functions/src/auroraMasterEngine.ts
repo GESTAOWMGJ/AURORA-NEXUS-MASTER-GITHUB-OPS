@@ -1,181 +1,117 @@
 import { generateNativeInsight, type NativeInsightFinding } from "./auroraNativeIntelligence.js";
 import { nativeRoutineSummary } from "./auroraNativeRoutines.js";
+import { assessNativeData, DATA_GOVERNANCE_POLICY, knownCount, masterCommandSurface } from "./auroraDataGovernance.js";
 
-export const AURORA_MASTER_ENGINE_VERSION = "0.1.0-native-governed";
-
+export const AURORA_MASTER_ENGINE_VERSION = "0.2.0-data-governance";
 type MasterContext = {
   actionSummary?: Record<string, unknown>;
   financialStatus?: Record<string, unknown> | null;
   release?: Record<string, unknown>;
 };
-
-const SEVERITY_RANK: Record<NativeInsightFinding["severity"], number> = {
-  CRITICAL: 5,
-  HIGH: 4,
-  MEDIUM: 3,
-  LOW: 2,
-  INFO: 1
-};
-
+const SEVERITY_RANK: Record<NativeInsightFinding["severity"], number> = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, INFO: 1 };
 function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
-
-function finiteNumber(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
 function insightFindings(value: Record<string, unknown>): NativeInsightFinding[] {
-  return Array.isArray(value.findings)
-    ? value.findings.filter((item): item is NativeInsightFinding =>
-        Boolean(item) && typeof item === "object" && typeof (item as NativeInsightFinding).code === "string")
-    : [];
+  return Array.isArray(value.findings) ? value.findings.filter((item): item is NativeInsightFinding =>
+    Boolean(item) && typeof item === "object" && typeof (item as NativeInsightFinding).code === "string") : [];
 }
-
 function uniqueFindings(groups: NativeInsightFinding[][]): NativeInsightFinding[] {
   const byCode = new Map<string, NativeInsightFinding>();
   for (const item of groups.flat()) {
     const current = byCode.get(item.code);
-    if (!current || SEVERITY_RANK[item.severity] > SEVERITY_RANK[current.severity]) {
-      byCode.set(item.code, item);
-    }
+    if (!current || SEVERITY_RANK[item.severity] > SEVERITY_RANK[current.severity]) byCode.set(item.code, item);
   }
-  return [...byCode.values()]
-    .sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || a.code.localeCompare(b.code));
+  return [...byCode.values()].sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || a.code.localeCompare(b.code));
 }
 
+/** Pure planner: no tool calls, financial writes, source access, or model provider. */
 export function buildMasterOperationalState(
-  projection: Record<string, unknown>,
-  context: MasterContext = {},
-  now = new Date()
+  projection: Record<string, unknown>, context: MasterContext = {}, now = new Date()
 ): Record<string, unknown> {
-  const executive = generateNativeInsight(projection, "EXECUTIVE", now);
-  const revenue = generateNativeInsight(projection, "REVENUE_RISK", now);
-  const sla = generateNativeInsight(projection, "SLA_RISK", now);
-  const quality = generateNativeInsight(projection, "DATA_QUALITY", now);
-  const next = generateNativeInsight(projection, "NEXT_ACTION", now);
-
-  const findings = uniqueFindings([
-    insightFindings(executive),
-    insightFindings(revenue),
-    insightFindings(sla),
-    insightFindings(quality)
-  ]).slice(0, 12);
-  const nextFinding = insightFindings(next)[0] ?? null;
-  const critical = findings.filter((item) => item.severity === "CRITICAL").length;
-  const high = findings.filter((item) => item.severity === "HIGH").length;
-  const summary = record(context.actionSummary);
-  const operations = record(projection.operations);
-  const hasActionSummary = Object.keys(summary).length > 0;
-  const openActions = hasActionSummary
-    ? finiteNumber(summary.open) + finiteNumber(summary.inProgress)
-    : finiteNumber(operations.openActions);
-  const overdueActions = hasActionSummary
-    ? finiteNumber(summary.overdue)
-    : finiteNumber(operations.overdueActions);
-  const routines = record(projection.nativeRoutines);
-  const routineState = Object.keys(routines).length > 0 ? routines : nativeRoutineSummary();
+  const assessment = assessNativeData(projection, now);
+  const denied = assessment.decision === "DENY";
+  // The data gate runs BEFORE inference, including the bootstrap's empty fallback.
+  const findings = denied ? [] : uniqueFindings([
+    insightFindings(generateNativeInsight(projection, "EXECUTIVE", now)),
+    insightFindings(generateNativeInsight(projection, "REVENUE_RISK", now)),
+    insightFindings(generateNativeInsight(projection, "SLA_RISK", now)),
+    insightFindings(generateNativeInsight(projection, "DATA_QUALITY", now))
+  ]);
+  const operations = denied ? {} : record(projection.operations);
+  // Do not merge a live, truncated, or cross-period action list into a canonical snapshot.
+  const openActions = knownCount(operations.openActions);
+  const overdueActions = knownCount(operations.overdueActions);
+  const workloadComplete = openActions !== null && overdueActions !== null;
+  const critical = findings.filter(item => item.severity === "CRITICAL").length;
+  const high = findings.filter(item => item.severity === "HIGH").length;
+  const nextFinding: NativeInsightFinding | null = denied ? {
+    code: "DATA_GOVERNANCE_BLOCKED", severity: "CRITICAL",
+    title: "Leitura operacional bloqueada pela governança de dados",
+    detail: assessment.reasonCodes.join(", "),
+    action: "Validar identidade, escopo, proveniência, qualidade e atualidade do snapshot no fluxo autorizado. Não ampliar permissões nem apagar evidências para liberar o motor.",
+    evidencePath: "projection.nativeDataPlane"
+  } : findings[0] ?? (!workloadComplete ? {
+    code: "WORKLOAD_UNPROVEN", severity: "HIGH", title: "Carga operacional não comprovada",
+    detail: "Contagens ausentes ou inválidas não representam zero.",
+    action: "Regenerar a projeção canônica e confirmar cobertura antes de decidir.", evidencePath: "projection.operations"
+  } : null);
+  const operationalState = denied || critical > 0 ? "BLOCKED"
+    : assessment.decision === "REVIEW" || !workloadComplete || findings.length > 0 || (overdueActions ?? 0) > 0 ? "ATTENTION" : "CONTROLLED";
+  const cycleStage = operationalState === "BLOCKED" ? "COMPROVAR"
+    : operationalState === "ATTENTION" ? "PRIORIZAR" : (openActions ?? 0) > 0 ? "AGIR" : "MEDIR";
   const release = record(context.release);
-  const financial = record(context.financialStatus);
-
-  const operationalState = critical > 0
-    ? "BLOCKED"
-    : high > 0 || overdueActions > 0
-      ? "ATTENTION"
-      : "CONTROLLED";
-  const cycleStage = critical > 0
-    ? "COMPROVAR"
-    : high > 0 || overdueActions > 0
-      ? "PRIORIZAR"
-      : openActions > 0
-        ? "AGIR"
-        : findings.length > 0
-          ? "VALIDAR"
-          : "MEDIR";
-
   return {
-    engine: "AURORA_MASTER_OPERATIONAL_ENGINE",
-    version: AURORA_MASTER_ENGINE_VERSION,
-    mode: "FIREBASE_NATIVE_GOVERNED",
-    externalProviderUsed: false,
-    externalAiRequired: false,
-    sourceAccessDuringInference: false,
-    explainable: true,
-    generatedAt: now.toISOString(),
-    operationalState,
-    cycleStage,
-    cycle: [
-      "OBSERVAR",
-      "INGESTAR",
-      "COMPROVAR",
-      "CONFRONTAR",
-      "DETECTAR",
-      "PRIORIZAR",
-      "AGIR",
-      "VALIDAR",
-      "MEDIR",
-      "APRENDER",
-      "REUTILIZAR"
-    ],
-    headline: nextFinding?.title ?? "Operação sem exceção prioritária detectada no snapshot atual.",
-    nextAction: nextFinding ? {
-      code: nextFinding.code,
-      severity: nextFinding.severity,
-      title: nextFinding.title,
-      detail: nextFinding.detail,
-      action: nextFinding.action,
-      evidencePath: nextFinding.evidencePath,
-      humanGate: ["CRITICAL", "HIGH"].includes(nextFinding.severity)
-    } : null,
-    priorities: findings,
+    engine: "AURORA_MASTER_OPERATIONAL_ENGINE", version: AURORA_MASTER_ENGINE_VERSION,
+    mode: "FIREBASE_NATIVE_GOVERNED", externalProviderUsed: false, externalAiRequired: false,
+    sourceAccessDuringInference: false, explainable: true,
+    generatedAt: Number.isFinite(now.getTime()) ? now.toISOString() : null,
+    operationalState, cycleStage,
+    cycle: ["OBSERVAR", "INGESTAR", "COMPROVAR", "CONFRONTAR", "DETECTAR", "PRIORIZAR", "AGIR", "VALIDAR", "MEDIR", "APRENDER", "REUTILIZAR"],
+    headline: nextFinding?.title ?? "Nenhuma exceção detectada neste recorte autorizado; isto não comprova ausência de risco.",
+    nextAction: nextFinding ? { ...nextFinding, humanGate: true } : null,
+    priorities: denied && nextFinding ? [nextFinding] : findings.slice(0, 12),
+    // Existing UI uses String(value). Keep presentation explicit; numeric metrics stay nullable.
     workload: {
-      openActions,
-      overdueActions,
-      criticalFindings: critical,
-      highFindings: high
+      openActions: openActions ?? "Sem fonte", overdueActions: overdueActions ?? "Sem fonte",
+      criticalFindings: denied ? "Não avaliado" : critical, highFindings: denied ? "Não avaliado" : high
     },
-    routines: routineState,
+    workloadMetrics: {
+      openActions, overdueActions, complete: workloadComplete,
+      criticalFindings: denied ? null : critical, highFindings: denied ? null : high
+    },
+    routines: nativeRoutineSummary(),
     financialGate: {
-      competence: projection.competence ?? null,
-      distributionState: financial.distributionGateState ?? null,
-      canApproveDistribution: financial.canApproveDistribution === true
+      competence: denied ? null : projection.competence ?? null,
+      distributionState: "USE_AUTHORIZED_FINANCIAL_ENDPOINT",
+      canApproveDistribution: false,
+      reason: "O Motor Mestre não autoriza distribuição. A decisão pertence ao endpoint autenticado com MFA, revisão e evidência financeira."
     },
     release: {
-      productVersion: release.productVersion ?? null,
-      releaseTrain: release.releaseTrain ?? null,
+      productVersion: release.productVersion ?? null, releaseTrain: release.releaseTrain ?? null,
       engineeringReadinessPercent: release.engineeringReadinessPercent ?? null
     },
-    commandSurface: [
-      { command: "REFRESH_PROJECTION", endpoint: "/api/refresh", humanGate: false, sourceMutation: false },
-      { command: "CREATE_REVIEW", endpoint: "/api/actions", humanGate: true, sourceMutation: false },
-      { command: "ACKNOWLEDGE_ACTION", endpoint: "/api/actions", humanGate: true, sourceMutation: false },
-      { command: "RESOLVE_WITH_EVIDENCE", endpoint: "/api/actions", humanGate: true, sourceMutation: false },
-      { command: "MANAGE_INTEGRATION", endpoint: "/api/integration-keys", humanGate: true, sourceMutation: false },
-      { command: "DISTRIBUTION_DECISION", endpoint: "/api/distribution-approval", humanGate: true, sourceMutation: false }
-    ],
+    commandSurface: masterCommandSurface(assessment.decision),
     governance: {
-      humanReviewForCriticalDecisions: true,
-      autonomousSourceMutation: false,
-      autonomousFinancialMovement: false,
-      autonomousClinicalDecision: false,
-      arbitraryCodeExecution: false,
-      tenantIsolationRequired: true,
-      auditTrailRequired: true
+      ...DATA_GOVERNANCE_POLICY, dataAssessment: assessment,
+      humanReviewForCriticalDecisions: true, autonomousSourceMutation: false,
+      autonomousFinancialMovement: false, autonomousClinicalDecision: false,
+      arbitraryCodeExecution: false, tenantIsolationRequired: true, auditTrailRequired: true,
+      executionAuthorization: "NOT_GRANTED_BY_MASTER",
+      controlCoverage: "MASTER_DATA_GATE_AND_COMMAND_PLANNING",
+      decisionTracePersisted: false,
+      auditNote: "Este objeto é uma avaliação; não é uma aprovação, um token de capacidade nem uma gravação no audit ledger."
     },
     knowledge: {
-      modusOperandi: "AURORA-MO-001",
-      organicLearning: "AURORA-ORG-001",
-      nativeIntelligence: "AURORA_NATIVE_INTELLIGENCE",
-      tenantRawDataTransfer: false
+      modusOperandi: "AURORA-MO-001", organicLearning: "AURORA-ORG-001",
+      dataGovernance: DATA_GOVERNANCE_POLICY.id,
+      nativeIntelligence: "AURORA_NATIVE_INTELLIGENCE", tenantRawDataTransfer: false,
+      modelWeightsTrained: false
     },
     source: {
-      type: "FIREBASE_CANONICAL_SNAPSHOT",
-      schemaVersion: projection.schemaVersion ?? null,
-      policyVersion: projection.policyVersion ?? null,
-      competence: projection.competence ?? null,
-      asOf: projection.asOf ?? projection.generatedAt ?? null
+      type: "FIREBASE_CANONICAL_SNAPSHOT", snapshotId: assessment.snapshotId, sourceHash: assessment.sourceHash,
+      schemaVersion: projection.schemaVersion ?? null, policyVersion: projection.policyVersion ?? null,
+      competence: denied ? null : projection.competence ?? null, asOf: denied ? null : projection.asOf ?? null
     }
   };
 }

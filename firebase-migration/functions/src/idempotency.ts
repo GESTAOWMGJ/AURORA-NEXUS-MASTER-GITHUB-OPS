@@ -2,11 +2,13 @@ export interface StoredIdempotencyRecord {
   payloadHash?: unknown;
   entityId?: unknown;
   eventId?: unknown;
+  versionId?: unknown;
+  revision?: unknown;
 }
 
 export type IdempotencyDecision =
   | { kind: "NEW" }
-  | { kind: "DUPLICATE"; entityId?: string; eventId?: string }
+  | { kind: "DUPLICATE"; entityId?: string; eventId?: string; versionId?: string; revision?: number }
   | { kind: "CONFLICT" };
 
 export type SourceVersionDecision = "ACCEPT" | "REGRESSION" | "CONFLICT";
@@ -29,7 +31,11 @@ export function decideIdempotency(
   return {
     kind: "DUPLICATE",
     ...(typeof existing.entityId === "string" ? { entityId: existing.entityId } : {}),
-    ...(typeof existing.eventId === "string" ? { eventId: existing.eventId } : {})
+    ...(typeof existing.eventId === "string" ? { eventId: existing.eventId } : {}),
+    ...(typeof existing.versionId === "string" ? { versionId: existing.versionId } : {}),
+    ...(typeof existing.revision === "number" && Number.isSafeInteger(existing.revision)
+      ? { revision: existing.revision }
+      : {})
   };
 }
 
