@@ -147,7 +147,12 @@ test("RC1.1 keeps baseline runtime non-secret and gates ingest redeploy behind a
   const approvalIndex = workflow.indexOf('secretManagerKeyringRotationApproved');
   const redeployIndex = workflow.indexOf('--only functions:ingestWmgjEvent');
   assert.ok(approvalIndex >= 0 && redeployIndex > approvalIndex);
-  assert.doesNotMatch(workflow, /--only functions(?!:ingestWmgjEvent)/);
+  assert.doesNotMatch(workflow, /--only functions(?:\s|$)/);
+  const functionDeploys = [...workflow.matchAll(/--only (functions:[^\n]+)/g)].map((match) => match[1]);
+  assert.deepEqual(functionDeploys.sort(), [
+    "functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting",
+    "functions:ingestWmgjEvent",
+  ].sort());
   assert.doesNotMatch(workflow, /secretmanager\.secrets\.setIamPolicy/);
   assert.match(workflow, /functionsRedeployed:false/);
 });
