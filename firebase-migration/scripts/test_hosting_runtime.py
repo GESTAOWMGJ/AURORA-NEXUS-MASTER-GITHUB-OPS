@@ -63,6 +63,26 @@ class HostingRuntimeTest(unittest.TestCase):
                                  text=True, capture_output=True)
             self.assertEqual(run.returncode == 0, success, run.stderr)
 
+    def test_protected_deploy_includes_every_hosting_rewrite_function(self):
+        root = Path(__file__).resolve().parents[2]
+        config = json.loads((root / "firebase-migration/firebase.json").read_text())
+        workflow = (root / ".github/workflows/deploy-aurora-firebase.yml").read_text()
+        sites = config["hosting"] if isinstance(config["hosting"], list) else [config["hosting"]]
+        rewrite_functions = {
+            rewrite["function"]["functionId"]
+            for site in sites
+            for rewrite in site.get("rewrites", [])
+            if "function" in rewrite
+        }
+        deploy = re.search(r"firebase-tools@[\d.]+ deploy[^\r\n]*--only ([^ ]+)", workflow)
+        self.assertIsNotNone(deploy)
+        deployed_functions = {
+            target.removeprefix("functions:")
+            for target in deploy[1].split(",")
+            if target.startswith("functions:")
+        }
+        self.assertEqual(rewrite_functions - deployed_functions, set())
+
 
 if __name__ == "__main__":
     unittest.main()

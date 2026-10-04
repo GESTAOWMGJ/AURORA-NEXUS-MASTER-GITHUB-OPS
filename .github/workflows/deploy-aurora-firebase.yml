@@ -384,7 +384,7 @@ jobs:
           test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
           git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
-          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusCryptoSelfTest,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -400,6 +400,7 @@ jobs:
             "auroraNexusBootstrap",
             "auroraNexusNativeInsight",
             "auroraNexusMasterEngine",
+            "auroraNexusCryptoSelfTest",
             "auroraNexusAction",
             "auroraNexusRefresh",
             "auroraNexusProjectionEngine",
