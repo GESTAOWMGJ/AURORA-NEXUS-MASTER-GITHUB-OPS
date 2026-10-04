@@ -202,6 +202,27 @@ test("RC1.1 reconciles the exact entity ids returned by real ingestion", () => {
   assert.doesNotMatch(workflow, /\.fields\.record\.mapValue/);
 });
 
+test("RC1.1 post-ingest workflow repairs only stale native routes and always verifies kill switch", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url), "utf8");
+  assert.match(workflow, /Repair native routes only if Hosting target is stale/);
+  assert.match(workflow, /session_status.*__sessionLogin/);
+  assert.match(workflow, /native_status.*api\/native-insight/);
+  assert.match(workflow, /functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting/);
+  assert.doesNotMatch(workflow, /firestore databases restore/);
+  assert.doesNotMatch(workflow, /auroraRc11EnviarAmostraReal/);
+  assert.doesNotMatch(workflow, /secrets versions add/);
+  assert.match(workflow, /Verify final Apps Script kill switch\n        if: always\(\)/);
+  assert.match(workflow, /nativeInsightVerified:\$nativeVerified/);
+});
+
+test("RC1.1 post-ingest workflow parses as YAML", () => {
+  const workflowPath = fileURLToPath(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url));
+  const ruby = "require 'yaml'; begin; YAML.load_file(ARGV[0]); puts 'YAML_OK'; rescue => e; STDERR.puts(e.message); exit 2; end";
+  const parsed = spawnSync("ruby", ["-e", ruby, workflowPath], { encoding: "utf8" });
+  assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
+  assert.equal(parsed.stdout.includes("YAML_OK"), true, parsed.stderr || parsed.stdout);
+});
+
 test("Apps Script deploy validates execution but never runs operational cycles automatically", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/deploy-appscript.yml", import.meta.url), "utf8");
   assert.match(workflow, /actions\/checkout@v7/);
