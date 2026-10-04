@@ -418,6 +418,44 @@ jobs:
           done
           test "$ready" = true
 
+      - name: Repair native routes only if Hosting target is stale
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        working-directory: firebase-migration
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = "wmgj-hml-jfn-20260927"
+          mkdir -p "$RUNNER_TEMP/rc11-post-evidence"
+          base_url="https://${PROJECT_ID}.web.app"
+          session_status="$(curl --silent --show-error --output "$RUNNER_TEMP/session-route.json" --write-out '%{http_code}' "${base_url}/__sessionLogin")"
+          native_status="$(curl --silent --show-error --output "$RUNNER_TEMP/native-route.json" --write-out '%{http_code}' "${base_url}/api/native-insight?intent=EXECUTIVE")"
+          repaired=false
+          if [ "$session_status" != "405" ] || [ "$native_status" != "401" ]; then
+            npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting
+            repaired=true
+            ready=false
+            for _ in $(seq 1 20); do
+              session_status="$(curl --silent --show-error --output "$RUNNER_TEMP/session-route.json" --write-out '%{http_code}' "${base_url}/__sessionLogin")"
+              native_status="$(curl --silent --show-error --output "$RUNNER_TEMP/native-route.json" --write-out '%{http_code}' "${base_url}/api/native-insight?intent=EXECUTIVE")"
+              if [ "$session_status" = "405" ] && [ "$native_status" = "401" ]; then ready=true; break; fi
+              sleep 6
+            done
+            test "$ready" = true
+          fi
+          test "$session_status" = "405"
+          jq -e '.ok==false and .code=="METHOD_NOT_ALLOWED"' "$RUNNER_TEMP/session-route.json" >/dev/null
+          test "$native_status" = "401"
+          jq -e '.ok==false and .code=="AUTH_REQUIRED"' "$RUNNER_TEMP/native-route.json" >/dev/null
+          jq -n --argjson repaired "$repaired" --arg session "$session_status" --arg native "$native_status" '{
+            gate:"NATIVE_ROUTES_READY",
+            repaired:$repaired,
+            sessionLoginStatus:$session,
+            nativeInsightStatus:$native,
+            targetedDeploy:["auroraNexusSessionLogin","auroraNexusNativeInsight","hosting"],
+            productionMutation:false,
+            sourceMutation:false
+          }' > "$RUNNER_TEMP/rc11-post-evidence/native-routes.json"
+
       - name: Test native intelligence against real HML data
         env:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
@@ -434,18 +472,36 @@ jobs:
           jq -nc --arg iss "$DEPLOY_SERVICE_ACCOUNT" --arg sub "$DEPLOY_SERVICE_ACCOUNT" --arg uid "$SMOKE_UID" --arg aud "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit" --argjson iat "$now" --argjson exp "$exp" '{iss:$iss,sub:$sub,aud:$aud,iat:$iat,exp:$exp,uid:$uid}' > "$d/claims.json"
           gcloud iam service-accounts sign-jwt "$d/claims.json" "$d/custom.jwt" --iam-account "$DEPLOY_SERVICE_ACCOUNT" --project "$PROJECT_ID" >/dev/null
           jq -nc --arg token "$(cat "$d/custom.jwt")" '{token:$token,returnSecureToken:true}' > "$d/auth.json"
-          curl -fsS -H 'Content-Type: application/json' --data-binary @"$d/auth.json" "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${api_key}" > "$d/auth-response.json"
+          auth_status="$(curl --silent --show-error --output "$d/auth-response.json" --write-out '%{http_code}' -H 'Content-Type: application/json' --data-binary @"$d/auth.json" "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${api_key}")"
+          test "$auth_status" = "200"
           id_token="$(jq -r '.idToken//empty' "$d/auth-response.json")"; test -n "$id_token"
           base_url="https://${PROJECT_ID}.web.app"
           jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$d/session.json"
-          curl -fsS -X POST -H 'Content-Type: application/json' -H "Origin: ${base_url}" -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$d/cookies.txt" --data-binary @"$d/session.json" "${base_url}/__sessionLogin" >/dev/null
+          session_status="$(curl --silent --show-error --output "$d/session-response.json" --write-out '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${base_url}" -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$d/cookies.txt" --data-binary @"$d/session.json" "${base_url}/__sessionLogin")"
+          if [ "$session_status" != "204" ]; then
+            echo "SESSION_LOGIN_HTTP_${session_status}" >&2
+            cat "$d/session-response.json" >&2 || true
+            exit 93
+          fi
           for intent in REVENUE_RISK SLA_RISK NEXT_ACTION EXECUTIVE; do
-            curl -fsS -H 'Accept: application/json' --cookie "$d/cookies.txt" "${base_url}/api/native-insight?intent=${intent}" > "$d/${intent}.json"
+            native_status="$(curl --silent --show-error --output "$d/${intent}.json" --write-out '%{http_code}' -H 'Accept: application/json' --cookie "$d/cookies.txt" "${base_url}/api/native-insight?intent=${intent}")"
+            if [ "$native_status" != "200" ]; then
+              echo "NATIVE_INSIGHT_${intent}_HTTP_${native_status}" >&2
+              cat "$d/${intent}.json" >&2 || true
+              exit 94
+            fi
             jq -e '.ok==true and .insight.engine=="AURORA_NATIVE_INTELLIGENCE" and .insight.externalProviderUsed==false and .insight.source.competence=="2026-05"' "$d/${intent}.json" >/dev/null
           done
           jq -e '[.insight.findings[]?|select(.code=="REVENUE_GAP")]|length==0' "$d/REVENUE_RISK.json" >/dev/null
           jq -e '[.insight.findings[]?|select(.code=="SLA_OVERDUE")]|length==0' "$d/SLA_RISK.json" >/dev/null
-          jq -n --arg r "$(jq -r '.insight.headline' "$d/REVENUE_RISK.json")" --arg s "$(jq -r '.insight.headline' "$d/SLA_RISK.json")" --arg n "$(jq -r '.insight.headline' "$d/NEXT_ACTION.json")" --arg e "$(jq -r '.insight.headline' "$d/EXECUTIVE.json")" '{gate:"NATIVE_INSIGHT_VERIFIED",externalProviderUsed:false,revenueHeadline:$r,slaHeadline:$s,nextActionHeadline:$n,executiveHeadline:$e}' > "$RUNNER_TEMP/rc11-evidence/native-intelligence.json"
+          jq -n --arg r "$(jq -r '.insight.headline' "$d/REVENUE_RISK.json")" --arg s "$(jq -r '.insight.headline' "$d/SLA_RISK.json")" --arg n "$(jq -r '.insight.headline' "$d/NEXT_ACTION.json")" --arg e "$(jq -r '.insight.headline' "$d/EXECUTIVE.json")" '{
+            gate:"NATIVE_INSIGHT_VERIFIED",
+            externalProviderUsed:false,
+            revenueHeadline:$r,
+            slaHeadline:$s,
+            nextActionHeadline:$n,
+            executiveHeadline:$e
+          }' > "$RUNNER_TEMP/rc11-post-evidence/native-intelligence.json"
 
       - name: Final kill switch and evidence
         run: |
