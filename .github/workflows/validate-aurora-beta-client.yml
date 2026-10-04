@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'desktop/beta/**'
+      - 'tools/windows/validate-aurora-beta.ps1'
       - 'tools/aurora-hosting-surface.mjs'
       - 'tests/aurora-*release.test.mjs'
       - 'tests/aurora-hosting-surface.test.mjs'
@@ -12,6 +13,7 @@ on:
     branches: [main]
     paths:
       - 'desktop/beta/**'
+      - 'tools/windows/validate-aurora-beta.ps1'
       - 'tools/aurora-hosting-surface.mjs'
       - 'tests/aurora-*release.test.mjs'
       - 'tests/aurora-hosting-surface.test.mjs'
@@ -36,13 +38,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Parse using Windows PowerShell and verify payload without installation
-        shell: powershell
+        shell: bash
         run: |
-          $ErrorActionPreference='Stop'
-          foreach($f in Get-ChildItem desktop/beta -Filter '*.ps1'){
-            $t=$null; $e=$null
-            $null=[System.Management.Automation.Language.Parser]::ParseFile($f.FullName,[ref]$t,[ref]$e)
-            if($e){throw ($e | Out-String)}
-          }
-          powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File desktop/beta/Client.ps1 -Action Verify
-          if($LASTEXITCODE -ne 0){throw 'Client integrity failed.'}
+          set -euo pipefail
+          powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File tools/windows/validate-aurora-beta.ps1
