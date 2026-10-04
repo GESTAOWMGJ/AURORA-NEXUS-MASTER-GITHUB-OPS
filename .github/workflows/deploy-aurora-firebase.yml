@@ -12,6 +12,14 @@ on:
         required: true
         default: "VALIDATE_ONLY"
         type: string
+      deployment_mode:
+        description: "BOOTSTRAP requires projection off; SHADOW_UPDATE preserves an existing authorized SHADOW projection"
+        required: true
+        default: "BOOTSTRAP"
+        type: choice
+        options:
+          - BOOTSTRAP
+          - SHADOW_UPDATE
       expected_main_sha:
         description: "Optional exact main SHA required for this deployment request"
         required: false
@@ -176,6 +184,7 @@ jobs:
           project_id: ${{ inputs.project_id }}
       - name: Preflight protected homologation resources
         env:
+          DEPLOYMENT_MODE: ${{ inputs.deployment_mode || 'BOOTSTRAP' }}
           PROJECT_ID: ${{ inputs.project_id }}
           APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
           DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
@@ -186,6 +195,10 @@ jobs:
           test "$GITHUB_REF" = "refs/heads/main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$PROJECT_ID" = "$APPROVED_PROJECT"
+          case "$DEPLOYMENT_MODE" in
+            BOOTSTRAP|SHADOW_UPDATE) ;;
+            *) echo "::error::HML_DEPLOYMENT_MODE_INVALID"; exit 44 ;;
+          esac
           active_account="$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')"
           test "$active_account" = "$DEPLOY_SERVICE_ACCOUNT"
 
@@ -254,10 +267,11 @@ jobs:
           org_json="$(curl --fail --silent --show-error --max-time 30 \
             -H "Authorization: Bearer ${access_token}" \
             "$org_url")"
-          jq -e '
+          if ! jq -e --arg mode "$DEPLOYMENT_MODE" '
             .fields.active.booleanValue == true and
             .fields.environment.stringValue == "HOMOLOGATION" and
-            .fields.projectionEnabled.booleanValue == false and
+            (($mode == "BOOTSTRAP" and .fields.projectionEnabled.booleanValue == false) or
+             ($mode == "SHADOW_UPDATE" and .fields.projectionEnabled.booleanValue == true)) and
             .fields.projectionMode.stringValue == "SHADOW" and
             .fields.organicEnabled.booleanValue == true and
             ([.fields.organicSectors.arrayValue.values[]?.stringValue] | index("AUDIT")) != null and
@@ -265,7 +279,10 @@ jobs:
             .fields.clinicalSensitiveEnabled.booleanValue == false and
             .fields.productionMutation.booleanValue == false and
             .fields.sourceMutation.booleanValue == false
-          ' <<<"$org_json" >/dev/null
+          ' <<<"$org_json" >/dev/null; then
+            echo "::error::HML_ORGANIZATION_STATE_MISMATCH mode=$DEPLOYMENT_MODE"
+            exit 45
+          fi
 
           smoke_uid_path="$(node -p 'encodeURIComponent(process.argv[1])' "$smoke_uid")"
           member_json="$(curl --fail --silent --show-error --max-time 30 \
@@ -283,11 +300,10 @@ jobs:
             )
           ' <<<"$member_json" >/dev/null
 
-          # First HML deploy stays recovery-safe without creating a parallel
-          # Firestore database. No operational source data is allowed yet.
-          # Recovery requires PITR plus a recent READY managed backup.
-          # A real restore rehearsal remains mandatory before real ingestion
-          # or promotion of Firebase as an operational source.
+          # BOOTSTRAP retains the original projection-off gate. SHADOW_UPDATE
+          # is an explicitly approved update; it never toggles projection state.
+          # Existing SHADOW data requires a READY backup no older than 24 hours.
+          # Neither mode authorizes new ingestion or production promotion.
           test "$(jq -r '.pointInTimeRecoveryEnablement // empty' <<<"$db_json")" = "POINT_IN_TIME_RECOVERY_ENABLED"
 
           schedules_json="$(gcloud firestore backups schedules list \
@@ -301,6 +317,10 @@ jobs:
             | last
             | .name // empty
           ' <<<"$backups_json")"
+          if [ "$DEPLOYMENT_MODE" = "SHADOW_UPDATE" ] && [ -z "$backup_resource" ]; then
+            echo "::error::HML_SHADOW_READY_BACKUP_REQUIRED"
+            exit 46
+          fi
           if [ -n "$backup_resource" ]; then
             backup_json="$(curl --fail --silent --show-error --max-time 30 \
               -H "Authorization: Bearer ${access_token}" \
@@ -312,6 +332,27 @@ jobs:
               ((.snapshotTime // "") | length > 0) and
               ((.expireTime // "") | length > 0)
             ' <<<"$backup_json" >/dev/null
+            if [ "$DEPLOYMENT_MODE" = "SHADOW_UPDATE" ]; then
+              backup_snapshot="$(jq -r '.snapshotTime' <<<"$backup_json")"
+              backup_expiry="$(jq -r '.expireTime' <<<"$backup_json")"
+              python3 - "$backup_snapshot" "$backup_expiry" <<'PY'
+          from datetime import datetime, timezone
+          import sys
+          try:
+              snapshot = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+              expiry = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
+              now = datetime.now(timezone.utc)
+              valid = (snapshot.tzinfo is not None and expiry.tzinfo is not None
+                       and 0 <= (now - snapshot).total_seconds() <= 86400
+                       and expiry > now)
+          except (ValueError, TypeError, IndexError):
+              valid = False
+          if not valid:
+              print("::error::HML_SHADOW_BACKUP_NOT_RECENT_OR_EXPIRED", file=sys.stderr)
+              raise SystemExit(47)
+          print("HML_SHADOW_BACKUP_RECENCY_VERIFIED")
+          PY
+            fi
           else
             echo "No READY managed backup yet; bootstrap allowed only for an operationally empty HML database."
           fi
@@ -325,6 +366,10 @@ jobs:
           jq -e '
             ([.collectionIds[]? | select(. != "organizations")] | length) == 0
           ' <<<"$collections_json" >/dev/null
+          if ! jq -e '(.nextPageToken // "") == ""' <<<"$collections_json" >/dev/null; then
+            echo "::error::HML_ROOT_COLLECTIONS_INCOMPLETE"
+            exit 48
+          fi
       - name: Deploy Functions, Hosting, Rules and indexes
         working-directory: firebase-migration
         env:

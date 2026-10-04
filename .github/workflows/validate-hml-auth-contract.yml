@@ -6,11 +6,13 @@ on:
     paths:
       - '.github/workflows/**'
       - 'scripts/tests/test_hml_auth_contract.py'
+      - 'scripts/tests/test_hml_shadow_update.py'
   push:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - 'scripts/tests/test_hml_auth_contract.py'
+      - 'scripts/tests/test_hml_shadow_update.py'
 
 permissions:
   contents: read
@@ -44,3 +46,4 @@ jobs:
         run: |
           set -euo pipefail
           python -m unittest discover -s scripts/tests -p 'test_hml_auth_contract.py' -v
+          python -m unittest discover -s scripts/tests -p 'test_hml_shadow_update.py' -v
