@@ -81,6 +81,13 @@
         }
       },
       {
+        "source": "/api/master-engine",
+        "function": {
+          "functionId": "auroraNexusMasterEngine",
+          "region": "southamerica-east1"
+        }
+      },
+      {
         "source": "/organic",
         "function": {
           "functionId": "auroraNexusOrganic",
