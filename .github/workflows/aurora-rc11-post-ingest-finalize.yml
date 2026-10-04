@@ -257,6 +257,38 @@ jobs:
             sourceMutation:false
           }' > "$RUNNER_TEMP/rc11-post-evidence/native-routes.json"
 
+      - name: Verify canonical native projection
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          access_token="$(gcloud auth print-access-token)"
+          auth_header="$(printf '%s: %s %s' 'Authorization' 'Bearer' "$access_token")"
+          url="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj/dashboardSnapshots/current"
+          ready=false
+          for _ in $(seq 1 40); do
+            if curl -fsS -H "$auth_header" "$url" > "$RUNNER_TEMP/native-projection.json" 2>/dev/null && jq -e '
+              .fields.competence.stringValue=="2026-05" and
+              .fields.nativeDataPlane.mapValue.fields.storage.stringValue=="FIRESTORE" and
+              .fields.nativeDataPlane.mapValue.fields.sourceAccessDuringInference.booleanValue==false and
+              (.fields.financialCents.mapValue.fields.invoicedCents.integerValue|tonumber)==4950000 and
+              (.fields.financialCents.mapValue.fields.receivedCents.integerValue|tonumber)==4950000 and
+              (.fields.financialCents.mapValue.fields.outstandingCents.integerValue|tonumber)==0 and
+              .fields.dataQuality.mapValue.fields.complete.booleanValue==true
+            ' "$RUNNER_TEMP/native-projection.json" >/dev/null 2>&1; then ready=true; break; fi
+            sleep 30
+          done
+          test "$ready" = true
+          jq '{
+            gate:"CANONICAL_NATIVE_PROJECTION_VERIFIED",
+            snapshotId:.fields.snapshotId.stringValue,
+            competence:.fields.competence.stringValue,
+            storage:.fields.nativeDataPlane.mapValue.fields.storage.stringValue,
+            sourceAccessDuringInference:.fields.nativeDataPlane.mapValue.fields.sourceAccessDuringInference.booleanValue,
+            productionMutation:false,
+            sourceMutation:false
+          }' "$RUNNER_TEMP/native-projection.json" > "$RUNNER_TEMP/rc11-post-evidence/native-projection.json"
+
       - name: Test native intelligence against real HML data
         env:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}

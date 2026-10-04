@@ -246,6 +246,8 @@ test("RC1.1 post-ingest waits for canonical native projection without elevating 
   assert.match(workflow, /Repair Hosting rewrite targets only if native routes are stale/);
   assert.match(workflow, /session_status.*__sessionLogin/);
   assert.match(workflow, /native_status.*api\/native-insight/);
+  assert.match(workflow, /Verify canonical native projection/);
+  assert.match(workflow, /CANONICAL_NATIVE_PROJECTION_VERIFIED/);
   assert.match(workflow, /nativeDataPlane\.mapValue\.fields\.storage\.stringValue=="FIRESTORE"/);
   assert.match(workflow, /nativeDataPlane\.mapValue\.fields\.sourceAccessDuringInference\.booleanValue==false/);
   assert.ok(workflow.includes(".hosting.rewrites[]"));
