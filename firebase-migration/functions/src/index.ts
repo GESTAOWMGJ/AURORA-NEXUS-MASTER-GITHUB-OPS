@@ -134,9 +134,21 @@ function deterministicId(entityType: string, entityKey: string): string {
 export function immutableEntityVersionId(
   entityType: string,
   entityKey: string,
-  sourceVersion: number
+  revision: number
 ): string {
-  return sha256Hex(`v1:${entityType}:${entityKey}:${sourceVersion}`).slice(0, 48);
+  return sha256Hex(`v1:${entityType}:${entityKey}:revision:${revision}`).slice(0, 48);
+}
+
+export function canonicalEntityRevision(value: unknown): number | null {
+  if (value === undefined || value === null) return 0;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) return null;
+  return value;
+}
+
+export function nextCanonicalEntityRevision(value: unknown): number | null {
+  const current = canonicalEntityRevision(value);
+  if (current === null || current >= Number.MAX_SAFE_INTEGER) return null;
+  return current + 1;
 }
 
 function safeLogError(error: unknown): string {
@@ -236,8 +248,6 @@ export const ingestWmgjEvent = onRequest(
       const idemRef = orgRef.collection("integrationEvents").doc(idempotencyId);
       const nonceRef = orgRef.collection("requestNonces").doc(nonceId);
       const entityRef = orgRef.collection(collection).doc(entityId);
-      const versionId = immutableEntityVersionId(event.entityType, event.entityKey, event.sourceVersion);
-      const versionRef = orgRef.collection("entityVersions").doc(versionId);
       const auditRef = orgRef.collection("auditEvents").doc(idempotencyId);
       const checkpointRef = orgRef.collection("runtimeCheckpoints").doc("ingestion");
 
@@ -246,7 +256,6 @@ export const ingestWmgjEvent = onRequest(
         const nonceSnap = await tx.get(nonceRef);
         const idemSnap = await tx.get(idemRef);
         const entitySnap = await tx.get(entityRef);
-        const versionSnap = await tx.get(versionRef);
 
         const organizationRejection = ingestOrganizationRejection(
           orgSnap.exists,
@@ -265,29 +274,32 @@ export const ingestWmgjEvent = onRequest(
           throw new IngestDomainError(409, "IDEMPOTENCY_CONFLICT");
         }
 
-        tx.create(nonceRef, {
-          orgId: event.orgId,
-          keyId: authHeaders.keyId,
-          nonceHash: nonceId,
-          acceptedAt: FieldValue.serverTimestamp(),
-          expiresAt: Timestamp.fromMillis(Date.now() + NONCE_TTL_MILLISECONDS)
-        });
-
         if (idempotency.kind === "DUPLICATE") {
+          tx.create(nonceRef, {
+            orgId: event.orgId,
+            keyId: authHeaders.keyId,
+            nonceHash: nonceId,
+            acceptedAt: FieldValue.serverTimestamp(),
+            expiresAt: Timestamp.fromMillis(Date.now() + NONCE_TTL_MILLISECONDS)
+          });
           return {
             duplicate: true,
             entityId: idempotency.entityId || entityId,
             eventId: idempotency.eventId || event.eventId,
-            versionId
+            versionId: idempotency.versionId ?? null,
+            revision: idempotency.revision ?? null
           };
-        }
-        if (versionSnap.exists) {
-          throw new IngestDomainError(409, "ENTITY_VERSION_CONFLICT");
         }
 
         const previous: Record<string, unknown> | null = entitySnap.exists
           ? entitySnap.data() ?? null
           : null;
+        const occurredAt = Timestamp.fromDate(new Date(event.occurredAt));
+        const currentRevision = canonicalEntityRevision(previous?.revision);
+        if (currentRevision === null) {
+          throw new IngestDomainError(409, "ENTITY_REVISION_CONFLICT");
+        }
+
         const sourceVersionDecision = decideSourceVersion(
           previous?.sourceVersion,
           event.sourceVersion
@@ -295,16 +307,105 @@ export const ingestWmgjEvent = onRequest(
         if (sourceVersionDecision === "REGRESSION") {
           throw new IngestDomainError(409, "SOURCE_VERSION_REGRESSION");
         }
-        if (sourceVersionDecision === "CONFLICT") {
+
+        const previousSource = previous?.source;
+        const previousContentHash = previousSource
+          && typeof previousSource === "object"
+          && !Array.isArray(previousSource)
+          && typeof (previousSource as Record<string, unknown>).contentHash === "string"
+          ? String((previousSource as Record<string, unknown>).contentHash)
+          : null;
+        const incomingContentHash = typeof event.source.contentHash === "string"
+          ? event.source.contentHash
+          : null;
+        const sameDeclaredSheetVersion = event.source.system === "SHEETS"
+          && previous?.sourceVersion === event.sourceVersion;
+        const comparableSheetHashes = sameDeclaredSheetVersion
+          && previousContentHash !== null
+          && incomingContentHash !== null;
+        const sameSheetContent = comparableSheetHashes
+          && previousContentHash === incomingContentHash;
+        const changedSheetContent = comparableSheetHashes
+          && previousContentHash !== incomingContentHash;
+        const seedLegacySheetRevision = sourceVersionDecision === "CONFLICT"
+          && sameDeclaredSheetVersion
+          && comparableSheetHashes
+          && currentRevision === 0;
+
+        if (
+          sourceVersionDecision === "CONFLICT"
+          && sameSheetContent
+          && currentRevision > 0
+        ) {
+          const versionId = immutableEntityVersionId(
+            event.entityType,
+            event.entityKey,
+            currentRevision
+          );
+          tx.create(nonceRef, {
+            orgId: event.orgId,
+            keyId: authHeaders.keyId,
+            nonceHash: nonceId,
+            acceptedAt: FieldValue.serverTimestamp(),
+            expiresAt: Timestamp.fromMillis(Date.now() + NONCE_TTL_MILLISECONDS)
+          });
+          tx.create(idemRef, {
+            orgId: event.orgId,
+            eventId: event.eventId,
+            eventType: event.eventType,
+            entityType: event.entityType,
+            entityId,
+            versionId,
+            revision: currentRevision,
+            authenticatedKeyId: authHeaders.keyId,
+            sourceVersion: event.sourceVersion,
+            sourceSystem: event.source.system,
+            sourceId: event.source.sourceId,
+            payloadHash,
+            occurredAt,
+            acceptedAt: FieldValue.serverTimestamp(),
+            status: "ACCEPTED",
+            duplicateSourceContent: true
+          });
+          return {
+            duplicate: true,
+            entityId,
+            eventId: event.eventId,
+            versionId,
+            revision: currentRevision
+          };
+        }
+
+        if (
+          sourceVersionDecision === "CONFLICT"
+          && !changedSheetContent
+          && !seedLegacySheetRevision
+        ) {
           throw new IngestDomainError(409, "SOURCE_VERSION_CONFLICT");
         }
-        const occurredAt = Timestamp.fromDate(new Date(event.occurredAt));
+
+        const revision = nextCanonicalEntityRevision(previous?.revision);
+        if (revision === null) {
+          throw new IngestDomainError(409, "ENTITY_REVISION_CONFLICT");
+        }
+        const versionId = immutableEntityVersionId(
+          event.entityType,
+          event.entityKey,
+          revision
+        );
+        const versionRef = orgRef.collection("entityVersions").doc(versionId);
+        const versionSnap = await tx.get(versionRef);
+        if (versionSnap.exists) {
+          throw new IngestDomainError(409, "ENTITY_VERSION_CONFLICT");
+        }
+
         const hashableAfter = {
           ...event.record,
           orgId: event.orgId,
           schemaVersion: 1,
           entityType: event.entityType,
           entityKey: event.entityKey,
+          revision,
           sourceVersion: event.sourceVersion,
           competence: event.competence ?? null,
           documentType: event.documentType ?? null,
@@ -340,12 +441,20 @@ export const ingestWmgjEvent = onRequest(
           mergedDocumentForAudit(previous, hashableAfter)
         ) as Record<string, unknown>;
 
+        tx.create(nonceRef, {
+          orgId: event.orgId,
+          keyId: authHeaders.keyId,
+          nonceHash: nonceId,
+          acceptedAt: FieldValue.serverTimestamp(),
+          expiresAt: Timestamp.fromMillis(Date.now() + NONCE_TTL_MILLISECONDS)
+        });
         tx.set(entityRef, normalized, { merge: true });
         tx.create(versionRef, {
           orgId: event.orgId,
           entityType: event.entityType,
           entityId,
           entityKey: event.entityKey,
+          revision,
           sourceVersion: event.sourceVersion,
           eventId: event.eventId,
           idempotencyId,
@@ -368,6 +477,7 @@ export const ingestWmgjEvent = onRequest(
           entityType: event.entityType,
           entityId,
           versionId,
+          revision,
           authenticatedKeyId: authHeaders.keyId,
           sourceVersion: event.sourceVersion,
           sourceSystem: event.source.system,
@@ -383,6 +493,7 @@ export const ingestWmgjEvent = onRequest(
           entityType: event.entityType,
           entityId,
           versionId,
+          revision,
           eventId: event.eventId,
           idempotencyId,
           authenticatedKeyId: authHeaders.keyId,
@@ -407,7 +518,13 @@ export const ingestWmgjEvent = onRequest(
           updatedAt: FieldValue.serverTimestamp()
         }, { merge: true });
 
-        return { duplicate: false, entityId, eventId: event.eventId, versionId };
+        return {
+          duplicate: false,
+          entityId,
+          eventId: event.eventId,
+          versionId,
+          revision
+        };
       });
 
       res.status(result.duplicate ? 200 : 202).json({
@@ -416,7 +533,8 @@ export const ingestWmgjEvent = onRequest(
         duplicate: result.duplicate,
         entityId: result.entityId,
         eventId: result.eventId,
-        versionId: result.versionId
+        versionId: result.versionId,
+        revision: result.revision
       });
     } catch (error) {
       if (error instanceof IngestDomainError) {
