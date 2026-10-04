@@ -13,6 +13,9 @@
   "productionMutation": false,
   "sourceMutation": false,
   "clinicalSensitiveEnabled": false,
-  "requestedAt": "2026-10-04T17:47:30Z",
-  "requestReason": "RC11_POST_INGEST_HOSTING_REWRITE_REPAIR_PR126"
+  "requestedAt": "2026-10-04T19:43:35Z",
+  "requestReason": "RC11_POST_INGEST_NATIVE_REFRESH_AFTER_PR139",
+  "requestSequence": 2,
+  "validatedPatchSha": "6020bd4cec318eb556d6171f86fe39cd3766ddfc",
+  "approvalLabel": "post-ingest 2"
 }
