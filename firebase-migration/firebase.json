@@ -155,6 +155,7 @@
     "predeploy": [
       "test \"$GCLOUD_PROJECT\" = \"wmgj-hml-jfn-20260927\"",
       "python3 \"$PROJECT_DIR/../desktop/build_installers.py\" --output \"$RESOURCE_DIR/private-downloads\"",
+      "npm --prefix \"$RESOURCE_DIR\" ci --ignore-scripts",
       "npm --prefix \"$RESOURCE_DIR\" run build"
     ]
   },
