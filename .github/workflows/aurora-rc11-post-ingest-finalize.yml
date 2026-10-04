@@ -193,6 +193,8 @@ jobs:
           projection_target="functions:auroraNexusProjectionEngine"
           repaired=false
           if [ "$session_status" != "405" ] || [ "$native_status" != "401" ] || [ "$native_contract" != "true" ]; then
+            npm --prefix functions ci --no-audit --no-fund
+            echo "FUNCTION_DEPENDENCIES_READY"
             npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only "${rewrite_targets},${projection_target},hosting"
             repaired=true
             ready=false
