@@ -24,6 +24,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  cloud-sync:
+    name: Canonical sync transport (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Synthetic transport, receipt and isolation tests
+        run: python -m unittest discover -s aurora-coletor/tests -p test_cloud_sync.py -v
+
   validate:
     name: Test local discovery without deployment
     runs-on: ubuntu-latest

@@ -1,5 +1,9 @@
 # Aurora Coletor
 
+O transporte explícito de registros estruturados para a API canônica também está
+disponível em Windows/Linux: [procedimento Windows–cloud](docs/windows-cloud-sync.md).
+É um componente de ingestão unidirecional; não significa espelhamento do banco local.
+
 Coletor local do Aurora Nexus para entrada administrativa por pasta explícita.
 
 ## Princípios
