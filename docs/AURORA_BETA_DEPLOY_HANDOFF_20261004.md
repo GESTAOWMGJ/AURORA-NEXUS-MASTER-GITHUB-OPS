@@ -28,8 +28,11 @@ rejeitando a ausência de qualquer função obrigatória.
 
 Requests HML existentes permanecem imutáveis neste patch. O run `37205987011`
 foi observado aguardando ambiente protegido no SHA antigo `4542ce89...`.
-Novo candidato pós-ingestão observado: run `37221856821`, SHA `35a2d5218604f611470e6db3e176a0a6d4cc6736`, aguardando `firebase-homologation`. Antes de executar, reconciliar novamente main, requests, CI e único candidato;
-não aprovar o run antigo como se fosse a main atual.
+O run pós-ingestão `37221856821`, SHA `35a2d5218604f611470e6db3e176a0a6d4cc6736`, foi executado por outra operação e terminou com falha. O job `111493631450` retornou HTTP 409, `FIREBASE_NATIVE_CONTRACT_REQUIRED`, no teste autenticado `REVENUE_RISK`. O artefato `11310407727` confirma amostra real reconciliada, SHADOW validado, `nativeInsightVerified=false` e `killSwitch=true`, sem mutação de produção ou da fonte. A falha do passo final não significa falha do kill switch: esse passo também exige native insight aprovado.
+
+O reparo de rotas não executou deploy (`repaired=false`), pois os testes anônimos retornaram 405/401. Eles não provam a versão do motor nem a compatibilidade do snapshot. O runtime exige `nativeDataPlane.storage=FIRESTORE` e `sourceAccessDuringInference=false`; o gerador atual inclui esses campos. A hipótese a verificar é runtime/projeção desatualizados. Não adicionar esses campos manualmente a um snapshot antigo: publicar o motor aprovado, regenerar a projeção canônica e verificar o contrato com identidade real.
+
+Antes de executar novo deploy, reconciliar novamente main, requests, CI e único candidato; não aprovar o run antigo como se fosse a main atual. Esta operação não disparou nem aprovou os runs protegidos observados.
 
 ## Windows e plataformas
 
@@ -53,11 +56,18 @@ a partir do SHA consultado no GitHub.
 
 1. Revisar este patch e validar CI no head reconciliado.
 2. Disparar deploy protegido completo com SHA imutável aprovado e confirmar
-   todos os rewrites, incluindo integração. Não repetir ingestão para corrigir UI.
+   todos os rewrites, incluindo integração, e `auroraNexusProjectionEngine`.
+   Regenerar a projeção e verificar o contrato nativo. Não repetir ingestão para corrigir UI.
 3. Executar finalização pós-ingestão, native insight e kill switch com evidência.
 4. Provisionar identidade revogável do gateway pelo fluxo autenticado/MFA
    existente; validar recibos, isolamento, repetição, backup externo e recuperação
    antes de ampliar dados reais. Nunca copiar secrets de CI para a estação.
+
+O conector GitHub disponível não oferece disparo de workflow nem aprovação de
+ambiente protegido. O patch permanece em PR draft para revisão humana conforme
+AURORA-DEV-001. O Mac estava offline; não houve atualização ou teste iOS. Não há
+evidência suficiente para declarar a beta completa, sincronização local/cloud,
+base mestre integralmente alimentada ou produção liberada.
 
 Rollback do cliente: remover somente os atalhos registrados em seu
 `installation.json` e a pasta da versão. Preservar gateway, dados, backups e
