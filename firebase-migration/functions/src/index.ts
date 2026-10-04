@@ -131,6 +131,14 @@ function deterministicId(entityType: string, entityKey: string): string {
   return sha256Hex(`${entityType}:${entityKey}`).slice(0, 48);
 }
 
+export function immutableEntityVersionId(
+  entityType: string,
+  entityKey: string,
+  sourceVersion: number
+): string {
+  return sha256Hex(`v1:${entityType}:${entityKey}:${sourceVersion}`).slice(0, 48);
+}
+
 function safeLogError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return message.replace(/[\r\n]/g, " ").slice(0, 300);
@@ -228,6 +236,8 @@ export const ingestWmgjEvent = onRequest(
       const idemRef = orgRef.collection("integrationEvents").doc(idempotencyId);
       const nonceRef = orgRef.collection("requestNonces").doc(nonceId);
       const entityRef = orgRef.collection(collection).doc(entityId);
+      const versionId = immutableEntityVersionId(event.entityType, event.entityKey, event.sourceVersion);
+      const versionRef = orgRef.collection("entityVersions").doc(versionId);
       const auditRef = orgRef.collection("auditEvents").doc(idempotencyId);
       const checkpointRef = orgRef.collection("runtimeCheckpoints").doc("ingestion");
 
@@ -236,6 +246,7 @@ export const ingestWmgjEvent = onRequest(
         const nonceSnap = await tx.get(nonceRef);
         const idemSnap = await tx.get(idemRef);
         const entitySnap = await tx.get(entityRef);
+        const versionSnap = await tx.get(versionRef);
 
         const organizationRejection = ingestOrganizationRejection(
           orgSnap.exists,
@@ -266,8 +277,12 @@ export const ingestWmgjEvent = onRequest(
           return {
             duplicate: true,
             entityId: idempotency.entityId || entityId,
-            eventId: idempotency.eventId || event.eventId
+            eventId: idempotency.eventId || event.eventId,
+            versionId
           };
+        }
+        if (versionSnap.exists) {
+          throw new IngestDomainError(409, "ENTITY_VERSION_CONFLICT");
         }
 
         const previous: Record<string, unknown> | null = entitySnap.exists
@@ -321,14 +336,38 @@ export const ingestWmgjEvent = onRequest(
         // deve representar o documento lógico final, inclusive campos legados
         // e mapas aninhados preservados, não apenas o payload parcial recebido.
         const afterHash = persistedDocumentHash(previous, hashableAfter);
+        const versionSnapshot = stableValue(
+          mergedDocumentForAudit(previous, hashableAfter)
+        ) as Record<string, unknown>;
 
         tx.set(entityRef, normalized, { merge: true });
+        tx.create(versionRef, {
+          orgId: event.orgId,
+          entityType: event.entityType,
+          entityId,
+          entityKey: event.entityKey,
+          sourceVersion: event.sourceVersion,
+          eventId: event.eventId,
+          idempotencyId,
+          source: event.source,
+          actor: event.actor,
+          beforeHash,
+          afterHash,
+          snapshot: versionSnapshot,
+          occurredAt,
+          createdAt: FieldValue.serverTimestamp(),
+          schemaVersion: 1,
+          ...(typeof versionSnapshot.facilityId === "string"
+            ? { facilityId: versionSnapshot.facilityId }
+            : {})
+        });
         tx.create(idemRef, {
           orgId: event.orgId,
           eventId: event.eventId,
           eventType: event.eventType,
           entityType: event.entityType,
           entityId,
+          versionId,
           authenticatedKeyId: authHeaders.keyId,
           sourceVersion: event.sourceVersion,
           sourceSystem: event.source.system,
@@ -343,6 +382,7 @@ export const ingestWmgjEvent = onRequest(
           action: entitySnap.exists ? "ENTITY_UPDATED" : "ENTITY_CREATED",
           entityType: event.entityType,
           entityId,
+          versionId,
           eventId: event.eventId,
           idempotencyId,
           authenticatedKeyId: authHeaders.keyId,
@@ -363,10 +403,11 @@ export const ingestWmgjEvent = onRequest(
           lastEntityType: event.entityType,
           lastAcceptedAt: FieldValue.serverTimestamp(),
           acceptedCount: FieldValue.increment(1),
+          versionCount: FieldValue.increment(1),
           updatedAt: FieldValue.serverTimestamp()
         }, { merge: true });
 
-        return { duplicate: false, entityId, eventId: event.eventId };
+        return { duplicate: false, entityId, eventId: event.eventId, versionId };
       });
 
       res.status(result.duplicate ? 200 : 202).json({
@@ -374,7 +415,8 @@ export const ingestWmgjEvent = onRequest(
         accepted: !result.duplicate,
         duplicate: result.duplicate,
         entityId: result.entityId,
-        eventId: result.eventId
+        eventId: result.eventId,
+        versionId: result.versionId
       });
     } catch (error) {
       if (error instanceof IngestDomainError) {
