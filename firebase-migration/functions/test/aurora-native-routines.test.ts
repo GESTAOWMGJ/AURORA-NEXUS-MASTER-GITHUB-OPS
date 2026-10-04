@@ -7,7 +7,7 @@ import { generateNativeInsight } from "../src/auroraNativeIntelligence.ts";
 
 test("modus operandi WMGJ está representado como registro nativo multi-tenant", () => {
   const ids = new Set(AURORA_NATIVE_ROUTINES.map((item) => item.id));
-  for (const id of ["AURORA-RUNTIME-WATCHDOG","AURORA-PROJECTION-ENGINE","AURORA-DOCUMENT-WATCHDOG","AURORA-FIN-SOC-001","AURORA-REV-SAN-001","AURORA-TECH-AUDIT-WEEKLY"]) {
+  for (const id of ["AURORA-RUNTIME-WATCHDOG","AURORA-PROJECTION-ENGINE","AURORA-DOCUMENT-WATCHDOG","AURORA-FIN-SOC-001","AURORA-REV-SAN-001","AURORA-MASTER-OPS-001","AURORA-TECH-AUDIT-WEEKLY"]) {
     assert.ok(ids.has(id), id);
   }
   assert.ok(AURORA_NATIVE_ROUTINES.every((item) => item.sourceMutation === false));
