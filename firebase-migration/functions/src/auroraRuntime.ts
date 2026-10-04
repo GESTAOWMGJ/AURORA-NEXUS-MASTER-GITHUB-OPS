@@ -345,7 +345,10 @@ export const auroraNexusMasterEngine = onRequest(
       return;
     }
     const projection = visibleProjection(rawProjection, member);
-    const financialStatus = await loadFinancialClosingStatus(member.orgId);
+    const competence = typeof projection.competence === "string" ? projection.competence : null;
+    const financialStatus = competence
+      ? await loadFinancialClosingStatus(member.orgId, competence)
+      : null;
     const release = buildReleaseStatus(org.data() ?? {});
     res.status(200).json({
       ok: true,
