@@ -4,7 +4,7 @@
  * Checkpoint só avança quando DRY_RUN=false e o endpoint aceita/identifica duplicata.
  */
 
-var WMGJ_FIRESTORE_MIGRATION_VERSION = 'v1.0.0-backfill-checkpoint';
+var WMGJ_FIRESTORE_MIGRATION_VERSION = 'v1.1.0-continuous-versioning';
 var WMGJ_FIRESTORE_MONEY_NORMALIZATION_VERSION = 'brl-cents-v1';
 
 function wmgjFirestoreMigrationMap_() {
@@ -83,8 +83,19 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
   var checkpointKey = 'WMGJ_FS_MIG_' + sheetName + '_ROW';
   var startRow = Math.max(2, Number(props.getProperty(checkpointKey) || 2));
   var lastRow = sheet.getLastRow();
+  var revisionSweep = false;
+  if (startRow > lastRow) {
+    // Após concluir o backfill, reinicia uma varredura cíclica. Linhas já
+    // aceitas e sem alteração são puladas pelo estado de versão; uma mudança
+    // de conteúdo recebe sourceVersion monotonicamente maior.
+    startRow = 2;
+    revisionSweep = true;
+  }
   var rowsToRead = Math.min(limit, lastRow - startRow + 1);
-  if (rowsToRead <= 0) return { ok: true, complete: true, sent: 0, errors: 0, lastRow: lastRow };
+  if (rowsToRead <= 0) return {
+    ok: true, complete: true, sent: 0, unchanged: 0, errors: 0,
+    lastRow: lastRow, revisionSweep: revisionSweep
+  };
 
   var width = sheet.getLastColumn();
   var headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0];
@@ -116,6 +127,7 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
   var rawValues = dataRange.getValues();
   var sent = 0;
   var duplicates = 0;
+  var unchanged = 0;
   var errors = 0;
   var planned = 0;
   var lastAcceptedRow = startRow - 1;
@@ -134,6 +146,14 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
         ? wmgjFirestoreBankStatementRecord_(headers, rawValues[offset], row, sourceRecord, rowHash)
         : wmgjFirestoreAddCanonicalMoney_(headers, rawValues[offset], row, sourceRecord, config.moneyFields || {});
       var entityKey = wmgjFirestoreEntityKey_(sheetName, record, rowNumber);
+      var versionState = wmgjFirestoreSourceVersionState_(
+        props, ss.getId(), sheetName, entityKey, rowHash
+      );
+      if (!versionState.changed) {
+        unchanged++;
+        lastAcceptedRow = rowNumber;
+        return;
+      }
       var legacyStatus = String(
         record.status ||
         record.status_conciliacao ||
@@ -151,9 +171,9 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
         eventType: 'ENTITY_UPSERT',
         orgId: bridgeConfig.orgId,
         occurredAt: occurredAt.toISOString(),
-        // O primeiro backfill trata a linha legada como versão congelada 1.
-        // Mudanças posteriores falham fechadas até existir versionador durável.
-        sourceVersion: 1,
+        // A versão é monotônica por entidade de origem. O estado só avança
+        // depois de aceite/duplicata confirmados pelo backend.
+        sourceVersion: versionState.version,
         idempotencyKey: [bridgeConfig.orgId, 'SHEETS', ss.getId(), sheetName, rowNumber, rowHash].join(':'),
         entityType: config.entityType,
         entityKey: entityKey,
@@ -190,7 +210,10 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
       if (bridgeConfig.dryRun) return;
       if (response.accepted) sent++;
       if (response.duplicate) duplicates++;
-      if (response.ok && (response.accepted || response.duplicate)) lastAcceptedRow = rowNumber;
+      if (response.ok && (response.accepted || response.duplicate)) {
+        wmgjFirestorePersistSourceVersionState_(props, versionState);
+        lastAcceptedRow = rowNumber;
+      }
     } catch (error) {
       errors++;
       wmgjFirestoreLog_('MIGRATION_ROW', 'ERRO', {
@@ -213,7 +236,9 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
     planned: planned,
     sent: sent,
     duplicates: duplicates,
+    unchanged: unchanged,
     errors: errors,
+    revisionSweep: revisionSweep,
     nextRow: bridgeConfig.dryRun ? startRow : Number(props.getProperty(checkpointKey) || startRow)
   };
 }
@@ -312,11 +337,11 @@ function wmgjFirestoreBankStatementRecord_(headers, rawRow, displayRow, sourceRe
     kind: amountCents >= 0 ? 'CREDIT' : 'DEBIT',
     source_row_hash: rowHash,
     classification_source: 'WMGJ_SHEETS_08_EXTRATOS_BRADESCO',
+    // Identidade estável: data + documento bancário. Valor não participa
+    // para que uma correção de montante gere nova versão da mesma entidade.
     transaction_id_hash: wmgjFirestoreHashString_([
       sourceRecord.data || '',
-      sourceRecord.dcto || '',
-      creditCents === null ? '' : String(creditCents),
-      debitCents === null ? '' : String(debitCents)
+      sourceRecord.dcto || ''
     ].join('|'))
   };
 
@@ -340,6 +365,51 @@ function wmgjFirestoreBankStatementRecord_(headers, rawRow, displayRow, sourceRe
     }
   }
   return record;
+}
+
+function wmgjFirestoreSourceVersionDecision_(previousHash, previousVersion, rowHash) {
+  previousHash = String(previousHash || '').trim();
+  rowHash = String(rowHash || '').trim();
+  var versionText = String(previousVersion || '').trim();
+  if (!rowHash) throw new Error('SOURCE_VERSION_ROW_HASH_MISSING');
+
+  if (!previousHash && !versionText) return { changed: true, version: 1 };
+  var version = Number(versionText);
+  if (!previousHash || !versionText || !isFinite(version) || version < 1 || Math.floor(version) !== version) {
+    throw new Error('SOURCE_VERSION_STATE_INVALID');
+  }
+  if (previousHash === rowHash) return { changed: false, version: version };
+  if (version >= Number.MAX_SAFE_INTEGER) throw new Error('SOURCE_VERSION_EXHAUSTED');
+  return { changed: true, version: version + 1 };
+}
+
+function wmgjFirestoreSourceVersionState_(props, spreadsheetId, sheetName, entityKey, rowHash) {
+  var identityHash = wmgjFirestoreHashString_([
+    spreadsheetId || '', sheetName || '', entityKey || ''
+  ].join('|')).slice(0, 40);
+  var baseKey = 'WMGJ_FS_SRCV_' + identityHash;
+  var previousHash = props.getProperty(baseKey + '_HASH') || '';
+  var previousVersion = props.getProperty(baseKey + '_VERSION') || '';
+  var decision = wmgjFirestoreSourceVersionDecision_(previousHash, previousVersion, rowHash);
+  return {
+    changed: decision.changed,
+    version: decision.version,
+    rowHash: rowHash,
+    hashKey: baseKey + '_HASH',
+    versionKey: baseKey + '_VERSION'
+  };
+}
+
+function wmgjFirestorePersistSourceVersionState_(props, state) {
+  if (!state || !state.hashKey || !state.versionKey || !state.rowHash) {
+    throw new Error('SOURCE_VERSION_PERSIST_STATE_INVALID');
+  }
+  props.setProperties((function() {
+    var values = {};
+    values[state.hashKey] = String(state.rowHash);
+    values[state.versionKey] = String(state.version);
+    return values;
+  })(), false);
 }
 
 function wmgjFirestoreNormalizeHeader_(header, index) {
