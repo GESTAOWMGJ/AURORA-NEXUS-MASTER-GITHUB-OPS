@@ -4,7 +4,7 @@ Decisão do titular em 04/10/2026: alinhar ao versionamento do frontend preparad
 pelo Copilot; conduzir o deploy por esta operação. Após a consulta aos PRs e
 branches acessíveis, o titular selecionou **usar a main atual**.
 
-Baseline: `52fb02862e31920d558733d99356e627b4109fd7`. O frontend não é redesenhado
+Baseline inicial: `52fb02862e31920d558733d99356e627b4109fd7`. Reconciliada com `35a2d5218604f611470e6db3e176a0a6d4cc6736` após PR #126 e request pós-ingestão. O frontend não é redesenhado
 nem recebe uma versão paralela. Sua versão continua em `auroraReleaseStatus.ts`.
 `desktop/beta-platforms.json` separa a versão do cliente Windows da versão web.
 O PR #124 permanece candidato independente; não é promovido por este patch.
@@ -13,7 +13,7 @@ O PR #124 permanece candidato independente; não é promovido por este patch.
 
 Run `37195696367`, job `111416974815`: a publicação Hosting retornou HTTP 400
 porque `auroraNexusIntegrationPing` não existia em `southamerica-east1`.
-O passo anterior já havia reconciliado a amostra e a projeção SHADOW; o run
+O PR #126 foi incorporado à main durante esta implementação e já amplia o reparo aos backends de todos os rewrites; essa correção foi preservada. O passo anterior já havia reconciliado a amostra e a projeção SHADOW; o run
 falhou antes de concluir native insight e kill switch. Isso não libera backfill.
 
 A expressão anterior `all($required[]; $deployed | index(.) != null)` podia
@@ -28,7 +28,7 @@ rejeitando a ausência de qualquer função obrigatória.
 
 Requests HML existentes permanecem imutáveis neste patch. O run `37205987011`
 foi observado aguardando ambiente protegido no SHA antigo `4542ce89...`.
-Antes de executar, reconciliar novamente main, requests, CI e único candidato;
+Novo candidato pós-ingestão observado: run `37221856821`, SHA `35a2d5218604f611470e6db3e176a0a6d4cc6736`, aguardando `firebase-homologation`. Antes de executar, reconciliar novamente main, requests, CI e único candidato;
 não aprovar o run antigo como se fosse a main atual.
 
 ## Windows e plataformas

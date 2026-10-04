@@ -166,7 +166,7 @@ jobs:
           test "$ready" = true
           jq -n '{gate:"SHADOW_SNAPSHOT_VERIFIED",competence:"2026-05",invoicedCents:4950000,receivedCents:4950000,outstandingCents:0}' > "$RUNNER_TEMP/rc11-post-evidence/shadow-snapshot.json"
 
-      - name: Repair native routes only if Hosting target is stale
+      - name: Repair Hosting rewrite targets only if native routes are stale
         env:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         working-directory: firebase-migration
@@ -177,12 +177,15 @@ jobs:
           base_url="https://${PROJECT_ID}.web.app"
           session_status="$(curl --silent --show-error --output "$RUNNER_TEMP/session-route.json" --write-out '%{http_code}' "${base_url}/__sessionLogin")"
           native_status="$(curl --silent --show-error --output "$RUNNER_TEMP/native-route.json" --write-out '%{http_code}' "${base_url}/api/native-insight?intent=EXECUTIVE")"
+          rewrite_targets="$(jq -r '[.hosting.rewrites[] | select(.function? != null and .function.functionId? != null) | ("functions:" + .function.functionId)] | unique | join(",")' firebase.json)"
+          test -n "$rewrite_targets"
+          grep -Fq "functions:auroraNexusIntegrationPing" <<<"$rewrite_targets"
           npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json > "$RUNNER_TEMP/native-functions-list.json"
           python3 scripts/validate-hosting-runtime.py --inventory "$RUNNER_TEMP/native-functions-list.json" \
-            --planned auroraNexusSessionLogin,auroraNexusNativeInsight
+            --planned "${rewrite_targets//functions:/}"
           repaired=false
           if [ "$session_status" != "405" ] || [ "$native_status" != "401" ]; then
-            npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting
+            npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only "${rewrite_targets},hosting"
             repaired=true
             ready=false
             for _ in $(seq 1 20); do
@@ -197,12 +200,12 @@ jobs:
           jq -e '.ok==false and .code=="METHOD_NOT_ALLOWED"' "$RUNNER_TEMP/session-route.json" >/dev/null
           test "$native_status" = "401"
           jq -e '.ok==false and .code=="AUTH_REQUIRED"' "$RUNNER_TEMP/native-route.json" >/dev/null
-          jq -n --argjson repaired "$repaired" --arg session "$session_status" --arg native "$native_status" '{
+          jq -n --argjson repaired "$repaired" --arg session "$session_status" --arg native "$native_status" --arg targets "$rewrite_targets" '{
             gate:"NATIVE_ROUTES_READY",
             repaired:$repaired,
             sessionLoginStatus:$session,
             nativeInsightStatus:$native,
-            targetedDeploy:["auroraNexusSessionLogin","auroraNexusNativeInsight","hosting"],
+            targetedDeploy:(($targets | split(",")) + ["hosting"]),
             productionMutation:false,
             sourceMutation:false
           }' > "$RUNNER_TEMP/rc11-post-evidence/native-routes.json"
