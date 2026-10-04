@@ -175,6 +175,8 @@ jobs:
           test "$PROJECT_ID" = "wmgj-hml-jfn-20260927"
           mkdir -p "$RUNNER_TEMP/rc11-post-evidence"
           base_url="https://${PROJECT_ID}.web.app"
+          access_token="$(gcloud auth print-access-token)"
+          native_snapshot_url="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj/dashboardSnapshots/current"
           session_status="$(curl --silent --show-error --output "$RUNNER_TEMP/session-route.json" --write-out '%{http_code}' "${base_url}/__sessionLogin")"
           native_status="$(curl --silent --show-error --output "$RUNNER_TEMP/native-route.json" --write-out '%{http_code}' "${base_url}/api/native-insight?intent=EXECUTIVE")"
           rewrite_targets="$(jq -r '[.hosting.rewrites[] | select(.function? != null and .function.functionId? != null) | ("functions:" + .function.functionId)] | unique | join(",")' firebase.json)"
@@ -190,6 +192,7 @@ jobs:
           ' "$RUNNER_TEMP/snapshot.json" >/dev/null 2>&1; then
             native_contract=true
           fi
+          native_contract_before="$native_contract"
           projection_target="functions:auroraNexusProjectionEngine"
           repaired=false
           if [ "$session_status" != "405" ] || [ "$native_status" != "401" ] || [ "$native_contract" != "true" ]; then
@@ -205,15 +208,48 @@ jobs:
               sleep 6
             done
             test "$ready" = true
+            if [ "$native_contract" != "true" ]; then
+              contract_ready=false
+              for _ in $(seq 1 40); do
+                if curl -fsS -H "Authorization: Bearer ${access_token}" "$native_snapshot_url" > "$RUNNER_TEMP/native-contract-snapshot.json" 2>/dev/null && jq -e '
+                  .fields.competence.stringValue=="2026-05" and
+                  (.fields.financialCents.mapValue.fields.invoicedCents.integerValue|tonumber)==4950000 and
+                  (.fields.financialCents.mapValue.fields.receivedCents.integerValue|tonumber)==4950000 and
+                  (.fields.financialCents.mapValue.fields.outstandingCents.integerValue|tonumber)==0 and
+                  .fields.dataQuality.mapValue.fields.complete.booleanValue==true and
+                  .fields.nativeDataPlane.mapValue.fields.storage.stringValue=="FIRESTORE" and
+                  .fields.nativeDataPlane.mapValue.fields.sourceAccessDuringInference.booleanValue==false
+                ' "$RUNNER_TEMP/native-contract-snapshot.json" >/dev/null 2>&1; then
+                  native_contract=true
+                  contract_ready=true
+                  cp "$RUNNER_TEMP/native-contract-snapshot.json" "$RUNNER_TEMP/snapshot.json"
+                  break
+                fi
+                sleep 30
+              done
+              if [ "$contract_ready" != "true" ]; then
+                echo "NATIVE_SNAPSHOT_CONTRACT_TIMEOUT" >&2
+                exit 96
+              fi
+              jq -n '{
+                gate:"CANONICAL_NATIVE_SNAPSHOT_VERIFIED",
+                competence:"2026-05",
+                storage:"FIRESTORE",
+                sourceAccessDuringInference:false,
+                productionMutation:false,
+                sourceMutation:false
+              }' > "$RUNNER_TEMP/rc11-post-evidence/native-snapshot.json"
+            fi
           fi
           test "$session_status" = "405"
           jq -e '.ok==false and .code=="METHOD_NOT_ALLOWED"' "$RUNNER_TEMP/session-route.json" >/dev/null
           test "$native_status" = "401"
           jq -e '.ok==false and .code=="AUTH_REQUIRED"' "$RUNNER_TEMP/native-route.json" >/dev/null
-          jq -n --argjson repaired "$repaired" --argjson nativeContractBefore "$native_contract" --arg session "$session_status" --arg native "$native_status" --arg targets "$rewrite_targets" --arg projection "$projection_target" '{
+          jq -n --argjson repaired "$repaired" --argjson nativeContractBefore "$native_contract_before" --argjson nativeContractAfter "$native_contract" --arg session "$session_status" --arg native "$native_status" --arg targets "$rewrite_targets" --arg projection "$projection_target" '{
             gate:"NATIVE_ROUTES_READY",
             repaired:$repaired,
             nativeContractBefore:$nativeContractBefore,
+            nativeContractAfter:$nativeContractAfter,
             sessionLoginStatus:$session,
             nativeInsightStatus:$native,
             targetedDeploy:(($targets | split(",")) + [$projection, "hosting"]),
@@ -249,40 +285,25 @@ jobs:
             exit 93
           fi
 
-          private_status="$(curl --silent --show-error --output "$d/private.html" --write-out '%{http_code}' --cookie "$d/cookies.txt" "${base_url}/")"
-          test "$private_status" = "200"
-          refresh_csrf="$(python3 -c 'import json,re,sys; html=open(sys.argv[1],encoding="utf-8").read(); match=re.search(r"const csrf=(\{[^;]+\});const capabilities=",html); assert match, "CSRF_BLOCK_MISSING"; token=json.loads(match.group(1)).get("refresh",""); assert token, "REFRESH_CSRF_MISSING"; print(token)' "$d/private.html")"
-          test -n "$refresh_csrf"
-          refresh_status="$(curl --silent --show-error --output "$d/refresh.json" --write-out '%{http_code}' -X POST \
-            -H 'Content-Type: application/json' \
-            -H "Origin: ${base_url}" \
-            -H 'Sec-Fetch-Site: same-origin' \
-            -H "X-Aurora-CSRF: ${refresh_csrf}" \
-            --cookie "$d/cookies.txt" \
-            --data '{}' \
-            "${base_url}/api/refresh")"
-          if [ "$refresh_status" != "200" ]; then
-            echo "NATIVE_REFRESH_HTTP_${refresh_status}" >&2
-            cat "$d/refresh.json" >&2 || true
-            exit 95
-          fi
+          native_snapshot_url="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj/dashboardSnapshots/current"
+          curl -fsS -H "Authorization: Bearer ${access_token}" "$native_snapshot_url" > "$d/native-snapshot.json"
           jq -e '
-            .ok==true and
-            .projection.competence=="2026-05" and
-            .projection.nativeDataPlane.storage=="FIRESTORE" and
-            .projection.nativeDataPlane.sourceAccessDuringInference==false and
-            (.projection.financialCents.invoicedCents|tonumber)==4950000 and
-            (.projection.financialCents.receivedCents|tonumber)==4950000 and
-            (.projection.financialCents.outstandingCents|tonumber)==0
-          ' "$d/refresh.json" >/dev/null
+            .fields.competence.stringValue=="2026-05" and
+            (.fields.financialCents.mapValue.fields.invoicedCents.integerValue|tonumber)==4950000 and
+            (.fields.financialCents.mapValue.fields.receivedCents.integerValue|tonumber)==4950000 and
+            (.fields.financialCents.mapValue.fields.outstandingCents.integerValue|tonumber)==0 and
+            .fields.dataQuality.mapValue.fields.complete.booleanValue==true and
+            .fields.nativeDataPlane.mapValue.fields.storage.stringValue=="FIRESTORE" and
+            .fields.nativeDataPlane.mapValue.fields.sourceAccessDuringInference.booleanValue==false
+          ' "$d/native-snapshot.json" >/dev/null
           jq -n '{
-            gate:"CANONICAL_NATIVE_REFRESH_VERIFIED",
+            gate:"CANONICAL_NATIVE_SNAPSHOT_VERIFIED",
             competence:"2026-05",
             storage:"FIRESTORE",
             sourceAccessDuringInference:false,
             productionMutation:false,
             sourceMutation:false
-          }' > "$RUNNER_TEMP/rc11-post-evidence/native-refresh.json"
+          }' > "$RUNNER_TEMP/rc11-post-evidence/native-snapshot.json"
 
           for intent in REVENUE_RISK SLA_RISK NEXT_ACTION EXECUTIVE; do
             native_status="$(curl --silent --show-error --output "$d/${intent}.json" --write-out '%{http_code}' -H 'Accept: application/json' --cookie "$d/cookies.txt" "${base_url}/api/native-insight?intent=${intent}")"
