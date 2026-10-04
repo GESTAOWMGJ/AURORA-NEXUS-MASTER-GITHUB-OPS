@@ -241,6 +241,16 @@ test("RC1.1 post-ingest workflow repairs only stale native routes and always ver
   assert.match(workflow, /nativeInsightVerified:\$nativeVerified/);
 });
 
+test("RC1.1 post-ingest waits for the Firebase native snapshot contract", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url), "utf8");
+  const waitStep = workflow.slice(
+    workflow.indexOf("- name: Wait for governed projection"),
+    workflow.indexOf("- name: Repair Hosting rewrite targets only if native routes are stale")
+  );
+  assert.match(waitStep, /\.fields\.nativeDataPlane\.mapValue\.fields\.storage\.stringValue=="FIRESTORE"/);
+  assert.match(waitStep, /\.fields\.nativeDataPlane\.mapValue\.fields\.sourceAccessDuringInference\.booleanValue==false/);
+});
+
 test("RC1.1 post-ingest workflow parses as YAML", () => {
   const workflowPath = fileURLToPath(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url));
   const ruby = "require 'yaml'; begin; YAML.load_file(ARGV[0]); puts 'YAML_OK'; rescue => e; STDERR.puts(e.message); exit 2; end";
