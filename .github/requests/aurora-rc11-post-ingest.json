@@ -13,9 +13,9 @@
   "productionMutation": false,
   "sourceMutation": false,
   "clinicalSensitiveEnabled": false,
-  "requestedAt": "2026-10-04T20:00:00Z",
-  "requestReason": "RC11_POST_INGEST_RETRY_AFTER_READONLY_NATIVE_SNAPSHOT_WAIT",
-  "requestSequence": 4,
-  "validatedPatchSha": "992df4a3696039241a3c852f0749d8847de54a81",
-  "approvalLabel": "post-ingest 4"
+  "requestedAt": "2026-10-04T20:53:50Z",
+  "requestReason": "RC11_POST_INGEST_AFTER_VERIFIED_READONLY_AUTHORIZATION_REGRESSIONS",
+  "requestSequence": 5,
+  "validatedPatchSha": "930d239e84103001c77f2eac73a8ddf9dcfb7b50",
+  "approvalLabel": "post-ingest 5"
 }
