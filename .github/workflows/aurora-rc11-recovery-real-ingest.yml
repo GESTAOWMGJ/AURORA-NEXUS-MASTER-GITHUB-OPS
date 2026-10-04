@@ -368,8 +368,16 @@ jobs:
           base="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj"
           curl -fsS -H "Authorization: Bearer ${access_token}" "$base/invoices/$AURORA_RC11_INVOICE_ENTITY_ID" > "$RUNNER_TEMP/invoice.json"
           curl -fsS -H "Authorization: Bearer ${access_token}" "$base/bankTransactions/$AURORA_RC11_BANK_ENTITY_ID" > "$RUNNER_TEMP/bank.json"
-          jq -e '.fields.orgId.stringValue=="wmgj" and .fields.entityType.stringValue=="invoice" and .fields.competence.stringValue=="2026-05" and .fields.documentType.stringValue=="06_NFS_E" and .fields.invoiceNumber.stringValue=="8" and (.fields.totalCents.integerValue|tonumber)==4950000 and .fields.source.mapValue.fields.system.stringValue=="SHEETS"' "$RUNNER_TEMP/invoice.json" >/dev/null
-          jq -e '.fields.orgId.stringValue=="wmgj" and .fields.entityType.stringValue=="bankTransaction" and .fields.competence.stringValue=="2026-05" and .fields.documentType.stringValue=="08_EXTRATOS_BRADESCO" and .fields.status.stringValue=="RECONCILED" and (.fields.liquidatedAmountCents.integerValue|tonumber)==4950000 and .fields.source.mapValue.fields.system.stringValue=="SHEETS"' "$RUNNER_TEMP/bank.json" >/dev/null
+          if ! jq -e '.fields.orgId.stringValue=="wmgj" and .fields.entityType.stringValue=="invoice" and .fields.competence.stringValue=="2026-05" and .fields.documentType.stringValue=="06_NFS_E" and (.fields.totalCents.integerValue|tonumber)==4950000 and .fields.source.mapValue.fields.system.stringValue=="SHEETS"' "$RUNNER_TEMP/invoice.json" >/dev/null; then
+            echo "::error title=RC1.1 invoice reconciliation failed::RC11_INVOICE_SEMANTIC_MISMATCH"
+            jq -c '{orgId:(.fields.orgId.stringValue//null),entityType:(.fields.entityType.stringValue//null),competence:(.fields.competence.stringValue//null),documentType:(.fields.documentType.stringValue//null),totalCents:(.fields.totalCents.integerValue//null),sourceSystem:(.fields.source.mapValue.fields.system.stringValue//null),legacyInvoiceNumberPresent:(.fields.invoiceNumber != null)}' "$RUNNER_TEMP/invoice.json" >&2 || true
+            exit 81
+          fi
+          if ! jq -e '.fields.orgId.stringValue=="wmgj" and .fields.entityType.stringValue=="bankTransaction" and .fields.competence.stringValue=="2026-05" and .fields.documentType.stringValue=="08_EXTRATOS_BRADESCO" and .fields.status.stringValue=="RECONCILED" and (.fields.liquidatedAmountCents.integerValue|tonumber)==4950000 and .fields.source.mapValue.fields.system.stringValue=="SHEETS"' "$RUNNER_TEMP/bank.json" >/dev/null; then
+            echo "::error title=RC1.1 bank reconciliation failed::RC11_BANK_SEMANTIC_MISMATCH"
+            jq -c '{orgId:(.fields.orgId.stringValue//null),entityType:(.fields.entityType.stringValue//null),competence:(.fields.competence.stringValue//null),documentType:(.fields.documentType.stringValue//null),status:(.fields.status.stringValue//null),liquidatedAmountCents:(.fields.liquidatedAmountCents.integerValue//null),sourceSystem:(.fields.source.mapValue.fields.system.stringValue//null)}' "$RUNNER_TEMP/bank.json" >&2 || true
+            exit 82
+          fi
           invoice_cents="$(jq -r '.fields.totalCents.integerValue|tonumber' "$RUNNER_TEMP/invoice.json")"
           bank_cents="$(jq -r '.fields.liquidatedAmountCents.integerValue|tonumber' "$RUNNER_TEMP/bank.json")"
           test "$invoice_cents" -eq 4950000
@@ -377,7 +385,24 @@ jobs:
           test "$invoice_cents" -eq "$bank_cents"
           jq -n --arg invoiceId "$AURORA_RC11_INVOICE_ENTITY_ID" --arg bankId "$AURORA_RC11_BANK_ENTITY_ID" --argjson cents "$invoice_cents" '{gate:"RECONCILED",invoiceEntityId:$invoiceId,bankEntityId:$bankId,invoiceCents:$cents,receivedCents:$cents,amountsEqual:true,differenceZero:true,sourceMutation:false}' > "$RUNNER_TEMP/rc11-evidence/reconciliation.json"
           payload='{"fields":{"projectionEnabled":{"booleanValue":true},"projectionMode":{"stringValue":"SHADOW"},"projectionCompetence":{"stringValue":"2026-05"},"productionMutation":{"booleanValue":false},"sourceMutation":{"booleanValue":false}}}'
-          curl -fsS -X PATCH -H "Authorization: Bearer ${access_token}" -H 'Content-Type: application/json' --data "$payload" "${base}?updateMask.fieldPaths=projectionEnabled&updateMask.fieldPaths=projectionMode&updateMask.fieldPaths=projectionCompetence&updateMask.fieldPaths=productionMutation&updateMask.fieldPaths=sourceMutation" >/dev/null
+          patch_response="$RUNNER_TEMP/projection-patch-response.json"
+          patch_url="${base}?updateMask.fieldPaths=projectionEnabled&updateMask.fieldPaths=projectionMode&updateMask.fieldPaths=projectionCompetence&updateMask.fieldPaths=productionMutation&updateMask.fieldPaths=sourceMutation"
+          if ! http_status="$(curl --silent --show-error --output "$patch_response" --write-out '%{http_code}' -X PATCH -H "Authorization: Bearer ${access_token}" -H 'Content-Type: application/json' --data "$payload" "$patch_url")"; then
+            echo "::error title=RC1.1 SHADOW PATCH transport failure::curl failed before an HTTP response"
+            exit 86
+          fi
+          case "$http_status" in
+            2??) ;;
+            *)
+              error_summary="$(jq -c '{code:(.error.code//null),status:(.error.status//null),message:(.error.message//null)}' "$patch_response" 2>/dev/null || printf '%s' '{"response":"unparseable"}')"
+              echo "::error title=RC1.1 SHADOW PATCH rejected::HTTP ${http_status} ${error_summary}"
+              exit 87
+              ;;
+          esac
+          if ! jq -e '.fields.projectionEnabled.booleanValue==true and .fields.projectionMode.stringValue=="SHADOW" and .fields.projectionCompetence.stringValue=="2026-05" and .fields.productionMutation.booleanValue==false and .fields.sourceMutation.booleanValue==false' "$patch_response" >/dev/null; then
+            echo "::error title=RC1.1 SHADOW PATCH postcondition failed::HTTP 2xx without expected SHADOW state"
+            exit 88
+          fi
 
       - name: Wait for governed projection
         env:

@@ -200,6 +200,12 @@ test("RC1.1 reconciles the exact entity ids returned by real ingestion", () => {
   assert.match(workflow, /\.fields\.liquidatedAmountCents\.integerValue/);
   assert.doesNotMatch(workflow, /metadata\.mapValue\.fields\.rc11Sample/);
   assert.doesNotMatch(workflow, /\.fields\.record\.mapValue/);
+  assert.doesNotMatch(workflow, /\.fields\.invoiceNumber\.stringValue=="8"/);
+  assert.match(workflow, /RC11_INVOICE_SEMANTIC_MISMATCH/);
+  assert.match(workflow, /RC11_BANK_SEMANTIC_MISMATCH/);
+  assert.match(workflow, /projection-patch-response\.json/);
+  assert.match(workflow, /RC1\.1 SHADOW PATCH rejected/);
+  assert.match(workflow, /projectionEnabled\.booleanValue==true/);
 });
 
 test("RC1.1 post-ingest workflow repairs only stale native routes and always verifies kill switch", () => {
