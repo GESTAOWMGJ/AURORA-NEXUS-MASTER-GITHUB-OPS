@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "files": [
+    {
+      "path": "Client.ps1",
+      "sha256": "2369bb47f84c73f23e25072df7b68fecdb7b783128ab06823e7e503bb5888a53"
+    },
+    {
+      "path": "Install.ps1",
+      "sha256": "dd449c423f43ab471f4ce6c3f9f30ed8a89d6ded07913761536b1a09b1ba725d"
+    },
+    {
+      "path": "release.json",
+      "sha256": "6dd0b363c6b764e7fe667c435a571860a7a6ae3a78647667be2d9cd64bf19a15"
+    },
+    {
+      "path": "LEIA-ME.md",
+      "sha256": "84817502724fe7644f79752a0b3927dd4095a741652fb27931242a6f8cf16e56"
+    }
+  ]
+}

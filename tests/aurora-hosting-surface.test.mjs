@@ -1,0 +1,26 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {assess,requirements,targets,deployedFunctions} from '../tools/aurora-hosting-surface.mjs';
+const region='southamerica-east1';
+const rule = functionId => ({source:'/api/'+functionId,function:{functionId,region}});
+const config = {hosting:{rewrites:[rule('auroraNexusSessionLogin'),rule('auroraNexusIntegrationPing'),rule('auroraNexusNativeInsight')]}};
+const complete = {status:'success',result:requirements(config).map(f => ({...f,state:'ACTIVE'}))};
+test('full exact closure passes',()=>assert.equal(assess(config,complete).ok,true));
+test('regression: two native functions do not satisfy the integration route',()=>{
+ const r=assess(config,{result:complete.result.filter(x=>x.id!=='auroraNexusIntegrationPing')});
+ assert.equal(r.ok,false); assert.deepEqual(r.missing,[{id:'auroraNexusIntegrationPing',region}]);
+});
+test('a nonempty deployment does not imply a required item is present (legacy jq bug)',()=>assert.equal(assess(config,[{id:'anotherFunction',region}]).missing.length,3));
+test('wrong region fails',()=>assert.equal(assess(config,complete.result.map(x=>({...x,region:'us-central1'}))).ok,false));
+test('wrong case fails',()=>assert.equal(assess(config,complete.result.map(x=>({...x,id:x.id.toLowerCase()}))).ok,false));
+test('non-active target fails',()=>assert.equal(assess(config,complete.result.map(x=>({...x,state:'DEPLOYING'}))).ok,false));
+test('failed CLI response cannot approve',()=>assert.throws(()=>assess(config,{status:'error',result:complete.result})));
+test('nested unrelated metadata is not a function list',()=>assert.throws(()=>assess(config,{result:{metadata:complete.result}})));
+test('missing region fails closed',()=>assert.throws(()=>assess(config,[{id:'auroraNexusSessionLogin'}])));
+test('duplicate identities fail closed',()=>assert.throws(()=>assess(config,[complete.result[0],complete.result[0]])));
+test('same function referenced twice yields one target',()=>assert.equal(requirements({hosting:{rewrites:[rule('a'),rule('a')]}}).length,1));
+test('all function targets generated; hosting is intentionally separate',()=>assert.equal(targets(config),'functions:auroraNexusIntegrationPing,functions:auroraNexusNativeInsight,functions:auroraNexusSessionLogin'));
+test('malicious function identifier rejected',()=>assert.throws(()=>requirements({hosting:{rewrites:[rule('x,hosting')]}})));
+test('ambiguous implicit-region rewrite rejected',()=>assert.throws(()=>requirements({hosting:{rewrites:[{source:'/**',function:'x'}]}})));
+test('named Cloud Function record accepts exact identity',()=>assert.equal(deployedFunctions([{name:`projects/test/locations/${region}/functions/f`,state:'ACTIVE'}]).get(`f@${region}`).active,true));
+test('conflicting named record fails',()=>assert.throws(()=>deployedFunctions([{name:`projects/test/locations/${region}/functions/f`,id:'g',region}])));
