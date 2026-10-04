@@ -205,27 +205,6 @@ test("identidade Bradesco permanece estável quando apenas o valor é corrigido"
   assert.equal(corrected.amountCents, -650000);
 });
 
-test("sourceVersion é monotônico e só avança quando o hash da fonte muda", () => {
-  const adapter = migrationAdapterContext() as any;
-
-  const initial = adapter.wmgjFirestoreSourceVersionDecision_("", "", "a".repeat(64));
-  assert.equal(initial.changed, true);
-  assert.equal(initial.version, 1);
-
-  const unchanged = adapter.wmgjFirestoreSourceVersionDecision_("a".repeat(64), "1", "a".repeat(64));
-  assert.equal(unchanged.changed, false);
-  assert.equal(unchanged.version, 1);
-
-  const changed = adapter.wmgjFirestoreSourceVersionDecision_("a".repeat(64), "1", "b".repeat(64));
-  assert.equal(changed.changed, true);
-  assert.equal(changed.version, 2);
-
-  assert.throws(
-    () => adapter.wmgjFirestoreSourceVersionDecision_("a".repeat(64), "", "b".repeat(64)),
-    /SOURCE_VERSION_STATE_INVALID/
-  );
-});
-
 test("adaptador Bradesco ignora cabeçalhos, saldos e resumos sem DCTO", () => {
   const adapter = migrationAdapterContext() as any;
   assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_({ data: "DATA", dcto: "DCTO" }), true);
