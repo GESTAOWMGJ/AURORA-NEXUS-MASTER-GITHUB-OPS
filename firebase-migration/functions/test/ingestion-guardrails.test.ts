@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  canonicalEntityRevision,
   ingestOrganizationRejection,
   mergedDocumentForAudit,
+  nextCanonicalEntityRevision,
   persistedDocumentHash
 } from "../src/index.ts";
 
@@ -69,6 +71,22 @@ test("ingestão rejeita campo de guardrail ausente, permissivo ou com tipo incor
       );
     });
   }
+});
+
+test("revisão canônica é monotônica e rejeita estado inválido", () => {
+  assert.equal(canonicalEntityRevision(undefined), 0);
+  assert.equal(canonicalEntityRevision(null), 0);
+  assert.equal(canonicalEntityRevision(1), 1);
+  assert.equal(canonicalEntityRevision(7), 7);
+  assert.equal(canonicalEntityRevision("7"), null);
+  assert.equal(canonicalEntityRevision(0), null);
+  assert.equal(canonicalEntityRevision(1.5), null);
+
+  assert.equal(nextCanonicalEntityRevision(undefined), 1);
+  assert.equal(nextCanonicalEntityRevision(1), 2);
+  assert.equal(nextCanonicalEntityRevision(41), 42);
+  assert.equal(nextCanonicalEntityRevision(Number.MAX_SAFE_INTEGER), null);
+  assert.equal(nextCanonicalEntityRevision("1"), null);
 });
 
 test("estado de auditoria reflete o documento final de merge, inclusive mapas preservados", () => {
