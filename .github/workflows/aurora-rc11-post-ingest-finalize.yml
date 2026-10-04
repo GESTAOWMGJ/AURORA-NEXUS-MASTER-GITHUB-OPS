@@ -1,0 +1,229 @@
+name: Aurora RC1.1 Post-Ingest Finalize
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/requests/aurora-rc11-post-ingest.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-rc11-post-ingest-hml
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    name: Reconcile -> SHADOW -> native insight -> final kill switch
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: firebase-homologation
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      REQUEST_FILE: .github/requests/aurora-rc11-post-ingest.json
+      APPS_SCRIPT_ID: 1_fQPqaq0EjaugyIF6jyuENDhJ2c2oTFm1kC-wdjmfaDqyRzy_uqwtiSW
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Validate immutable post-ingest request
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          jq -e --arg project "$PROJECT_ID" '
+            .confirmation=="RUN_RC11_POST_INGEST_HML" and
+            .requestVersion==1 and
+            .projectId==$project and
+            .projectId=="wmgj-hml-jfn-20260927" and
+            .orgId=="wmgj" and
+            .competence=="2026-05" and
+            .invoiceEntityId=="2ecf22486a131eb73a6c3461d193065b9159d724409f0021" and
+            .bankEntityId=="548ad8845970183fc0c4eb419ca030114ce448000d0b163b" and
+            .expectedInvoiceCents==4950000 and
+            .expectedReceivedCents==4950000 and
+            .projectionMode=="SHADOW" and
+            .projectionEnabled==true and
+            .productionMutation==false and
+            .sourceMutation==false and
+            .clinicalSensitiveEnabled==false
+          ' "$REQUEST_FILE" >/dev/null
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: firebase-migration/functions/package-lock.json
+
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+        with:
+          version: "548.0.0"
+          project_id: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+
+      - name: Reconcile existing real entities
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/rc11-post-evidence"
+          access_token="$(gcloud auth print-access-token)"
+          base="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj"
+          invoice_id="$(jq -r '.invoiceEntityId' "$REQUEST_FILE")"
+          bank_id="$(jq -r '.bankEntityId' "$REQUEST_FILE")"
+          curl -fsS -H "Authorization: Bearer ${access_token}" "$base/invoices/$invoice_id" > "$RUNNER_TEMP/invoice.json"
+          curl -fsS -H "Authorization: Bearer ${access_token}" "$base/bankTransactions/$bank_id" > "$RUNNER_TEMP/bank.json"
+          invoice_cents="$(jq -r '.fields.totalCents.integerValue|tonumber' "$RUNNER_TEMP/invoice.json")"
+          bank_cents="$(jq -r '.fields.liquidatedAmountCents.integerValue|tonumber' "$RUNNER_TEMP/bank.json")"
+          test "$invoice_cents" -eq "$(jq -r '.expectedInvoiceCents' "$REQUEST_FILE")"
+          test "$bank_cents" -eq "$(jq -r '.expectedReceivedCents' "$REQUEST_FILE")"
+          test "$invoice_cents" -eq "$bank_cents"
+          jq -n --arg invoiceId "$invoice_id" --arg bankId "$bank_id" --argjson cents "$invoice_cents" '{
+            gate:"RECONCILED",
+            invoiceEntityId:$invoiceId,
+            bankEntityId:$bankId,
+            invoiceCents:$cents,
+            receivedCents:$cents,
+            differenceZero:true,
+            productionMutation:false,
+            sourceMutation:false
+          }' > "$RUNNER_TEMP/rc11-post-evidence/reconciliation.json"
+
+      - name: Enable SHADOW with explicit HTTP diagnostics
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          access_token="$(gcloud auth print-access-token)"
+          org_url="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj"
+          curl -fsS -H "Authorization: Bearer ${access_token}" "$org_url" > "$RUNNER_TEMP/org-before.json"
+          jq -e '
+            .fields.active.booleanValue==true and
+            .fields.environment.stringValue=="HOMOLOGATION" and
+            .fields.projectionMode.stringValue=="SHADOW" and
+            .fields.productionMutation.booleanValue==false and
+            .fields.sourceMutation.booleanValue==false and
+            .fields.clinicalSensitiveEnabled.booleanValue==false
+          ' "$RUNNER_TEMP/org-before.json" >/dev/null
+          payload='{"fields":{"projectionEnabled":{"booleanValue":true},"projectionMode":{"stringValue":"SHADOW"},"projectionCompetence":{"stringValue":"2026-05"},"productionMutation":{"booleanValue":false},"sourceMutation":{"booleanValue":false}}}'
+          patch_url="${org_url}?updateMask.fieldPaths=projectionEnabled&updateMask.fieldPaths=projectionMode&updateMask.fieldPaths=projectionCompetence&updateMask.fieldPaths=productionMutation&updateMask.fieldPaths=sourceMutation"
+          http_status="$(curl --silent --show-error --output "$RUNNER_TEMP/projection-patch-response.json" --write-out '%{http_code}' -X PATCH -H "Authorization: Bearer ${access_token}" -H 'Content-Type: application/json' --data "$payload" "$patch_url")"
+          if [ "$http_status" -lt 200 ] || [ "$http_status" -ge 300 ]; then
+            google_status="$(jq -r '.error.status // empty' "$RUNNER_TEMP/projection-patch-response.json" 2>/dev/null || true)"
+            google_code="$(jq -r '.error.code // empty' "$RUNNER_TEMP/projection-patch-response.json" 2>/dev/null || true)"
+            google_message="$(jq -r '.error.message // empty' "$RUNNER_TEMP/projection-patch-response.json" 2>/dev/null | head -c 400 || true)"
+            jq -n --argjson http "$http_status" --arg status "$google_status" --arg code "$google_code" --arg message "$google_message" '{
+              gate:"PROJECTION_PATCH_FAILED",
+              httpStatus:$http,
+              googleStatus:$status,
+              googleCode:$code,
+              message:$message,
+              productionMutation:false,
+              sourceMutation:false
+            }' > "$RUNNER_TEMP/rc11-post-evidence/projection-patch.json"
+            cat "$RUNNER_TEMP/rc11-post-evidence/projection-patch.json"
+            exit 72
+          fi
+          jq -e '
+            .fields.projectionEnabled.booleanValue==true and
+            .fields.projectionMode.stringValue=="SHADOW" and
+            .fields.projectionCompetence.stringValue=="2026-05" and
+            .fields.productionMutation.booleanValue==false and
+            .fields.sourceMutation.booleanValue==false
+          ' "$RUNNER_TEMP/projection-patch-response.json" >/dev/null
+          jq -n '{gate:"SHADOW_ENABLED",competence:"2026-05",productionMutation:false,sourceMutation:false}' > "$RUNNER_TEMP/rc11-post-evidence/projection-patch.json"
+
+      - name: Wait for governed projection
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          access_token="$(gcloud auth print-access-token)"
+          url="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj/dashboardSnapshots/current"
+          ready=false
+          for _ in $(seq 1 40); do
+            if curl -fsS -H "Authorization: Bearer ${access_token}" "$url" > "$RUNNER_TEMP/snapshot.json" 2>/dev/null && jq -e '
+              .fields.competence.stringValue=="2026-05" and
+              (.fields.financialCents.mapValue.fields.invoicedCents.integerValue|tonumber)==4950000 and
+              (.fields.financialCents.mapValue.fields.receivedCents.integerValue|tonumber)==4950000 and
+              (.fields.financialCents.mapValue.fields.outstandingCents.integerValue|tonumber)==0 and
+              .fields.dataQuality.mapValue.fields.complete.booleanValue==true
+            ' "$RUNNER_TEMP/snapshot.json" >/dev/null 2>&1; then ready=true; break; fi
+            sleep 30
+          done
+          test "$ready" = true
+          jq -n '{gate:"SHADOW_SNAPSHOT_VERIFIED",competence:"2026-05",invoicedCents:4950000,receivedCents:4950000,outstandingCents:0}' > "$RUNNER_TEMP/rc11-post-evidence/shadow-snapshot.json"
+
+      - name: Test native intelligence against real HML data
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+          SMOKE_UID: ${{ vars.FIREBASE_HML_SMOKE_UID }}
+        run: |
+          set -euo pipefail
+          d="$(mktemp -d "$RUNNER_TEMP/rc11-native.XXXXXX")"; trap 'rm -rf "$d"' EXIT
+          access_token="$(gcloud auth print-access-token)"
+          apps="$(curl -fsS -H "Authorization: Bearer ${access_token}" "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/webApps?pageSize=100")"
+          app_name="$(jq -r '[.apps[]?|select(.state=="ACTIVE")]|first|.name//empty' <<<"$apps")"; test -n "$app_name"
+          api_key="$(curl -fsS -H "Authorization: Bearer ${access_token}" "https://firebase.googleapis.com/v1beta1/${app_name}/config" | jq -r '.apiKey//empty')"; test -n "$api_key"
+          now="$(date +%s)"; exp="$((now+3000))"
+          jq -nc --arg iss "$DEPLOY_SERVICE_ACCOUNT" --arg sub "$DEPLOY_SERVICE_ACCOUNT" --arg uid "$SMOKE_UID" --arg aud "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit" --argjson iat "$now" --argjson exp "$exp" '{iss:$iss,sub:$sub,aud:$aud,iat:$iat,exp:$exp,uid:$uid}' > "$d/claims.json"
+          gcloud iam service-accounts sign-jwt "$d/claims.json" "$d/custom.jwt" --iam-account "$DEPLOY_SERVICE_ACCOUNT" --project "$PROJECT_ID" >/dev/null
+          jq -nc --arg token "$(cat "$d/custom.jwt")" '{token:$token,returnSecureToken:true}' > "$d/auth.json"
+          curl -fsS -H 'Content-Type: application/json' --data-binary @"$d/auth.json" "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${api_key}" > "$d/auth-response.json"
+          id_token="$(jq -r '.idToken//empty' "$d/auth-response.json")"; test -n "$id_token"
+          base_url="https://${PROJECT_ID}.web.app"
+          jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$d/session.json"
+          curl -fsS -X POST -H 'Content-Type: application/json' -H "Origin: ${base_url}" -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$d/cookies.txt" --data-binary @"$d/session.json" "${base_url}/__sessionLogin" >/dev/null
+          for intent in REVENUE_RISK SLA_RISK NEXT_ACTION EXECUTIVE; do
+            curl -fsS -H 'Accept: application/json' --cookie "$d/cookies.txt" "${base_url}/api/native-insight?intent=${intent}" > "$d/${intent}.json"
+            jq -e '.ok==true and .insight.engine=="AURORA_NATIVE_INTELLIGENCE" and .insight.externalProviderUsed==false and .insight.source.competence=="2026-05"' "$d/${intent}.json" >/dev/null
+          done
+          jq -e '[.insight.findings[]?|select(.code=="REVENUE_GAP")]|length==0' "$d/REVENUE_RISK.json" >/dev/null
+          jq -e '[.insight.findings[]?|select(.code=="SLA_OVERDUE")]|length==0' "$d/SLA_RISK.json" >/dev/null
+          jq -n --arg r "$(jq -r '.insight.headline' "$d/REVENUE_RISK.json")" --arg s "$(jq -r '.insight.headline' "$d/SLA_RISK.json")" --arg n "$(jq -r '.insight.headline' "$d/NEXT_ACTION.json")" --arg e "$(jq -r '.insight.headline' "$d/EXECUTIVE.json")" '{
+            gate:"NATIVE_INSIGHT_VERIFIED",
+            externalProviderUsed:false,
+            revenueHeadline:$r,
+            slaHeadline:$s,
+            nextActionHeadline:$n,
+            executiveHeadline:$e
+          }' > "$RUNNER_TEMP/rc11-post-evidence/native-intelligence.json"
+
+      - name: Verify final Apps Script kill switch
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          npm install -g @google/clasp@3.4.1
+          umask 077
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          mkdir -p "$RUNNER_TEMP/build-appscript"
+          printf '{"scriptId":"%s","projectId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" "$PROJECT_ID" > "$RUNNER_TEMP/build-appscript/.clasp.json"
+          cd "$RUNNER_TEMP/build-appscript"
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11KillSwitch "$RUNNER_TEMP/rc11-final-kill.json"
+          jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-final-kill.json" >/dev/null
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11InspecionarConfiguracao "$RUNNER_TEMP/rc11-final-config.json"
+          jq -e '.response.ok==true and .response.dryRun==true and .response.hmacConfigured==true' "$RUNNER_TEMP/rc11-final-config.json" >/dev/null
+          jq -n '{release:"1.0.0-rc.1",gate:"RC1.1_POST_INGEST",realWmgjSample:true,reconciled:true,shadowVerified:true,nativeInsightVerified:true,killSwitch:true,productionMutation:false,sourceMutation:false}' > "$RUNNER_TEMP/rc11-post-evidence/final-gate.json"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: aurora-rc11-post-ingest-evidence
+          path: ${{ runner.temp }}/rc11-post-evidence/
+          if-no-files-found: warn
+          retention-days: 30
