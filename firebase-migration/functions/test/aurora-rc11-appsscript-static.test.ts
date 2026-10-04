@@ -241,7 +241,7 @@ test("RC1.1 repair deploys install pinned function dependencies before Firebase 
   }
 });
 
-test("RC1.1 post-ingest repairs stale runtime, refreshes canonical native projection and preserves truthful final evidence", () => {
+test("RC1.1 post-ingest waits for canonical native projection without elevating smoke permissions", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url), "utf8");
   assert.match(workflow, /Repair Hosting rewrite targets only if native routes are stale/);
   assert.match(workflow, /session_status.*__sessionLogin/);
@@ -252,9 +252,13 @@ test("RC1.1 post-ingest repairs stale runtime, refreshes canonical native projec
   assert.ok(workflow.includes('grep -Fq "functions:auroraNexusIntegrationPing"'));
   assert.ok(workflow.includes('projection_target="functions:auroraNexusProjectionEngine"'));
   assert.ok(workflow.includes('--only "${rewrite_targets},${projection_target},hosting"'));
-  assert.match(workflow, /\/api\/refresh/);
-  assert.match(workflow, /X-Aurora-CSRF: \${refresh_csrf}/);
-  assert.match(workflow, /CANONICAL_NATIVE_REFRESH_VERIFIED/);
+  assert.match(workflow, /native_contract_before="\$native_contract"/);
+  assert.match(workflow, /for _ in \$\(seq 1 40\)/);
+  assert.match(workflow, /NATIVE_SNAPSHOT_CONTRACT_TIMEOUT/);
+  assert.match(workflow, /CANONICAL_NATIVE_SNAPSHOT_VERIFIED/);
+  assert.match(workflow, /nativeContractAfter:\$nativeContractAfter/);
+  assert.doesNotMatch(workflow, /\/api\/refresh/);
+  assert.doesNotMatch(workflow, /X-Aurora-CSRF/);
   assert.doesNotMatch(workflow, /firestore databases restore/);
   assert.doesNotMatch(workflow, /auroraRc11EnviarAmostraReal/);
   assert.doesNotMatch(workflow, /secrets versions add/);
