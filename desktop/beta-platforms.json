@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "product": "AURORA NEXUS",
+  "channel": "beta",
+  "frontendVersionPolicy": "EXISTING_MAIN_NO_REDESIGN",
+  "frontendVersionSource": "firebase-migration/functions/src/auroraReleaseStatus.ts",
+  "reviewedMainSha": "52fb02862e31920d558733d99356e627b4109fd7",
+  "portal": "https://wmgj-hml-jfn-20260927.web.app/",
+  "windows": {"clientVersion": "0.2.0-beta.1", "type": "EDGE_APP_ACCESS_CLIENT", "offlineDatabaseReplica": false},
+  "mac": {"strategy": "PRESERVE_EXISTING_APP_IDENTITY", "nativeUpdate": "BLOCKED_BASELINE_INSPECTION"},
+  "ios": {"type": "EXISTING_PWA", "nativeAppStoreBuild": false, "deviceTest": "PENDING"},
+  "web": {"type": "EXISTING_PRIVATE_FIREBASE_APP", "deployedFrontendSha": null},
+  "fullLocalCloudSync": "BLOCKED_INTEGRATION_RUNTIME_AND_DEVICE_AUTH",
+  "productionReleased": false
+}

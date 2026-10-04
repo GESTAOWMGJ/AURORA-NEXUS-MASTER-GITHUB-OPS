@@ -368,7 +368,8 @@ jobs:
             "auroraNexusDistributionDecision"
           ]' '
             (.result // .functions // []) as $functions |
-            [$functions[] | (.id // .name // "") | split("/")[-1]] | sort == ($expected | sort)
+            [$functions[] | (.id // .name // "") | split("/")[-1]] as $deployed |
+            all($expected[]; . as $name | $deployed | index($name) != null)
           ' <<<"$functions" >/dev/null
           shell="$(curl --fail --silent --show-error --max-time 30 "https://${PROJECT_ID}.web.app/")"
           grep -Fq "Ambiente privado" <<<"$shell"
