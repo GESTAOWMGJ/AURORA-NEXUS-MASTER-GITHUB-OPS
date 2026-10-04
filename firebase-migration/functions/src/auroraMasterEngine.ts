@@ -24,6 +24,20 @@ function uniqueFindings(groups: NativeInsightFinding[][]): NativeInsightFinding[
   }
   return [...byCode.values()].sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || a.code.localeCompare(b.code));
 }
+function governanceReviewFinding(reasonCodes: readonly string[]): NativeInsightFinding {
+  const coverageUnproven = reasonCodes.includes("GOV_DOCUMENT_COVERAGE_UNPROVEN");
+  return {
+    code: "DATA_GOVERNANCE_REVIEW_REQUIRED", severity: "HIGH",
+    title: coverageUnproven ? "Cobertura documental não comprovada" : "Revisão documental exigida pela governança",
+    detail: reasonCodes.join(", "),
+    action: [
+      coverageUnproven ? "Regenerar a projeção canônica e validar as contagens documentais ausentes ou inválidas; ausência não representa zero." : "",
+      reasonCodes.includes("GOV_DOCUMENT_REVIEW_REQUIRED") ? "Revisar os documentos com fragilidade, dependência da origem ou SLA vencido no fluxo autorizado." : "",
+      "Registrar evidências e submeter a revisão humana antes de decidir."
+    ].filter(Boolean).join(" "),
+    evidencePath: "projection.documentIntelligence"
+  };
+}
 
 /** Pure planner: no tool calls, financial writes, source access, or model provider. */
 export function buildMasterOperationalState(
@@ -32,12 +46,19 @@ export function buildMasterOperationalState(
   const assessment = assessNativeData(projection, now);
   const denied = assessment.decision === "DENY";
   // The data gate runs BEFORE inference, including the bootstrap's empty fallback.
-  const findings = denied ? [] : uniqueFindings([
+  const nativeFindings = denied ? [] : uniqueFindings([
     insightFindings(generateNativeInsight(projection, "EXECUTIVE", now)),
     insightFindings(generateNativeInsight(projection, "REVENUE_RISK", now)),
     insightFindings(generateNativeInsight(projection, "SLA_RISK", now)),
     insightFindings(generateNativeInsight(projection, "DATA_QUALITY", now))
   ]);
+  const reviewFinding = assessment.decision === "REVIEW" ? governanceReviewFinding(assessment.reasonCodes) : null;
+  // Surface REVIEW reasons before ordinary findings, without masking a critical finding.
+  const findings = reviewFinding ? [
+    ...nativeFindings.filter(item => item.severity === "CRITICAL"),
+    reviewFinding,
+    ...nativeFindings.filter(item => item.severity !== "CRITICAL")
+  ] : nativeFindings;
   const operations = denied ? {} : record(projection.operations);
   // Do not merge a live, truncated, or cross-period action list into a canonical snapshot.
   const openActions = knownCount(operations.openActions);
