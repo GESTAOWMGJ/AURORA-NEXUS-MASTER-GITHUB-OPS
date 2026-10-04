@@ -263,11 +263,10 @@ jobs:
         run: |
           set -euo pipefail
           access_token="$(gcloud auth print-access-token)"
-          auth_header="$(printf '%s: %s %s' 'Authorization' 'Bearer' "$access_token")"
           url="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj/dashboardSnapshots/current"
           ready=false
           for _ in $(seq 1 40); do
-            if curl -fsS -H "$auth_header" "$url" > "$RUNNER_TEMP/native-projection.json" 2>/dev/null && jq -e '
+            if curl -fsS -H "Authorization: Bearer ${access_token}" "$url" > "$RUNNER_TEMP/native-projection.json" 2>/dev/null && jq -e '
               .fields.competence.stringValue=="2026-05" and
               .fields.nativeDataPlane.mapValue.fields.storage.stringValue=="FIRESTORE" and
               .fields.nativeDataPlane.mapValue.fields.sourceAccessDuringInference.booleanValue==false and
