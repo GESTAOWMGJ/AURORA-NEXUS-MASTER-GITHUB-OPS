@@ -127,7 +127,7 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
   var rawValues = dataRange.getValues();
   var sent = 0;
   var duplicates = 0;
-  var unchanged = 0;
+  var skipped = 0;
   var errors = 0;
   var planned = 0;
   var lastAcceptedRow = startRow - 1;
@@ -141,19 +141,15 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
       // canônicos em centavos são derivados separadamente, sem alterar a Sheet.
       var sourceRecord = wmgjFirestoreRowObject_(headers, row);
       var rowHash = wmgjFirestoreHashString_(JSON.stringify(sourceRecord));
-      if (config.bankStatementAdapter && wmgjFirestoreSkipBankStatementRow_(sourceRecord)) return;
+      if (config.bankStatementAdapter && wmgjFirestoreSkipBankStatementRow_(sourceRecord)) {
+        skipped++;
+        lastAcceptedRow = rowNumber;
+        return;
+      }
       var record = config.bankStatementAdapter
         ? wmgjFirestoreBankStatementRecord_(headers, rawValues[offset], row, sourceRecord, rowHash)
         : wmgjFirestoreAddCanonicalMoney_(headers, rawValues[offset], row, sourceRecord, config.moneyFields || {});
       var entityKey = wmgjFirestoreEntityKey_(sheetName, record, rowNumber);
-      var versionState = wmgjFirestoreSourceVersionState_(
-        props, ss.getId(), sheetName, entityKey, rowHash
-      );
-      if (!versionState.changed) {
-        unchanged++;
-        lastAcceptedRow = rowNumber;
-        return;
-      }
       var legacyStatus = String(
         record.status ||
         record.status_conciliacao ||
@@ -171,9 +167,10 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
         eventType: 'ENTITY_UPSERT',
         orgId: bridgeConfig.orgId,
         occurredAt: occurredAt.toISOString(),
-        // A versão é monotônica por entidade de origem. O estado só avança
-        // depois de aceite/duplicata confirmados pelo backend.
-        sourceVersion: versionState.version,
+        // Sheets legadas não oferecem revisão monotônica por linha. O produtor
+        // envia a versão-fonte 1 e o hash do conteúdo; o backend AURORA mantém
+        // a revisão canônica monotônica e imutável da entidade.
+        sourceVersion: 1,
         idempotencyKey: [bridgeConfig.orgId, 'SHEETS', ss.getId(), sheetName, rowNumber, rowHash].join(':'),
         entityType: config.entityType,
         entityKey: entityKey,
@@ -211,7 +208,6 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
       if (response.accepted) sent++;
       if (response.duplicate) duplicates++;
       if (response.ok && (response.accepted || response.duplicate)) {
-        wmgjFirestorePersistSourceVersionState_(props, versionState);
         lastAcceptedRow = rowNumber;
       }
     } catch (error) {
@@ -236,7 +232,7 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
     planned: planned,
     sent: sent,
     duplicates: duplicates,
-    unchanged: unchanged,
+    skipped: skipped,
     errors: errors,
     revisionSweep: revisionSweep,
     nextRow: bridgeConfig.dryRun ? startRow : Number(props.getProperty(checkpointKey) || startRow)
@@ -365,51 +361,6 @@ function wmgjFirestoreBankStatementRecord_(headers, rawRow, displayRow, sourceRe
     }
   }
   return record;
-}
-
-function wmgjFirestoreSourceVersionDecision_(previousHash, previousVersion, rowHash) {
-  previousHash = String(previousHash || '').trim();
-  rowHash = String(rowHash || '').trim();
-  var versionText = String(previousVersion || '').trim();
-  if (!rowHash) throw new Error('SOURCE_VERSION_ROW_HASH_MISSING');
-
-  if (!previousHash && !versionText) return { changed: true, version: 1 };
-  var version = Number(versionText);
-  if (!previousHash || !versionText || !isFinite(version) || version < 1 || Math.floor(version) !== version) {
-    throw new Error('SOURCE_VERSION_STATE_INVALID');
-  }
-  if (previousHash === rowHash) return { changed: false, version: version };
-  if (version >= Number.MAX_SAFE_INTEGER) throw new Error('SOURCE_VERSION_EXHAUSTED');
-  return { changed: true, version: version + 1 };
-}
-
-function wmgjFirestoreSourceVersionState_(props, spreadsheetId, sheetName, entityKey, rowHash) {
-  var identityHash = wmgjFirestoreHashString_([
-    spreadsheetId || '', sheetName || '', entityKey || ''
-  ].join('|')).slice(0, 40);
-  var baseKey = 'WMGJ_FS_SRCV_' + identityHash;
-  var previousHash = props.getProperty(baseKey + '_HASH') || '';
-  var previousVersion = props.getProperty(baseKey + '_VERSION') || '';
-  var decision = wmgjFirestoreSourceVersionDecision_(previousHash, previousVersion, rowHash);
-  return {
-    changed: decision.changed,
-    version: decision.version,
-    rowHash: rowHash,
-    hashKey: baseKey + '_HASH',
-    versionKey: baseKey + '_VERSION'
-  };
-}
-
-function wmgjFirestorePersistSourceVersionState_(props, state) {
-  if (!state || !state.hashKey || !state.versionKey || !state.rowHash) {
-    throw new Error('SOURCE_VERSION_PERSIST_STATE_INVALID');
-  }
-  props.setProperties((function() {
-    var values = {};
-    values[state.hashKey] = String(state.rowHash);
-    values[state.versionKey] = String(state.version);
-    return values;
-  })(), false);
 }
 
 function wmgjFirestoreNormalizeHeader_(header, index) {
