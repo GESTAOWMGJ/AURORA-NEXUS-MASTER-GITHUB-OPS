@@ -47,6 +47,7 @@
 | Pentest independente | EXTERNAL_REQUIRED | — | executar antes de escala com dado sensível |
 | Evidência de remediação | PARTIAL | `docs/36-vulnerability-consolidated-report.md` registra baseline e achados moderados | anexar Codex Security e fechar/remediar achados |
 | Revisão de acesso | MISSING | — | periodicidade, owner e primeira revisão |
+| Recuperação IAM Eventarc HML | IMPLEMENTED / TESTED | `scripts/repair-hml-eventarc-iam.py`, testes sintéticos e doc 49 | revisar política atual com administrador GCP, aplicar apenas adições ausentes e validar novo deploy protegido |
 | Change/release management | PARTIAL | Release Cockpit/AURORA-DEV-001 | aprovação formal e trilha por release |
 | SLA/SLO/Suporte | MISSING | — | disponibilidade, resposta e suporte |
 | Security questionnaire pack | PARTIAL | `docs/27-security-questionnaire-cryptography.md` cobre criptografia; pack corporativo ainda incompleto | consolidar questionário geral |
