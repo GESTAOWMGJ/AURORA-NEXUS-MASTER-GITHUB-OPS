@@ -217,9 +217,9 @@ test("RC1.1 primary workflow repairs stale native routes before authenticated sm
   assert.ok(repairIndex >= 0 && smokeIndex > repairIndex);
   assert.match(workflow, /session_status.*__sessionLogin/);
   assert.match(workflow, /native_status.*api\/native-insight/);
-  assert.match(workflow, /rewrite_targets=.*hosting\\.rewrites/);
-  assert.match(workflow, /grep -Fq "functions:auroraNexusIntegrationPing"/);
-  assert.match(workflow, /--only "\\$\\{rewrite_targets\\},hosting"/);
+  assert.ok(workflow.includes(".hosting.rewrites[]"));
+  assert.ok(workflow.includes('grep -Fq "functions:auroraNexusIntegrationPing"'));
+  assert.ok(workflow.includes('--only "${rewrite_targets},hosting"'));
   assert.doesNotMatch(workflow, /--only functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting/);
   assert.match(workflow, /SESSION_LOGIN_HTTP_/);
   assert.match(workflow, /NATIVE_INSIGHT_.*_HTTP_/);
@@ -231,9 +231,9 @@ test("RC1.1 post-ingest workflow repairs only stale native routes and always ver
   assert.match(workflow, /Repair Hosting rewrite targets only if native routes are stale/);
   assert.match(workflow, /session_status.*__sessionLogin/);
   assert.match(workflow, /native_status.*api\/native-insight/);
-  assert.match(workflow, /rewrite_targets=.*hosting\\.rewrites/);
-  assert.match(workflow, /grep -Fq "functions:auroraNexusIntegrationPing"/);
-  assert.match(workflow, /--only "\\$\\{rewrite_targets\\},hosting"/);
+  assert.ok(workflow.includes(".hosting.rewrites[]"));
+  assert.ok(workflow.includes('grep -Fq "functions:auroraNexusIntegrationPing"'));
+  assert.ok(workflow.includes('--only "${rewrite_targets},hosting"'));
   assert.doesNotMatch(workflow, /--only functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting/);
   assert.doesNotMatch(workflow, /firestore databases restore/);
   assert.doesNotMatch(workflow, /auroraRc11EnviarAmostraReal/);
