@@ -67,8 +67,14 @@ export function buildMasterOperationalState(
   const critical = findings.filter((item) => item.severity === "CRITICAL").length;
   const high = findings.filter((item) => item.severity === "HIGH").length;
   const summary = record(context.actionSummary);
-  const openActions = finiteNumber(summary.open) + finiteNumber(summary.inProgress);
-  const overdueActions = finiteNumber(summary.overdue);
+  const operations = record(projection.operations);
+  const hasActionSummary = Object.keys(summary).length > 0;
+  const openActions = hasActionSummary
+    ? finiteNumber(summary.open) + finiteNumber(summary.inProgress)
+    : finiteNumber(operations.openActions);
+  const overdueActions = hasActionSummary
+    ? finiteNumber(summary.overdue)
+    : finiteNumber(operations.overdueActions);
   const routines = record(projection.nativeRoutines);
   const routineState = Object.keys(routines).length > 0 ? routines : nativeRoutineSummary();
   const release = record(context.release);
