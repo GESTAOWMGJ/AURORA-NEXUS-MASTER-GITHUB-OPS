@@ -225,6 +225,22 @@ test("RC1.1 primary workflow repairs stale native routes before authenticated sm
   assert.ok(workflow.includes('targetedDeploy:(($targets | split(",")) + ["hosting"]),'));
 });
 
+test("RC1.1 repair deploys install pinned function dependencies before Firebase predeploy", () => {
+  for (const relative of [
+    "../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml",
+    "../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml",
+  ]) {
+    const workflow = readFileSync(new URL(relative, import.meta.url), "utf8");
+    const repairIndex = workflow.indexOf("Repair Hosting rewrite targets only if native routes are stale");
+    const installIndex = workflow.indexOf("npm --prefix functions ci --no-audit --no-fund", repairIndex);
+    const deployIndex = workflow.indexOf("firebase-tools@14.17.0 deploy", repairIndex);
+    assert.ok(repairIndex >= 0);
+    assert.ok(installIndex > repairIndex);
+    assert.ok(deployIndex > installIndex);
+    assert.ok(workflow.includes('echo "FUNCTION_DEPENDENCIES_READY"'));
+  }
+});
+
 test("RC1.1 post-ingest repairs stale runtime, refreshes canonical native projection and preserves truthful final evidence", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url), "utf8");
   assert.match(workflow, /Repair Hosting rewrite targets only if native routes are stale/);
