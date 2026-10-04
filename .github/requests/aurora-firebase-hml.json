@@ -3,10 +3,10 @@
   "confirmation": "DEPLOY_HOMOLOGATION",
   "projectId": "wmgj-hml-jfn-20260927",
   "authorizedScope": "PR123_INGESTION_VERSIONING",
-  "expectedSourceSha": "f3c0ab5b634991ffdec65061a0f2e49361c14f11",
+  "expectedSourceSha": "b5843f171629375672ff783ce414f2d2e97d2a5e",
   "sourceMutation": false,
   "productionMutation": false,
   "clinicalSensitiveEnabled": false,
   "requestedAt": "2026-10-04",
-  "requestReason": "DEPLOY_PR123_IMMUTABLE_INGESTION_VERSIONING_HML"
+  "requestReason": "OWNER_AUTHORIZED_BETA_FULL_HML_AFTER_PR127"
 }
