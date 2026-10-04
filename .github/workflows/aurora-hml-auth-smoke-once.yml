@@ -79,10 +79,36 @@ jobs:
             exit 71
           fi
 
-          id_token="$(jq -r '.idToken // empty' "$tmp/auth-out.json")"
-          local_id="$(jq -r '.localId // empty' "$tmp/auth-out.json")"
-          test -n "$id_token"
-          test "$local_id" = "$SMOKE_UID"
+          # signInWithCustomToken does not return localId. Validate identity server-side.
+          if ! id_token="$(jq -er '.idToken | select(type == "string" and length > 0)' "$tmp/auth-out.json")"; then
+            echo "::error::AUTH_ID_TOKEN_MISSING_OR_INVALID"
+            exit 72
+          fi
+          printf '::add-mask::%s\n' "$id_token"
+          lookup_dir="$tmp"
+          umask 077
+          printf '%s' "$id_token" | jq -Rs '{idToken:.}' > "$lookup_dir/account-lookup-in.json"
+          if ! lookup_code="$(curl --silent --show-error --max-time 30 \
+            -H 'Content-Type: application/json' \
+            --data-binary @"$lookup_dir/account-lookup-in.json" \
+            -o "$lookup_dir/account-lookup-out.json" -w '%{http_code}' \
+            "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${api_key}")"; then
+            echo "::error::AUTH_ACCOUNT_LOOKUP_TRANSPORT_FAILED"
+            exit 73
+          fi
+          if [ "$lookup_code" != "200" ]; then
+            echo "::error::AUTH_ACCOUNT_LOOKUP_HTTP=$lookup_code"
+            exit 74
+          fi
+          if ! jq -e --arg uid "$SMOKE_UID" '
+            (.users | type == "array" and length == 1) and
+            (.users[0].localId == $uid) and
+            (.users[0].disabled != true)
+          ' "$lookup_dir/account-lookup-out.json" >/dev/null; then
+            echo "::error::AUTH_SMOKE_ACCOUNT_INVALID"
+            exit 75
+          fi
+          echo "AUTH_SMOKE_UID_VERIFIED"
 
           jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$tmp/session.json"
           curl --fail --silent --show-error --max-time 30 -X POST -H 'Content-Type: application/json' -H "Origin: ${base}" -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$tmp/cookies.txt" --data-binary @"$tmp/session.json" -o /dev/null "$base/__sessionLogin"
