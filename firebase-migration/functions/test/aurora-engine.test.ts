@@ -139,6 +139,52 @@ test("E2E sanitizado adapta Sheet pt-BR e projeta recebimento em centavos", () =
   assert.equal(projection.sanitized, true);
 });
 
+test("adaptador Bradesco usa crédito/débito real e remove narrativa identificável", () => {
+  const adapter = migrationAdapterContext() as any;
+  const headers = [
+    "DATA", "DESCRICAO", "DCTO", "CREDITO", "DEBITO", "SALDO",
+    "CATEGORIA", "COMPETENCIA_VINCULADA", "FONTE", "SUBCATEGORIA",
+    "COMPETENCIA_ASSISTENCIAL_RELACIONADA", "NF_RELACIONADA",
+    "STATUS_CONCILIACAO", "ID_DRIVE", "OBS"
+  ];
+  const display = [
+    "01/10/2026", "PIX ENVIADO DES: PRESTADOR", "1442376", "",
+    "R$ 6.600,00", "R$ 59.881,73", "REPASSE_MEDICO", "2026-10",
+    "Bradesco_02102026_090336.PDF", "PRESTADOR_PJ", "", "",
+    "PENDENTE_COMPETENCIA_E_DOCUMENTO", "GMAIL:message", "texto operacional"
+  ];
+  const raw = [...display];
+  raw[4] = 6600 as any;
+  raw[5] = 59881.73 as any;
+
+  const sourceRecord = adapter.wmgjFirestoreRowObject_(headers, display);
+  const rowHash = "a".repeat(64);
+  const adapted = adapter.wmgjFirestoreBankStatementRecord_(headers, raw, display, sourceRecord, rowHash);
+
+  assert.equal(adapted.amountCents, -660000);
+  assert.equal(adapted.currency, "BRL");
+  assert.equal(adapted.kind, "DEBIT");
+  assert.equal(adapted.competence, "2026-10");
+  assert.equal(adapted.category, "REPASSE_MEDICO");
+  assert.equal(adapted.status, "PENDENTE_COMPETENCIA_E_DOCUMENTO");
+  assert.match(adapted.transaction_id_hash, /^[a-f0-9]{64}$/);
+  assert.equal(adapted.source_row_hash, rowHash);
+  assert.equal(adapted.descricao, undefined);
+  assert.equal(adapted.dcto, undefined);
+  assert.equal(adapted.saldo, undefined);
+  assert.equal(adapted.obs, undefined);
+  assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_(sourceRecord), false);
+});
+
+test("adaptador Bradesco ignora cabeçalhos, saldos e resumos sem DCTO", () => {
+  const adapter = migrationAdapterContext() as any;
+  assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_({ data: "DATA", dcto: "DCTO" }), true);
+  assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_({ data: "BLOCO_CONCILIACAO_02102026" }), true);
+  assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_({ data: "30/09/2026", categoria: "RESUMO_MENSAL" }), true);
+  assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_({ data: "01/10/2026", categoria: "SALDO_INVESTIMENTO" }), true);
+  assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_({ data: "01/10/2026", dcto: "1443272", categoria: "REPASSE_MEDICO" }), false);
+});
+
 test("motor calcula SLA, cobertura e filtra competência", () => {
   const projection = buildProjection(source({
     actionItems: [
