@@ -223,6 +223,13 @@ service cloud.firestore {
         allow write: if false;
       }
 
+      // Histórico imutável de cada versão aceita pela ingestão. O conteúdo pode
+      // conter dados financeiros/operacionais e permanece restrito ao backend
+      // Admin SDK; clientes usam auditEvents e projeções sanitizadas.
+      match /entityVersions/{versionId} {
+        allow read, write: if false;
+      }
+
       match /aiRuns/{runId} {
         allow read: if (
           canReadAudit(orgId)
