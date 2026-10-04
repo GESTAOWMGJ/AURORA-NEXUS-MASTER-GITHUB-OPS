@@ -185,6 +185,47 @@ test("adaptador Bradesco usa crédito/débito real e remove narrativa identific�
   assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_(sourceRecord), false);
 });
 
+test("identidade Bradesco permanece estável quando apenas o valor é corrigido", () => {
+  const adapter = migrationAdapterContext() as any;
+  const headers = ["DATA", "DCTO", "CREDITO", "DEBITO", "CATEGORIA", "COMPETENCIA_VINCULADA", "STATUS_CONCILIACAO"];
+  const firstDisplay = ["01/10/2026", "1442376", "", "R$ 6.600,00", "REPASSE_MEDICO", "2026-10", "PENDENTE"];
+  const correctedDisplay = ["01/10/2026", "1442376", "", "R$ 6.500,00", "REPASSE_MEDICO", "2026-10", "PENDENTE"];
+  const firstRaw = [...firstDisplay];
+  const correctedRaw = [...correctedDisplay];
+  firstRaw[3] = 6600 as any;
+  correctedRaw[3] = 6500 as any;
+
+  const firstSource = adapter.wmgjFirestoreRowObject_(headers, firstDisplay);
+  const correctedSource = adapter.wmgjFirestoreRowObject_(headers, correctedDisplay);
+  const first = adapter.wmgjFirestoreBankStatementRecord_(headers, firstRaw, firstDisplay, firstSource, "a".repeat(64));
+  const corrected = adapter.wmgjFirestoreBankStatementRecord_(headers, correctedRaw, correctedDisplay, correctedSource, "b".repeat(64));
+
+  assert.equal(first.transaction_id_hash, corrected.transaction_id_hash);
+  assert.equal(first.amountCents, -660000);
+  assert.equal(corrected.amountCents, -650000);
+});
+
+test("sourceVersion é monotônico e só avança quando o hash da fonte muda", () => {
+  const adapter = migrationAdapterContext() as any;
+
+  const initial = adapter.wmgjFirestoreSourceVersionDecision_("", "", "a".repeat(64));
+  assert.equal(initial.changed, true);
+  assert.equal(initial.version, 1);
+
+  const unchanged = adapter.wmgjFirestoreSourceVersionDecision_("a".repeat(64), "1", "a".repeat(64));
+  assert.equal(unchanged.changed, false);
+  assert.equal(unchanged.version, 1);
+
+  const changed = adapter.wmgjFirestoreSourceVersionDecision_("a".repeat(64), "1", "b".repeat(64));
+  assert.equal(changed.changed, true);
+  assert.equal(changed.version, 2);
+
+  assert.throws(
+    () => adapter.wmgjFirestoreSourceVersionDecision_("a".repeat(64), "", "b".repeat(64)),
+    /SOURCE_VERSION_STATE_INVALID/
+  );
+});
+
 test("adaptador Bradesco ignora cabeçalhos, saldos e resumos sem DCTO", () => {
   const adapter = migrationAdapterContext() as any;
   assert.equal(adapter.wmgjFirestoreSkipBankStatementRow_({ data: "DATA", dcto: "DCTO" }), true);
