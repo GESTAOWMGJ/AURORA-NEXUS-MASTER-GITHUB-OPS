@@ -85,15 +85,15 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
   var lastRow = sheet.getLastRow();
   var revisionSweep = false;
   if (startRow > lastRow) {
-    // Após concluir o backfill, reinicia uma varredura cíclica. Linhas já
-    // aceitas e sem alteração são puladas pelo estado de versão; uma mudança
-    // de conteúdo recebe sourceVersion monotonicamente maior.
+    // Após concluir o backfill, reinicia uma varredura cíclica. Linhas sem
+    // alteração retornam como duplicatas idempotentes; conteúdo alterado é
+    // promovido pelo backend para nova revisão canônica imutável.
     startRow = 2;
     revisionSweep = true;
   }
   var rowsToRead = Math.min(limit, lastRow - startRow + 1);
   if (rowsToRead <= 0) return {
-    ok: true, complete: true, sent: 0, unchanged: 0, errors: 0,
+    ok: true, complete: true, sent: 0, skipped: 0, errors: 0,
     lastRow: lastRow, revisionSweep: revisionSweep
   };
 
