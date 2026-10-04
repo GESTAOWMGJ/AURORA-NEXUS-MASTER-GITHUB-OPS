@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -13,7 +14,15 @@ function source(overrides: Partial<ProjectionSource> = {}): ProjectionSource {
 const context = { orgId: "wmgj", competence: "2026-09" };
 
 function migrationAdapterContext(): Record<string, unknown> {
-  const adapter: Record<string, unknown> = {};
+  const adapter: Record<string, unknown> = {
+    Utilities: {
+      DigestAlgorithm: { SHA_256: "SHA_256" },
+      Charset: { UTF_8: "UTF_8" },
+      computeDigest: (_algorithm: string, value: string) =>
+        [...createHash("sha256").update(String(value), "utf8").digest()]
+          .map((byte) => byte > 127 ? byte - 256 : byte)
+    }
+  };
   vm.createContext(adapter);
   const testDir = path.dirname(fileURLToPath(import.meta.url));
   const migrationRoot = path.resolve(testDir, "../..");
