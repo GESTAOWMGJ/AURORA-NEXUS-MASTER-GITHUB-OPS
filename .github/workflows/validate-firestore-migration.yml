@@ -62,6 +62,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: firebase-migration/api/uv.lock
 
+      - name: Test controlled HML IAM repair without cloud access
+        run: python3 -m unittest discover -s firebase-migration/scripts -p test_hml_eventarc_iam.py -v
+
       - name: Validate configuration and controlled launcher
         shell: bash
         run: |
