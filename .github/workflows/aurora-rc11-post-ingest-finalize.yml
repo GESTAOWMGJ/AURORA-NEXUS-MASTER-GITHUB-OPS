@@ -177,6 +177,9 @@ jobs:
           base_url="https://${PROJECT_ID}.web.app"
           session_status="$(curl --silent --show-error --output "$RUNNER_TEMP/session-route.json" --write-out '%{http_code}' "${base_url}/__sessionLogin")"
           native_status="$(curl --silent --show-error --output "$RUNNER_TEMP/native-route.json" --write-out '%{http_code}' "${base_url}/api/native-insight?intent=EXECUTIVE")"
+          npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json > "$RUNNER_TEMP/native-functions-list.json"
+          python3 scripts/validate-hosting-runtime.py --inventory "$RUNNER_TEMP/native-functions-list.json" \
+            --planned auroraNexusSessionLogin,auroraNexusNativeInsight
           repaired=false
           if [ "$session_status" != "405" ] || [ "$native_status" != "401" ]; then
             npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting
