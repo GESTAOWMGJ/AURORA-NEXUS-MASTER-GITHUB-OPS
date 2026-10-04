@@ -183,9 +183,17 @@ jobs:
           npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json > "$RUNNER_TEMP/native-functions-list.json"
           python3 scripts/validate-hosting-runtime.py --inventory "$RUNNER_TEMP/native-functions-list.json" \
             --planned "${rewrite_targets//functions:/}"
+          native_contract=false
+          if jq -e '
+            .fields.nativeDataPlane.mapValue.fields.storage.stringValue=="FIRESTORE" and
+            .fields.nativeDataPlane.mapValue.fields.sourceAccessDuringInference.booleanValue==false
+          ' "$RUNNER_TEMP/snapshot.json" >/dev/null 2>&1; then
+            native_contract=true
+          fi
+          projection_target="functions:auroraNexusProjectionEngine"
           repaired=false
-          if [ "$session_status" != "405" ] || [ "$native_status" != "401" ]; then
-            npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only "${rewrite_targets},hosting"
+          if [ "$session_status" != "405" ] || [ "$native_status" != "401" ] || [ "$native_contract" != "true" ]; then
+            npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --non-interactive --only "${rewrite_targets},${projection_target},hosting"
             repaired=true
             ready=false
             for _ in $(seq 1 20); do
@@ -200,12 +208,13 @@ jobs:
           jq -e '.ok==false and .code=="METHOD_NOT_ALLOWED"' "$RUNNER_TEMP/session-route.json" >/dev/null
           test "$native_status" = "401"
           jq -e '.ok==false and .code=="AUTH_REQUIRED"' "$RUNNER_TEMP/native-route.json" >/dev/null
-          jq -n --argjson repaired "$repaired" --arg session "$session_status" --arg native "$native_status" --arg targets "$rewrite_targets" '{
+          jq -n --argjson repaired "$repaired" --argjson nativeContractBefore "$native_contract" --arg session "$session_status" --arg native "$native_status" --arg targets "$rewrite_targets" --arg projection "$projection_target" '{
             gate:"NATIVE_ROUTES_READY",
             repaired:$repaired,
+            nativeContractBefore:$nativeContractBefore,
             sessionLoginStatus:$session,
             nativeInsightStatus:$native,
-            targetedDeploy:(($targets | split(",")) + ["hosting"]),
+            targetedDeploy:(($targets | split(",")) + [$projection, "hosting"]),
             productionMutation:false,
             sourceMutation:false
           }' > "$RUNNER_TEMP/rc11-post-evidence/native-routes.json"
@@ -237,6 +246,42 @@ jobs:
             cat "$d/session-response.json" >&2 || true
             exit 93
           fi
+
+          private_status="$(curl --silent --show-error --output "$d/private.html" --write-out '%{http_code}' --cookie "$d/cookies.txt" "${base_url}/")"
+          test "$private_status" = "200"
+          refresh_csrf="$(python3 -c 'import json,re,sys; html=open(sys.argv[1],encoding="utf-8").read(); match=re.search(r"const csrf=(\{[^;]+\});const capabilities=",html); assert match, "CSRF_BLOCK_MISSING"; token=json.loads(match.group(1)).get("refresh",""); assert token, "REFRESH_CSRF_MISSING"; print(token)' "$d/private.html")"
+          test -n "$refresh_csrf"
+          refresh_status="$(curl --silent --show-error --output "$d/refresh.json" --write-out '%{http_code}' -X POST \
+            -H 'Content-Type: application/json' \
+            -H "Origin: ${base_url}" \
+            -H 'Sec-Fetch-Site: same-origin' \
+            -H "X-Aurora-CSRF: ${refresh_csrf}" \
+            --cookie "$d/cookies.txt" \
+            --data '{}' \
+            "${base_url}/api/refresh")"
+          if [ "$refresh_status" != "200" ]; then
+            echo "NATIVE_REFRESH_HTTP_${refresh_status}" >&2
+            cat "$d/refresh.json" >&2 || true
+            exit 95
+          fi
+          jq -e '
+            .ok==true and
+            .projection.competence=="2026-05" and
+            .projection.nativeDataPlane.storage=="FIRESTORE" and
+            .projection.nativeDataPlane.sourceAccessDuringInference==false and
+            (.projection.financialCents.invoicedCents|tonumber)==4950000 and
+            (.projection.financialCents.receivedCents|tonumber)==4950000 and
+            (.projection.financialCents.outstandingCents|tonumber)==0
+          ' "$d/refresh.json" >/dev/null
+          jq -n '{
+            gate:"CANONICAL_NATIVE_REFRESH_VERIFIED",
+            competence:"2026-05",
+            storage:"FIRESTORE",
+            sourceAccessDuringInference:false,
+            productionMutation:false,
+            sourceMutation:false
+          }' > "$RUNNER_TEMP/rc11-post-evidence/native-refresh.json"
+
           for intent in REVENUE_RISK SLA_RISK NEXT_ACTION EXECUTIVE; do
             native_status="$(curl --silent --show-error --output "$d/${intent}.json" --write-out '%{http_code}' -H 'Accept: application/json' --cookie "$d/cookies.txt" "${base_url}/api/native-insight?intent=${intent}")"
             if [ "$native_status" != "200" ]; then
@@ -264,6 +309,7 @@ jobs:
           PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
         run: |
           set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/rc11-post-evidence"
           npm install -g @google/clasp@3.4.1
           umask 077
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
@@ -274,19 +320,38 @@ jobs:
           jq -e '.response.ok==true and .response.dryRun==true' "$RUNNER_TEMP/rc11-final-kill.json" >/dev/null
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraRc11InspecionarConfiguracao "$RUNNER_TEMP/rc11-final-config.json"
           jq -e '.response.ok==true and .response.dryRun==true and .response.hmacConfigured==true' "$RUNNER_TEMP/rc11-final-config.json" >/dev/null
+          real_sample_verified=false
+          reconciled=false
+          shadow_verified=false
           native_verified=false
-          test -f "$RUNNER_TEMP/rc11-post-evidence/native-intelligence.json" && native_verified=true
-          jq -n --argjson nativeVerified "$native_verified" '{
+          if [ -f "$RUNNER_TEMP/rc11-post-evidence/reconciliation.json" ]; then
+            real_sample_verified=true
+            reconciled=true
+          fi
+          if [ -f "$RUNNER_TEMP/rc11-post-evidence/shadow-snapshot.json" ]; then
+            shadow_verified=true
+          fi
+          if [ -f "$RUNNER_TEMP/rc11-post-evidence/native-intelligence.json" ]; then
+            native_verified=true
+          fi
+          jq -n \
+            --argjson realSample "$real_sample_verified" \
+            --argjson reconciled "$reconciled" \
+            --argjson shadowVerified "$shadow_verified" \
+            --argjson nativeVerified "$native_verified" '{
             release:"1.0.0-rc.1",
             gate:"RC1.1_POST_INGEST",
-            realWmgjSample:true,
-            reconciled:true,
-            shadowVerified:true,
+            realWmgjSample:$realSample,
+            reconciled:$reconciled,
+            shadowVerified:$shadowVerified,
             nativeInsightVerified:$nativeVerified,
             killSwitch:true,
             productionMutation:false,
             sourceMutation:false
           }' > "$RUNNER_TEMP/rc11-post-evidence/final-gate.json"
+          test "$real_sample_verified" = true
+          test "$reconciled" = true
+          test "$shadow_verified" = true
           test "$native_verified" = true
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
