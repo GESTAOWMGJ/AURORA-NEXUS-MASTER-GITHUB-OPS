@@ -12,6 +12,7 @@ import subprocess
 PROJECT = "wmgj-hml-jfn-20260927"
 NUMBER = "299889357292"
 REGION = "southamerica-east1"
+PROFILE = "aurora-hml"
 VERIFIED, PENDING, UNKNOWN = "COMPROVADO", "PENDENTE", "DESCONHECIDO"
 spec = importlib.util.spec_from_file_location("eventarc_plan", Path(__file__).with_name("repair-hml-eventarc-iam.py"))
 eventarc = importlib.util.module_from_spec(spec)
@@ -19,7 +20,7 @@ spec.loader.exec_module(eventarc)
 COMMANDS = {
     "auth": ["auth", "list", "--filter=status:ACTIVE", "--format=json(status)"],
     "project": ["projects", "describe", PROJECT, "--format=json(projectId,projectNumber,lifecycleState)"],
-    "iam": ["projects", "get-iam-policy", PROJECT, "--format=json(version,etag,bindings.role,bindings.members,bindings.condition)"],
+    "iam": ["projects", "get-iam-policy", PROJECT, "--format=json(version,etag,bindings)"],
     "functions": ["functions", "list", "--v2", "--regions=" + REGION,
                   "--format=json(name,environment,state,eventTrigger.eventType)"],
     "eventarc": ["eventarc", "triggers", "list", "--location=" + REGION, "--format=json(name)"],
@@ -64,7 +65,7 @@ class Reader:
             return None, "GCLOUD_UNAVAILABLE"
         env = dict(os.environ, CLOUDSDK_CORE_DISABLE_PROMPTS="1", CLOUDSDK_CORE_LOG_HTTP="false")
         try:
-            result = subprocess.run([self.executable, *COMMANDS[key], "--project=" + PROJECT, "--quiet"],
+            result = subprocess.run([self.executable, *COMMANDS[key], "--configuration=" + PROFILE, "--project=" + PROJECT, "--quiet"],
                                     capture_output=True, text=True, timeout=30, check=False, env=env)
         except subprocess.TimeoutExpired:
             return None, "METADATA_QUERY_TIMEOUT"
@@ -111,6 +112,7 @@ def collect(reader):
         gates["project"]["evidence"] = "PROJECT_IDENTITY_UNVERIFIED"
         return report
     gates["project"] = {"status": VERIFIED, "evidence": "EXACT_HML_ACTIVE_METADATA"}
+    gates["auth"] = {"status": VERIFIED, "evidence": "AUTHENTICATED_HML_METADATA_READ"}
     policy, error = read("iam")
     if not error:
         try:

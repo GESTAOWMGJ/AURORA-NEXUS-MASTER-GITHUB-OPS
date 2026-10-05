@@ -67,6 +67,7 @@ class ReadonlyGateTests(unittest.TestCase):
         reader = FakeReader(); report = gate.collect(reader)
         self.assertEqual(reader.calls, list(gate.COMMANDS))
         self.assertTrue(all(g["status"] == gate.VERIFIED for g in report["gates"].values()))
+        self.assertEqual(report["gates"]["auth"]["evidence"], "AUTHENTICATED_HML_METADATA_READ")
         self.assertFalse(report["releaseApproved"])
         self.assertFalse(report["cloudMutationAttempted"])
         self.assertEqual(report["gates"]["iam"]["effectiveAccess"], gate.UNKNOWN)
@@ -107,7 +108,7 @@ class ReadonlyGateTests(unittest.TestCase):
             reader = gate.Reader("gcloud")
             for key in gate.COMMANDS:
                 reader.read(key); args, kwargs = run.call_args
-                self.assertEqual(args[0], ["gcloud", *gate.COMMANDS[key], "--project=" + gate.PROJECT, "--quiet"])
+                self.assertEqual(args[0], ["gcloud", *gate.COMMANDS[key], "--configuration=" + gate.PROFILE, "--project=" + gate.PROJECT, "--quiet"])
                 self.assertEqual(kwargs["env"]["CLOUDSDK_CORE_LOG_HTTP"], "false")
                 self.assertEqual(kwargs["env"]["CLOUDSDK_CORE_DISABLE_PROMPTS"], "1")
                 self.assertEqual(kwargs["timeout"], 30)
@@ -117,6 +118,9 @@ class ReadonlyGateTests(unittest.TestCase):
         self.assertEqual(gate.error_code("PERMISSION_DENIED 403. To switch account run gcloud auth login"), "READ_PERMISSION_DENIED")
         self.assertEqual(gate.error_code("You do not currently have an active account selected"), "AUTH_LOGIN_REQUIRED")
         self.assertEqual(gate.error_code("invalid_grant private-token-marker"), "AUTH_RENEWAL_REQUIRED")
+
+    def test_iam_projection_preserves_binding_objects(self):
+        self.assertIn("--format=json(version,etag,bindings)", gate.COMMANDS["iam"])
 
     def test_reader_redacts_failures_and_timeout(self):
         reader = gate.Reader("gcloud")
@@ -136,7 +140,8 @@ class ReadonlyGateTests(unittest.TestCase):
         source = (ROOT / "tools/windows/DIAG_AURORA_HML.cmd").read_text()
         self.assertIn('if /I "%~1"=="login" goto login', source)
         self.assertLess(source.index("goto diagnose"), source.index(":login"))
-        self.assertEqual(source.count("auth login --brief"), 1)
+        self.assertEqual(source.count("hml_cli_access.py\" --login"), 1)
+        self.assertIn('if /I "%~1"=="setup" goto setup', source)
         for forbidden in ("set-iam-policy", "firebase deploy", "ExecutionPolicy Bypass", "auth print-access-token"):
             self.assertNotIn(forbidden, source)
 
