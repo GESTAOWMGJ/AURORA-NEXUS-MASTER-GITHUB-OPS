@@ -182,6 +182,28 @@ jobs:
         with:
           version: "548.0.0"
           project_id: ${{ inputs.project_id }}
+      - name: Inspect Eventarc IAM without changing access
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = "$APPROVED_PROJECT"
+          test "$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')" = "$DEPLOY_SERVICE_ACCOUNT"
+          project_number="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+          umask 077
+          review_root="$(mktemp -d "${RUNNER_TEMP}/aurora-iam-preflight.XXXXXX")"
+          trap 'rm -rf -- "$review_root"' EXIT
+          status=0
+          python3 firebase-migration/scripts/repair-hml-eventarc-iam.py \
+            --project "$PROJECT_ID" \
+            --expected-project-number "$project_number" \
+            --evidence-dir "$review_root/evidence" || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::error::HML_EVENTARC_IAM_REVIEW_REQUIRED: deploy stopped before Firebase CLI; use the reviewed administrative recovery procedure."
+            exit "$status"
+          fi
       - name: Preflight protected homologation resources
         env:
           DEPLOYMENT_MODE: ${{ inputs.deployment_mode || 'BOOTSTRAP' }}

@@ -87,6 +87,19 @@ class RepairTests(unittest.TestCase):
                 repair.run(self.args("unused"), "gcloud")
             self.assertEqual(command.call_count, 1)
 
+    def test_read_only_preflight_passes_when_bindings_exist_without_any_write(self):
+        project = {"projectId": PROJECT, "projectNumber": NUMBER, "lifecycleState": "ACTIVE"}
+        policy = self.policy()
+        policy, _ = repair.proposed_policy(policy, repair.fingerprint(policy), NUMBER)
+        with tempfile.TemporaryDirectory() as root, patch.object(repair, "execute", side_effect=[project, policy]) as command:
+            target = str(Path(root) / "evidence")
+            self.assertEqual(repair.run(self.args(target), "gcloud"), 0)
+            self.assertEqual(command.call_count, 2)
+            self.assertNotIn("set-iam-policy", str(command.call_args_list))
+            result = json.loads((Path(target) / "result.json").read_text())
+            self.assertEqual(result["status"], "BINDINGS_PRESENT")
+            self.assertFalse(result["cloudMutationAttempted"])
+
     def test_non_hml_and_invalid_number_rejected_before_cloud_call(self):
         for values in ({"project": "production"}, {"project": "wmgj-hml-jfn-prod"},
                        {"expected_project_number": "not-a-number"}):
