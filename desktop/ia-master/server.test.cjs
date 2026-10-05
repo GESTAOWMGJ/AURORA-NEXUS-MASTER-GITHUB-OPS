@@ -21,6 +21,8 @@ test('private routes require authentication and reject foreign origins / DNS reb
   assert.equal((await a.request('/api/improve', task, { Origin: 'https://evil.invalid' })).status, 403);
   const rebound = await new Promise(resolve => { const req = http.get(a.base + '/health', { headers: { Host: 'evil.invalid' } }, res => { res.resume(); resolve(res.statusCode); }); req.on('error', err => { throw err; }); });
   assert.equal(rebound, 403);
+  assert.equal((await a.request('/', null, { Authorization: '', 'Sec-Fetch-Site': 'cross-site' })).status, 200);
+  assert.equal((await a.request('/api/status', null, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
   assert.equal((await a.request('/api/improve', task, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
   assert.equal((await a.request('/api/improve', task, { 'X-Aurora-Local': '' })).status, 403);
   assert.equal((await a.request('/api/improve', task, { 'Content-Type': 'text/plain' })).status, 415);

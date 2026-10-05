@@ -63,12 +63,12 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
     try {
       if (req.headers.host !== '127.0.0.1:' + server.address().port || !['127.0.0.1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) return send(403, { code: 'LOCAL_HOST_REQUIRED' });
       if (req.headers.origin && req.headers.origin !== origin) return send(403, { code: 'ORIGIN_REJECTED' });
-      if (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site'])) return send(403, { code: 'CROSS_SITE_REJECTED' });
       if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'AURORA_IA_MASTER', version: VERSION });
       if (req.method === 'GET' && ['/', '/app.js', '/app.css'].includes(req.url)) {
         const name = { '/': 'index.html', '/app.js': 'app.js', '/app.css': 'app.css' }[req.url];
         return send(200, fs.readFileSync(path.join(__dirname, name), 'utf8'), { '/': 'text/html', '/app.js': 'text/javascript', '/app.css': 'text/css' }[req.url]);
       }
+      if (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site'])) return send(403, { code: 'CROSS_SITE_REJECTED' });
       expire(sessions); expire(tickets);
       const bearer = equal(req.headers.authorization, 'Bearer ' + controlToken);
       const cookie = (req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith('aurora_local='))?.slice(13);
