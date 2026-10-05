@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'aurora-coletor/**'
+      - 'desktop/install_windows_beta.py'
       - 'src/01_PIPELINE_CONFIABILIDADE_WMGJ.gs'
       - 'src/04_EXTRACAO_DOCUMENTAL_WMGJ.gs'
       - 'src/35_AURORA_FIRESTORE_BRIDGE_WMGJ.gs'
@@ -13,6 +14,7 @@ on:
     branches: [main]
     paths:
       - 'aurora-coletor/**'
+      - 'desktop/install_windows_beta.py'
       - '.github/workflows/validate-aurora-onboarding.yml'
   workflow_dispatch:
 
@@ -40,6 +42,8 @@ jobs:
           python-version: '3.12'
       - name: Synthetic transport, receipt and isolation tests
         run: python -m unittest discover -s aurora-coletor/tests -p test_cloud_sync.py -v
+      - name: Resumable installer, interrupted send and package tests
+        run: python -m unittest discover -s aurora-coletor/tests -p test_deployment.py -v
 
   validate:
     name: Test local discovery without deployment

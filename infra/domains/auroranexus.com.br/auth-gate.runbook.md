@@ -71,6 +71,33 @@ firebase deploy --only hosting
 
 ## Smoke test obrigatório
 
+### Caminho comercial por empresa
+
+Após publicar o candidato protegido e validar o domínio:
+
+1. Abrir `/wmgj` anônimo: somente login, sem dados operacionais.
+2. Entrar com identidade allowlisted e membership WMGJ ativo; confirmar página
+   e APIs na organização, com MFA preservado para administração.
+3. Para cliente novo, provisionar individualmente a claim assinada `auroraOrgId`
+   igual ao ID da organização, membership ativo e as permissões necessárias.
+   Não reutilizar credenciais, provisionar por nome de URL nem copiar dados WMGJ.
+4. Solicitar URL de outra empresa com a sessão atual: 403, sem shell privado.
+5. Revogar membership ou desativar a organização: o próximo acesso é recusado.
+6. Confirmar logout e expiração retornando ao caminho da empresa.
+7. Instalar a PWA no dispositivo de referência: conferir manifesto/start_url por
+   empresa, login e ausência de dados privados em cache.
+8. Confirmar que a interface não exibe marcas ou links ChatGPT/OpenAI/GPT.
+
+O caminho é apresentação; a seleção confiável vem do token Firebase verificado.
+Claims de papel/permissão não substituem o membership. A sessão existente do
+piloto sem `auroraOrgId` continua WMGJ. Não adicionar um cookie de tenant: o
+Hosting encaminha somente `__session` aos rewrites.
+
+Rollback: reverter o candidato de código pelo fluxo protegido e restaurar o
+destino anterior do cliente, sem apagar memberships, dados ou histórico. Novos
+tenants dependentes da claim exigem suspender seu uso durante esse rollback;
+não redirecioná-los à WMGJ.
+
 ### Sem autenticação
 
 Cada URL abaixo deve mostrar somente login:

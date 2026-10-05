@@ -19,4 +19,6 @@ test("real operational ingestion stays blocked in this release candidate", () =>
   const status = buildReleaseStatus({ active: true, organicEnabled: true, organicSectors: ["AUDIT", "FINANCE"] }) as any;
   const ingestion = status.gates.find((gate: any) => gate.id === "real-data-ingestion");
   assert.equal(ingestion.status, "BLOCKED");
+  assert.equal(status.installerIntegration.status, "IMPLEMENTED_PENDING_LIVE_VALIDATION");
+  assert.equal(status.installerIntegration.fullSynchronizationVerified, false);
 });

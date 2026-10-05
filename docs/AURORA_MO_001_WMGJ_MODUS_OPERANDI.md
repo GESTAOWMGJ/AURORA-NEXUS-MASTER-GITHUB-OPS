@@ -13,6 +13,26 @@ Mudanças futuras devem preservar esta linhagem ou registrar explicitamente a ra
 
 ## 1. Ciclo mestre
 
+### Implantação reutilizável — AURORA-INSTALL-INTEGRATION-001
+
+O aprendizado da integração Windows/cloud passa a compor M08 no mesmo motor:
+validar amostra estruturada e destino explícitos → verificar identidade da
+organização → enviar amostra autorizada → conferir recibo → reconciliar no
+armazenamento canônico. O registro nativo representa a capacidade como
+`NATIVE_GOVERNED`, por organização e sob demanda, sem ativar outro executor.
+
+`aurora-coletor/aurora_deployment.py` retoma etapas usando um checkpoint local
+sanitizado no diretório da instalação existente. Credenciais nunca são gravadas.
+Destino ou conteúdo diferentes bloqueiam a retomada; timeout repete a mesma chave
+idempotente. Recibo já confirmado evita novo POST, mas exige novo ping autenticado
+e é apresentado como histórico local, não como leitura atual do Firestore.
+
+O padrão abstrato serve a novos clientes sem transportar dados WMGJ. Provisionamento
+com MFA, IAM, publicação protegida, reconciliação real, empacotamento comercial e
+aceite continuam sendo gates independentes. Código do instalador não prova
+sincronização completa nem autoriza ampliar acesso. Nenhum executor agendado ou
+conta administrativa é criado automaticamente.
+
 Toda capacidade operacional do AURORA segue:
 
 ```text
