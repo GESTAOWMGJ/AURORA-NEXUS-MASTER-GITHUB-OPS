@@ -1,0 +1,24 @@
+name: Validate Gmail Ingestion Contract
+on:
+  pull_request:
+    paths:
+      - 'src/*.gs'
+      - 'tools/test-gmail*.cjs'
+      - 'firebase-migration/functions/src/auroraNativeRoutines.ts'
+      - 'docs/AURORA_GMAIL_SINGLE_MESSAGE_RECOVERY.md'
+      - '.github/workflows/validate-gmail-ingestion.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node tools/audit-appscript.js
+      - run: node --test tools/test-gmail-ingestion.cjs tools/test-gmail-replay.cjs

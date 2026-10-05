@@ -674,6 +674,10 @@ function prepararPipelineConfiavelWMGJ_Compat_(limite) {
 }
 
 function prepararPipelineConfiavelWMGJ_Local_(limite) {
+  return comTravaIngestaoGmailWMGJ_(function() { return prepararPipelineConfiavelWMGJ_Local_SobTrava_(limite); });
+}
+
+function prepararPipelineConfiavelWMGJ_Local_SobTrava_(limite) {
   garantirAbasControleExtracaoWMGJ_V1_();
 
   var cfg = getConfigWMGJ_Compat_();

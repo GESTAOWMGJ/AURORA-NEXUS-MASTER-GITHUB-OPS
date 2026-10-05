@@ -286,6 +286,10 @@ function obterStatusWMGJ() {
 }
 
 function importarGmailWMGJ() {
+  return comTravaIngestaoGmailWMGJ_(function() { return importarGmailWMGJ_SobTrava_(); });
+}
+
+function importarGmailWMGJ_SobTrava_() {
   var cfg = getConfigWMGJ_();
   garantirLabelsGmail_();
 
@@ -299,8 +303,10 @@ function importarGmailWMGJ() {
   var importados = 0;
 
   threads.forEach(function(thread) {
+    var temMensagemReservada = false;
     thread.getMessages().forEach(function(msg) {
       var id = msg.getId();
+      if (mensagemReservadaReplayGmailWMGJ_(id)) { temMensagemReservada = true; return; }
       if (ids.has(id)) return;
 
       var assunto = msg.getSubject();
@@ -317,7 +323,7 @@ function importarGmailWMGJ() {
       importados++;
     });
 
-    thread.removeLabel(labelImportar);
+    if (!temMensagemReservada) thread.removeLabel(labelImportar);
   });
 
   registrarLogWMGJ_("OK", "gmail", "AppsScript", "Mensagens importadas: " + importados);
