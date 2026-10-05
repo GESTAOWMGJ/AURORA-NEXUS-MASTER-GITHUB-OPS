@@ -1,5 +1,16 @@
 # Changelog
 
+## Não publicado — AURORA NEXUS 1.0.0-rc.1 / web updater 1.0.1 — 2026-10-05
+
+- Corrige a retentativa automática do atualizador web/PWA: falhas de registro ou
+  atualização agendam nova tentativa após 15 minutos; sucesso mantém 24 horas.
+- Mantém um único timer e a retomada por visibilidade/conectividade, sem reload
+  forçado, cache de respostas privadas ou mudança de protocolo, domínio ou identidade.
+- Seis testes sintéticos cobrem cadência, falhas, retomada e concorrência. Evidências
+  por plataforma e rollback em `docs/AURORA_DAILY_UPDATE_20261005.md`.
+- Candidata somente; instalação, HML e validação em iOS/Android não são inferidas
+  dos testes. Gates de publicação permanecem abertos.
+
 ## v1.2.0-gemini-api-validada - 2026-07-13
 
 ### Integração Gemini

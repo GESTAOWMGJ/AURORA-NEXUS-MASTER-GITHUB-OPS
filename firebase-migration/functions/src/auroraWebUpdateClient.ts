@@ -5,7 +5,7 @@ export function webUpdateClient(): string {
 (() => {
   if (!('serviceWorker' in navigator)) return;
   const day = 24 * 60 * 60 * 1000;
-  let registration = null, nextCheck = 0, pending = false;
+  let registration = null, nextCheck = 0, pending = false, timer = null;
   async function checkUpdate() {
     if (pending || navigator.onLine === false || document.visibilityState === 'hidden' || Date.now() < nextCheck) return;
     pending = true;
@@ -14,11 +14,14 @@ export function webUpdateClient(): string {
       await registration.update();
       nextCheck = Date.now() + day;
     } catch { nextCheck = Date.now() + 15 * 60 * 1000; }
-    finally { pending = false; }
+    finally {
+      pending = false;
+      clearTimeout(timer);
+      timer = setTimeout(checkUpdate, Math.max(0, nextCheck - Date.now()));
+    }
   }
   document.addEventListener('visibilitychange', checkUpdate);
   window.addEventListener('online', checkUpdate);
-  setInterval(checkUpdate, day);
   checkUpdate();
 })();
 `;
