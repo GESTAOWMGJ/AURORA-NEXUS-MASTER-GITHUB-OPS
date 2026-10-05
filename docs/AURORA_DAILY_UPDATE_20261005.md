@@ -88,3 +88,27 @@ Nenhum upgrade especulativo de dependência foi incluído.
 - https://github.com/firebase/firebase-admin-node/releases
 
 Não houve deploy, publicação binária, alteração de IAM, segredo, DNS ou produção.
+
+## Reconciliação com a main durante a validação
+
+Às 08:18 America/Sao_Paulo, a main avançou para
+`19937d96be37a570caa9e074a9c03d51543cdbc8` com merge do PR #158.
+O PR #159 é reconciliado com esse commit, preservando integralmente a IA Master.
+A mudança não sobrepõe os quatro arquivos deste patch. A seção 23 acrescentada
+à AURORA-MO-001 foi relida: inferência local produz propostas, não autentica
+fontes nem autoriza publicação, credenciais ou execução arbitrária.
+
+O estado Windows da tabela acima é a primeira consulta. A evidência posterior
+registrada no PR #158 informa instalação do componente no PC autorizado,
+sete testes nativos e inferência sintética autenticada (10.998 ms inicial,
+5 ms com cache; 123 tokens locais). Cinco workflows passaram no candidato
+`e76df6f45ace4b542dcb0e69e30533abf098f622`. Isso é evidência registrada no PR,
+não uma nova inspeção física realizada por esta rotina. Sincronização cloud,
+publicação web e produção continuam não comprovadas por esses resultados.
+
+O primeiro candidato do #159, `71a7267a0c4304ff1f5274091f18d4724b975157`,
+passou Firestore 37301903488 (461 testes Functions e 27 Rules), CodeQL
+37301903471 e integração orgânica 37301903474; audit de produção retornou zero
+vulnerabilidades nesse run. Esses checks são históricos após a reconciliação:
+o novo SHA exige seus próprios checks. A descrição do PR registra o SHA e os
+runs finais, sem reutilizar o verde da base anterior como aprovação.
