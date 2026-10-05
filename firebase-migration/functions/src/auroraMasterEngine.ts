@@ -1,6 +1,7 @@
 import { generateNativeInsight, type NativeInsightFinding } from "./auroraNativeIntelligence.js";
 import { nativeRoutineSummary } from "./auroraNativeRoutines.js";
 import { iaMasterCapability } from "./auroraIaMaster.js";
+import { buildBetaProductionOrchestrator } from "./auroraProductionOrchestrator.js";
 import { assessNativeData, DATA_GOVERNANCE_POLICY, knownCount, masterCommandSurface } from "./auroraDataGovernance.js";
 
 export const AURORA_MASTER_ENGINE_VERSION = "0.2.0-data-governance";
@@ -104,6 +105,7 @@ export function buildMasterOperationalState(
     },
     routines: nativeRoutineSummary(),
     iaMaster: iaMasterCapability(),
+    betaProductionOrchestrator: buildBetaProductionOrchestrator(projection, { ...context, release }, now),
     financialGate: {
       competence: denied ? null : projection.competence ?? null,
       distributionState: "USE_AUTHORIZED_FINANCIAL_ENDPOINT",
