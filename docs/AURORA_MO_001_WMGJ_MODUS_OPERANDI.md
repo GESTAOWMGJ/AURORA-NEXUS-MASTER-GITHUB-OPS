@@ -245,6 +245,13 @@ Nenhum dado real é promovido para compensar falta de recuperação, autenticaç
 
 ## 10. Segurança estrutural
 
+Aprendizado `AURORA-PROD-PROJECT-001` (05/10/2026): nome pretendido ou candidato
+histórico não é recurso provisionado. Destino produtivo exige ID/número explícitos,
+contrato coerente e consulta autorizada confirmando projeto ativo antes de mutar.
+Erro de consulta nunca autoriza criação ou fallback para outro ambiente. Concessões
+de recurso como CMEK são específicas do projeto e não se propagam por inferência.
+Regra incorporada ao bootstrap/workflow existentes, sem novo executor ou scheduler.
+
 Preservar:
 
 - login-first;

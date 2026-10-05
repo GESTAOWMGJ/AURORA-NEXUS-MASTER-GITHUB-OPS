@@ -11,7 +11,11 @@ const apiLock=fs.readFileSync("../api/uv.lock","utf8");
 const ruleTestLock=fs.readFileSync("../tests/package-lock.json","utf8");
 
 test("production provisioning is isolated and cold by default",()=>{
-  assert.equal(request.projectId,"aurora-nexus-prod-wmgj");
+  assert.equal(request.requestVersion,2);
+  assert.equal(request.status,"BLOCKED_PROJECT_NOT_VALIDATED");
+  assert.equal(request.projectId,null);
+  assert.equal(request.projectNumber,null);
+  assert.equal(request.confirmation,null);
   assert.equal(request.deploymentStage,"COLD_PRODUCTION");
   assert.equal(request.productionMutation,false);
   assert.equal(request.sourceMutation,false);
@@ -27,12 +31,18 @@ test("production provisioning is isolated and cold by default",()=>{
   assert.match(workflow,/projectionMode.*SHADOW/);
 });
 
-test("project creation is a local one-time bootstrap, not a deploy permission",()=>{
+test("project selection never creates a missing or inaccessible project",()=>{
   assert.doesNotMatch(workflow,/gcloud projects create/);
   assert.doesNotMatch(workflow,/HML_PROJECT_ID/);
   assert.doesNotMatch(workflow,/\bGCP_WIF_PROVIDER\b/);
   assert.doesNotMatch(workflow,/GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT/);
-  assert.match(windowsBootstrap,/gcloud projects create/);
+  assert.doesNotMatch(windowsBootstrap,/gcloud projects create|billing projects link/);
+  assert.match(windowsBootstrap,/production_project_contract\.py/);
+  assert.match(workflow,/production_project_contract\.py/);
+  assert.match(workflow,/FIREBASE_PROD_PROJECT_NUMBER/);
+  assert.ok(windowsBootstrap.indexOf("--verify-live") < windowsBootstrap.indexOf("gcloud services enable"));
+  assert.ok(workflow.indexOf("--verify-live") < workflow.indexOf("gcloud services enable"));
+  assert.ok(workflow.indexOf("production_project_contract.py") < workflow.indexOf("uses: google-github-actions/auth"));
   assert.match(windowsBootstrap,/workload-identity-pools/);
   assert.match(windowsBootstrap,/attribute\.repository/);
   assert.match(windowsBootstrap,/firebase-production/);

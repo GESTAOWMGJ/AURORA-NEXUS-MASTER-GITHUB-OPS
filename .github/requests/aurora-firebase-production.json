@@ -1,7 +1,7 @@
 {
-  "requestVersion": 1,
-  "confirmation": "CREATE_PRODUCTION_PROJECT",
-  "projectId": "aurora-nexus-prod-wmgj",
+  "requestVersion": 2,
+  "confirmation": null,
+  "projectId": null,
   "region": "southamerica-east1",
   "organizationId": "wmgj",
   "deploymentStage": "COLD_PRODUCTION",
@@ -9,6 +9,8 @@
   "productionMutation": false,
   "sourceMutation": false,
   "clinicalSensitiveEnabled": false,
-  "requestedAt": "2026-10-01",
-  "requestReason": "AURORA_SEC_002_PR83_PRODUCTION_RELEASE_CANDIDATE"
+  "requestedAt": "2026-10-05",
+  "requestReason": "PRODUCTION_PROJECT_ID_REQUIRES_EXPLICIT_GCP_VALIDATION",
+  "status": "BLOCKED_PROJECT_NOT_VALIDATED",
+  "projectNumber": null
 }
