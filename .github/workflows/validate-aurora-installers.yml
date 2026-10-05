@@ -10,6 +10,10 @@ on:
       - 'AGENTS.md'
       - 'firebase-migration/functions/src/auroraDownloads.ts'
       - 'firebase-migration/functions/src/auroraAuthGate.ts'
+      - 'firebase-migration/functions/src/auroraIaMaster*.ts'
+      - 'firebase-migration/functions/src/auroraMasterEngine.ts'
+      - 'firebase-migration/functions/src/auroraNative*.ts'
+      - 'docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md'
       - 'firebase-migration/functions/test/aurora-downloads.test.ts'
       - '.github/workflows/validate-aurora-installers.yml'
       - 'firebase-migration/scripts/*hosting*'
@@ -45,6 +49,19 @@ jobs:
         run: |
           python3 -m unittest discover -s firebase-migration/scripts -p test_hosting_runtime.py -v
           python3 -m py_compile desktop/install_windows_beta.py
+      - name: Build and test authenticated local IA Master without model downloads
+        run: |
+          set -euo pipefail
+          npm ci --prefix firebase-migration/functions
+          python3 desktop/ia-master/build.py --output "${RUNNER_TEMP}/aurora-ia-master"
+          AURORA_TEST_BUILD="${RUNNER_TEMP}/aurora-ia-master" node --test desktop/ia-master/server.test.cjs
+      - name: Retain local IA Master candidate with exact source manifest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: aurora-ia-master-${{ github.run_id }}
+          path: ${{ runner.temp }}/aurora-ia-master.zip
+          if-no-files-found: error
+          retention-days: 7
       - name: Organic proposal tests with synthetic verification only
         run: |
           set -euo pipefail

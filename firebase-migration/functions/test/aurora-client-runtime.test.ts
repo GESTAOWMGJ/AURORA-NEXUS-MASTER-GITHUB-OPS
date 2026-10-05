@@ -48,7 +48,8 @@ test('the actual emitted browser script parses; missing regex delimiters fail th
 test('all navigation links target existing sections, not placeholder pages', () => {
   const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
   const targets = [...html.matchAll(/href="#([^"]+)"/g)].map(match => match[1]);
-  assert.equal(targets.length, 11);
+  assert.equal(targets.length, 12);
+  assert.ok(targets.includes('ia-master'));
   targets.forEach(id => assert.ok(ids.has(id), id));
 });
 
