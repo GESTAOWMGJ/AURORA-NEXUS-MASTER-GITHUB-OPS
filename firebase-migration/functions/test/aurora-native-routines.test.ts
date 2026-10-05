@@ -27,6 +27,18 @@ test("aprendizado orgânico promove capacidade, não dados entre clientes", () =
   assert.equal(summary.organicPromotion.tenantAgnosticAbstractionRequired, true);
 });
 
+test("instalação canônica é governada e está presente na projeção, sem novo scheduler", () => {
+  const routine = AURORA_NATIVE_ROUTINES.find((item) => item.id === "AURORA-INSTALL-INTEGRATION-001");
+  assert.equal(routine?.state, "NATIVE_GOVERNED");
+  assert.equal(routine?.tenantScope, "PER_ORG");
+  assert.equal(routine?.humanGate, true);
+  assert.equal(routine?.sourceMutation, false);
+  assert.equal(routine?.cadence, "ON_DEMAND");
+  const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
+  const projection = buildProjection(empty, new Date("2026-10-04T12:00:00Z"), { orgId: "synthetic-org", competence: "2026-10" }) as any;
+  assert.ok(projection.nativeRoutines.routines.some((item: any) => item.id === routine?.id));
+});
+
 
 test("projeção e inteligência nativa recebem o estado real de migração das rotinas", () => {
   const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };

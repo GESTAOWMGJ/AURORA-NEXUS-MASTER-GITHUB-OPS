@@ -14,6 +14,7 @@ import {
 import { auroraProtectedShell } from "./auroraFrontend.js";
 import { auroraAuth } from "./firebase.js";
 import { servePrivateDownloads } from "./auroraDownloads.js";
+import { companyEntry, companyEntryAllowsMember, companyEntryPath, companyManifest, isCompanySlug } from "./auroraTenantEntry.js";
 
 const AURORA_NEXUS_ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const AURORA_NEXUS_CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -53,7 +54,9 @@ function setSecurityHeaders(res: { set(name: string, value: string): unknown }):
   );
 }
 
-function loginPage(message = "Acesso privado. Entre com usuário autorizado."): string {
+function loginPage(message = "Acesso privado. Entre com usuário autorizado.", entryOrg: string | null = null): string {
+  const entryPath = entryOrg ? companyEntryPath(entryOrg) : "/";
+  const manifestPath = entryOrg ? `${entryPath}/manifest.webmanifest` : "/manifest.webmanifest";
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -63,7 +66,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Aurora Nexus">
-  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="manifest" href="${escapeHtml(manifestPath)}">
   <title>Aurora Nexus | Login</title>
   <style>
     :root { color-scheme: dark; --bg:#071f25; --panel:#0d2d34; --line:#1d4a53; --gold:#c6a45d; --text:#f7f1e7; --muted:#b9c7c6; }
@@ -86,7 +89,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
 <body>
   <main>
     <p class="eyebrow">Aurora Nexus</p>
-    <h1>Ambiente privado</h1>
+    <h1>${entryOrg ? escapeHtml(entryOrg.toUpperCase()) : "Ambiente privado"}</h1>
     <p>${escapeHtml(message)}</p>
     <form id="login-form" autocomplete="on">
       <label for="email">E-mail</label>
@@ -129,11 +132,11 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado."): 
       const response = await fetch('/__sessionLogin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken })
+        body: JSON.stringify({ idToken, orgId: ${JSON.stringify(entryOrg)} })
       });
       await firebase.auth().signOut();
       if (!response.ok) throw new Error('LOGIN_REJECTED');
-      window.location.replace('/');
+      window.location.replace(${JSON.stringify(entryPath)});
     }
 
     function requestTotpChallenge(error) {
@@ -230,6 +233,12 @@ export const auroraNexusAuthGate = onRequest(
       return;
     }
 
+    const entry = companyEntry(req.path);
+    if (entry?.manifest) {
+      // Public installation metadata only; it neither resolves nor authorizes a tenant.
+      res.status(200).type("application/manifest+json").send(JSON.stringify(companyManifest(entry.orgId)));
+      return;
+    }
     const isDownload = req.path === "/downloads" || req.path.startsWith("/downloads/");
     const decoded = await verifySession(req.get("cookie"), AURORA_NEXUS_ALLOWED_EMAILS.value());
     if (!decoded) {
@@ -237,17 +246,25 @@ export const auroraNexusAuthGate = onRequest(
         await servePrivateDownloads(req, res, null);
         return;
       }
-      res.status(200).type("html").send(loginPage());
+      res.status(200).type("html").send(loginPage(undefined, entry?.orgId));
       return;
     }
 
     const member = await resolveMember(decoded);
     if (!member) {
-      res.status(403).type("html").send(loginPage("Conta válida, mas o acesso à organização ainda não foi provisionado."));
+      res.status(403).type("html").send(loginPage("Conta válida, mas o acesso à organização ainda não foi provisionado.", entry?.orgId));
+      return;
+    }
+    if (!companyEntryAllowsMember(entry?.orgId, member.orgId)) {
+      res.status(403).type("html").send(loginPage("Esta conta não está autorizada para a empresa selecionada.", entry?.orgId));
       return;
     }
     if (isDownload) {
       await servePrivateDownloads(req, res, member);
+      return;
+    }
+    if (!entry && ["/", "/login", "/portal"].includes(req.path) && isCompanySlug(member.orgId)) {
+      res.redirect(303, companyEntryPath(member.orgId));
       return;
     }
     const csrfSecret = AURORA_NEXUS_CSRF_HMAC_KEY.value();
@@ -260,10 +277,10 @@ export const auroraNexusAuthGate = onRequest(
     };
     if (!csrfTokens.action || !csrfTokens.refresh || !csrfTokens.integrationKey || !csrfTokens.distributionApproval || !csrfTokens.logout) {
       logger.error("Aurora Nexus CSRF key is not configured");
-      res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança."));
+      res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança.", entry?.orgId));
       return;
     }
-    let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; integrationKey: string; distributionApproval: string; logout: string });
+    let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; integrationKey: string; distributionApproval: string; logout: string }, entry?.path);
     if (["platform_admin", "org_admin", "director"].includes(member.role) || member.permissions.includes("downloads.hml.read")) {
       shell = shell.replace("</nav>", '<a href="/downloads">Instaladores Mac e Windows</a></nav>');
     }
@@ -318,6 +335,10 @@ export const auroraNexusSessionLogin = onRequest(
       const member = await resolveMember(decoded);
       if (!member) {
         res.status(403).json({ ok: false, code: "MEMBERSHIP_NOT_PROVISIONED" });
+        return;
+      }
+      if (!companyEntryAllowsMember(req.body?.orgId, member.orgId)) {
+        res.status(403).json({ ok: false, code: "COMPANY_ACCESS_DENIED" });
         return;
       }
       const sessionCookie = await auroraAuth.createSessionCookie(idToken, { expiresIn: SESSION_TTL_MS });

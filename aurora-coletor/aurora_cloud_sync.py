@@ -119,6 +119,18 @@ def request_json(url, token, payload=None, idempotency=None):
         raise SyncError('INVALID_SERVER_RESPONSE') from None
 
 
+def connect(origin, org, token, transport=request_json):
+    origin = origin_url(origin)
+    if not isinstance(org, str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{1,62}', org):
+        raise SyncError('INVALID_ORGANIZATION')
+    if not isinstance(token, str) or not token or any(ch.isspace() for ch in token):
+        raise SyncError('INTEGRATION_CREDENTIAL_REQUIRED')
+    status, ping = transport(origin + '/api/integration/ping', token)
+    if status != 200 or not isinstance(ping, dict) or ping.get('ok') is not True or ping.get('orgId') != org:
+        raise SyncError('AUTHENTICATED_ORGANIZATION_MISMATCH')
+    return {'connectionVerified': True}
+
+
 def synchronize(raw, origin, org, token=None, send=False, transport=request_json):
     origin = origin_url(origin)
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]{1,62}', org):
@@ -132,11 +144,7 @@ def synchronize(raw, origin, org, token=None, send=False, transport=request_json
                'idempotencyKey': idem, 'documentId': document_id, 'cloudReceiptVerified': False}
     if not send:
         return receipt
-    if not isinstance(token, str) or not token or any(ch.isspace() for ch in token):
-        raise SyncError('INTEGRATION_CREDENTIAL_REQUIRED')
-    status, ping = transport(origin + '/api/integration/ping', token)
-    if status != 200 or not isinstance(ping, dict) or ping.get('ok') is not True or ping.get('orgId') != org:
-        raise SyncError('AUTHENTICATED_ORGANIZATION_MISMATCH')
+    connect(origin, org, token, transport)
     status, result = transport(origin + '/api/integration/documents', token, payload, idem)
     if (not isinstance(result, dict) or result.get('ok') is not True
             or result.get('documentId') != document_id or result.get('sourceSystem') != payload['sourceSystem']

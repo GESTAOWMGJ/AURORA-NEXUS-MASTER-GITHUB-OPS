@@ -2,6 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import type { DecodedIdToken } from "firebase-admin/auth";
 import * as logger from "firebase-functions/logger";
 import { auroraAuth, auroraDb } from "./firebase.js";
+import { sessionOrganization } from "./auroraTenantEntry.js";
 
 export const SESSION_COOKIE_NAME = "__session";
 export const DEFAULT_ORG_ID = "wmgj";
@@ -64,7 +65,10 @@ export async function verifySession(cookieHeader: string | undefined, allowedRaw
   }
 }
 
-export async function resolveMember(decoded: DecodedIdToken, orgId = DEFAULT_ORG_ID): Promise<AuroraMember | null> {
+export async function resolveMember(decoded: DecodedIdToken, orgId = sessionOrganization(decoded.auroraOrgId)): Promise<AuroraMember | null> {
+  // Both the page and every protected API resolve the same signed session tenant.
+  // Query/body/path values cannot select data; membership and organization stay live reads.
+  if (!orgId || orgId !== sessionOrganization(decoded.auroraOrgId)) return null;
   const [snapshot, organization] = await Promise.all([
     auroraDb.doc(`organizations/${orgId}/members/${decoded.uid}`).get(),
     auroraDb.doc(`organizations/${orgId}`).get()

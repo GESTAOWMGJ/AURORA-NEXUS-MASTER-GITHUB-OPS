@@ -234,6 +234,8 @@ class OnboardingTests(unittest.TestCase):
         source = self.base / 'package'; source.mkdir()
         (source / 'aurora_collector.py').write_text('# synthetic collector fixture only\n')
         (source / 'aurora_onboarding.py').write_text(Path(onboarding.__file__).read_text())
+        for name in ('aurora_cloud_sync.py', 'aurora_deployment.py'):
+            (source / name).write_bytes((Path(onboarding.__file__).parent / name).read_bytes())
         target = self.base / "Application Support & O'Brien"
         document = self.document(); before = document.stat().st_mtime_ns
         args = installer.parse_args(['--target', str(target), '--watch-dir', str(self.root), '--endpoint', 'https://ingest.synthetic.invalid/collector', '--org', 'synthetic-client', '--facility', 'SYNTHETIC'])
@@ -250,6 +252,7 @@ class OnboardingTests(unittest.TestCase):
             plist = plistlib.loads((target / name).read_bytes())
             self.assertEqual(plist['ProgramArguments'][0], sys.executable)
         self.assertEqual(document.stat().st_mtime_ns, before)
+        self.assertTrue((target / 'integration' / '1.0.0' / 'aurora_deployment.py').is_file())
         self.assertEqual(json.loads((target / 'collector-config.json').read_text())['allowedExtensions'], ['.csv', '.json', '.jsonl'])
 
     def test_installer_authorization_enables_only_bounded_metadata_mode(self):
