@@ -182,6 +182,28 @@ jobs:
         with:
           version: "548.0.0"
           project_id: ${{ inputs.project_id }}
+      - name: Inspect Eventarc IAM without changing access
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = "$APPROVED_PROJECT"
+          test "$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')" = "$DEPLOY_SERVICE_ACCOUNT"
+          project_number="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
+          umask 077
+          review_root="$(mktemp -d "${RUNNER_TEMP}/aurora-iam-preflight.XXXXXX")"
+          trap 'rm -rf -- "$review_root"' EXIT
+          status=0
+          python3 firebase-migration/scripts/repair-hml-eventarc-iam.py \
+            --project "$PROJECT_ID" \
+            --expected-project-number "$project_number" \
+            --evidence-dir "$review_root/evidence" || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::error::HML_EVENTARC_IAM_REVIEW_REQUIRED: deploy stopped before Firebase CLI; use the reviewed administrative recovery procedure."
+            exit "$status"
+          fi
       - name: Preflight protected homologation resources
         env:
           DEPLOYMENT_MODE: ${{ inputs.deployment_mode || 'BOOTSTRAP' }}
@@ -384,7 +406,7 @@ jobs:
           test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
           git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
-          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusUserProfiles,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -405,6 +427,7 @@ jobs:
             "auroraNexusProjectionEngine",
             "auroraNexusOrganic",
             "auroraNexusIntegrationKeys",
+            "auroraNexusUserProfiles",
             "auroraNexusIntegrationPing",
             "auroraNexusIntegrationDocuments",
             "auroraNexusDocumentWatchdog",
@@ -468,6 +491,16 @@ jobs:
             "https://${PROJECT_ID}.web.app/api/distribution-approval")"
           test "$distribution_status" = "401"
           jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+      - name: Verify user profile API rejects anonymous access
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+        run: |
+          set -euo pipefail
+          for method in GET POST; do
+            status="$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' --request "$method" "https://${PROJECT_ID}.web.app/api/user-profiles")"
+            test "$status" = "401"
+          done
+
       - name: Authenticated smoke test without stored password
         env:
           PROJECT_ID: ${{ inputs.project_id }}

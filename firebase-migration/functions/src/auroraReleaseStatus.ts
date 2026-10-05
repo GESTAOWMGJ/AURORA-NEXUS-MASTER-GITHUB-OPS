@@ -51,7 +51,7 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}): 
       label: "Aurora Native Intelligence v0",
       status: "DONE",
       weight: 10,
-      detail: "Motor interno explicável opera sem Gemini/OpenAI para riscos financeiros, SLA, qualidade de dados e próxima ação."
+      detail: "Motor próprio com regras explicáveis para riscos financeiros, SLA, qualidade de dados e próximas ações."
     },
     {
       id: "real-data-ingestion",
@@ -90,6 +90,18 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}): 
     productVersion: AURORA_PRODUCT_VERSION,
     releaseTrain: AURORA_RELEASE_TRAIN,
     target: "SELLABLE_GA",
+    iaMaster: { routineId: "AURORA-IA-MASTER-001", version: "1.0.0", status: "IMPLEMENTED_PENDING_DEVICE_ATTESTATION", externalAiEnabled: false, cloudSyncVerified: false, autonomousDevelopmentPromoted: false },
+    userProfiles: { routineId: "AURORA-USER-PROFILES-001", version: "1.0.0", status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", verifiedEmailRequired: true, mfaRequired: true, tenantOptInRequired: true, productionVerified: false },
+    dailyUpdates: { routineId: "AURORA-DAILY-UPDATES-001", webPwaCheckIntervalHours: 24, status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", desktopBinaryUpdateVerified: false, mobileDeviceVerified: false, productionVerified: false },
+    installerIntegration: {
+      routineId: "AURORA-INSTALL-INTEGRATION-001",
+      componentVersion: "1.0.0",
+      status: "IMPLEMENTED_PENDING_LIVE_VALIDATION",
+      credentialProvisioning: "EXISTING_ADMIN_MFA_FLOW",
+      sampleReceiptRequired: true,
+      fullSynchronizationVerified: false,
+      detail: "Instalação retomável e recibo por amostra; credencial, IAM, deploy e reconciliação real continuam sujeitos aos gates existentes."
+    },
     engineeringReadinessPercent: Math.round((doneWeight / totalWeight) * 100),
     metricNote: "Percentual ponderado dos gates de engenharia versionados; não representa avaliação comercial, regulatória ou financeira.",
     gates,

@@ -16,7 +16,10 @@ test("modus operandi WMGJ está representado como registro nativo multi-tenant",
 test("rotinas legadas ficam espelhadas até migração e nunca são fingidas como nativas ativas", () => {
   const legacy = AURORA_NATIVE_ROUTINES.filter((item) => item.state === "LEGACY_MIRRORED");
   assert.ok(legacy.length >= 2);
-  assert.ok(legacy.every((item) => item.id.startsWith("WMGJ-LEGACY-")));
+  assert.ok(legacy.every((item) => item.id.startsWith("WMGJ-LEGACY-") || item.id === "AURORA-DAILY-UPDATES-001"));
+  const maintenance = legacy.find(item => item.id === "AURORA-DAILY-UPDATES-001");
+  assert.equal(maintenance?.trigger, "EXISTING_HOSTED_MAINTENANCE");
+  assert.equal(maintenance?.cadence, "DAILY");
 });
 
 test("aprendizado orgânico promove capacidade, não dados entre clientes", () => {
@@ -29,9 +32,24 @@ test("aprendizado orgânico promove capacidade, não dados entre clientes", () =
   assert.equal(summary.organicPromotion.unresolvedChallengesRemainOpen, true);
   assert.equal(summary.organicPromotion.validatedSolutionsFeedBaseEngine, true);
   assert.equal(summary.organicPromotion.versionedEvidenceAndRegressionRequired, true);
-  assert.equal(summary.ingestionRecoveryPolicy.executorState, "SPECIFIED_PENDING_RUNTIME_VALIDATION");
+  assert.equal(summary.ingestionRecoveryPolicy.executorState, "IMPLEMENTED_SYNTHETIC_TESTED_PENDING_RUNTIME_VALIDATION");
+  assert.equal(summary.ingestionRecoveryPolicy.runtimeEnabledByDefault, false);
+  assert.equal(summary.ingestionRecoveryPolicy.financialRecognitionAllowed, false);
+  assert.equal(summary.ingestionRecoveryPolicy.executor, "replayMensagemGmailWMGJ");
   assert.equal(summary.ingestionRecoveryPolicy.automaticBroadReplayAllowed, false);
   assert.equal(summary.ingestionRecoveryPolicy.observedFindingIsValidatedOutcome, false);
+});
+
+test("instalação canônica é governada e está presente na projeção, sem novo scheduler", () => {
+  const routine = AURORA_NATIVE_ROUTINES.find((item) => item.id === "AURORA-INSTALL-INTEGRATION-001");
+  assert.equal(routine?.state, "NATIVE_GOVERNED");
+  assert.equal(routine?.tenantScope, "PER_ORG");
+  assert.equal(routine?.humanGate, true);
+  assert.equal(routine?.sourceMutation, false);
+  assert.equal(routine?.cadence, "ON_DEMAND");
+  const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
+  const projection = buildProjection(empty, new Date("2026-10-04T12:00:00Z"), { orgId: "synthetic-org", competence: "2026-10" }) as any;
+  assert.ok(projection.nativeRoutines.routines.some((item: any) => item.id === routine?.id));
 });
 
 
@@ -57,4 +75,18 @@ test("AURORA-MO-001 torna a representação nativa obrigatória e proíbe transf
   assert.match(doc, /registro nativo de rotinas/i);
   assert.match(doc, /nenhum dado bruto de um cliente/i);
   assert.match(doc, /LEGACY_MIRRORED/);
+});
+
+
+test("AURORA self-sufficient engine docs and policy artifacts are present", () => {
+  const engine = fs.readFileSync(new URL("../../../docs/aurora-self-sufficient-engine.md", import.meta.url), "utf8");
+  const runbook = fs.readFileSync(new URL("../../../docs/aurora-autonomous-improvement-runbook.md", import.meta.url), "utf8");
+  const policy = fs.readFileSync(new URL("../../../policy/aurora-external-ai-reduction-policy.md", import.meta.url), "utf8");
+  const kpi = JSON.parse(fs.readFileSync(new URL("../../../config/aurora-kpi-baseline.json", import.meta.url), "utf8"));
+  assert.match(engine, /Firebase and Google Cloud/);
+  assert.match(engine, /AURORA_DRY_RUN/);
+  assert.match(runbook, /No auto-merge on gate failure/);
+  assert.match(policy, /fallback de exceção/);
+  assert.equal(kpi.kpis.external_ai_dependency_rate.target, 0.2);
+  assert.equal(kpi.kpis.mttr.target_minutes, 60);
 });

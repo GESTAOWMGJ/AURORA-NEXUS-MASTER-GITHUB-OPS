@@ -18,6 +18,7 @@ import shutil
 import shlex
 import plistlib
 from aurora_onboarding import installation_config, install_assets
+from aurora_deployment import install_assets as install_integration_assets
 from connector_setup import interactive_install as install_connectors
 import stat
 import sys
@@ -246,6 +247,7 @@ AURORA_COLLECTOR_TOKEN=
     }).decode("utf-8")
     write_text(target / "aurora-coletor.launchd.plist.example", launchd_example, 0o600)
     install_assets(source_dir, target, onboarding)
+    install_integration_assets(source_dir, target)
     connector_manifest = None
     if args.setup_connectors:
         connector_manifest = install_connectors(target, org=org)

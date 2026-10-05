@@ -1,5 +1,7 @@
 # AURORA-MO-001 — Modus Operandi Mestre WMGJ → AURORA NEXUS
 
+Incremento de 04/10/2026: `AURORA-USER-PROFILES-001` incorpora criação/retomada/revogação de perfis por administrador com MFA, por organização e sem banco paralelo. `AURORA-DAILY-UPDATES-001` representa a manutenção diária autorizada de cliente, web e mobile, ainda executada pela rotina hospedada existente e marcada LEGACY_MIRRORED. Contrato, evidências, gates e rollback em [AURORA_USER_PROFILES_1_0_0.md](AURORA_USER_PROFILES_1_0_0.md). A autorização antecipada de futuras versões evita repetir consentimento no mesmo escopo; não equivale a validação técnica ou implantação comprovada.
+
 ## Diretriz permanente do titular — desafios alimentam o motor
 
 Decisão de 04/10/2026: aplicar este modus operandi a todo desafio e solução relacionados
@@ -26,7 +28,10 @@ colunas, arquivo pelo hash, fila e idempotência. Atualização da planilha ou d
 não demonstram ingestão. Um watchdog que limpa a trava não demonstra recuperação do trabalho.
 
 O registro nativo expõe `ingestionRecoveryPolicy`, ligado às rotinas legadas existentes.
-Isso é política incorporada ao motor, não executor de replay ativo nem resultado orgânico homologado.
+O executor `replayMensagemGmailWMGJ` foi implementado e coberto por fixtures sintéticas no PR #148,
+com dry-run padrão, SHA-256, reserva persistente de ID Drive e recibos de arquivo/índice/fila.
+Permanece `LEGACY_MIRRORED`, desabilitado por padrão e pendente de validação de runtime;
+código/testes não demonstram recuperação real nem resultado orgânico homologado.
 `diagnosticarMensagemGmailWMGJ(messageId)` realiza inspeção somente leitura por ID exato.
 Não instala gatilhos, não altera mensagens, não escreve documentos nem lança valores.
 
@@ -60,6 +65,26 @@ Este documento é a fonte canônica do modus operandi operacional aprendido com 
 Mudanças futuras devem preservar esta linhagem ou registrar explicitamente a razão, evidência, teste e rollback da alteração.
 
 ## 1. Ciclo mestre
+
+### Implantação reutilizável — AURORA-INSTALL-INTEGRATION-001
+
+O aprendizado da integração Windows/cloud passa a compor M08 no mesmo motor:
+validar amostra estruturada e destino explícitos → verificar identidade da
+organização → enviar amostra autorizada → conferir recibo → reconciliar no
+armazenamento canônico. O registro nativo representa a capacidade como
+`NATIVE_GOVERNED`, por organização e sob demanda, sem ativar outro executor.
+
+`aurora-coletor/aurora_deployment.py` retoma etapas usando um checkpoint local
+sanitizado no diretório da instalação existente. Credenciais nunca são gravadas.
+Destino ou conteúdo diferentes bloqueiam a retomada; timeout repete a mesma chave
+idempotente. Recibo já confirmado evita novo POST, mas exige novo ping autenticado
+e é apresentado como histórico local, não como leitura atual do Firestore.
+
+O padrão abstrato serve a novos clientes sem transportar dados WMGJ. Provisionamento
+com MFA, IAM, publicação protegida, reconciliação real, empacotamento comercial e
+aceite continuam sendo gates independentes. Código do instalador não prova
+sincronização completa nem autoriza ampliar acesso. Nenhum executor agendado ou
+conta administrativa é criado automaticamente.
 
 Toda capacidade operacional do AURORA segue:
 
@@ -636,3 +661,20 @@ Invariantes:
 8. provedores externos podem existir futuramente como fallback substituível, nunca como requisito para disponibilidade do motor.
 
 A interface deve apresentar o Motor Mestre como visão principal de inteligência operacional, mantendo leituras especializadas de receita, SLA, qualidade e próxima ação como subfunções explicáveis.
+
+## 23. IA Master no PC autorizado — AURORA-IA-MASTER-001
+
+O processamento físico local integra o mesmo produto: núcleo nativo compartilhado
+para regras e modelo local para propostas de engenharia. Provedor externo permanece
+desativado. O método é contexto versionado, sem treinamento automático de pesos.
+Cache reduz inferências repetidas; auditoria registra hashes sem dados de clientes.
+
+Prévia importada localmente não autentica a origem nem substitui o Firebase
+canônico. Aprendizagem reutilizável continua restrita a padrões abstratos validados.
+Nenhuma proposta executa código, adquire credenciais ou promove sua própria versão.
+Alterações seguem patch, testes, revisão, CI, HML e reversão existentes.
+
+Registro nativo, Release Cockpit e seção IA Master representam a capacidade; sua
+presença não comprova dispositivo conectado, integração autenticada ou deploy.
+Instalação, teste físico e publicação exigem evidências separadas por SHA.
+Procedimento e limites: `desktop/ia-master/README.md`.

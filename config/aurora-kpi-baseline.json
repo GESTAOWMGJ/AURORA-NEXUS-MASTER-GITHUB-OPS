@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "org": "WMGJ",
+  "baselineDate": "2026-10-04",
+  "kpis": {
+    "external_ai_dependency_rate": {
+      "target": 0.2,
+      "definition": "Fraction of autonomous decisions that still require external AI fallback."
+    },
+    "autonomous_pr_success_rate": {
+      "target": 0.9,
+      "definition": "Fraction of safe autonomous PRs that pass all gates without human fixups."
+    },
+    "regression_rate": {
+      "target": 0.05,
+      "definition": "Fraction of autonomous changes that introduce failed checks or rollback."
+    },
+    "mttr": {
+      "target_minutes": 60,
+      "definition": "Mean time to recover from an autonomous change incident."
+    }
+  },
+  "measurementRules": {
+    "windowDays": 30,
+    "sourceOfTruth": [
+      "github_actions",
+      "firebase_logs",
+      "manual_incident_review"
+    ]
+  }
+}

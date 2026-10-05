@@ -1,0 +1,52 @@
+name: AURORA Evaluation and Safety Gate
+
+on:
+  pull_request:
+    paths:
+      - "docs/aurora-self-sufficient-engine.md"
+      - "docs/aurora-autonomous-improvement-runbook.md"
+      - "policy/aurora-external-ai-reduction-policy.md"
+      - "config/aurora-kpi-baseline.json"
+      - "scripts/aurora/**"
+      - ".github/workflows/aurora-eval-gate.yml"
+      - ".github/workflows/aurora-self-improve.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate JSON baseline
+        run: node -e "JSON.parse(require('node:fs').readFileSync('config/aurora-kpi-baseline.json','utf8')); console.log('KPI_OK')"
+
+      - name: Evaluate candidate change
+        env:
+          AURORA_DRY_RUN: "1"
+          AURORA_CANDIDATE_PATH: "docs/aurora-self-sufficient-engine.md"
+        run: node scripts/aurora/evaluate_candidate_change.js
+
+      - name: Check route selection
+        env:
+          AURORA_DRY_RUN: "1"
+          AURORA_CANONICAL_SNAPSHOT_READY: "1"
+          AURORA_INTERNAL_ENGINE_READY: "1"
+          AURORA_ALLOW_EXTERNAL_AI: "0"
+          AURORA_CHANGE_RISK: "low"
+        run: node scripts/aurora/select_model_route.js
+
+      - name: Enforce no auto-merge on failed gates
+        run: |
+          echo "This workflow only gates; it never merges."

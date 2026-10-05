@@ -52,6 +52,10 @@ function rodarDiagnosticoGmailFaturamentoWMGJ() {
 }
 
 function indexarGmailFaturamentoWMGJ(opcoes) {
+  return comTravaIngestaoGmailWMGJ_(function() { return indexarGmailFaturamentoWMGJ_SobTrava_(opcoes); });
+}
+
+function indexarGmailFaturamentoWMGJ_SobTrava_(opcoes) {
   opcoes = opcoes || {};
 
   var ss = getPlanilhaWMGJ_Gmail_();
@@ -78,6 +82,7 @@ function indexarGmailFaturamentoWMGJ(opcoes) {
     var mensagens = thread.getMessages();
 
     mensagens.forEach(function(msg) {
+      if (mensagemReservadaReplayGmailWMGJ_(msg.getId())) return;
       estat.mensagensLidas++;
 
       var anexos = msg.getAttachments({

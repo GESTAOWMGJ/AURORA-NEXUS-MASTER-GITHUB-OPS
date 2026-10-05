@@ -6,8 +6,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const root = path.resolve(__dirname, '..');
 function runtime(extra = {}) {
-  const ctx = vm.createContext({ Date, ...extra });
-  for (const file of ['09_INDEXADOR_GMAIL_FATURAMENTO_WMGJ.gs', '09B_BUSCA_GMAIL_AMPLA_WMGJ.gs', '09C_DIAGNOSTICO_INGESTAO_GMAIL_WMGJ.gs']) {
+  const ctx = vm.createContext({ Date, LockService: { getScriptLock: () => ({ hasLock: () => false, tryLock: () => true, releaseLock() {} }) }, SpreadsheetApp: { flush() {} }, ...extra });
+  for (const file of ['09_INDEXADOR_GMAIL_FATURAMENTO_WMGJ.gs', '09B_BUSCA_GMAIL_AMPLA_WMGJ.gs', '09C_DIAGNOSTICO_INGESTAO_GMAIL_WMGJ.gs', '09D_REPLAY_MENSAGEM_GMAIL_WMGJ.gs']) {
     vm.runInContext(fs.readFileSync(path.join(root, 'src', file), 'utf8'), ctx);
   }
   return ctx;

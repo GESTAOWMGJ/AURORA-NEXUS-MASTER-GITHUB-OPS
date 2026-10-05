@@ -24,7 +24,8 @@ test("interface promove o motor mestre como controle primário", () => {
   assert.match(frontend, /Motor Mestre Operacional/);
   assert.match(frontend, /id="master-operational"/);
   assert.match(frontend, /\/api\/master-engine/);
-  assert.match(frontend, /não depende de GPT, Gemini ou outro provedor externo/i);
+  assert.match(frontend, /Reúne indicadores, pendências e próximas ações/);
+  assert.doesNotMatch(frontend, /GPT|Gemini|ChatGPT|OpenAI/);
 });
 
 test("hosting e deploy protegido incluem o motor mestre", () => {

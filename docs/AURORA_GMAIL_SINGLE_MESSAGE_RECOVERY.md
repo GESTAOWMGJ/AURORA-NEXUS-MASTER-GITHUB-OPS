@@ -1,60 +1,112 @@
 # Recuperação de uma mensagem — M01/M08/M10
 
-Estado: diagnóstico e contenção implementados; executor de replay especificado, não implantado.
-Baseline da investigação: `cbe469558e5c00cf7fc01095d563c36457c72f3a`.
-Dados do incidente permanecem no relatório privado do tenant, fora deste repositório público.
+Estado do candidato: **implementado e testado com fixtures sintéticas; não implantado**.
+PR #148 reconciliado com `main` `19937d96be37a570caa9e074a9c03d51543cdbc8`.
+A conciliação preserva os perfis, instalação e IA Master acrescentados na main.
+Não houve replay real, merge do PR, deploy nem alteração de gatilhos.
 
-## Diagnóstico disponível
+## Escopo implementado
 
-Executar `diagnosticarMensagemGmailWMGJ(messageId)` por identidade autorizada no projeto
-Apps Script canônico. A função usa `GmailApp.getMessageById` e obtém anexos automaticamente;
-não percorre mensagens irmãs da thread. Retorna hashes completos e legados, referências
-de registros, divergências de layout, último timestamp nativo e gatilhos visíveis ao executor.
-`ok=true` significa diagnóstico retornado, não permissão nem sucesso de reprocessamento.
+`replayMensagemGmailWMGJ(messageId, options)` aceita um ID hexadecimal exato.
+`dryRun` é `true` por padrão. A função usa `GmailApp.getMessageById`, sem query,
+varredura de irmãos da thread, OCR, Gemini, parser, pipeline global ou lançamento financeiro.
+Não altera mensagem, label, arquivo-fonte ou histórico de erros.
 
-Gatilhos instaláveis pertencem ao criador. A lista de um usuário não prova ausência de
-gatilhos de outro. Conferir proprietário, scopes, versão implantada, execuções e erros após
-o último sucesso. O deploy atual preserva separação entre publicar fonte e instalar/executar
-rotinas; não reativar todos os perfis nem limpar todas as propriedades.
+O diagnóstico somente leitura anterior, `diagnosticarMensagemGmailWMGJ`, permanece disponível.
+Inventário de gatilhos mostra apenas os pertencentes ao executor; não demonstra ausência de
+execuções de outras contas. Schema misto continua bloqueado: não reparar trocando cabeçalho.
 
-## Menor intervenção operacional
+## Preparação e dry-run
 
-1. Capturar snapshot restrito de índice/fila/log e inventário atual de gatilhos. Suspender
-   somente escritores concorrentes da ingestão durante a manutenção, com restauração definida.
-2. Validar contrato de 25 colunas do escritor. Em tabela mista, reconstruir linhas a partir
-   de evidências verificáveis; conservar a origem e as linhas não resolvidas como exceções.
-   Não trocar o cabeçalho nem apagar duplicatas como forma de corrigir o histórico.
-3. Testar deduplicação e rejeição de schema. Só então reativar um perfil de rotina existente,
-   na conta correta, se estiver ausente/desabilitado. Se já ativo, reparar a falha de execução
-   comprovada. Falta de evidência não autoriza inventar causa de suspensão.
-4. Gerar manifesto restrito para o ID exato, anexos esperados, tamanhos, SHA-256 completo,
-   chave legada e destinos. Conferir Drive por metadados e conteúdo, além de índice e fila.
-5. Executor com lock compartilhado deve revalidar manifesto e estado sob trava. Reutilizar
-   cópia íntegra existente; se não houver, criar arquivo com chave persistida atomicamente
-   nos metadados da criação. Persistir etapas para recuperar timeout entre arquivo, índice
-   e fila. Um simples `createFile` seguido de `appendRow` não fornece atomicidade.
-6. Inserir somente registros ausentes; fila por arquivo/versão; extração e parsing limitados
-   aos IDs do manifesto. Indexar não equivale a reconhecer movimentação financeira.
-   Conta corrente, investimentos, saldos e transações exigem tratamento próprio.
-7. Repetir em modo de verificação: zero novas cópias, índice e fila; confirmar os dois
-   recibos de arquivo e a trilha de etapas. Encerrar somente com conciliação dos destinos.
+No projeto Apps Script canônico e sob identidade autorizada, exigir configurações existentes:
+`WMGJ_SPREADSHEET_ID`, `WMGJ_FIRESTORE_ORG_ID`, `WMGJ_PASTA_ENTRADA_ID` (ou `PASTA_ENTRADA_ID`).
+Ausência bloqueia; não há descoberta/criação automática de pasta ou tenant.
+O índice deve respeitar as 25 colunas; a fila existente `15_FILA_PROCESSAMENTO`, as 10 colunas
+V3/extração (aliases `NOME_ARQUIVO`/`MIME_TYPE` aceitos). Fila antiga de 7 colunas exige
+reconciliação separada, com backup e preservação das fontes.
 
-## Falhas já cobertas pelo patch
+Primeiro gerar o dry-run. Ele não escreve propriedades, arquivo, índice ou fila e não reserva
+IDs Drive. O manifesto vincula organização, planilha, pasta, projeto, identidade executora,
+ID exato, nomes, tamanhos, MIME, SHA-256 completo e identidade legada por anexo.
+O retorno contém `manifestHash`, recibos encontrados e destinos faltantes.
 
-- Cabeçalho trocado que faz `MESSAGE_ID` apontar para a versão do código.
-- Linha histórica de outro layout mesmo após restaurar o cabeçalho.
-- Erro e registro parcial tratados incorretamente como processamento concluído.
-- Diagnóstico por query ampla ou seleção de thread em lugar do ID da mensagem.
+A reconciliação lê referências persistidas e inventaria a pasta configurada, verificando os
+bytes por SHA-256. Um órfão íntegro é reutilizado mesmo sem metadados de replay. Ambiguidade,
+arquivo referenciado ausente/alterado/lixeira, índice duplicado, fila conflitante ou leitura
+negada bloqueiam antes das escritas. O inventário não prova ausência fora da pasta autorizada;
+fontes movidas e sem qualquer referência precisam de conciliação humana anterior.
 
-O patch contém novas escritas no schema inválido; não normaliza os dados históricos e não
-implementa replay mutante. O reparo definitivo depende das evidências e gates acima.
+## Gate para uma execução futura, separada
 
-## Rollback e testes
+Esta entrega **não configura nem executa** o gate abaixo. Após revisão do dry-run e autorização
+operacional, um administrador do projeto pode registrar em Script Properties
+`AURORA_GMAIL_REPLAY_AUTHORIZATION` com `messageId`, `manifestHash`, `actor`, `expiresAt` ISO e
+`dataClassification` (`INTERNAL` ou `RESTRICTED`). Dado clínico sensível permanece bloqueado.
+A propriedade não é um segredo nem substitui IAM, MFA e a revisão do administrador do projeto.
+Não há endpoint público, scheduler ou habilitação automática pela inteligência.
 
-Reverter este commit reverte código/política, sem tocar fontes. Não retomar ingestão no
-schema misto apenas para contornar o bloqueio. Teste: `node --test tools/test-gmail-ingestion.cjs`.
-Validar depois CI, conta real, concorrência, interrupção após criar arquivo e nova tentativa.
+A execução exige explicitamente `dryRun:false` e `expectedManifestHash` correspondente ao
+manifesto revisado, autorização não expirada e a mesma identidade/escopo. O manifesto é
+recalculado sob trava antes de qualquer mutação. Conteúdo ou destino alterado exige novo dry-run.
+Manter backup restrito de índice/fila/propriedades e gates institucionais antes de dado real.
 
-Fontes técnicas: [GmailApp](https://developers.google.com/apps-script/reference/gmail/gmail-app),
-[gatilhos instaláveis](https://developers.google.com/apps-script/guides/triggers/installable),
-[LockService](https://developers.google.com/apps-script/reference/lock/lock-service).
+## Concorrência, idempotência e retomada
+
+- V1/V2, importador Gmail legado, produtores da fila e watchdog compartilham a mesma instância
+  de `ScriptLock`. Chamadas aninhadas não liberam a trava externa; flush precede liberação.
+  Escritores externos/outros projetos não são protegidos por ScriptLock e devem ser suspensos
+  durante a manutenção. O lock não é um bloqueio distribuído entre projetos.
+- Antes de criar arquivos, a mensagem é reservada persistentemente. Os indexadores e o
+  importador legado deixam essa mensagem para o replay, inclusive após interrupção.
+  A reserva continua após conclusão, evitando nova cópia pelo importador legado.
+- Checkpoint por anexo em Script Properties: chave escopada, SHA-256, tentativa, ator,
+  manifesto, estágio, ID reservado, recibos e erro sanitizado. Usa armazenamento existente;
+  não cria banco, projeto, planilha ou propriedade com conteúdo de anexos.
+- Antes do upload, `files.generateIds` aloca um ID e o checkpoint persiste esse ID.
+  Upload multipart grava bytes + ID + chave de replay + SHA-256 em uma única criação.
+  Perda de resposta nunca aloca novo ID; uma resposta 409 exige releitura e hash correto.
+- Índice usa a chave legada `messageId|nome|hashLegado`, preservando compatibilidade com V1/V2.
+  Erro/parcial histórico permanece e recebe uma única linha terminal quando reparado.
+- Fila é reconciliada por arquivo/versão; não reabre nem duplica item existente. Novo item
+  recebe SHA-256 e chave na observação. Conteúdo idêntico com nomes distintos compartilha
+  arquivo e fila, mantendo as duas identidades legadas no índice.
+- Cada etapa é relida, confirmada e persistida. `COMPLETE` exige recibos de arquivo, índice
+  e fila. Repetição em runtime novo reconcilia novamente e cria zero duplicatas.
+  Recibo de fila comprova enfileiramento, não extração concluída nem receita reconhecida.
+
+Limites do executor mínimo: 20 anexos, 5 MiB por anexo, 25 MiB por mensagem, 1.000 arquivos
+na pasta por inventário e 10 tentativas por anexo. Limites, quota de propriedades, identidades
+ambíguas ou anexos anteriormente ignorados bloqueiam para revisão, sem apagar checkpoints.
+A mesma identidade legada repetida dentro da mensagem também exige revisão.
+
+## Validação e integração ao motor
+
+```sh
+node --test tools/test-gmail-ingestion.cjs tools/test-gmail-replay.cjs
+node tools/audit-appscript.js
+cd firebase-migration/functions
+node --import tsx --test test/aurora-native-routines.test.ts
+npm run build
+```
+
+Fixtures sintéticas exercitam o adaptador Apps Script/Drive, multipart, reserva anterior ao
+upload, falhas antes/depois de cada destino, perda de resposta, reinício de runtime, 409,
+repetição, órfãos, hash alterado, isolamento de escopo, schema inválido, travas e recibos.
+Isso não comprova execução/concorrência em Google Workspace real; ensaio HML continua pendente.
+
+O registro nativo apresenta `WMGJ-LEGACY-GMAIL-SINGLE-REPLAY` como `LEGACY_MIRRORED`, com
+`ingestionRecoveryPolicy.executorState=IMPLEMENTED_SYNTHETIC_TESTED_PENDING_RUNTIME_VALIDATION`.
+Somente regra abstrata e regressões entram no motor; incidente real continua aberto até
+conciliação comprovada e revisão humana. Não há promoção automática para NATIVE_ACTIVE.
+
+## Rollback
+
+Antes de qualquer execução real, remover/revogar somente a autorização de replay interrompe
+novas execuções mutantes. Preservar reservas/checkpoints e fontes para retomar ou reconciliar.
+Reverter código não desfaz documentos já escritos; versões antigas não respeitam as reservas,
+portanto suspender os escritores antes de rollback. Não limpar todas as propriedades nem
+retomar ingestão sobre schema misto. PR permanece draft para revisão e validação de runtime.
+
+Referências técnicas oficiais: [IDs pré-gerados](https://developers.google.com/workspace/drive/api/guides/create-file),
+[upload multipart](https://developers.google.com/workspace/drive/api/guides/manage-uploads),
+[Lock](https://developers.google.com/apps-script/reference/lock/lock).

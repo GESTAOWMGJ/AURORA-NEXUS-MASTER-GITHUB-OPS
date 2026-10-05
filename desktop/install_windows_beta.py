@@ -16,6 +16,10 @@ import sys
 import urllib.error
 import urllib.request
 
+COLLECTOR_SOURCE = Path(__file__).resolve().parents[1] / "aurora-coletor"
+sys.path.insert(0, str(COLLECTOR_SOURCE))
+from aurora_deployment import install_assets as install_integration_assets
+
 VERSION = "0.2.0-beta.1"
 BASE = "https://wmgj-hml-jfn-20260927.web.app"
 SOURCE_SHA = "52fb02862e31920d558733d99356e627b4109fd7"
@@ -113,6 +117,7 @@ def install():
         raise ValueError("EXISTING_INSTALLATION_REQUIRES_REVIEW")
     proof = probe()
     target.mkdir(parents=True, exist_ok=True)
+    integration = install_integration_assets(COLLECTOR_SOURCE, root)
     link.parent.mkdir(parents=True, exist_ok=True)
     script = shortcut_script(target, edge, shortcuts)
     encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
@@ -123,6 +128,7 @@ def install():
                 "launchTarget": str(edge), "probe": proof, "sourceScriptSha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 "gatewayDatabaseChanged": False, "cloudDeploymentPerformed": False,
                 "productionReleased": False, "macUpdated": False, "iosNativeAppBuilt": False}
+    manifest["integrationComponent"] = integration
     manifest_file.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps({"status": "CLIENT_INSTALLED", "idempotent": existed,
                       "manifest": str(manifest_file), "proof": proof}, indent=2))
@@ -130,10 +136,15 @@ def install():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("probe", "install"))
+    parser.add_argument("action", choices=("probe", "install", "prepare-integration"))
+    parser.add_argument("--target", help="Existing installation root for prepare-integration")
     args = parser.parse_args()
     try:
-        if args.action == "probe":
+        if args.action == "prepare-integration":
+            if not args.target:
+                parser.error("--target is required for prepare-integration")
+            print(json.dumps(install_integration_assets(COLLECTOR_SOURCE, Path(args.target))))
+        elif args.action == "probe":
             print(json.dumps(probe(), indent=2))
         else:
             install()
