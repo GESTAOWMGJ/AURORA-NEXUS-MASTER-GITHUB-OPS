@@ -90,6 +90,8 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}): 
     productVersion: AURORA_PRODUCT_VERSION,
     releaseTrain: AURORA_RELEASE_TRAIN,
     target: "SELLABLE_GA",
+    userProfiles: { routineId: "AURORA-USER-PROFILES-001", version: "1.0.0", status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", verifiedEmailRequired: true, mfaRequired: true, tenantOptInRequired: true, productionVerified: false },
+    dailyUpdates: { routineId: "AURORA-DAILY-UPDATES-001", webPwaCheckIntervalHours: 24, status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", desktopBinaryUpdateVerified: false, mobileDeviceVerified: false, productionVerified: false },
     installerIntegration: {
       routineId: "AURORA-INSTALL-INTEGRATION-001",
       componentVersion: "1.0.0",

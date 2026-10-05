@@ -25,12 +25,31 @@ service cloud.firestore {
         : null;
     }
 
+    // Managed users must complete email verification and a real MFA sign-in,
+    // including direct SDK reads that do not pass through the HTTP session gate.
+    function profileIdentityAllowed(orgId, profile) {
+      let token = request.auth.token;
+      return (!('profileVersion' in profile) && !('auroraProfileVersion' in token))
+        || (profile.profileVersion == 1
+          && profile.profileState == 'READY'
+          && token.auroraProfileVersion == 1
+          && token.auroraOrgId == orgId
+          && token.email_verified == true
+          && token.email == profile.authEmail
+          && token.firebase.sign_in_second_factor is string
+          && token.firebase.sign_in_second_factor.size() > 0
+          && token.auroraProfileOperation is string
+          && token.auroraProfileOperation.matches('^profile-[a-f0-9]{64}$')
+          && token.auroraProfileOperation == profile.profileOperationId);
+    }
+
     function activeMember(orgId) {
       let profile = member(orgId);
       return signedIn()
         && activeOrganization(orgId)
         && profile != null
-        && profile.active == true;
+        && profile.active == true
+        && profileIdentityAllowed(orgId, profile);
     }
 
     function roleIn(orgId, roles) {

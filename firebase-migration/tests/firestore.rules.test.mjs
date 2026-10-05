@@ -231,6 +231,31 @@ before(async () => {
 
 after(async () => env?.cleanup());
 
+test('managed identities require matching company, verified email, MFA and current READY membership on direct SDK reads', async () => {
+  const uid = 'managed-synthetic';
+  const operation = 'profile-' + 'a'.repeat(64);
+  const path = `organizations/wmgj/members/${uid}`;
+  const profile = member('org_admin', { allFacilities:true, facilityIds:[], profileVersion:1, profileState:'READY',
+    authEmail:'managed@example.invalid', profileOperationId:operation });
+  const claims = { email:'managed@example.invalid', email_verified:true, auroraOrgId:'wmgj',
+    auroraProfileVersion:1, auroraProfileOperation:operation,
+    firebase:{sign_in_provider:'password', sign_in_second_factor:'totp'} };
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(),path),profile));
+  const read = patch => getDoc(doc(env.authenticatedContext(uid,{...claims,...patch}).firestore(),'organizations/wmgj'));
+  await assertSucceeds(read({}));
+  for(const patch of [{email_verified:false},{firebase:{sign_in_provider:'password'}},{auroraOrgId:'other-company'},
+    {auroraProfileVersion:2},{auroraProfileOperation:'forged'},{email:'another@example.invalid'}]) await assertFails(read(patch));
+  await assertFails(getDoc(doc(env.authenticatedContext(uid).firestore(),'organizations/wmgj')));
+  const db = env.authenticatedContext(uid,claims).firestore();
+  await assertFails(setDoc(doc(db,path),{...profile,role:'platform_admin'}));
+  await assertFails(setDoc(doc(db,'organizations/wmgj/apiIdempotency/client-write'),{status:'READY'}));
+  await assertFails(getDoc(doc(db,'organizations/other-company')));
+  for(const patch of [{active:false},{profileState:'PENDING'},{profileState:'REVOKED'}]) {
+    await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(),path),{...profile,...patch}));
+    await assertFails(read({}));
+  }
+});
+
 test('nega toda leitura sem autenticação', async () => {
   const db = env.unauthenticatedContext().firestore();
   await assertFails(

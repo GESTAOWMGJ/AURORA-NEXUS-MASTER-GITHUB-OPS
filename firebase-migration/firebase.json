@@ -137,6 +137,13 @@
         }
       },
       {
+        "source": "/api/user-profiles",
+        "function": {
+          "functionId": "auroraNexusUserProfiles",
+          "region": "southamerica-east1"
+        }
+      },
+      {
         "source": "**",
         "function": {
           "functionId": "auroraNexusAuthGate",

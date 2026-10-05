@@ -3,6 +3,7 @@ import type { DecodedIdToken } from "firebase-admin/auth";
 import * as logger from "firebase-functions/logger";
 import { auroraAuth, auroraDb } from "./firebase.js";
 import { sessionOrganization } from "./auroraTenantEntry.js";
+import { managedProfileMatches } from "./auroraUserProfilePolicy.js";
 
 export const SESSION_COOKIE_NAME = "__session";
 export const DEFAULT_ORG_ID = "wmgj";
@@ -13,6 +14,7 @@ export const CSRF_PURPOSES = {
   organic: "POST:/organic",
   crypto: "POST:/api/crypto/self-test",
   integrationKey: "POST:/api/integration-keys",
+  userProfile: "POST:/api/user-profiles",
   distributionApproval: "POST:/api/distribution-approval",
   logout: "POST:/__sessionLogout"
 } as const;
@@ -58,11 +60,21 @@ export async function verifySession(cookieHeader: string | undefined, allowedRaw
   if (!cookie) return null;
   try {
     const decoded = await auroraAuth.verifySessionCookie(cookie, true);
-    return isEmailAllowed(decoded.email, allowedRaw) ? decoded : null;
+    return await identityMayEnter(decoded, allowedRaw) ? decoded : null;
   } catch (error) {
     logger.warn("Aurora Nexus session rejected", { error: error instanceof Error ? error.message : String(error) });
     return null;
   }
+}
+
+export async function identityMayEnter(decoded: DecodedIdToken, allowedRaw: string): Promise<boolean> {
+  if (decoded.auroraProfileVersion === undefined) return isEmailAllowed(decoded.email, allowedRaw);
+  const orgId = sessionOrganization(decoded.auroraOrgId);
+  if (!orgId) return false;
+  const [member, org] = await Promise.all([
+    auroraDb.doc(`organizations/${orgId}/members/${decoded.uid}`).get(), auroraDb.doc(`organizations/${orgId}`).get()
+  ]);
+  return org.data()?.active === true && managedProfileMatches(decoded, member.data(), orgId);
 }
 
 export async function resolveMember(decoded: DecodedIdToken, orgId = sessionOrganization(decoded.auroraOrgId)): Promise<AuroraMember | null> {
@@ -76,6 +88,8 @@ export async function resolveMember(decoded: DecodedIdToken, orgId = sessionOrga
   const data = snapshot.data();
   if (!organization.exists || !isActiveOrganization(organization.data())) return null;
   if (!snapshot.exists || data?.active !== true || typeof data.role !== "string") return null;
+  if ((decoded.auroraProfileVersion !== undefined || data.profileVersion !== undefined)
+      && !managedProfileMatches(decoded, data, orgId)) return null;
   return {
     uid: decoded.uid,
     email: String(decoded.email ?? ""),

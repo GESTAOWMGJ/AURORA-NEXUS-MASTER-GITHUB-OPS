@@ -1,5 +1,7 @@
 # AURORA-MO-001 — Modus Operandi Mestre WMGJ → AURORA NEXUS
 
+Incremento de 04/10/2026: `AURORA-USER-PROFILES-001` incorpora criação/retomada/revogação de perfis por administrador com MFA, por organização e sem banco paralelo. `AURORA-DAILY-UPDATES-001` representa a manutenção diária autorizada de cliente, web e mobile, ainda executada pela rotina hospedada existente e marcada LEGACY_MIRRORED. Contrato, evidências, gates e rollback em [AURORA_USER_PROFILES_1_0_0.md](AURORA_USER_PROFILES_1_0_0.md). A autorização antecipada de futuras versões evita repetir consentimento no mesmo escopo; não equivale a validação técnica ou implantação comprovada.
+
 ## Status
 
 - Código: `AURORA-MO-001`
