@@ -7,12 +7,20 @@ on:
       - '.github/workflows/**'
       - 'scripts/tests/test_hml_auth_contract.py'
       - 'scripts/tests/test_hml_shadow_update.py'
+      - 'scripts/tests/test_hml_gate_readonly.py'
+      - 'firebase-migration/scripts/hml_gate_readonly.py'
+      - 'firebase-migration/scripts/repair-hml-eventarc-iam.py'
+      - 'tools/windows/DIAG_AURORA_HML.cmd'
   push:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - 'scripts/tests/test_hml_auth_contract.py'
       - 'scripts/tests/test_hml_shadow_update.py'
+      - 'scripts/tests/test_hml_gate_readonly.py'
+      - 'firebase-migration/scripts/hml_gate_readonly.py'
+      - 'firebase-migration/scripts/repair-hml-eventarc-iam.py'
+      - 'tools/windows/DIAG_AURORA_HML.cmd'
 
 permissions:
   contents: read
@@ -47,3 +55,4 @@ jobs:
           set -euo pipefail
           python -m unittest discover -s scripts/tests -p 'test_hml_auth_contract.py' -v
           python -m unittest discover -s scripts/tests -p 'test_hml_shadow_update.py' -v
+          python -m unittest discover -s scripts/tests -p 'test_hml_gate_readonly.py' -v

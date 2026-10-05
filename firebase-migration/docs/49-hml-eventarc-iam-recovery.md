@@ -40,6 +40,44 @@ o script não a converte em permissão irrestrita.
 
 ## Diagnóstico e aplicação
 
+### Diagnóstico pronto para Windows — incremento 1.0.1
+
+`tools/windows/DIAG_AURORA_HML.cmd` executa somente
+`firebase-migration/scripts/hml_gate_readonly.py --collect`. O coletor localiza
+o SDK no PATH e nos destinos usuais do instalador Windows; não modifica o PATH
+nem instala outro SDK. Python 3 é necessário. Ausência no PATH não prova ausência
+da ferramenta; lista de credenciais vazia não representa uma conta ativa.
+
+Se retornar `AUTH_LOGIN_REQUIRED`, o titular pode executar o lançador com o
+argumento `login`. Somente essa opção explícita abre o fluxo oficial interativo
+`gcloud auth login --brief`: exige escolha da conta autorizada no navegador e
+pode criar/atualizar a credencial local do CLI. Não solicita senha ao agente,
+não exporta tokens e não concede acesso ao projeto. Ao concluir, repete as leituras.
+Sem esse argumento, o diagnóstico nunca inicia login ou troca de identidade.
+
+O alvo é fixo no HML autorizado. A coleta compara ID/número/estado do projeto
+antes de consultar IAM, Functions Gen2 e Eventarc na região homologada. Reutiliza
+o planejador existente sem chamar sua aplicação. Nenhum valor de segredo,
+documento Firestore, principal IAM, política completa ou erro bruto sai no relatório.
+Condição IAM, acesso negado e metadados inválidos continuam desconhecidos.
+Binding direto ausente exige revisão, não concessão automática. Inventário
+regional vazio é metadado observado, não prova de ausência global.
+
+Código 0 significa conclusão desta coleta ou plano sem consultas; código 2
+significa pendência. Ambos mantêm `releaseApproved=false`. Sem `--collect`, o
+Python apenas apresenta o plano. Billing/orçamento, WIF, secrets, memberships/MFA,
+App Check, backup/restore, DNS/SSL, acesso efetivo e autenticação da aplicação
+continuam gates independentes. Sucesso do inventário não os promove.
+
+Aprendizado AURORA-MO-001/M08/M09: distinguir descoberta de executável, credencial
+configurada, autenticação válida, permissão de leitura, configuração observada e
+ação autorizada. Estado operacional só muda com evidência da etapa correspondente.
+Teste: `python -m unittest discover -s scripts/tests -p test_hml_gate_readonly.py -v`.
+Rollback: remover o lançador/coletor e reverter teste/CI; o diagnóstico não modifica
+cloud. Login manual possui ciclo de credenciais próprio.
+
+### Recuperação administrativa separada
+
 Em Linux ou Cloud Shell com `gcloud` autenticado, a partir deste checkout revisado.
 Definir `AURORA_HML_PROJECT_ID` e `AURORA_HML_PROJECT_NUMBER` com os identificadores
 confirmados do ambiente autorizado. Não são credenciais. O script exige prefixo
