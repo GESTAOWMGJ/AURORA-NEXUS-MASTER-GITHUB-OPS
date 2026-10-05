@@ -77,8 +77,8 @@ jobs:
         run: python3 -m unittest discover -s firebase-migration/scripts -p test_production_project_contract.py -v
 
       - name: Test production bootstrap fails closed before external calls
-        shell: pwsh
-        run: ./firebase-migration/scripts/test-production-bootstrap.ps1
+        shell: bash
+        run: pwsh -NoProfile -NonInteractive -File ./firebase-migration/scripts/test-production-bootstrap.ps1
 
       - name: Validate configuration and controlled launcher
         shell: bash
