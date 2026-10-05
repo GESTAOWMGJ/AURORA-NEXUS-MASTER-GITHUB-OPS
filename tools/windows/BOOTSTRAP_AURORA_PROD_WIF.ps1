@@ -108,8 +108,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $productionWorkflowRef = "$Repository/.github/workflows/aurora-firebase-production.yml@refs/heads/main"
-$attributeMapping = "google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref,attribute.environment=assertion.environment,attribute.job_workflow_ref=assertion.job_workflow_ref"
-$attributeCondition = "assertion.repository=='$Repository' && assertion.ref=='refs/heads/main' && assertion.environment=='$Environment' && assertion.job_workflow_ref=='$productionWorkflowRef'"
+$attributeMapping = "google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref,attribute.environment=assertion.environment,attribute.workflow_ref=assertion.workflow_ref"
+$attributeCondition = "assertion.repository=='$Repository' && assertion.ref=='refs/heads/main' && assertion.environment=='$Environment' && assertion.workflow_ref=='$productionWorkflowRef'"
 
 & gcloud iam workload-identity-pools providers describe $provider --project $ProductionProjectId --location global --workload-identity-pool $pool 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {

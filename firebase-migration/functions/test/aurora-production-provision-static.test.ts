@@ -67,11 +67,12 @@ test("production secrets stay local to bootstrap and are only verified in CI",()
 
 test("production WIF is bound to the protected environment and exact workflow",()=>{
   assert.match(windowsBootstrap,/attribute\.environment=assertion\.environment/);
-  assert.match(windowsBootstrap,/attribute\.job_workflow_ref=assertion\.job_workflow_ref/);
+  assert.match(windowsBootstrap,/attribute\.workflow_ref=assertion\.workflow_ref/);
   assert.match(windowsBootstrap,/assertion\.environment=='\$Environment'/);
   assert.match(windowsBootstrap,/aurora-firebase-production\.yml@refs\/heads\/main/);
   assert.match(windowsBootstrap,/attribute\.environment\/\$Environment/);
   assert.match(windowsBootstrap,/providers update-oidc/);
+  assert.doesNotMatch(windowsBootstrap,/assertion\.job_workflow_ref/);
 });
 
 test("production deployment identity follows least-privilege hardening",()=>{
