@@ -454,6 +454,10 @@ function garantirAbasControlePipelineWMGJ_V3_() {
 }
 
 function enfileirarArquivosEntradaWMGJ_V3(limite) {
+  return comTravaIngestaoGmailWMGJ_(function() { return enfileirarArquivosEntradaWMGJ_V3_SobTrava_(limite); });
+}
+
+function enfileirarArquivosEntradaWMGJ_V3_SobTrava_(limite) {
   garantirAbasControlePipelineWMGJ_V3_();
 
   var cfg = getConfigWMGJ_();

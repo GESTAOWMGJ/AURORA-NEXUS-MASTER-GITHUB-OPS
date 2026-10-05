@@ -52,6 +52,10 @@ function rodarDiagnosticoGmailFaturamentoWMGJ() {
 }
 
 function indexarGmailFaturamentoWMGJ(opcoes) {
+  return comTravaIngestaoGmailWMGJ_(function() { return indexarGmailFaturamentoWMGJ_SobTrava_(opcoes); });
+}
+
+function indexarGmailFaturamentoWMGJ_SobTrava_(opcoes) {
   opcoes = opcoes || {};
 
   var ss = getPlanilhaWMGJ_Gmail_();
@@ -78,6 +82,7 @@ function indexarGmailFaturamentoWMGJ(opcoes) {
     var mensagens = thread.getMessages();
 
     mensagens.forEach(function(msg) {
+      if (mensagemReservadaReplayGmailWMGJ_(msg.getId())) return;
       estat.mensagensLidas++;
 
       var anexos = msg.getAttachments({
@@ -450,24 +455,19 @@ function garantirAbaIndexacaoGmailWMGJ_(ss) {
     sheet.getRange(1, 1, 1, cabecalho.length).setValues([cabecalho]);
   }
 
+  exigirContratoIndiceGmailWMGJ_(sheet);
+
   return sheet;
 }
 
 function carregarChavesGmailJaIndexadasWMGJ_(aba) {
   var mapa = {};
   if (!aba || aba.getLastRow() < 2) return mapa;
-
-  var dados = aba.getDataRange().getValues();
-  var idx = mapearCabecalhoGmailWMGJ_(dados[0]);
-
-  for (var i = 1; i < dados.length; i++) {
-    var chave = [
-      dados[i][idx.MESSAGE_ID],
-      dados[i][idx.ANEXO_NOME],
-      dados[i][idx.ANEXO_HASH]
-    ].join('|');
-    mapa[chave] = true;
-  }
+  var diagnostico = exigirContratoIndiceGmailWMGJ_(aba);
+  diagnostico.registros.forEach(function(r) {
+    // Error/partial rows are not proof of completion and cannot suppress retry.
+    if (r.terminal) mapa[r.chave] = true;
+  });
 
   return mapa;
 }

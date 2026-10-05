@@ -180,7 +180,7 @@ function rodarWatchdogWMGJ() {
 function executarComTravaConcorrenciaWMGJ_(nomeCiclo, fn, maxMinutos) {
   var ss = getPlanilhaWMGJ_Watchdog_();
   var aba = garantirAbaWatchdogWMGJ_(ss);
-  var lock = LockService.getScriptLock();
+  var lock = obterTravaIngestaoGmailWMGJ_();
   var execucaoId = montarIdExecucaoWatchdogWMGJ_(nomeCiclo);
 
   if (!lock.tryLock(WMGJ_LOCK_TIMEOUT_MS)) {
@@ -236,7 +236,7 @@ function executarComTravaConcorrenciaWMGJ_(nomeCiclo, fn, maxMinutos) {
     return falha;
   } finally {
     limparEstadoExecucaoSeMesmoIdWMGJ_(execucaoId);
-    try { lock.releaseLock(); } catch (erroLock) {}
+    try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); }
   }
 }
 

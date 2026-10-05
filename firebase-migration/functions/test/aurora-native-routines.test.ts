@@ -28,6 +28,16 @@ test("aprendizado orgânico promove capacidade, não dados entre clientes", () =
   assert.equal(summary.organicPromotion.validatedOutcomeRequired, true);
   assert.equal(summary.organicPromotion.humanReviewRequired, true);
   assert.equal(summary.organicPromotion.tenantAgnosticAbstractionRequired, true);
+  assert.equal(summary.organicPromotion.everyOperationalChallengeRecorded, true);
+  assert.equal(summary.organicPromotion.unresolvedChallengesRemainOpen, true);
+  assert.equal(summary.organicPromotion.validatedSolutionsFeedBaseEngine, true);
+  assert.equal(summary.organicPromotion.versionedEvidenceAndRegressionRequired, true);
+  assert.equal(summary.ingestionRecoveryPolicy.executorState, "IMPLEMENTED_SYNTHETIC_TESTED_PENDING_RUNTIME_VALIDATION");
+  assert.equal(summary.ingestionRecoveryPolicy.runtimeEnabledByDefault, false);
+  assert.equal(summary.ingestionRecoveryPolicy.financialRecognitionAllowed, false);
+  assert.equal(summary.ingestionRecoveryPolicy.executor, "replayMensagemGmailWMGJ");
+  assert.equal(summary.ingestionRecoveryPolicy.automaticBroadReplayAllowed, false);
+  assert.equal(summary.ingestionRecoveryPolicy.observedFindingIsValidatedOutcome, false);
 });
 
 test("instalação canônica é governada e está presente na projeção, sem novo scheduler", () => {
