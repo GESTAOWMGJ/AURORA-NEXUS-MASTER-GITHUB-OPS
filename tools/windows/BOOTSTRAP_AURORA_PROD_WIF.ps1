@@ -3,7 +3,7 @@ param(
   [string]$ProductionProjectId = "",
   [string]$ProductionProjectNumber = "",
   [string]$HmlProjectId = "wmgj-hml-jfn-20260927",
-  [string]$Repository = "GESTAOWMGJ/automacao-gestao-wmgj",
+  [string]$Repository = "GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS",
   [string]$Environment = "firebase-production",
   [string]$Region = "southamerica-east1"
 )
