@@ -608,15 +608,26 @@ jobs:
             --data-binary @"$session_payload" \
             --output /dev/null \
             "${base_url}/__sessionLogin"
-          curl --fail --silent --show-error --max-time 30 \
+          # Authenticated / redirects to the signed tenant's canonical page.
+          # Read the explicit pilot path; never follow arbitrary redirects with a session.
+          private_status="$(curl --fail --silent --show-error --max-time 30 \
             --cookie "$cookie_jar" \
             --output "$private_shell" \
-            "${base_url}/"
-          grep -Fq "Centro de gestão WMGJ" "$private_shell"
+            --write-out '%{http_code}' \
+            "${base_url}/wmgj")"
+          if [ "$private_status" != "200" ]; then
+            echo "::error::AUTH_PRIVATE_SHELL_HTTP=$private_status"
+            exit 91
+          fi
+          if ! grep -Fq "Centro de gestão WMGJ" "$private_shell"; then
+            echo "::error::AUTH_PRIVATE_SHELL_CONTENT_MISMATCH"
+            exit 91
+          fi
           if grep -Fq "Ambiente privado" "$private_shell"; then
             echo "Authenticated smoke remained on the login shell" >&2
             exit 91
           fi
+          echo "AUTH_PRIVATE_SHELL_VERIFIED"
           curl --fail --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --cookie "$cookie_jar" \
