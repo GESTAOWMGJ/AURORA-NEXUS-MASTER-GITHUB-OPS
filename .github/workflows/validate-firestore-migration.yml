@@ -7,6 +7,10 @@ on:
       - "app-foundation/contracts/**"
       - ".github/workflows/validate-firestore-migration.yml"
       - ".github/workflows/deploy-aurora-firebase.yml"
+      - ".github/workflows/aurora-firebase-production.yml"
+      - ".github/requests/aurora-firebase-production.json"
+      - "tools/windows/BOOTSTRAP_AURORA_PROD_WIF.ps1"
+      - "infra/domains/auroranexus.com.br/firebase-hosting.desired-state.json"
   push:
     branches:
       - main
@@ -16,6 +20,10 @@ on:
       - "app-foundation/contracts/**"
       - ".github/workflows/validate-firestore-migration.yml"
       - ".github/workflows/deploy-aurora-firebase.yml"
+      - ".github/workflows/aurora-firebase-production.yml"
+      - ".github/requests/aurora-firebase-production.json"
+      - "tools/windows/BOOTSTRAP_AURORA_PROD_WIF.ps1"
+      - "infra/domains/auroranexus.com.br/firebase-hosting.desired-state.json"
   workflow_dispatch:
 
 permissions:
@@ -64,6 +72,13 @@ jobs:
 
       - name: Test controlled HML IAM repair without cloud access
         run: python3 -m unittest discover -s firebase-migration/scripts -p test_hml_eventarc_iam.py -v
+
+      - name: Test production project contract without cloud access
+        run: python3 -m unittest discover -s firebase-migration/scripts -p test_production_project_contract.py -v
+
+      - name: Test production bootstrap fails closed before external calls
+        shell: bash
+        run: pwsh -NoProfile -NonInteractive -File ./firebase-migration/scripts/test-production-bootstrap.ps1
 
       - name: Validate configuration and controlled launcher
         shell: bash

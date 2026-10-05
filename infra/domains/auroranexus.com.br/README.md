@@ -1,5 +1,10 @@
 # Aurora Nexus — domínio canônico
 
+**Projeto de produção (05/10/2026):** `BLOCKED_PROJECT_NOT_VALIDATED`.
+`productionProjectId` e `productionProjectNumber` permanecem nulos; candidato
+recusado preservado somente no histórico. DNS/SSL e fallback não são promovidos.
+Ver [contrato de projeto existente](../../../firebase-migration/docs/38-production-project-contract.md).
+
 **Status:** domínio canônico registrado no estado desejado; política de interface atualizada para **login-first privado**, sem landing pública e sem demonstração pública.
 
 ## Domínio base

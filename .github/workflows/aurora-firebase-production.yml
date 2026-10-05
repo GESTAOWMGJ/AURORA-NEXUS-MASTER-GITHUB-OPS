@@ -25,6 +25,7 @@ jobs:
     env:
       REQUEST_FILE: .github/requests/aurora-firebase-production.json
       APPROVED_PROJECT: ${{ vars.FIREBASE_PROD_PROJECT_ID }}
+      APPROVED_PROJECT_NUMBER: ${{ vars.FIREBASE_PROD_PROJECT_NUMBER }}
       WIF_PROVIDER: ${{ vars.GCP_PROD_WIF_PROVIDER }}
       PROVISION_SERVICE_ACCOUNT: ${{ vars.GCP_PROD_DEPLOY_SERVICE_ACCOUNT }}
     steps:
@@ -33,24 +34,17 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Validate exact production creation request
+      - name: Validate explicit existing-production project contract
         id: request
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          jq -e '
-            .requestVersion == 1 and
-            .confirmation == "CREATE_PRODUCTION_PROJECT" and
-            .projectId == "aurora-nexus-prod-wmgj" and
-            .region == "southamerica-east1" and
-            .organizationId == "wmgj" and
-            .deploymentStage == "COLD_PRODUCTION" and
-            .productionMutation == false and
-            .sourceMutation == false and
-            .clinicalSensitiveEnabled == false and
-            (.expectedSourceSha | test("^[a-f0-9]{40}$"))
-          ' "$REQUEST_FILE" >/dev/null
+          python3 firebase-migration/scripts/production_project_contract.py \
+            --approved-project="$APPROVED_PROJECT" \
+            --approved-number="$APPROVED_PROJECT_NUMBER" \
+            --require-wif --wif-provider="$WIF_PROVIDER" \
+            --service-account="$PROVISION_SERVICE_ACCOUNT"
           expected="$(jq -r '.expectedSourceSha' "$REQUEST_FILE")"
           git cat-file -e "$expected^{commit}"
           git merge-base --is-ancestor "$expected" "$GITHUB_SHA"
@@ -77,16 +71,13 @@ jobs:
           PROJECT_ID: ${{ steps.request.outputs.project_id }}
         run: |
           set -euo pipefail
-          test -n "$APPROVED_PROJECT"
-          test "$PROJECT_ID" = "$APPROVED_PROJECT"
-          test "$PROJECT_ID" != "wmgj-hml-jfn-20260927"
-          test "$PROJECT_ID" != "wmgj-ops"
-          case "$PROJECT_ID" in aurora-nexus-prod-*) ;; *) exit 41 ;; esac
-          test -n "$WIF_PROVIDER"
-          test -n "$PROVISION_SERVICE_ACCOUNT"
           active_account="$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')"
           test "$active_account" = "$PROVISION_SERVICE_ACCOUNT"
-          test "$(gcloud projects describe "$PROJECT_ID" --format='value(projectId)')" = "$PROJECT_ID"
+          python3 firebase-migration/scripts/production_project_contract.py \
+            --approved-project="$PROJECT_ID" \
+            --approved-number="$APPROVED_PROJECT_NUMBER" \
+            --require-wif --wif-provider="$WIF_PROVIDER" \
+            --service-account="$PROVISION_SERVICE_ACCOUNT" --verify-live
 
       - name: Enable production platform APIs
         env:
@@ -188,6 +179,6 @@ jobs:
           done
           prod_sa="aurora-prod-deploy@${PROJECT_ID}.iam.gserviceaccount.com"
           test "$PROVISION_SERVICE_ACCOUNT" = "$prod_sa"
-          echo "AURORA_PRODUCTION_PROJECT_CREATED=$PROJECT_ID"
+          echo "AURORA_EXISTING_PRODUCTION_PROJECT_PROVISIONED=$PROJECT_ID"
           echo "AURORA_PRODUCTION_STAGE=COLD_PRODUCTION"
           echo "AURORA_PRODUCTION_DEPLOY_IDENTITY=$prod_sa"

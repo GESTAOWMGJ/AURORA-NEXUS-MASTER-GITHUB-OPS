@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-  [string]$ProductionProjectId = "aurora-nexus-prod-wmgj",
+  [string]$ProductionProjectId = "",
+  [string]$ProductionProjectNumber = "",
   [string]$HmlProjectId = "wmgj-hml-jfn-20260927",
   [string]$Repository = "GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS",
   [string]$Environment = "firebase-production",
@@ -30,6 +31,14 @@ function Ensure-Secret([string]$Project, [string]$Name) {
   }
 }
 
+# Reject pending/mismatched contracts before login, HML reads or any mutation.
+Require-Command "python"
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
+$contractValidator = Join-Path $repoRoot "firebase-migration/scripts/production_project_contract.py"
+$contractArgs = @($contractValidator, "--approved-project=$ProductionProjectId", "--approved-number=$ProductionProjectNumber")
+& python @contractArgs
+if ($LASTEXITCODE -ne 0) { throw "Production project contract blocked; no resources changed" }
+if ($ProductionProjectId -eq $HmlProjectId) { throw "Production must not target HML" }
 Require-Command "gcloud"
 Require-Command "gh"
 
@@ -43,17 +52,9 @@ if ($LASTEXITCODE -ne 0) {
   if ($LASTEXITCODE -ne 0) { throw "GitHub CLI login failed" }
 }
 
-$billingResource = (& gcloud billing projects describe $HmlProjectId --format="value(billingAccountName)").Trim()
-if (-not $billingResource) { throw "Could not resolve billing from HML project" }
-$billingId = ($billingResource -split "/")[-1]
-
-& gcloud projects describe $ProductionProjectId --format="value(projectId)" 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
-  & gcloud projects create $ProductionProjectId --name="Aurora Nexus Production" --quiet
-  if ($LASTEXITCODE -ne 0) { throw "Production project creation failed" }
-}
-& gcloud billing projects link $ProductionProjectId --billing-account $billingId --quiet | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "Billing link failed" }
+# Read-only verification must succeed; lookup failures never trigger creation.
+& python @contractArgs --verify-live
+if ($LASTEXITCODE -ne 0) { throw "Production project verification failed; no resources changed" }
 
 $bootstrapApis = @(
   "iam.googleapis.com",
@@ -107,8 +108,8 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $productionWorkflowRef = "$Repository/.github/workflows/aurora-firebase-production.yml@refs/heads/main"
-$attributeMapping = "google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref,attribute.environment=assertion.environment,attribute.job_workflow_ref=assertion.job_workflow_ref"
-$attributeCondition = "assertion.repository=='$Repository' && assertion.ref=='refs/heads/main' && assertion.environment=='$Environment' && assertion.job_workflow_ref=='$productionWorkflowRef'"
+$attributeMapping = "google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref,attribute.environment=assertion.environment,attribute.workflow_ref=assertion.workflow_ref"
+$attributeCondition = "assertion.repository=='$Repository' && assertion.ref=='refs/heads/main' && assertion.environment=='$Environment' && assertion.workflow_ref=='$productionWorkflowRef'"
 
 & gcloud iam workload-identity-pools providers describe $provider --project $ProductionProjectId --location global --workload-identity-pool $pool 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
@@ -135,7 +136,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $providerResource = (& gcloud iam workload-identity-pools providers describe $provider --project $ProductionProjectId --location global --workload-identity-pool $pool --format="value(name)").Trim()
-$projectNumber = (& gcloud projects describe $ProductionProjectId --format="value(projectNumber)").Trim()
+$projectNumber = $ProductionProjectNumber
 if ($providerResource -notmatch "^projects/[0-9]+/locations/global/workloadIdentityPools/") { throw "Invalid WIF provider resource" }
 if ($projectNumber -notmatch "^[0-9]+$") { throw "Invalid production project number" }
 
@@ -189,6 +190,9 @@ $environmentPayload | & gh api --method PUT "repos/$Repository/environments/$Env
 if ($LASTEXITCODE -ne 0) { throw "Could not create protected GitHub production environment" }
 
 & gh variable set FIREBASE_PROD_PROJECT_ID --env $Environment --body $ProductionProjectId --repo $Repository
+if ($LASTEXITCODE -ne 0) { throw "Could not write production project ID" }
+& gh variable set FIREBASE_PROD_PROJECT_NUMBER --env $Environment --body $ProductionProjectNumber --repo $Repository
+if ($LASTEXITCODE -ne 0) { throw "Could not write production project number" }
 & gh variable set GCP_PROD_WIF_PROVIDER --env $Environment --body $providerResource --repo $Repository
 & gh variable set GCP_PROD_DEPLOY_SERVICE_ACCOUNT --env $Environment --body $serviceAccount --repo $Repository
 if ($LASTEXITCODE -ne 0) { throw "Could not write GitHub production variables" }
