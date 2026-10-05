@@ -21,7 +21,7 @@
     "hostingConfigurationInFirebaseJson": "firebase-migration/firebase.json",
     "customDomainStatus": "PENDING_PROVIDER_DNS_SSL_AND_AUTH_SMOKE_TEST",
     "productionProjectIdCandidate": "aurora-nexus-prod-wmgj",
-    "productionProvisioningStatus": "REQUESTED_COLD_PRODUCTION",
+    "productionProvisioningStatus": "BLOCKED_PENDING_PROJECT_VALIDATION",
     "productionGuardrails": {
       "deploymentStage": "COLD_PRODUCTION",
       "productionMutation": false,

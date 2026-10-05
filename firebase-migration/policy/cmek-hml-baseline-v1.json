@@ -32,8 +32,15 @@
   },
   "applyConfirmation": "APPLY_AURORA_CMEK_HML",
   "restoreConfirmation": "RESTORE_AURORA_CMEK_HML",
-  "firestoreCmekFeatureAccessRequired": false,
-  "firestoreCmekFeatureAccessState": "RUNTIME_VERIFIED_BY_DATABASE_CREATE_OR_EXISTING_CMEK_DATABASE",
+  "firestoreCmekFeatureAccessRequired": true,
+  "firestoreCmekFeatureAccessState": "EXTERNALLY_CONFIRMED",
   "sameLocationKmsRequired": true,
-  "serviceAgentRole": "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  "serviceAgentRole": "roles/cloudkms.cryptoKeyEncrypterDecrypter",
+  "firestoreCmekFeatureAccessEvidence": {
+    "source": "GMAIL",
+    "messageId": "1a0fd2f51798e6ef",
+    "date": "2026-10-02",
+    "projectId": "wmgj-hml-jfn-20260927"
+  },
+  "firestoreCmekOperationalState": "PENDING_HML_VERIFICATION"
 }

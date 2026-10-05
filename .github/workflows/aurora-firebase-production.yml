@@ -1,11 +1,6 @@
 name: Provision Aurora Firebase Production
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/requests/aurora-firebase-production.json"
   workflow_dispatch:
 
 permissions:
@@ -40,6 +35,8 @@ jobs:
           test "$GITHUB_REF" = "refs/heads/main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           jq -e '
+            .executionApproved == true and
+            .projectValidationStatus == "VERIFIED_EXISTING_PROJECT" and
             .requestVersion == 1 and
             .confirmation == "CREATE_PRODUCTION_PROJECT" and
             .projectId == "aurora-nexus-prod-wmgj" and

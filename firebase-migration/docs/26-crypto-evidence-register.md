@@ -16,7 +16,7 @@
 | IAM mínimo | SPECIFIED | runbook + workflow HML | verificar binding real |
 | rotação 90 dias | SPECIFIED | workflow HML | verificar key metadata |
 | KMS audit log | SPECIFIED | política | verificar log real |
-| Firestore CMEK | SPECIFIED | arquitetura | confirmar acesso + banco HML separado |
+| Firestore CMEK | SPECIFIED | arquitetura | acesso HML externamente confirmado (02/10/2026); comprovar banco separado, cmekConfig, backup/restore e falha/recuperação da chave |
 | Secret Manager CMEK | SPECIFIED | arquitetura | avaliação por risco |
 | CodeQL | CI_VERIFIED | workflow `Security - CodeQL` | manter required check |
 | dependency high/critical gate | CI_VERIFIED | `Validate Firestore Migration` | manter required check |
@@ -60,3 +60,9 @@ Além do HML:
 - DPA;
 - incident response;
 - aceite de risco residual.
+
+## Reconciliação de acesso Firestore CMEK — 02/10/2026
+
+Fonte: Gmail `1a0fd2f51798e6ef`, Cloud Firestore Engineering Team. Acesso ao recurso externamente confirmado apenas para `wmgj-hml-jfn-20260927`; isso não comprova banco, `cmekConfig`, backup READY, restore reconciliado ou teste de falha/recuperação da chave. Firestore CMEK permanece sem promoção para `HML_VERIFIED`.
+
+`aurora-nexus-prod-wmgj` é candidato: não reconhecido pelo provedor como projeto GCP naquela resposta, sem acesso CMEK concedido. Existência atual exige consulta autenticada bem-sucedida; não inferir inexistência de erro IAM. Allowlist organizacional não foi confirmada. Nenhuma autorização de apply ou produção deriva do e-mail.

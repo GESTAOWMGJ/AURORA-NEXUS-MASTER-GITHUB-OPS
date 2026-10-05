@@ -10,5 +10,14 @@
   "sourceMutation": false,
   "clinicalSensitiveEnabled": false,
   "requestedAt": "2026-10-01",
-  "requestReason": "AURORA_SEC_002_PR83_PRODUCTION_RELEASE_CANDIDATE"
+  "requestReason": "AURORA_SEC_002_PR83_PRODUCTION_RELEASE_CANDIDATE",
+  "executionApproved": false,
+  "projectValidationStatus": "BLOCKED_PENDING_PROJECT_VALIDATION",
+  "projectIdCandidate": "aurora-nexus-prod-wmgj",
+  "projectEvidence": {
+    "source": "GMAIL",
+    "messageId": "1a0fd2f51798e6ef",
+    "date": "2026-10-02",
+    "result": "NOT_RECOGNIZED_BY_PROVIDER_NO_CMEK_ACCESS_GRANTED"
+  }
 }

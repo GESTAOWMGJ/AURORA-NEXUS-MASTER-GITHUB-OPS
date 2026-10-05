@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-  [string]$ProductionProjectId = "aurora-nexus-prod-wmgj",
+  [Parameter(Mandatory = $true)]
+  [string]$ProductionProjectId,
   [string]$HmlProjectId = "wmgj-hml-jfn-20260927",
   [string]$Repository = "GESTAOWMGJ/automacao-gestao-wmgj",
   [string]$Environment = "firebase-production",
@@ -43,17 +44,16 @@ if ($LASTEXITCODE -ne 0) {
   if ($LASTEXITCODE -ne 0) { throw "GitHub CLI login failed" }
 }
 
-$billingResource = (& gcloud billing projects describe $HmlProjectId --format="value(billingAccountName)").Trim()
-if (-not $billingResource) { throw "Could not resolve billing from HML project" }
-$billingId = ($billingResource -split "/")[-1]
-
-& gcloud projects describe $ProductionProjectId --format="value(projectId)" 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
-  & gcloud projects create $ProductionProjectId --name="Aurora Nexus Production" --quiet
-  if ($LASTEXITCODE -ne 0) { throw "Production project creation failed" }
+# Read-only existence check must succeed before any production mutation.
+if ($ProductionProjectId -eq $HmlProjectId -or $ProductionProjectId -eq "wmgj-hml-jfn-20260927" -or $ProductionProjectId -eq "wmgj-ops" -or $ProductionProjectId -notmatch "^aurora-nexus-prod-") {
+  throw "Production target must be isolated from HML and fallback"
 }
-& gcloud billing projects link $ProductionProjectId --billing-account $billingId --quiet | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "Billing link failed" }
+$projectJson = & gcloud projects describe $ProductionProjectId --format=json
+if ($LASTEXITCODE -ne 0) { throw "Production project not verified; creation is forbidden in this bootstrap" }
+$project = ($projectJson -join "`n") | ConvertFrom-Json
+if ($project.projectId -ne $ProductionProjectId -or $project.lifecycleState -ne "ACTIVE") {
+  throw "Production project must exist and be ACTIVE"
+}
 
 $bootstrapApis = @(
   "iam.googleapis.com",

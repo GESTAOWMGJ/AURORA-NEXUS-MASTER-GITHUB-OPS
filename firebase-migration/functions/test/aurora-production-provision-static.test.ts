@@ -27,12 +27,12 @@ test("production provisioning is isolated and cold by default",()=>{
   assert.match(workflow,/projectionMode.*SHADOW/);
 });
 
-test("project creation is a local one-time bootstrap, not a deploy permission",()=>{
+test("bootstrap requires an existing project and never creates it",()=>{
   assert.doesNotMatch(workflow,/gcloud projects create/);
   assert.doesNotMatch(workflow,/HML_PROJECT_ID/);
   assert.doesNotMatch(workflow,/\bGCP_WIF_PROVIDER\b/);
   assert.doesNotMatch(workflow,/GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT/);
-  assert.match(windowsBootstrap,/gcloud projects create/);
+  assert.doesNotMatch(windowsBootstrap,/gcloud projects create/);
   assert.match(windowsBootstrap,/workload-identity-pools/);
   assert.match(windowsBootstrap,/attribute\.repository/);
   assert.match(windowsBootstrap,/firebase-production/);
@@ -87,4 +87,17 @@ test("security dependency locks are reconciled",()=>{
   assert.match(apiLock,/name = "pyjwt"\nversion = "2\.15\.0"/);
   assert.match(apiLock,/name = "urllib3"\nversion = "2\.8\.0"/);
   assert.match(ruleTestLock,/"node_modules\/hono": \{\n      "version": "4\.13\.12"/);
+});
+
+
+test("unverified production candidate is blocked before cloud authentication", () => {
+  assert.equal(request.executionApproved, false);
+  assert.equal(request.projectValidationStatus, "BLOCKED_PENDING_PROJECT_VALIDATION");
+  assert.equal(request.projectIdCandidate, request.projectId);
+  assert.doesNotMatch(workflow, /\n  push:/);
+  assert.match(workflow, /\.executionApproved == true/);
+  assert.match(workflow, /\.projectValidationStatus == "VERIFIED_EXISTING_PROJECT"/);
+  assert.ok(workflow.indexOf(".executionApproved == true") < workflow.indexOf("uses: google-github-actions/auth"));
+  assert.doesNotMatch(windowsBootstrap, /ProductionProjectId = "aurora-nexus-prod-wmgj"/);
+  assert.ok(windowsBootstrap.indexOf("project.lifecycleState") < windowsBootstrap.indexOf("gcloud services enable"));
 });

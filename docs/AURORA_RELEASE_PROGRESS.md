@@ -50,3 +50,43 @@ Toda solicitação relevante deve:
 4. validar atualização do app Mac instalado;
 5. hardening comercial, domínio, distribuição e documentação;
 6. promover RC aprovada para `1.0.0` GA.
+
+## Incremento candidato — reconciliação CMEK 02/10/2026
+
+- Baseline: `ee4d274bf27e36b293f2043fe2d4d818ea965c3d`; branch/PR draft, sem merge/deploy/apply.
+- Acesso Firestore CMEK HML: EXTERNALLY_CONFIRMED, Gmail `1a0fd2f51798e6ef` (02/10/2026), somente `wmgj-hml-jfn-20260927`.
+- CMEK operacional: PENDING_HML_VERIFICATION. Exigir banco `aurora-hml-cmek`, cmekConfig/versões ativas, backup READY, restore/sentinel e falha/recuperação de chave. CLINICAL_SENSITIVE permanece BLOCKED.
+- Produção: candidato `aurora-nexus-prod-wmgj`, não reconhecido pelo Google na resposta. Request bloqueado até validação de projeto existente e autorização explícita; workflow somente manual; bootstrap não cria projeto.
+- Validação: testes locais e CI devem ser vinculados ao SHA final; nenhum resultado HML ou de produção é inferido.
+- Próximo gate: consulta autenticada read-only do banco HML e projeto de produção; depois planejar execução HML separadamente autorizada.
+- Rollback: reverter o commit do patch em PR revisado; não remover os bloqueios em operação sem reconciliação da evidência.
+
+### Evidência complementar — 03/10/2026
+
+- Main reconciliada: `5dcaddc88b27b54a7f24f9042b05e9799205fb1a` (PR #109). Nenhuma alteração do request RC1.1 nesta reconciliação.
+- Consultas Cloud Shell fornecidas pelo titular, identidade `wmgjltda@gmail.com`: `aurora-hml-cmek` e a CryptoKey prevista retornaram NOT_FOUND; duas listagens KMS em `southamerica-east1` retornaram `[]`. A lista de seis bancos não contém `aurora-hml-cmek` nem apresenta cmekConfig. Acesso ao recurso concedido pelo Google não equivale a provisionamento.
+- Cinco backups READY pertencem a `(default)`, snapshots de 29/09 a 03/10/2026. `(default)` tem schedules de backup e PITR habilitados, retenção de 604800s e proteção contra exclusão.
+- Quatro destinos de restore listados têm sourceInfo.progress COMPLETED; `rc11-restore-37093409122-4` estava IN_PROGRESS. Conclusão do provedor não comprova reconciliação dos dados ou restore CMEK. Não remover destinos nem alterar proteção contra exclusão neste patch.
+- Produção: describe retornou falta de permissão ou possível inexistência; não permite afirmar inexistência atual. ID continua candidato não validado e bloqueado.
+- HMAC: job `111225779429` do run `37093409122` falhou no probe com HTTP 401 / RC11_HMAC_INVALIDO (saída 73). PR #109 corrige interpretação da chave hexadecimal para 32 bytes em paridade com o backend; deploy Apps Script `37132639621` foi aprovado. Hipótese de segredo antigo não comprovada. Correção implantada não equivale a probe HML aprovado.
+- Na consulta de acompanhamento, job `111230961385` da tentativa 4 estava em restore; probe HMAC, ingestão, reconciliação e inteligência nativa ainda pendentes. Não disparada nova tentativa neste trabalho.
+- CMEK permanece PENDING_HML_VERIFICATION; banco, cmekConfig, versões de chave, backup/restore CMEK e falha/recuperação da chave não comprovados. Nenhum apply, recurso cloud, merge ou deploy executado por este patch.
+
+### Correção de provisionamento KMS — 03/10/2026
+
+- Apply autorizado pelo titular iniciou em Cloud Shell; APIs/identidade de serviço avançaram, criação da CryptoKey falhou com INVALID_ARGUMENT: next_rotation_time obrigatório para rotation_schedule. Banco CMEK não comprovado.
+- Executor agora fornece primeira rotação em RFC3339 UTC, 90 dias após execução, junto do período de rotação. Compatível com date GNU/BSD. Teste offline captura argumentos reais de criação e interrompe antes de IAM/banco; não chama GCP.
+- Retomada somente no SHA corrigido; PENDING_HML_VERIFICATION permanece até provas operacionais completas.
+
+### Provisionamento parcial e primeira escrita sintética — 03/10/2026
+
+- Banco criado às 15:38:29Z com UID `203215ec-1e3e-4a27-a56c-84cd0dc2ab88`, chave CMEK prevista, PITR e proteção de exclusão. CryptoKey primária versão 1 ENABLED, rotação 7776000s, próxima 2027-01-01T15:38:05Z. Backup schedules retornou `[]`.
+- Executor validava activeKeyVersion antes da primeira escrita, interrompendo antes de schedule/sentinel. Validar configuração/região/proteções antes de qualquer escrita; validar versões ativas após sentinel sintético. Ausência de versões retorna estado explícito pendente e código 13, sem promover homologação.
+- Provisionamento permanece parcial até saída completa e backup READY/restore/recuperação comprovados. Nenhum dado real/clínico no banco de ensaio.
+
+
+### CMEK HML — sequência de recuperação protegida (03/10/2026)
+
+Baseline main: `403e20317e073de6da88d569dc18e66f99447cae`. Provisionamento apresentado pelo titular no SHA `6295e9b`; último inventário de backup CMEK ainda vazio. Executor agora oferece `backup-check` e `restore-verify` somente leitura; key-failure revalida backup/restore e limita os recursos compartilhando a chave antes de disable. Falha só é comprovada pelo erro específico de CMEK; reativação e igualdade do sentinel são obrigatórias. Testes locais não substituem execução cloud. CMEK segue `PENDING_HML_VERIFICATION`; produção, dados clínicos e audit logs seguem gates próprios.
+
+Atualização observada: tentativa 5 do run `37093409122`, job `111235471017`, concluiu envio de amostra e reaplicação do kill switch com sucesso; reconciliação falhou (exit 1). Evidência final/upload foram skipped. Restore desse run pertence a `(default)`, não ao banco CMEK.

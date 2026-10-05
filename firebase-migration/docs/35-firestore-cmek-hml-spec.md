@@ -33,7 +33,7 @@ A chave CMEK de Firestore é distinta da KEK `aurora-field-encryption` usada pel
 
 ## 3. Premissas técnicas
 
-- O acesso ao recurso Firestore CMEK deve ser solicitado e confirmado para o projeto antes de qualquer `apply`. O workflow exige `cmek_access_confirmed=true` e o script exige `AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED=YES`.
+- O acesso ao recurso Firestore CMEK foi externamente confirmado para este projeto HML pelo e-mail Gmail `1a0fd2f51798e6ef` de 02/10/2026. Essa evidência não autoriza execução e não comprova homologação técnica. Antes de qualquer `apply`, a confirmação explícita continua obrigatória. O workflow exige `cmek_access_confirmed=true` e o script exige `AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED=YES`.
 - Firestore existente com Google default encryption não é convertido in-place para CMEK.
 - A CMEK só é selecionada na criação do novo banco.
 - A chave Cloud KMS deve estar na mesma localização do banco regional.
@@ -139,3 +139,15 @@ O banco `aurora-hml-cmek` nasce exclusivamente sintético. Dados pessoais reais 
 ## 11. Gate para CLINICAL_SENSITIVE
 
 Continua bloqueado até: envelope AES-256-GCM HML_VERIFIED, CMEK HML_VERIFIED, restore test, key-failure recovery, RIPD/DPIA quando aplicável, pentest independente, exercício de incidente e aceite formal do risco residual.
+
+
+## 12. Continuidade após provisionamento — 03/10/2026
+
+O titular apresentou `AURORA_CMEK_HML_APPLIED` no SHA `6295e9b61c7510905eebfc25cbfcf3c5524ae98e`, banco isolado e chave esperados, PITR/delete protection e schedule diário com retenção de 14 dias. A última consulta de backups desse banco retornou `[]`. Backups de `(default)` não fecham este gate. A baseline descreve a configuração preparada; o estado operacional continua `PENDING_HML_VERIFICATION`.
+
+- `backup-check`: leitura apenas; retorna 21 enquanto não houver backup READY de `aurora-hml-cmek`.
+- `restore-test`: usa o backup READY desse banco e cria destino novo com CMEK. Exige `RESTORE_AURORA_CMEK_HML`.
+- `restore-verify`: leitura apenas; informar `AURORA_CMEK_RESTORE_DATABASE`. Confere origem do backup READY, operação COMPLETED, região, CMEK, PITR/delete protection e igualdade dos campos do sentinel sintético.
+- `key-failure-test`: exige o mesmo destino reconciliado, revalida o restore antes de qualquer disable, restringe a chave ao namespace HML sintético e exige uma única versão ativa ENABLED da chave esperada. Exige `TEST_AURORA_CMEK_KEY_FAILURE_HML`.
+
+O teste não aceita erro de rede/401/403 como perda de acesso CMEK. Exige HTTP 400 com `FAILED_PRECONDITION` e mensagem referente à customer-managed encryption key. Reativação deve concluir e a versão deve voltar a ENABLED; recuperação exige HTTP 200 e os mesmos campos do sentinel. Saída 33 indica propagação não observada, ainda que a leitura tenha recuperado. Preservar logs KMS/Audit Logs separadamente; marcadores do executor não os substituem. Nenhum desses passos declara produção ou CLINICAL_SENSITIVE prontos.
