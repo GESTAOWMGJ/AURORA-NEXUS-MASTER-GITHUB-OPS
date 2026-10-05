@@ -78,6 +78,20 @@ restrições organizacionais, acesso efetivo, deploy ou sincronização.
 
 ## Retomar publicação e verificar
 
+O workflow protegido executa primeiro o diagnóstico somente leitura com a mesma
+identidade WIF já configurada. Ele verifica a conta ativa e o projeto aprovado,
+obtém o número do projeto e reutiliza este script sem `--apply`. Bindings ausentes,
+condicionais ou uma leitura negada interrompem o deploy antes do Firebase CLI.
+O log contém apenas o resultado reduzido do diagnóstico; a política completa fica
+em diretório temporário privado, apagado ao sair da etapa e nunca enviado como
+artefato. Nenhuma permissão é concedida pelo preflight. A reparação administrativa
+continua separada e exige revisão atual da política.
+
+Incremento `AURORA-HML-IAM-PREFLIGHT-001`, baseline `4c121df2`: validação local pelo
+teste de recuperação IAM e pelos checks de configuração existentes; CI, consulta
+cloud e deploy exigem seus próprios resultados. Reversão: reverter somente esta
+etapa e este registro; isso não reverte permissões, pois o incremento não as altera.
+
 1. Revalidar o SHA atual da `main`.
 2. Executar o workflow existente `Deploy Aurora Firebase Homologation` com projeto
    HML, `DEPLOY_HOMOLOGATION`, `SHADOW_UPDATE` e `expected_main_sha` atual.
