@@ -6,9 +6,58 @@ import { companyEntry, companyEntryAllowsMember, companyEntryPath, companyManife
 import { auroraProtectedShell } from "../src/auroraFrontend.js";
 import { resolveMember, verifyAuroraAccess } from "../src/auroraAccess.js";
 import { auroraAuth, auroraDb } from "../src/firebase.js";
+import { auroraNexusAuthGate } from "../src/auroraAuthGate.js";
 
 const member = { uid: "synthetic-user", email: "user@example.invalid", orgId: "synthetic-company", role: "viewer", permissions: [], facilityIds: [], allFacilities: false, mfaVerified: false };
 const csrf = { action: "test-action", refresh: "test-refresh", integrationKey: "test-integration", distributionApproval: "test-distribution", logout: "test-logout" };
+
+test("authenticated root redirects while the canonical pilot page renders; anonymous and foreign tenants stay denied", async context => {
+  const names = ["AURORA_NEXUS_ALLOWED_EMAILS", "AURORA_NEXUS_CSRF_HMAC_KEY"];
+  const previous = names.map(name => process.env[name]);
+  process.env[names[0]] = member.email;
+  process.env[names[1]] = "a".repeat(64);
+  context.after(() => names.forEach((name, index) => {
+    if (previous[index] === undefined) delete process.env[name];
+    else process.env[name] = previous[index];
+  }));
+  const decoded = { uid: member.uid, email: member.email, auroraOrgId: "wmgj" } as unknown as DecodedIdToken;
+  context.mock.method(auroraAuth, "verifySessionCookie", async (_cookie: string, revoked: boolean) => {
+    assert.equal(revoked, true);
+    return decoded;
+  });
+  context.mock.method(auroraDb, "doc", (path: string) => {
+    assert.ok(path === "organizations/wmgj" || path === `organizations/wmgj/members/${member.uid}`);
+    return { get: async () => ({ exists: true, data: () => path.includes("/members/")
+      ? { active: true, role: "viewer", permissions: [], allFacilities: false }
+      : { active: true } }) };
+  });
+  async function invoke(path: string, authenticated = true) {
+    let status = 200, html = "", location = "";
+    const res: any = {
+      on: () => res, set: () => res, setHeader: () => res, type: () => res,
+      status: (code: number) => { status = code; return res; },
+      send: (body: string) => { html = body; return res; },
+      redirect: (code: number, target: string) => { status = code; location = target; return res; }
+    };
+    await auroraNexusAuthGate({ method: "GET", path, get: (name: string) =>
+      name.toLowerCase() === "cookie" && authenticated ? "__session=synthetic" : undefined } as any, res);
+    return { status, html, location };
+  }
+  assert.deepEqual(await invoke("/"), { status: 303, html: "", location: "/wmgj" });
+  const pilot = await invoke("/wmgj");
+  assert.equal(pilot.status, 200);
+  assert.match(pilot.html, /Centro de gestão WMGJ/);
+  assert.match(pilot.html, /id="session-identity"/);
+  for (const path of ["/", "/wmgj"]) {
+    const anonymous = await invoke(path, false);
+    assert.equal(anonymous.status, 200);
+    assert.match(anonymous.html, /<title>Aurora Nexus \| Login<\/title>/);
+    assert.doesNotMatch(anonymous.html, /id="session-identity"/);
+  }
+  const foreign = await invoke("/other-company");
+  assert.equal(foreign.status, 403);
+  assert.doesNotMatch(foreign.html, /id="session-identity"/);
+});
 
 test("company URLs preserve login, PWA start and same-origin return", () => {
   for (const path of ["/synthetic-company", "/synthetic-company/", "/synthetic-company/login"]) {
