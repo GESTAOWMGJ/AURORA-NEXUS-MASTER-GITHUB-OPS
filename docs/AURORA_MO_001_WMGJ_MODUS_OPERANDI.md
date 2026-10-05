@@ -610,3 +610,20 @@ Invariantes:
 8. provedores externos podem existir futuramente como fallback substituível, nunca como requisito para disponibilidade do motor.
 
 A interface deve apresentar o Motor Mestre como visão principal de inteligência operacional, mantendo leituras especializadas de receita, SLA, qualidade e próxima ação como subfunções explicáveis.
+
+## 23. IA Master no PC autorizado — AURORA-IA-MASTER-001
+
+O processamento físico local integra o mesmo produto: núcleo nativo compartilhado
+para regras e modelo local para propostas de engenharia. Provedor externo permanece
+desativado. O método é contexto versionado, sem treinamento automático de pesos.
+Cache reduz inferências repetidas; auditoria registra hashes sem dados de clientes.
+
+Prévia importada localmente não autentica a origem nem substitui o Firebase
+canônico. Aprendizagem reutilizável continua restrita a padrões abstratos validados.
+Nenhuma proposta executa código, adquire credenciais ou promove sua própria versão.
+Alterações seguem patch, testes, revisão, CI, HML e reversão existentes.
+
+Registro nativo, Release Cockpit e seção IA Master representam a capacidade; sua
+presença não comprova dispositivo conectado, integração autenticada ou deploy.
+Instalação, teste físico e publicação exigem evidências separadas por SHA.
+Procedimento e limites: `desktop/ia-master/README.md`.
