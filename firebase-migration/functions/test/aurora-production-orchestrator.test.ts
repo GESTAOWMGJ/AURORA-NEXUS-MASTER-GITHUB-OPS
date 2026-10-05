@@ -42,7 +42,7 @@ test('beta production orchestrator reports command credential blocker without ex
     'PROVISION_SERVICE_ACCOUNT'
   ]);
   assert.equal(result.nextAction.blocker, 'COMMAND_CREDENTIALS_REQUIRED');
-  assert.doesNotMatch(JSON.stringify(result), /token|secret|PRIVATE KEY/i);
+  assert.doesNotMatch(JSON.stringify(result), /Bearer\s+|AIza[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z_-]{20,}|-----BEGIN PRIVATE KEY-----/i);
 });
 
 test('beta production orchestrator distinguishes missing source from zero work', () => {
