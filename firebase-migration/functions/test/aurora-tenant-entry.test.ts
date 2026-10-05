@@ -94,5 +94,7 @@ test("page and login gate tenant before private shell and session issuance", () 
   assert.match(page, /res\.status\(403\)/);
   assert.match(login, /COMPANY_ACCESS_DENIED/);
   assert.match(source, /HttpOnly; Secure; SameSite=Strict; Path=\//);
-  assert.match(source, /JSON\.stringify\(\{ idToken, orgId:/);
+  const client = fs.readFileSync(new URL("../src/auroraLoginClient.ts", import.meta.url), "utf8");
+  assert.match(source, /loginClient\(entryOrg\)/);
+  assert.match(client, /JSON\.stringify\(\{ idToken, orgId \}\)/);
 });

@@ -16,7 +16,10 @@ test("modus operandi WMGJ está representado como registro nativo multi-tenant",
 test("rotinas legadas ficam espelhadas até migração e nunca são fingidas como nativas ativas", () => {
   const legacy = AURORA_NATIVE_ROUTINES.filter((item) => item.state === "LEGACY_MIRRORED");
   assert.ok(legacy.length >= 2);
-  assert.ok(legacy.every((item) => item.id.startsWith("WMGJ-LEGACY-")));
+  assert.ok(legacy.every((item) => item.id.startsWith("WMGJ-LEGACY-") || item.id === "AURORA-DAILY-UPDATES-001"));
+  const maintenance = legacy.find(item => item.id === "AURORA-DAILY-UPDATES-001");
+  assert.equal(maintenance?.trigger, "EXISTING_HOSTED_MAINTENANCE");
+  assert.equal(maintenance?.cadence, "DAILY");
 });
 
 test("aprendizado orgânico promove capacidade, não dados entre clientes", () => {

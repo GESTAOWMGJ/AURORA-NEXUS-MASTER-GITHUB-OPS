@@ -50,11 +50,13 @@ test("shell escapa identidade antes de renderizar", () => {
 
 test("login conclui desafio TOTP antes de trocar o ID token por sessão", () => {
   const source = readFileSync(new URL("../src/auroraAuthGate.ts", import.meta.url), "utf8");
-  assert.match(source, /auth\/multi-factor-auth-required/);
-  assert.match(source, /TotpMultiFactorGenerator\.assertionForSignIn/);
-  assert.match(source, /await mfaResolver\.resolveSignIn\(assertion\)/);
-  assert.match(source, /await createPrivateSession\(credential\)/);
+  const client = readFileSync(new URL("../src/auroraLoginClient.ts", import.meta.url), "utf8");
+  assert.match(client, /auth\/multi-factor-auth-required/);
+  assert.match(client, /TotpMultiFactorGenerator\.assertionForSignIn/);
+  assert.match(client, /await resolver\.resolveSignIn\(assertion\)/);
+  assert.match(client, /await completeLogin\(credential\.user\)/);
   assert.match(source, /autocomplete="one-time-code"/);
   assert.match(source, /manifest\.webmanifest/);
-  assert.match(source, /service-worker\.js/);
+  assert.match(client, /webUpdateClient\(\)/);
+  assert.match(readFileSync(new URL("../src/auroraWebUpdateClient.ts", import.meta.url), "utf8"), /service-worker\.js/);
 });
