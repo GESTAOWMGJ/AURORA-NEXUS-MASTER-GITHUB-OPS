@@ -58,6 +58,16 @@ class CliAccessTests(unittest.TestCase):
         for args in mutations[1:]: self.assertIn('--configuration=' + access.PROFILE, args)
         self.assertLess(next(i for i,x in enumerate(cli.calls) if x[:2] == ['projects','describe']), cli.calls.index(mutations[0]))
 
+    def test_bind_local_is_client_install_without_cloud_metadata_or_auth_read(self):
+        cli = FakeCli(accounts=[])
+        result = access.bind_local(cli)
+        self.assertEqual(result['status'], 'CLIENT_PROFILE_BOUND')
+        self.assertFalse(result['cloudMetadataRead'])
+        self.assertFalse(result['tokenExported'])
+        self.assertFalse(any(x[:2] == ['auth', 'list'] for x in cli.calls))
+        self.assertFalse(any(x[:2] == ['projects', 'describe'] for x in cli.calls))
+        self.assertTrue(any(x[:3] == ['config', 'configurations', 'create'] for x in cli.calls))
+
     def test_existing_profile_is_idempotent_and_preserves_account(self):
         cli = FakeCli(profiles=existing(), accounts=[])
         access.setup(cli)
@@ -85,7 +95,13 @@ class CliAccessTests(unittest.TestCase):
 
     def test_login_requires_explicit_mode_and_does_not_use_default_account(self):
         cli = FakeCli(accounts=[])
-        self.assertEqual(access.setup(cli, login=True)['status'], 'LOCAL_PROFILE_READY')
+        result = access.setup(cli, login=True)
+        self.assertEqual(result['status'], 'LOCAL_PROFILE_READY')
+        self.assertTrue(result['postLoginRefreshRequired'])
+        self.assertIn('CLIENT_VERSION_REFRESH', result['postLoginActions'])
+        self.assertIn('ON_TIME_DOCUMENT_INGESTION', result['postLoginActions'])
+        self.assertIn('PENDING_QUEUE_REFRESH', result['postLoginActions'])
+        self.assertIn('INTERFACE_IMPROVEMENT_REFRESH', result['postLoginActions'])
         self.assertEqual(cli.logins, 1)
         self.assertFalse(any(x[:2] == ['auth','list'] for x in cli.calls))
 

@@ -139,9 +139,15 @@ class ReadonlyGateTests(unittest.TestCase):
     def test_launcher_requires_explicit_login_argument(self):
         source = (ROOT / "tools/windows/DIAG_AURORA_HML.cmd").read_text()
         self.assertIn('if /I "%~1"=="login" goto login', source)
-        self.assertLess(source.index("goto diagnose"), source.index(":login"))
+        self.assertIn('if /I "%~1"=="verify" goto verify', source)
+        self.assertLess(source.index("goto install"), source.index(":login"))
         self.assertEqual(source.count("hml_cli_access.py\" --login"), 1)
-        self.assertIn('if /I "%~1"=="setup" goto setup', source)
+        self.assertEqual(source.count("hml_cli_access.py\" --bind-local"), 1)
+        self.assertEqual(source.count("hml_cli_access.py\" --setup"), 1)
+        self.assertNotIn('if /I "%~1"=="setup"', source)
+        self.assertLess(source.index("hml_cli_access.py\" --bind-local"), source.index(":verify"))
+        self.assertLess(source.index("hml_cli_access.py\" --setup"), source.index("hml_gate_readonly.py\" --collect"))
+        self.assertIn("Uso: DIAG_AURORA_HML.cmd [login^|verify]", source)
         for forbidden in ("set-iam-policy", "firebase deploy", "ExecutionPolicy Bypass", "auth print-access-token"):
             self.assertNotIn(forbidden, source)
 

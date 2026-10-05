@@ -42,19 +42,24 @@ o script não a converte em permissão irrestrita.
 
 ### Diagnóstico e acesso de comando Windows — incremento 1.0.2
 
-`tools/windows/DIAG_AURORA_HML.cmd` executa somente
-`firebase-migration/scripts/hml_gate_readonly.py --collect`. O coletor localiza
-o SDK no PATH e nos destinos usuais do instalador Windows; não modifica o PATH
-nem instala outro SDK. Python 3 é necessário. Ausência no PATH não prova ausência
-da ferramenta; lista de credenciais vazia não representa uma conta ativa.
+`tools/windows/DIAG_AURORA_HML.cmd` separa instalação comercial de validação
+técnica. Sem argumentos, executa somente a preparação local idempotente do perfil
+`aurora-hml`, sem leitura cloud, IAM, Functions ou Eventarc. O objetivo do primeiro
+ato é deixar o comando utilizável, não provar todo o ambiente. A coleta pesada
+fica no pós-instalação, quando o operador chama `DIAG_AURORA_HML.cmd verify`.
+O coletor localiza o SDK no PATH e nos destinos usuais do instalador Windows; não
+modifica o PATH nem instala outro SDK. Python 3 é necessário. Ausência no PATH não
+prova ausência da ferramenta; lista de credenciais vazia não representa uma conta
+ativa.
 
 O perfil de comando versionado é `aurora-hml`. O coletor sempre o seleciona
-explicitamente; não depende do perfil global ativo. Na primeira preparação,
-`DIAG_AURORA_HML.cmd setup` reutiliza a conta já autenticada, verifica a identidade
-do HML e grava somente a configuração local de conta/projeto. A criação usa
+explicitamente; não depende do perfil global ativo. Na primeira preparação, o
+executável grava somente a configuração local de projeto. A criação usa
 `--no-activate`; configurações existentes para outro projeto bloqueiam a operação.
-A credencial permanece no armazenamento nativo do gcloud. Nenhuma chave, senha,
-refresh token, access token ou arquivo de credenciais integra o GitHub.
+A verificação de conta e identidade exata do HML fica no `verify`, fora do ato
+inicial do cliente. A credencial permanece no armazenamento nativo do gcloud.
+Nenhuma chave, senha, refresh token, access token ou arquivo de credenciais integra
+o GitHub.
 
 `DIAG_AURORA_HML.cmd login` abre o fluxo oficial `gcloud auth login --brief`
 diretamente nesse perfil. Prefere o Chrome instalado por variável `BROWSER` local
@@ -62,7 +67,11 @@ ao processo, sem alterar o navegador padrão do Windows. A conta salva no navega
 pode ser escolhida no fluxo oficial; não se copiam cookies ou arquivos do perfil.
 Senha, MFA e verificação de identidade, quando exigidos, ficam com o titular.
 A aprovação desse login autoriza credencial local, não IAM, API nova ou deploy.
-O helper sem argumentos só mostra o plano; o diagnóstico não abre login.
+Todo login também gera o contrato de atualização pós-login: versão atual do
+client, ingestão on-time de documentos, atualização de pendências e refresh da
+interface. Essa atualização pertence ao runtime do client; não transforma o
+primeiro ato de instalação em gate redundante. O helper Python sem argumentos só
+mostra o plano; o diagnóstico não abre login.
 
 O SDK obtém e renova seus tokens usando a credencial autorizada. Não é necessário
 exportar token manualmente, criar chave de service account ou cadastrar segredo
@@ -73,7 +82,6 @@ IAM da conta e não constitui uma barreira de segurança entre projetos.
 Comandos no Windows, a partir do checkout ou diretório de diagnóstico preparado:
 
 ```bat
-DIAG_AURORA_HML.cmd setup
 DIAG_AURORA_HML.cmd
 ```
 
@@ -81,6 +89,12 @@ Somente quando necessário renovar a identidade:
 
 ```bat
 DIAG_AURORA_HML.cmd login
+```
+
+Validação técnica pós-instalação:
+
+```bat
+DIAG_AURORA_HML.cmd verify
 ```
 
 Referências do provedor: [configurações nomeadas](https://docs.cloud.google.com/sdk/docs/configurations),

@@ -9,6 +9,13 @@ import subprocess
 
 from hml_gate_readonly import NUMBER, PROFILE, PROJECT, error_code, find_gcloud
 
+POST_LOGIN_ACTIONS = [
+    "CLIENT_VERSION_REFRESH",
+    "ON_TIME_DOCUMENT_INGESTION",
+    "PENDING_QUEUE_REFRESH",
+    "INTERFACE_IMPROVEMENT_REFRESH",
+]
+
 
 class AccessError(Exception):
     pass
@@ -55,7 +62,7 @@ class Cli:
             raise AccessError("LOGIN_NOT_COMPLETED")
 
 
-def setup(cli, login=False):
+def _read_profile(cli):
     profiles = cli.run(["config", "configurations", "list", "--filter=name=" + PROFILE,
                         "--format=json(name,properties.core.account,properties.core.project)"])
     if not isinstance(profiles, list) or len(profiles) > 1:
@@ -71,6 +78,29 @@ def setup(cli, login=False):
         core = properties.get("core", {})
         if not isinstance(core, dict) or core.get("project") not in (None, "", PROJECT):
             raise AccessError("PROFILE_PROJECT_CONFLICT")
+    return profiles, core
+
+
+def bind_local(cli):
+    profiles, core = _read_profile(cli)
+    if not profiles:
+        cli.run(["config", "configurations", "create", PROFILE, "--no-activate", "--format=json"])
+    scope = ["--configuration=" + PROFILE, "--format=json"]
+    if core.get("project") != PROJECT:
+        cli.run(["config", "set", "core/project", PROJECT, *scope])
+    verified = cli.run(["config", "list", "core/", *scope])
+    actual = verified.get("core", {}) if isinstance(verified, dict) else {}
+    if not isinstance(actual, dict) or actual.get("project") != PROJECT:
+        raise AccessError("PROFILE_BIND_UNVERIFIED")
+    return {"schemaVersion": "aurora.hml.cli-access.v1", "profile": PROFILE,
+            "projectId": PROJECT, "status": "CLIENT_PROFILE_BOUND",
+            "credentialStorage": "GCLOUD_NATIVE", "tokenExported": False,
+            "cloudMetadataRead": False, "cloudMutationAttempted": False,
+            "releaseApproved": False}
+
+
+def setup(cli, login=False):
+    profiles, core = _read_profile(cli)
     account = core.get("account")
     if not login:
         if not account:
@@ -102,23 +132,30 @@ def setup(cli, login=False):
     actual = verified.get("core", {}) if isinstance(verified, dict) else {}
     if not isinstance(actual, dict) or actual.get("project") != PROJECT or not actual.get("account"):
         raise AccessError("PROFILE_SETUP_UNVERIFIED")
-    return {"schemaVersion": "aurora.hml.cli-access.v1", "profile": PROFILE,
-            "projectId": PROJECT, "status": "LOCAL_PROFILE_READY",
-            "credentialStorage": "GCLOUD_NATIVE", "tokenExported": False,
-            "cloudMutationAttempted": False, "releaseApproved": False}
+    result = {"schemaVersion": "aurora.hml.cli-access.v1", "profile": PROFILE,
+              "projectId": PROJECT, "status": "LOCAL_PROFILE_READY",
+              "credentialStorage": "GCLOUD_NATIVE", "tokenExported": False,
+              "cloudMutationAttempted": False, "releaseApproved": False}
+    if login:
+        result.update({"postLoginRefreshRequired": True,
+                       "postLoginActions": POST_LOGIN_ACTIONS})
+    return result
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group()
+    action.add_argument("--bind-local", action="store_true", help="Bind the local profile without cloud metadata verification")
     action.add_argument("--setup", action="store_true", help="Reuse the locally authenticated account")
     action.add_argument("--login", action="store_true", help="Start official interactive login in this profile")
     args = parser.parse_args(argv)
-    if not (args.setup or args.login):
+    if not (args.bind_local or args.setup or args.login):
         print(json.dumps({"mode": "PLAN_ONLY", "profile": PROFILE, "projectId": PROJECT}))
         return 0
     try:
-        print(json.dumps(setup(Cli(), login=args.login)))
+        cli = Cli()
+        result = bind_local(cli) if args.bind_local else setup(cli, login=args.login)
+        print(json.dumps(result))
         return 0
     except AccessError as exc:
         print(json.dumps({"status": "BLOCKED", "code": str(exc), "tokenExported": False,
