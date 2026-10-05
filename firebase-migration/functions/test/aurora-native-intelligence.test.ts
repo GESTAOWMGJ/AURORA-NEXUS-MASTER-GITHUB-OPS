@@ -80,3 +80,11 @@ test("intent parser is closed", () => {
   assert.equal(parseNativeInsightIntent("revenue_risk"), "REVENUE_RISK");
   assert.equal(parseNativeInsightIntent("free_form_prompt"), null);
 });
+
+
+test("native intelligence documentation stays aligned with the internal-first policy", () => {
+  const policy = fs.readFileSync(new URL("../../../policy/aurora-external-ai-reduction-policy.md", import.meta.url), "utf8");
+  assert.match(policy, /Motor interno primeiro/);
+  assert.match(policy, /external_ai_dependency_rate/);
+  assert.match(policy, /autonomous_pr_success_rate/);
+});

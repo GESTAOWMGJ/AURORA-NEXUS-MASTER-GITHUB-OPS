@@ -63,3 +63,17 @@ test("AURORA-MO-001 torna a representação nativa obrigatória e proíbe transf
   assert.match(doc, /nenhum dado bruto de um cliente/i);
   assert.match(doc, /LEGACY_MIRRORED/);
 });
+
+
+test("AURORA self-sufficient engine docs and policy artifacts are present", () => {
+  const engine = fs.readFileSync(new URL("../../../docs/aurora-self-sufficient-engine.md", import.meta.url), "utf8");
+  const runbook = fs.readFileSync(new URL("../../../docs/aurora-autonomous-improvement-runbook.md", import.meta.url), "utf8");
+  const policy = fs.readFileSync(new URL("../../../policy/aurora-external-ai-reduction-policy.md", import.meta.url), "utf8");
+  const kpi = JSON.parse(fs.readFileSync(new URL("../../../config/aurora-kpi-baseline.json", import.meta.url), "utf8"));
+  assert.match(engine, /Firebase and Google Cloud/);
+  assert.match(engine, /AURORA_DRY_RUN/);
+  assert.match(runbook, /No auto-merge on gate failure/);
+  assert.match(policy, /fallback de exceção/);
+  assert.equal(kpi.kpis.external_ai_dependency_rate.target, 0.2);
+  assert.equal(kpi.kpis.mttr.target_minutes, 60);
+});

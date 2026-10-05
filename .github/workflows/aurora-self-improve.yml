@@ -1,0 +1,59 @@
+name: AURORA Self-Improve
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run in dry-run mode"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: aurora-self-improve-${{ github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  improve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Generate backlog
+        id: backlog
+        env:
+          AURORA_DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+        run: node scripts/aurora/generate_improvement_backlog.js
+
+      - name: Evaluate candidate
+        id: eval
+        env:
+          AURORA_DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+          AURORA_CANDIDATE_PATH: "docs/aurora-self-sufficient-engine.md"
+        run: node scripts/aurora/evaluate_candidate_change.js
+
+      - name: Select model route
+        id: route
+        env:
+          AURORA_DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+          AURORA_CANONICAL_SNAPSHOT_READY: "1"
+          AURORA_INTERNAL_ENGINE_READY: "1"
+          AURORA_ALLOW_EXTERNAL_AI: "0"
+          AURORA_CHANGE_RISK: "low"
+        run: node scripts/aurora/select_model_route.js
+
+      - name: Create safe PR metadata
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          echo "Branch format: aurora/self-sufficient/<short-topic>"
+          echo "PR title format: AURORA: <verb> <area> [autonomous]"
+          echo "No auto-merge on failed gates."
