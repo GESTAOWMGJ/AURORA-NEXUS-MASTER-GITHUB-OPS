@@ -38,6 +38,13 @@ test("project creation is a local one-time bootstrap, not a deploy permission",(
   assert.match(windowsBootstrap,/firebase-production/);
 });
 
+test("production bootstrap is bound to the canonical Aurora Nexus repository",()=>{
+  assert.match(windowsBootstrap,/\$Repository = "GESTAOWMGJ\/AURORA-NEXUS-MASTER-GITHUB-OPS"/);
+  assert.doesNotMatch(windowsBootstrap,/\$Repository = "GESTAOWMGJ\/automacao-gestao-wmgj"/);
+  assert.match(windowsBootstrap,/\$productionWorkflowRef = "\$Repository\/\.github\/workflows\/aurora-firebase-production\.yml@refs\/heads\/main"/);
+  assert.match(windowsBootstrap,/assertion\.repository=='\$Repository'/);
+});
+
 test("production secrets stay local to bootstrap and are only verified in CI",()=>{
   assert.match(workflow,/AURORA_NEXUS_ALLOWED_EMAILS/);
   assert.match(workflow,/AURORA_NEXUS_CSRF_HMAC_KEY/);
