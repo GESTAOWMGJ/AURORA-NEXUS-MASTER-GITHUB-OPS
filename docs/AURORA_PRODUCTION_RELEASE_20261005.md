@@ -77,3 +77,34 @@ Aprendizado M08/M09/M10: sucesso HML não promove identidade, credenciais, dados
 metadados de ambiente. Validar claims OIDC pelo tipo real de workflow e confrontar
 ID/número/variáveis antes de qualquer mutação. Registro persistido na fonte mestre;
 nenhuma nova regra de runtime ou aprendizagem orgânica ativa foi implantada.
+
+## Reconciliação documental após merge do PR #160
+
+Baseline da main conferida: `67ff80d147c0ea96692becf2adf8f04bc0b3fb8c`.
+O request registra o projeto `wmgj-prod-jfn-20261005`, número
+`616997609173`, usando a evidência ACTIVE/billing habilitado acima, já
+registrada pelo PR #160. Não houve nova consulta GCP nesta reconciliação.
+`expectedSourceSha` aponta à baseline indicada, anterior ao commit deste patch.
+
+`confirmation=null` e `status=BLOCKED_PROJECT_NOT_VALIDATED` permanecem
+inalterados. O nome do status é preservado por compatibilidade com o contrato;
+neste checkpoint o projeto está identificado, mas a prontidão produtiva não está
+comprovada. WIF, service account, secrets próprios e proteção do environment
+continuam pendentes de evidência atual. Nenhum desses recursos é declarado pronto.
+
+O estado desejado do domínio permanece bloqueado com ID/número nulos: sua
+promoção e a confirmação de provisionamento pertencem a mudança posterior,
+após comprovação dos gates. Não foram alterados workflow, validador, bootstrap,
+IAM, secrets, environment, HML, DNS, fallback ou flags operacionais.
+
+Escopo: request/checkpoint e expectativas dos testes existentes que exigiam
+ID/número nulos. A validação continua rejeitando este request antes de consultas
+externas ou autenticação. Nenhum merge ou workflow produtivo foi disparado.
+Reversão: restaurar os três campos do request da baseline; manter confirmação,
+status e flags bloqueados.
+
+Validação local deste patch: 11 testes Python de contrato e 9 testes estáticos
+de provisionamento passaram. O teste de contrato mocka consultas e comprova
+zero chamadas externas no estado bloqueado. PowerShell não está disponível no
+executor local; o ensaio comportamental PowerShell permanece a cargo da CI
+existente. Estes resultados não comprovam implantação nem recursos produtivos.
