@@ -1,16 +1,16 @@
 {
   "requestVersion": 2,
-  "confirmation": null,
-  "projectId": null,
+  "confirmation": "PROVISION_EXISTING_PRODUCTION_PROJECT",
+  "projectId": "wmgj-prod-jfn-20261005",
   "region": "southamerica-east1",
   "organizationId": "wmgj",
   "deploymentStage": "COLD_PRODUCTION",
-  "expectedSourceSha": "3e6bf548469448ac3dc4c722b10954c4c6f746aa",
+  "expectedSourceSha": "67ff80d147c0ea96692becf2adf8f04bc0b3fb8c",
   "productionMutation": false,
   "sourceMutation": false,
   "clinicalSensitiveEnabled": false,
-  "requestedAt": "2026-10-05",
-  "requestReason": "PRODUCTION_PROJECT_ID_REQUIRES_EXPLICIT_GCP_VALIDATION",
-  "status": "BLOCKED_PROJECT_NOT_VALIDATED",
-  "projectNumber": null
+  "requestedAt": "2026-10-06",
+  "requestReason": "EXPLICIT_OWNER_AUTHORIZATION_AND_LIVE_GCP_PROJECT_NUMBER_BILLING_VERIFIED",
+  "status": "READY_FOR_PROVISIONING",
+  "projectNumber": "616997609173"
 }

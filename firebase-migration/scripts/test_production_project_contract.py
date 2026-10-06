@@ -27,15 +27,24 @@ class ProductionProjectContractTests(unittest.TestCase):
                                           self.project if project is None else project,
                                           self.number if number is None else number)
 
-    def test_checked_in_contract_blocks_before_any_gcp_lookup(self):
+    def test_unapproved_destination_blocks_before_any_gcp_lookup(self):
         with patch.object(contract, "describe") as lookup:
             self.assertEqual(contract.main(["--approved-project=" + self.project,
                                            "--approved-number=" + self.number, "--verify-live"]), 41)
             lookup.assert_not_called()
-        self.assertIsNone(self.request["projectId"])
-        self.assertIsNone(self.request["projectNumber"])
-        self.assertIsNone(self.desired["firebase"]["productionProjectId"])
-        self.assertIsNone(self.desired["firebase"]["productionProjectNumber"])
+
+    def test_pending_contract_still_blocks_after_production_is_selected(self):
+        self.ready()
+        for field in ("projectId", "projectNumber", "confirmation", "status"):
+            request = copy.deepcopy(self.request)
+            request[field] = None
+            with self.subTest(field=field), self.assertRaises(contract.ContractError):
+                contract.validate_contract(request, self.desired, self.project, self.number)
+
+    def test_checked_in_contract_is_bound_to_explicit_owner_approved_project(self):
+        self.assertEqual(contract.validate_contract(self.request, self.desired,
+            "wmgj-prod-jfn-20261005", "616997609173"),
+            ("wmgj-prod-jfn-20261005", "616997609173"))
 
     def test_complete_explicit_contract_is_accepted(self):
         self.ready()
