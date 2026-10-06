@@ -20,9 +20,9 @@ COLLECTOR_SOURCE = Path(__file__).resolve().parents[1] / "aurora-coletor"
 sys.path.insert(0, str(COLLECTOR_SOURCE))
 from aurora_deployment import install_assets as install_integration_assets
 
-VERSION = "0.2.0-beta.1"
+VERSION = "0.2.0-beta.2"
 BASE = "https://wmgj-hml-jfn-20260927.web.app"
-SOURCE_SHA = "52fb02862e31920d558733d99356e627b4109fd7"
+SOURCE_SHA = "1d4721935e75d0000c336e47868194d1bc8439f7"
 MAX_BYTES = 262144
 
 
