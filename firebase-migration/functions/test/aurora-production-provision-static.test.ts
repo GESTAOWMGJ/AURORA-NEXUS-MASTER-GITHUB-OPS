@@ -12,10 +12,10 @@ const ruleTestLock=fs.readFileSync("../tests/package-lock.json","utf8");
 
 test("production provisioning is isolated and cold by default",()=>{
   assert.equal(request.requestVersion,2);
-  assert.equal(request.status,"BLOCKED_PROJECT_NOT_VALIDATED");
-  assert.equal(request.projectId,null);
-  assert.equal(request.projectNumber,null);
-  assert.equal(request.confirmation,null);
+  assert.equal(request.status,"READY_FOR_PROVISIONING");
+  assert.equal(request.projectId,"wmgj-prod-jfn-20261005");
+  assert.equal(request.projectNumber,"616997609173");
+  assert.equal(request.confirmation,"PROVISION_EXISTING_PRODUCTION_PROJECT");
   assert.equal(request.deploymentStage,"COLD_PRODUCTION");
   assert.equal(request.productionMutation,false);
   assert.equal(request.sourceMutation,false);
