@@ -40,6 +40,95 @@ o script não a converte em permissão irrestrita.
 
 ## Diagnóstico e aplicação
 
+### Diagnóstico e acesso de comando Windows — incremento 1.0.2
+
+`tools/windows/DIAG_AURORA_HML.cmd` separa instalação comercial de validação
+técnica. Sem argumentos, executa somente a preparação local idempotente do perfil
+`aurora-hml`, sem leitura cloud, IAM, Functions ou Eventarc. O objetivo do primeiro
+ato é deixar o comando utilizável, não provar todo o ambiente. A coleta pesada
+fica no pós-instalação, quando o operador chama `DIAG_AURORA_HML.cmd verify`.
+O coletor localiza o SDK no PATH e nos destinos usuais do instalador Windows; não
+modifica o PATH nem instala outro SDK. Python 3 é necessário. Ausência no PATH não
+prova ausência da ferramenta; lista de credenciais vazia não representa uma conta
+ativa.
+
+O perfil de comando versionado é `aurora-hml`. O coletor sempre o seleciona
+explicitamente; não depende do perfil global ativo. Na primeira preparação, o
+executável grava somente a configuração local de projeto. A criação usa
+`--no-activate`; configurações existentes para outro projeto bloqueiam a operação.
+A verificação de conta e identidade exata do HML fica no `verify`, fora do ato
+inicial do cliente. A credencial permanece no armazenamento nativo do gcloud.
+Nenhuma chave, senha, refresh token, access token ou arquivo de credenciais integra
+o GitHub.
+
+`DIAG_AURORA_HML.cmd login` abre o fluxo oficial `gcloud auth login --brief`
+diretamente nesse perfil. Prefere o Chrome instalado por variável `BROWSER` local
+ao processo, sem alterar o navegador padrão do Windows. A conta salva no navegador
+pode ser escolhida no fluxo oficial; não se copiam cookies ou arquivos do perfil.
+Senha, MFA e verificação de identidade, quando exigidos, ficam com o titular.
+A aprovação desse login autoriza credencial local, não IAM, API nova ou deploy.
+Todo login também gera o contrato de atualização pós-login: versão atual do
+client, ingestão on-time de documentos, atualização de pendências e refresh da
+interface. Essa atualização pertence ao runtime do client; não transforma o
+primeiro ato de instalação em gate redundante. O helper Python sem argumentos só
+mostra o plano; o diagnóstico não abre login.
+
+O SDK obtém e renova seus tokens usando a credencial autorizada. Não é necessário
+exportar token manualmente, criar chave de service account ou cadastrar segredo
+para esse acesso de comando. Políticas de sessão, revogação e reautenticação ainda
+podem exigir novo login. O perfil seleciona configurações; não restringe os direitos
+IAM da conta e não constitui uma barreira de segurança entre projetos.
+
+Comandos no Windows, a partir do checkout ou diretório de diagnóstico preparado:
+
+```bat
+DIAG_AURORA_HML.cmd
+```
+
+Somente quando necessário renovar a identidade:
+
+```bat
+DIAG_AURORA_HML.cmd login
+```
+
+Validação técnica pós-instalação:
+
+```bat
+DIAG_AURORA_HML.cmd verify
+```
+
+Referências do provedor: [configurações nomeadas](https://docs.cloud.google.com/sdk/docs/configurations),
+[criação sem ativação global](https://docs.cloud.google.com/sdk/gcloud/reference/config/configurations/create)
+e [login oficial](https://docs.cloud.google.com/sdk/gcloud/reference/auth/login).
+
+O alvo é fixo no HML autorizado. A coleta compara ID/número/estado do projeto
+antes de consultar IAM, Functions Gen2 e Eventarc na região homologada. Reutiliza
+o planejador existente sem chamar sua aplicação. Nenhum valor de segredo,
+documento Firestore, principal IAM, política completa ou erro bruto sai no relatório.
+A projeção IAM preserva `bindings` como lista de objetos; projetar campos internos
+de uma lista pode transformar sua estrutura e invalidar o planejamento. Condição
+IAM, acesso negado e metadados inválidos continuam desconhecidos.
+Binding direto ausente exige revisão, não concessão automática. Inventário
+regional vazio é metadado observado, não prova de ausência global.
+
+Código 0 significa conclusão desta coleta ou plano sem consultas; código 2
+significa pendência. Ambos mantêm `releaseApproved=false`. Sem `--collect`, o
+Python apenas apresenta o plano. Billing/orçamento, WIF, secrets, memberships/MFA,
+App Check, backup/restore, DNS/SSL, acesso efetivo e autenticação da aplicação
+continuam gates independentes. Sucesso do inventário não os promove.
+
+Aprendizado AURORA-MO-001/M08/M09: distinguir descoberta de executável, credencial
+configurada, autenticação válida, permissão de leitura, configuração observada e
+ação autorizada. Estado operacional só muda com evidência da etapa correspondente.
+Testes: `test_hml_gate_readonly.py` e `test_hml_cli_access.py` em `scripts/tests`.
+Login no navegador, credencial configurada e acesso autenticado ao HML têm evidências
+diferentes; o relatório só confirma autenticação após a leitura válida do projeto.
+Rollback: reverter lançador/helpers/testes/CI e, se autorizado, remover apenas o
+perfil local `aurora-hml`. Isso não revoga a credencial compartilhada do SDK; não
+executar revogação geral nem apagar o armazenamento gcloud como rollback de código.
+
+### Recuperação administrativa separada
+
 Em Linux ou Cloud Shell com `gcloud` autenticado, a partir deste checkout revisado.
 Definir `AURORA_HML_PROJECT_ID` e `AURORA_HML_PROJECT_NUMBER` com os identificadores
 confirmados do ambiente autorizado. Não são credenciais. O script exige prefixo

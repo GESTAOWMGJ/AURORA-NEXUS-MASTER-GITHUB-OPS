@@ -17,6 +17,7 @@ export type NativeRoutine = {
 };
 
 export const AURORA_NATIVE_ROUTINES: readonly NativeRoutine[] = Object.freeze([
+  { id: "WMGJ-LEGACY-GMAIL-SINGLE-REPLAY", module: "M01", name: "Recuperação documental de mensagem única", cadence: "ON_DEMAND", trigger: "MANUAL_EXACT_MESSAGE_WITH_REVIEWED_MANIFEST", state: "LEGACY_MIRRORED", tenantScope: "PER_ORG", humanGate: true, sourceMutation: false },
   { id: "AURORA-RUNTIME-WATCHDOG", module: "M08", name: "Watchdog de runtime", cadence: "EVERY_15_MINUTES", trigger: "SCHEDULE", state: "NATIVE_ACTIVE", tenantScope: "PLATFORM", humanGate: false, sourceMutation: false },
   { id: "AURORA-PROJECTION-ENGINE", module: "M07", name: "Projeção financeira/operacional", cadence: "EVERY_15_MINUTES", trigger: "SCHEDULE", state: "NATIVE_ACTIVE", tenantScope: "PER_ORG", humanGate: false, sourceMutation: false },
   { id: "AURORA-DOCUMENT-WATCHDOG", module: "M01", name: "Vigilância documental", cadence: "EVERY_15_MINUTES", trigger: "SCHEDULE", state: "NATIVE_ACTIVE", tenantScope: "PER_ORG", humanGate: false, sourceMutation: false },
@@ -50,7 +51,32 @@ export function nativeRoutineSummary(): Record<string, unknown> {
     referenceTenant: "WMGJ",
     routines: AURORA_NATIVE_ROUTINES,
     counts,
+    ingestionRecoveryPolicy: {
+      version: 2,
+      source: "AURORA-MO-001",
+      rule: "GMAIL_SINGLE_MESSAGE_RECONCILIATION",
+      executorState: "IMPLEMENTED_SYNTHETIC_TESTED_PENDING_RUNTIME_VALIDATION",
+      executor: "replayMensagemGmailWMGJ",
+      executorRuntime: "APPS_SCRIPT",
+      runtimeEnabledByDefault: false,
+      checkpointStorage: "EXISTING_SCRIPT_PROPERTIES",
+      fileCreationIdentity: "PERSISTED_PREGENERATED_DRIVE_ID",
+      financialRecognitionAllowed: false,
+      observedFindingIsValidatedOutcome: false,
+      requiredChecks: ["SOURCE_MESSAGE", "FILTER_WINDOW", "TRIGGER_OWNER", "FRESHNESS", "INDEX_SCHEMA", "DRIVE_HASH", "QUEUE", "IDEMPOTENCY"],
+      replayScope: "EXACT_MESSAGE_ID",
+      dryRunFirst: true,
+      exclusiveWriterRequired: true,
+      partialWriteReconciliationRequired: true,
+      automaticBroadReplayAllowed: false,
+      rawTenantEvidenceInKnowledgeRegistryAllowed: false,
+      completionRequiresDestinationReceipts: true
+    },
     organicPromotion: {
+      everyOperationalChallengeRecorded: true,
+      unresolvedChallengesRemainOpen: true,
+      validatedSolutionsFeedBaseEngine: true,
+      versionedEvidenceAndRegressionRequired: true,
       tenantRawDataTransfer: false,
       validatedOutcomeRequired: true,
       humanReviewRequired: true,

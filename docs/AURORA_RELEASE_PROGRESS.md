@@ -23,6 +23,14 @@
 
 ## Bloqueios objetivos
 
+### Projeto de produção — 05/10/2026
+`AURORA-PROD-PROJECT-001`: produção permanece `BLOCKED_PROJECT_NOT_VALIDATED`.
+Request v2 e domínio mantêm ID/número nulos; candidato recusado somente histórico.
+Bootstrap/workflow exigem contrato explícito e consulta GCP read-only bem-sucedida
+antes de provisionar. Criação de projeto e vínculo automático de billing removidos.
+Patch baseado em `68467209`; testes sintéticos não constituem produção verificada.
+HML e recursos de produção preservados. [Contrato e próximo gate](../firebase-migration/docs/38-production-project-contract.md).
+
 ### Ingestão real
 Não liberar enquanto faltar ensaio real de restore e promoção governada da identidade/keyring de ingestão.
 

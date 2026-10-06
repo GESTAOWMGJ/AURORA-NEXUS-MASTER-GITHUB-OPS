@@ -11,7 +11,11 @@ const apiLock=fs.readFileSync("../api/uv.lock","utf8");
 const ruleTestLock=fs.readFileSync("../tests/package-lock.json","utf8");
 
 test("production provisioning is isolated and cold by default",()=>{
-  assert.equal(request.projectId,"aurora-nexus-prod-wmgj");
+  assert.equal(request.requestVersion,2);
+  assert.equal(request.status,"READY_FOR_PROVISIONING");
+  assert.equal(request.projectId,"wmgj-prod-jfn-20261005");
+  assert.equal(request.projectNumber,"616997609173");
+  assert.equal(request.confirmation,"PROVISION_EXISTING_PRODUCTION_PROJECT");
   assert.equal(request.deploymentStage,"COLD_PRODUCTION");
   assert.equal(request.productionMutation,false);
   assert.equal(request.sourceMutation,false);
@@ -27,15 +31,28 @@ test("production provisioning is isolated and cold by default",()=>{
   assert.match(workflow,/projectionMode.*SHADOW/);
 });
 
-test("project creation is a local one-time bootstrap, not a deploy permission",()=>{
+test("project selection never creates a missing or inaccessible project",()=>{
   assert.doesNotMatch(workflow,/gcloud projects create/);
   assert.doesNotMatch(workflow,/HML_PROJECT_ID/);
   assert.doesNotMatch(workflow,/\bGCP_WIF_PROVIDER\b/);
   assert.doesNotMatch(workflow,/GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT/);
-  assert.match(windowsBootstrap,/gcloud projects create/);
+  assert.doesNotMatch(windowsBootstrap,/gcloud projects create|billing projects link/);
+  assert.match(windowsBootstrap,/production_project_contract\.py/);
+  assert.match(workflow,/production_project_contract\.py/);
+  assert.match(workflow,/FIREBASE_PROD_PROJECT_NUMBER/);
+  assert.ok(windowsBootstrap.indexOf("--verify-live") < windowsBootstrap.indexOf("gcloud services enable"));
+  assert.ok(workflow.indexOf("--verify-live") < workflow.indexOf("gcloud services enable"));
+  assert.ok(workflow.indexOf("production_project_contract.py") < workflow.indexOf("uses: google-github-actions/auth"));
   assert.match(windowsBootstrap,/workload-identity-pools/);
   assert.match(windowsBootstrap,/attribute\.repository/);
   assert.match(windowsBootstrap,/firebase-production/);
+});
+
+test("production bootstrap is bound to the canonical Aurora Nexus repository",()=>{
+  assert.match(windowsBootstrap,/\$Repository = "GESTAOWMGJ\/AURORA-NEXUS-MASTER-GITHUB-OPS"/);
+  assert.doesNotMatch(windowsBootstrap,/\$Repository = "GESTAOWMGJ\/automacao-gestao-wmgj"/);
+  assert.match(windowsBootstrap,/\$productionWorkflowRef = "\$Repository\/\.github\/workflows\/aurora-firebase-production\.yml@refs\/heads\/main"/);
+  assert.match(windowsBootstrap,/assertion\.repository=='\$Repository'/);
 });
 
 test("production secrets stay local to bootstrap and are only verified in CI",()=>{
@@ -50,11 +67,12 @@ test("production secrets stay local to bootstrap and are only verified in CI",()
 
 test("production WIF is bound to the protected environment and exact workflow",()=>{
   assert.match(windowsBootstrap,/attribute\.environment=assertion\.environment/);
-  assert.match(windowsBootstrap,/attribute\.job_workflow_ref=assertion\.job_workflow_ref/);
+  assert.match(windowsBootstrap,/attribute\.workflow_ref=assertion\.workflow_ref/);
   assert.match(windowsBootstrap,/assertion\.environment=='\$Environment'/);
   assert.match(windowsBootstrap,/aurora-firebase-production\.yml@refs\/heads\/main/);
   assert.match(windowsBootstrap,/attribute\.environment\/\$Environment/);
   assert.match(windowsBootstrap,/providers update-oidc/);
+  assert.doesNotMatch(windowsBootstrap,/assertion\.job_workflow_ref/);
 });
 
 test("production deployment identity follows least-privilege hardening",()=>{

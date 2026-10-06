@@ -27,6 +27,10 @@ test("shell privado carrega dados somente pela API autenticada e não contém de
   assert.match(html, /Registrar ação no app/);
   assert.match(html, /managementInput/);
   assert.match(html, /Registro de ações/);
+  assert.match(html, /Motor de implantação/);
+  assert.match(html, /impact danger/);
+  assert.match(html, /resolver primeiro/);
+  assert.match(html, /caixa real/);
   assert.match(html, /Atividade recente/);
   assert.match(html, /Fechamento mensal — visão rápida/);
   assert.match(html, /Aprovar liberação para distribuição/);
