@@ -32,8 +32,10 @@ class ProductionProjectContractTests(unittest.TestCase):
             self.assertEqual(contract.main(["--approved-project=" + self.project,
                                            "--approved-number=" + self.number, "--verify-live"]), 41)
             lookup.assert_not_called()
-        self.assertIsNone(self.request["projectId"])
-        self.assertIsNone(self.request["projectNumber"])
+        self.assertEqual(self.request["projectId"], "wmgj-prod-jfn-20261005")
+        self.assertEqual(self.request["projectNumber"], "616997609173")
+        self.assertEqual(self.request["status"], "BLOCKED_PROJECT_NOT_VALIDATED")
+        self.assertIsNone(self.request["confirmation"])
         self.assertIsNone(self.desired["firebase"]["productionProjectId"])
         self.assertIsNone(self.desired["firebase"]["productionProjectNumber"])
 
