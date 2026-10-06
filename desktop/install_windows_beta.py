@@ -113,8 +113,23 @@ def install():
         previous = json.loads(manifest_file.read_text(encoding="utf-8"))
         if any(previous.get(k) != v for k, v in expected.items()):
             raise ValueError("INSTALLATION_IDENTITY_CONFLICT")
-    elif target.exists() or any(p.exists() for p in shortcuts):
+    elif target.exists():
         raise ValueError("EXISTING_INSTALLATION_REQUIRES_REVIEW")
+    elif any(p.exists() for p in shortcuts):
+        prior_manifests = sorted((root / "client").glob("*/installation.json")) if (root / "client").is_dir() else []
+        compatible = False
+        for prior_manifest in prior_manifests:
+            try:
+                prior = json.loads(prior_manifest.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if (prior.get("portal") == BASE and prior.get("environment") == "HML"
+                    and prior.get("frontendPolicy") == "PRESERVE_DEPLOYED_MAIN"
+                    and isinstance(prior.get("clientVersion"), str)):
+                compatible = True
+                break
+        if not compatible:
+            raise ValueError("EXISTING_INSTALLATION_REQUIRES_REVIEW")
     proof = probe()
     target.mkdir(parents=True, exist_ok=True)
     integration = install_integration_assets(COLLECTOR_SOURCE, root)
