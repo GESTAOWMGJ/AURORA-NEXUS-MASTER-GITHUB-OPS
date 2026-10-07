@@ -3,7 +3,22 @@
 Código: AURORA-PROD-PROJECT-001. Versão: 2. Data: 05/10/2026.
 Baseline observada: `68467209b55f1f8e281ecb5d21acb9a8211757cf`. Módulos: M08/M09/M10.
 Reconciliado com a main `19937d96be37a570caa9e074a9c03d51543cdbc8` em 05/10/2026.
-Estado operacional: **BLOCKED_PROJECT_NOT_VALIDATED**.
+Estado histórico de 05/10: **BLOCKED_PROJECT_NOT_VALIDATED**.
+
+## Estado vigente — 07/10/2026
+
+O PR #168 substituiu o bloqueio de seleção pelo contrato `READY_FOR_PROVISIONING`,
+com projeto e número explícitos. As descrições de campos nulos abaixo são históricas.
+O run 37508726998 falhou na consulta live antes de mutações. O preflight agora
+informa etapa PROJECT/BILLING e categoria fixa de erro, sem imprimir stderr,
+respostas cloud ou credenciais. Falha de consulta continua bloqueando mutações.
+O request atualizado autoriza uma nova execução do provisionador existente na
+main após validação; não comprova provisionamento nem deploy do aplicativo.
+O workflow atual prepara COLD_PRODUCTION e não publica Functions/Hosting.
+
+Rollback deste diagnóstico: reverter somente o classificador de falhas; preservar
+a seleção aprovada de projeto do #168 e as verificações live. Não restaurar campos
+nulos históricos nem criar outro projeto para contornar uma consulta recusada.
 
 ## Evidência e correção
 

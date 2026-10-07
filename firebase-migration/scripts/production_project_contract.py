@@ -61,15 +61,33 @@ def validate_wif(project, number, provider, service_account):
     require(service_account == f"aurora-prod-deploy@{project}.iam.gserviceaccount.com", "SERVICE_ACCOUNT_MISMATCH")
 
 
+def lookup_failure(args, category):
+    # Emit only fixed labels, never cloud stderr, credentials or response bodies.
+    stages = {("projects", "describe"): "PROJECT", ("billing", "projects", "describe"): "BILLING"}
+    stage = stages.get(tuple(args[:-1]), "UNKNOWN")
+    return ContractError(f"GCP_LOOKUP_FAILED_NO_MUTATION:{stage}:{category}")
+
+
 def describe(args):
     executable = shutil.which("gcloud")
     require(executable is not None, "GCLOUD_UNAVAILABLE")
     try:
         result = subprocess.run([executable, *args, "--format=json", "--quiet"],
                                 capture_output=True, text=True, timeout=60, check=False)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise ContractError("GCP_LOOKUP_FAILED_NO_MUTATION") from error
-    require(result.returncode == 0, "GCP_LOOKUP_FAILED_NO_MUTATION")
+    except subprocess.TimeoutExpired as error:
+        raise lookup_failure(args, "TIMEOUT") from error
+    except OSError as error:
+        raise lookup_failure(args, "EXECUTION_ERROR") from error
+    if result.returncode != 0:
+        detail = result.stderr or ""
+        category = "UNCLASSIFIED"
+        for marker in ("SERVICE_DISABLED", "ACCESS_TOKEN_SCOPE_INSUFFICIENT", "IAM_PERMISSION_DENIED",
+                       "PERMISSION_DENIED", "UNAUTHENTICATED", "NOT_FOUND", "RESOURCE_EXHAUSTED",
+                       "UNAVAILABLE", "DEADLINE_EXCEEDED"):
+            if marker in detail:
+                category = marker
+                break
+        raise lookup_failure(args, category)
     try:
         value = json.loads(result.stdout)
     except (ValueError, TypeError) as error:

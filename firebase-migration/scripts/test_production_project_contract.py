@@ -146,6 +146,30 @@ class ProductionProjectContractTests(unittest.TestCase):
             with self.assertRaises(contract.ContractError):
                 contract.verify_live(self.project, self.number)
 
+    def test_failure_labels_identify_stage_without_disclosing_cloud_output(self):
+        secret = "CANARY_PRIVATE_BEARER_TOKEN"
+        for prefix, stage in ((["projects", "describe"], "PROJECT"),
+                              (["billing", "projects", "describe"], "BILLING")):
+            for marker in ("PERMISSION_DENIED", "SERVICE_DISABLED", "UNAUTHENTICATED", "NOT_FOUND"):
+                result = subprocess.CompletedProcess([], 1, secret, marker + " " + secret)
+                with self.subTest(stage=stage, marker=marker), \
+                        patch.object(contract.shutil, "which", return_value="gcloud"), \
+                        patch.object(contract.subprocess, "run", return_value=result):
+                    with self.assertRaises(contract.ContractError) as error:
+                        contract.describe(prefix + [self.project])
+                    self.assertEqual(str(error.exception), f"GCP_LOOKUP_FAILED_NO_MUTATION:{stage}:{marker}")
+                    self.assertNotIn(secret, str(error.exception))
+
+    def test_unknown_stderr_is_not_echoed_and_timeout_is_distinct(self):
+        with patch.object(contract.shutil, "which", return_value="gcloud"), \
+                patch.object(contract.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "private detail")):
+            with self.assertRaisesRegex(contract.ContractError, "^GCP_LOOKUP_FAILED_NO_MUTATION:PROJECT:UNCLASSIFIED$"):
+                contract.describe(["projects", "describe", self.project])
+        with patch.object(contract.shutil, "which", return_value="gcloud"), \
+                patch.object(contract.subprocess, "run", side_effect=subprocess.TimeoutExpired("gcloud", 60)):
+            with self.assertRaisesRegex(contract.ContractError, "^GCP_LOOKUP_FAILED_NO_MUTATION:BILLING:TIMEOUT$"):
+                contract.describe(["billing", "projects", "describe", self.project])
+
 
 if __name__ == "__main__":
     unittest.main()
