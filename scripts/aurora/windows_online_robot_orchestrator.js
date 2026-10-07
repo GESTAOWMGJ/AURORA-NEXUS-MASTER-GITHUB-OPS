@@ -213,6 +213,8 @@ function executeRobot(robot) {
     exitCode: run.status,
     signal: run.signal || null,
     outputHash: hashText(stdout),
+    evidenceScope: "READ_ONLY_CHECK",
+    candidateEvaluated: parsed?.candidate || null,
     stderrHash: stderr ? hashText(stderr) : null,
     reportedPassed: parsed && typeof parsed.passed === "boolean" ? parsed.passed : null,
     error: run.error ? run.error.message : null
@@ -229,18 +231,51 @@ function currentRevision() {
   return run.status === 0 ? run.stdout.trim() : null;
 }
 
-const executionResults = executionRequested ? robots.map(executeRobot) : [];
 const staticPassed = policyChecks.every((check) => check.ok) && semanticChecks.every((check) => check.ok);
-const executionPassed = !executionRequested || executionResults.every((entry) => entry.ok && entry.reportedPassed !== false);
+const receiptDir = process.env.AURORA_ROBOT_RECEIPT_DIR;
+const executionResults = [];
+let executionError = null;
+let lockPath = null;
+if (executionRequested) {
+  if (!staticPassed) executionError = "PREFLIGHT_FAILED";
+  else if (process.platform !== "win32") executionError = "WINDOWS_EXECUTION_REQUIRED";
+  else if (!receiptDir || !path.isAbsolute(receiptDir)) executionError = "ABSOLUTE_RECEIPT_DIRECTORY_REQUIRED";
+  else {
+    try {
+      for (const policy of requiredPolicies) JSON.parse(readText(policy));
+      fs.mkdirSync(receiptDir, { recursive: true });
+      const candidateLock = path.join(receiptDir, "orchestrator.lock");
+      const fd = fs.openSync(candidateLock, "wx");
+      lockPath = candidateLock;
+      try { fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })); }
+      finally { fs.closeSync(fd); }
+      for (const robot of robots) {
+        const entry = executeRobot(robot);
+        executionResults.push(entry);
+        if (!entry.ok || entry.reportedPassed === false) break;
+      }
+    } catch (error) {
+      executionError = error.code === "EEXIST" ? "EXECUTOR_BUSY" : "PREFLIGHT_OR_EXECUTION_FAILED";
+    }
+  }
+}
+const executionPassed = !executionRequested || (!executionError && executionResults.length === robots.length
+  && executionResults.every((entry) => entry.ok && entry.reportedPassed !== false));
 
 const result = {
   orchestrator: "AURORA_CLOUD_FAILSAFE_ROBOT_ORCHESTRATOR",
-  version: "1.4.0",
+  version: "1.4.1",
   activeDeliverable: ACTIVE_DELIVERABLE,
   revision: currentRevision(),
   trigger: "CLOUD_HEALTH_OR_WINDOWS_XEON_ONLINE_CONFIRMED",
-  mode: "START_ALL_SAFE_ROBOTS_WITH_FAILOVER",
+  mode: executionRequested ? "RUN_ALLOWED_READ_ONLY_CHECKS" : "PLAN_ONLY",
   executionRequested,
+  executionError,
+  evidenceScope: "READ_ONLY_SCRIPT_EXECUTION_AND_POLICY_VALIDATION",
+  operationalLoopsStarted: 0,
+  cloudFailoverVerified: false,
+  deploymentPerformed: false,
+  formalCertificationObtained: false,
   passed: staticPassed && executionPassed,
   failoverPlan,
   startupOrder: robots,
@@ -260,18 +295,21 @@ const result = {
   executionResults
 };
 
-const receiptDir = process.env.AURORA_ROBOT_RECEIPT_DIR;
-if (executionRequested && receiptDir) {
-  if (!path.isAbsolute(receiptDir)) {
-    result.passed = false;
-    result.receiptError = "RECEIPT_DIRECTORY_MUST_BE_ABSOLUTE";
-  } else {
-    fs.mkdirSync(receiptDir, { recursive: true });
-    const receiptPath = path.join(receiptDir, `aurora-robot-run-${Date.now()}.json`);
+try {
+  if (executionRequested && lockPath) {
+    const receiptPath = path.join(receiptDir, `aurora-robot-run-${Date.now()}-${process.pid}.json`);
     const temporaryPath = `${receiptPath}.tmp`;
     fs.writeFileSync(temporaryPath, JSON.stringify(result, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
     fs.renameSync(temporaryPath, receiptPath);
     result.receiptPath = receiptPath;
+  }
+} catch (_error) {
+  result.passed = false;
+  result.receiptError = "RECEIPT_WRITE_FAILED";
+} finally {
+  if (lockPath) {
+    try { fs.unlinkSync(lockPath); }
+    catch (_error) { result.passed = false; result.receiptError = "LOCK_RELEASE_FAILED"; }
   }
 }
 
