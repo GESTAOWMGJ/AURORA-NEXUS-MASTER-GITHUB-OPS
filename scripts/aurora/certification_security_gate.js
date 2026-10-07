@@ -14,8 +14,10 @@ const requiredFiles = [
   "firebase-migration/policy/autonomous-bugfix-realtime-audit-v1.json",
   "firebase-migration/policy/certification-readiness-v1.json",
   "firebase-migration/policy/cloud-failsafe-robot-operation-v1.json",
+  "firebase-migration/policy/development-deliverable-v1.json",
   "firebase-migration/policy/digital-security-certification-layer-v1.json",
   "firebase-migration/policy/intrinsic-cloud-ai-operational-learning-v1.json",
+  "firebase-migration/policy/manifest.json",
   "firebase-migration/policy/resolutive-algorithm-policy-v1.json",
   "firebase-migration/policy/security-baseline-v1.json",
   "firebase-migration/docs/30-threat-model.md",
@@ -50,10 +52,22 @@ const resolutivePolicy = readText("firebase-migration/policy/resolutive-algorith
 const bugfixPolicy = readText("firebase-migration/policy/autonomous-bugfix-realtime-audit-v1.json");
 const cloudFailsafePolicy = readText("firebase-migration/policy/cloud-failsafe-robot-operation-v1.json");
 const learningPolicy = readText("firebase-migration/policy/intrinsic-cloud-ai-operational-learning-v1.json");
+const deliverablePolicy = readText("firebase-migration/policy/development-deliverable-v1.json");
+const manifest = readText("firebase-migration/policy/manifest.json");
 const orchestrator = readText("scripts/aurora/windows_online_robot_orchestrator.js");
-const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy, bugfixPolicy, cloudFailsafePolicy, learningPolicy].join("\n");
+const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy, bugfixPolicy, cloudFailsafePolicy, learningPolicy, deliverablePolicy, manifest].join("\n");
 
 const policyChecks = [
+  {
+    id: "single-development-deliverable",
+    ok: deliverablePolicy.includes("AURORA-DEV-DELIVERABLE-001")
+      && deliverablePolicy.includes("2026.10.07-dev.1")
+      && deliverablePolicy.includes("ACTIVE_DEVELOPMENT_DELIVERABLE")
+      && deliverablePolicy.includes("oneCanonicalDeliverable")
+      && manifest.includes("development-deliverable-v1.json")
+      && manifest.includes("ACTIVE_DEVELOPMENT_DELIVERABLE")
+      && manifest.includes("parallelRuntimePoliciesMustReferenceActiveDeliverable")
+  },
   {
     id: "no-premature-certification-claim",
     ok: certificationProfile.includes("PREPARATION_NOT_CERTIFIED")
@@ -148,7 +162,7 @@ const passed = fileChecks.every((check) => check.ok) && policyChecks.every((chec
 
 console.log(JSON.stringify({
   gate: "AURORA_CERTIFICATION_SECURITY_GATE",
-  version: "1.6.0",
+  version: "1.7.0",
   passed,
   fileChecks,
   policyChecks
