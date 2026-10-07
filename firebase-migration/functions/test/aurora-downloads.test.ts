@@ -59,3 +59,12 @@ test('legacy release remains valid and absent beta bundle is 404',async()=>{
  try {const r=response();await servePrivateDownloads({method:'GET',path:'/downloads/AURORA-NEXUS-Windows-Beta.zip'},r,admin,f.root);assert.equal(r.statusCode,404);}
  finally {await f.clean();}
 });
+
+for (const tamper of [false,true]) test('guided executable integrity '+tamper,async()=>{
+ const f=await fixture();try {
+ for(const name of ['AURORA-NEXUS-Windows-Beta.zip','AURORA-NEXUS-Instalar.exe']){await writeFile(join(f.root,name),f.bytes);f.manifest.files.push({...f.files[1],name});}
+ await writeFile(join(f.root,'manifest.json'),JSON.stringify(f.manifest));
+ if(tamper)await writeFile(join(f.root,'AURORA-NEXUS-Instalar.exe'),'changed');
+ const r=response();await servePrivateDownloads({method:'GET',path:'/downloads/AURORA-NEXUS-Instalar.exe'},r,admin,f.root);assert.equal(r.statusCode,tamper?503:200);
+ }finally{await f.clean();}
+});

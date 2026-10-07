@@ -14,6 +14,7 @@ import {
 import { auroraProtectedShell } from "./auroraFrontend.js";
 import { auroraAuth } from "./firebase.js";
 import { servePrivateDownloads } from "./auroraDownloads.js";
+import { setupPage } from "./auroraSetup.js";
 import { loginClient } from "./auroraLoginClient.js";
 import { companyEntry, companyEntryAllowsMember, companyEntryPath, companyManifest, isCompanySlug } from "./auroraTenantEntry.js";
 
@@ -159,6 +160,10 @@ export const auroraNexusAuthGate = onRequest(
       res.status(403).type("html").send(loginPage("Esta conta não está autorizada para a empresa selecionada.", entry?.orgId));
       return;
     }
+    if (req.path === "/setup") {
+      res.status(200).type("html").send(req.method === "HEAD" ? "" : setupPage(member));
+      return;
+    }
     if (isDownload) {
       await servePrivateDownloads(req, res, member);
       return;
@@ -182,6 +187,7 @@ export const auroraNexusAuthGate = onRequest(
       return;
     }
     let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; integrationKey: string; userProfile: string; distributionApproval: string; logout: string }, entry?.path);
+    shell = shell.replace("</nav>", '<a href="/setup">Instalação e conexões</a></nav>');
     if (["platform_admin", "org_admin", "director"].includes(member.role) || member.permissions.includes("downloads.hml.read")) {
       shell = shell.replace("</nav>", '<a href="/downloads">Instaladores Mac e Windows</a></nav>');
     }
