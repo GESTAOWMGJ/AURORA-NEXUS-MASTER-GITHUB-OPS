@@ -19,6 +19,7 @@ const requiredFiles = [
   "firebase-migration/policy/intrinsic-cloud-ai-operational-learning-v1.json",
   "firebase-migration/policy/manifest.json",
   "firebase-migration/policy/operational-delivery-hardening-v1.json",
+  "firebase-migration/policy/platform-unification-conflict-certification-v1.json",
   "firebase-migration/policy/resolutive-algorithm-policy-v1.json",
   "firebase-migration/policy/security-baseline-v1.json",
   "firebase-migration/docs/30-threat-model.md",
@@ -26,6 +27,7 @@ const requiredFiles = [
   "firebase-migration/docs/32-security-risk-register.md",
   "firebase-migration/docs/33-incident-response-plan.md",
   "firebase-migration/docs/37-clinical-sensitive-release-gate.md",
+  "scripts/aurora/platform_unification_robot.js",
   "scripts/aurora/windows_online_robot_orchestrator.js"
 ];
 
@@ -55,9 +57,11 @@ const cloudFailsafePolicy = readText("firebase-migration/policy/cloud-failsafe-r
 const learningPolicy = readText("firebase-migration/policy/intrinsic-cloud-ai-operational-learning-v1.json");
 const deliverablePolicy = readText("firebase-migration/policy/development-deliverable-v1.json");
 const hardeningPolicy = readText("firebase-migration/policy/operational-delivery-hardening-v1.json");
+const unificationPolicy = readText("firebase-migration/policy/platform-unification-conflict-certification-v1.json");
 const manifest = readText("firebase-migration/policy/manifest.json");
 const orchestrator = readText("scripts/aurora/windows_online_robot_orchestrator.js");
-const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy, bugfixPolicy, cloudFailsafePolicy, learningPolicy, deliverablePolicy, hardeningPolicy, manifest].join("\n");
+const unificationRobot = readText("scripts/aurora/platform_unification_robot.js");
+const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy, bugfixPolicy, cloudFailsafePolicy, learningPolicy, deliverablePolicy, hardeningPolicy, unificationPolicy, manifest].join("\n");
 
 const policyChecks = [
   {
@@ -82,6 +86,18 @@ const policyChecks = [
       && hardeningPolicy.includes("cloudAndPhysicalServerMustHaveFailoverPath")
       && hardeningPolicy.includes("clientMustHaveSafeDegradedMode")
       && manifest.includes("operational-delivery-hardening-v1.json")
+  },
+  {
+    id: "platform-unification-conflict-certification",
+    ok: unificationPolicy.includes("AURORA-PLATFORM-UNIFICATION-001")
+      && unificationPolicy.includes("INTERNAL_OPERATIONAL_INTEGRATION_CERTIFICATION_NOT_EXTERNAL_ISO_CERTIFICATION")
+      && unificationPolicy.includes("singleActiveDeliverableRequired")
+      && unificationPolicy.includes("cloudPhysicalAndClientMustHaveNonConflictingRoles")
+      && unificationPolicy.includes("CONFLICT_FREE")
+      && manifest.includes("platform-unification-conflict-certification-v1.json")
+      && deliverablePolicy.includes("onePlatformUnificationRobot")
+      && orchestrator.includes("platform-unification-robot")
+      && unificationRobot.includes("AURORA_PLATFORM_UNIFICATION_ROBOT")
   },
   {
     id: "no-premature-certification-claim",
@@ -177,7 +193,7 @@ const passed = fileChecks.every((check) => check.ok) && policyChecks.every((chec
 
 console.log(JSON.stringify({
   gate: "AURORA_CERTIFICATION_SECURITY_GATE",
-  version: "1.8.0",
+  version: "1.9.0",
   passed,
   activeDeliverable: "2026.10.07-dev.2",
   fileChecks,
