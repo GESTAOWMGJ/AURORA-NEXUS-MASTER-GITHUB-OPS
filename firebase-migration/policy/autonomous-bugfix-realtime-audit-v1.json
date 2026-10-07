@@ -1,0 +1,128 @@
+{
+  "id": "AURORA-AUTO-BUGFIX-REALTIME-001",
+  "name": "Aurora Nexus Autonomous Bugfix and Realtime Audit Policy",
+  "version": "1.0.0",
+  "date": "2026-10-07",
+  "status": "ACTIVE_POLICY",
+  "standingAuthorization": {
+    "state": "AUTHORIZED_BY_OWNER",
+    "duration": "STANDING_UNTIL_REVOKED",
+    "scope": [
+      "CLOUD_PLATFORM",
+      "PHYSICAL_SERVER",
+      "CLIENT_APP",
+      "INSTALLER",
+      "LOCAL_CONNECTORS",
+      "FIREBASE_FUNCTIONS_HOSTING_RULES_INDEXES",
+      "GITHUB_WORKFLOWS",
+      "AURORA_OPERATIONAL_ENGINE",
+      "CLIENT_PLATFORM_FRONTENDS"
+    ],
+    "allowedActions": [
+      "DETECT_BUGS",
+      "DETECT_CODE_BREAKAGE",
+      "DETECT_WORKFLOW_FAILURE",
+      "DETECT_CLIENT_RUNTIME_FAILURE",
+      "CREATE_FIX_BRANCH",
+      "PATCH_CODE",
+      "PATCH_TESTS",
+      "PATCH_WORKFLOWS",
+      "PATCH_INSTALLERS",
+      "PATCH_CLIENT_CONFIGURATION",
+      "RUN_VALIDATIONS",
+      "OPEN_OR_UPDATE_PULL_REQUEST",
+      "PROMOTE_FIX_WHEN_GATES_PASS",
+      "ROLLBACK_WHEN_HEALTH_REGRESSES"
+    ]
+  },
+  "operatingModes": [
+    "ON_DEMAND_AUDIT",
+    "REALTIME_AUDIT_WHEN_CONNECTED",
+    "SCHEDULED_HEALTH_CHECK",
+    "POST_DEPLOY_GUARD",
+    "CLIENT_RUNTIME_GUARD"
+  ],
+  "targets": {
+    "cloud": [
+      "firebase_hml",
+      "firebase_production_when_authorized",
+      "cloud_run_or_api_layer_when_present",
+      "github_actions",
+      "artifact_release_pipeline"
+    ],
+    "physicalServer": [
+      "windows_xeon_gateway",
+      "local_database_or_cache",
+      "triggercmd_remote_control",
+      "backup_and_restore_channel",
+      "hardware_health_signal"
+    ],
+    "client": [
+      "mac_installer",
+      "windows_installer",
+      "ios_build_path",
+      "android_build_path",
+      "web_hml_and_production_frontend",
+      "authenticated_access_flow"
+    ],
+    "engine": [
+      "security_privacy_update_bot",
+      "certification_security_gate",
+      "organic_learning_routines",
+      "financial_societary_closing_routines",
+      "ingestion_and_indexing_routines"
+    ]
+  },
+  "autonomousFixRules": {
+    "default": "FIX_FAST_WITH_TEST_AND_ROLLBACK",
+    "branchPrefix": "auto/aurora-bugfix-",
+    "mustPreserveClientContinuity": true,
+    "mustPreferSmallPatch": true,
+    "mustRunRelevantValidation": true,
+    "mustRecordEvidence": true,
+    "mustKeepRollbackPath": true,
+    "canPromoteWithoutNewPromptWhen": [
+      "OWNER_STANDING_AUTHORIZATION_EXISTS",
+      "CHANGE_IS_REVERSIBLE",
+      "RELEVANT_GATES_PASS",
+      "NO_SECRET_EXPOSURE",
+      "NO_DESTRUCTIVE_REAL_DATA_OPERATION",
+      "NO_NEW_PATIENT_DATA_MIGRATION",
+      "ROLLBACK_PATH_EXISTS"
+    ]
+  },
+  "blockersRequiringFreshApproval": [
+    "SECRET_OR_PASSWORD_DISCLOSURE_OR_ROTATION",
+    "DESTRUCTIVE_REAL_DATA_OPERATION_WITHOUT_RECOVERABLE_BACKUP",
+    "PATIENT_OR_CLINICAL_SENSITIVE_DATA_MIGRATION",
+    "IRREVERSIBLE_INFRASTRUCTURE_DELETION",
+    "LEGAL_CERTIFICATION_CLAIM_WITHOUT_CERTIFICATE",
+    "THIRD_PARTY_CONTRACTUAL_CHANGE_WITH_NEW_FINANCIAL_OBLIGATION"
+  ],
+  "healthSignals": [
+    "workflow_success_rate",
+    "deploy_health",
+    "authenticated_smoke_result",
+    "anonymous_access_denial_result",
+    "ingestion_freshness",
+    "indexing_gap_detection",
+    "client_installer_validation",
+    "server_resource_pressure",
+    "backup_restore_readiness",
+    "security_gate_result",
+    "rollback_readiness"
+  ],
+  "interruptionMitigation": {
+    "target": "MINIMIZE_PLATFORM_INTERRUPTION",
+    "method": [
+      "FAST_DETECTION",
+      "SMALL_REVERSIBLE_PATCHES",
+      "AUTOMATED_VALIDATION",
+      "ROLLBACK_ON_REGRESSION",
+      "FAIL_CLOSED_FOR_SECURITY",
+      "FAIL_SOFT_FOR_NON_CRITICAL_UI",
+      "DEFER_HEAVY_PROCESSING_TO_WINDOWS_XEON_WHEN_CONNECTED"
+    ],
+    "nonGuarantee": "No software policy can mathematically eliminate every interruption; this policy maximizes autonomous prevention, detection, correction and rollback."
+  }
+}
