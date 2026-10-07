@@ -1,6 +1,13 @@
 {
-  "manifestVersion": 1,
-  "generatedAt": "2026-09-27",
+  "manifestVersion": 2,
+  "generatedAt": "2026-10-07",
+  "activeDeliverable": {
+    "file": "development-deliverable-v1.json",
+    "id": "AURORA-DEV-DELIVERABLE-001",
+    "version": "2026.10.07-dev.1",
+    "status": "ACTIVE_DEVELOPMENT_DELIVERABLE",
+    "canonicalBranch": "feat/certification-readiness-20261007"
+  },
   "source": {
     "file": "aurora-nexus-source-2.3.0.json",
     "version": "2.3.0",
@@ -11,11 +18,25 @@
     "policyVersion": "aurora-nexus-2.3.0-firebase-shadow-v2",
     "sha256": "077e7cbf4c60e578dee971ce5af5f847c773ba35c7b8beb020caa7cb6af971a7"
   },
+  "activePolicyStack": [
+    "certification-readiness-v1.json",
+    "digital-security-certification-layer-v1.json",
+    "security-baseline-v1.json",
+    "autonomous-bugfix-realtime-audit-v1.json",
+    "cloud-failsafe-robot-operation-v1.json",
+    "intrinsic-cloud-ai-operational-learning-v1.json",
+    "resolutive-algorithm-policy-v1.json"
+  ],
   "runtime": {
     "environment": "HOMOLOGATION",
-    "mode": "SHADOW",
+    "mode": "SHADOW_FIRST_WITH_SAFE_PROMOTION_GATES",
     "clinicalSensitiveEnabled": false,
     "sourceMutation": false,
     "productionMutation": false
+  },
+  "singleVersionRules": {
+    "oneCanonicalDeliverable": true,
+    "parallelRuntimePoliciesMustReferenceActiveDeliverable": true,
+    "supersededVersionsMustNotBePromoted": true
   }
 }
