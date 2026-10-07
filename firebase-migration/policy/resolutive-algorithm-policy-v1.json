@@ -1,7 +1,7 @@
 {
   "id": "AURORA-ALG-RESOLUTIVE-001",
   "name": "Aurora Nexus Resolutive Algorithm Policy",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "date": "2026-10-07",
   "status": "ACTIVE_POLICY",
   "motto": "AUTOMATIC_RELIABLE_RESOLUTIVE_BY_DEFAULT",
@@ -30,6 +30,40 @@
       "LEGAL_CERTIFICATION_CLAIM_WITHOUT_CERTIFICATE"
     ]
   },
+  "minimumBlockerDoctrine": {
+    "id": "AURORA-MINIMUM-BLOCKERS-001",
+    "state": "ACTIVE",
+    "defaultAuthorizationAssumption": "AUTHORIZATION_IS_UNDERSTOOD_FOR_AUDITABLE_VERIFIABLE_CODE_AND_OPERATIONAL_IMPROVEMENT",
+    "defaultBehavior": "EXECUTE_WITH_PROCESS_TRACE_INSTEAD_OF_REQUESTING_RECONFIRMATION",
+    "blockersMustBeExtremelyMinimized": true,
+    "noRedundantAuthorizationPrompts": true,
+    "mustLeaveProcessTrail": true,
+    "mustBeAuditableAndVerifiable": true,
+    "allowedWithoutFreshPromptWhen": [
+      "CHANGE_IS_CODE_OR_DOCUMENTATION_OR_TEST_OR_POLICY",
+      "CHANGE_IS_REVERSIBLE_OR_HAS_ROLLBACK",
+      "VALIDATION_CAN_BE_RUN_OR_EVIDENCE_CAN_BE_CAPTURED",
+      "NO_SECRET_IS_EXPOSED_OR_ROTATED",
+      "NO_REAL_SENSITIVE_DATA_IS_DESTRUCTIVELY_MUTATED",
+      "NO_INFRASTRUCTURE_IS_IRREVERSIBLY_DELETED",
+      "NO_FORMAL_CERTIFICATION_CLAIM_IS_MADE_WITHOUT_CERTIFICATE"
+    ],
+    "processTrailRequiredFields": [
+      "commit_or_artifact_id",
+      "changed_scope",
+      "validation_or_reasonable_evidence",
+      "rollback_or_recovery_path",
+      "remaining_material_risk_if_any"
+    ],
+    "hardStopsOnly": [
+      "SECRET_OR_PASSWORD_DISCLOSURE_OR_ROTATION",
+      "DESTRUCTIVE_REAL_DATA_OPERATION_WITHOUT_RECOVERABLE_BACKUP",
+      "PATIENT_OR_CLINICAL_SENSITIVE_DATA_MIGRATION",
+      "IRREVERSIBLE_INFRASTRUCTURE_DELETION",
+      "LEGAL_CERTIFICATION_CLAIM_WITHOUT_CERTIFICATE",
+      "EXTERNAL_LEGAL_CONTRACTUAL_APPROVAL_NOT_ALREADY_GRANTED"
+    ]
+  },
   "decisionPrinciples": [
     "SINGLE_BEST_PATH_BY_DEFAULT",
     "MOST_RESOLUTIVE_SAFE_PATH_WHEN_SINGLE_PATH_IS_NOT_OBJECTIVELY_PROVABLE",
@@ -42,10 +76,10 @@
   "runtimeBehavior": {
     "defaultAction": "EXECUTE_OR_PRODUCE_THE_MOST_RESOLUTIVE_OUTPUT",
     "askUserOnlyWhen": [
-      "LEGAL_OR_CONTRACTUAL_APPROVAL_IS_MISSING",
+      "LEGAL_OR_CONTRACTUAL_APPROVAL_IS_MISSING_AND_NOT_ALREADY_GRANTED",
       "CREDENTIAL_OR_SECRET_ENTRY_IS_REQUIRED",
       "REAL_DATA_DESTRUCTIVE_ACTION_IS_REQUIRED",
-      "MULTIPLE_PATHS_HAVE_SIMILAR_RISK_AND_DIFFERENT_BUSINESS_IMPACT",
+      "MULTIPLE_PATHS_HAVE_SIMILAR_RISK_AND_DIFFERENT_BUSINESS_IMPACT_WITH_NO_CANONICAL_POLICY",
       "AVAILABLE_EVIDENCE_IS_INSUFFICIENT_FOR_MATERIAL_CLAIM"
     ],
     "avoid": [
@@ -76,6 +110,8 @@
     "mustKeepClientOperationSmooth": true,
     "mustAvoidNewManualStepsUnlessNecessary": true,
     "mustKeepRollbackPathVisible": true,
-    "standingCodeAuthorizationRequired": true
+    "standingCodeAuthorizationRequired": true,
+    "minimumBlockerDoctrineRequired": true,
+    "processTrailRequired": true
   }
 }
