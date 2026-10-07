@@ -1,4 +1,5 @@
-//go:build windows
+//go:build aurora_windows_setup && windows
+
 package main
 
 import (
