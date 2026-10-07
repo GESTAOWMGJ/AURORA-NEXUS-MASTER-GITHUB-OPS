@@ -262,8 +262,10 @@ def build(output: pathlib.Path):
             subprocess.run(['go','build','-o',str(probe),'.'],cwd=gosrc,env=env,check=True)
             result=json.loads(subprocess.check_output([str(probe),'--diagnose'],text=True))
             assert result['autoScan'] is False and result['serverVerified'] is False
+    from build_windows_beta_bundle import build as build_beta, NAME as BETA_NAME
+    build_beta(repo, output, commit)
     files=[]
-    for name,label,platform in [(MAC_NAME,'Mac — Intel e Apple Silicon','mac'),(WIN_NAME,'Windows x64','windows')]:
+    for name,label,platform in [(BETA_NAME,'Windows beta — Edge e Python 3.10+','windows'),(MAC_NAME,'Mac HML experimental — não atualiza o app existente','mac'),(WIN_NAME,'Windows x64 — launcher HML','windows')]:
         path=output/name
         files.append({'name':name,'label':label,'platform':platform,'size':path.stat().st_size,'sha256':sha(path),'signed':False})
     manifest={'schemaVersion':1,'version':VERSION,'channel':'homologation','portalUrl':PORTAL,'sourceCommit':commit,'productionApproved':False,'files':files}

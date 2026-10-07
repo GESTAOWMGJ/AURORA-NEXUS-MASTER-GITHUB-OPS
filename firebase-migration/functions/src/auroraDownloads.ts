@@ -4,7 +4,7 @@ import { join, resolve, dirname } from 'node:path';
 
 type Member = { role: string; permissions: string[]; orgId: string };
 type Entry = { name: string; label: string; platform: string; size: number; sha256: string; signed: boolean };
-const names = new Set(['AURORA-NEXUS-Mac-HML.zip', 'AURORA-NEXUS-Windows-x64-HML.exe']);
+const names = new Set(['AURORA-NEXUS-Mac-HML.zip', 'AURORA-NEXUS-Windows-x64-HML.exe', 'AURORA-NEXUS-Windows-Beta.zip']);
 const portal = 'https://wmgj-hml-jfn-20260927.web.app/';
 const escape = (value: unknown): string => String(value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]!));
 
@@ -19,7 +19,7 @@ async function checkedFile(root: string, name: string, maximum: number): Promise
 async function release(root: string) {
   const value = JSON.parse((await checkedFile(root, 'manifest.json', 65536)).toString('utf8'));
   if (value.schemaVersion !== 1 || value.channel !== 'homologation' || value.productionApproved !== false || value.portalUrl !== portal || typeof value.version !== 'string' || !/^[a-zA-Z0-9._-]{1,64}$/.test(value.version)) throw new Error('INVALID_RELEASE');
-  if (!Array.isArray(value.files) || value.files.length !== 2) throw new Error('INVALID_FILES');
+  if (!Array.isArray(value.files) || ![2, 3].includes(value.files.length)) throw new Error('INVALID_FILES');
   const seen = new Set<string>();
   for (const item of value.files) {
     if (!item || !names.has(item.name) || seen.has(item.name) || typeof item.label !== 'string' || item.label.length > 100 || !['mac','windows'].includes(item.platform) || item.signed !== false || !Number.isSafeInteger(item.size) || item.size < 1 || item.size > 16 * 1024 * 1024 || typeof item.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(item.sha256)) throw new Error('INVALID_FILE');
@@ -27,6 +27,7 @@ async function release(root: string) {
     if (bytes.length !== item.size || createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('PACKAGE_INTEGRITY_FAILED');
     seen.add(item.name);
   }
+  if (!seen.has('AURORA-NEXUS-Mac-HML.zip') || !seen.has('AURORA-NEXUS-Windows-x64-HML.exe')) throw new Error('MISSING_BASE_PACKAGES');
   return { schemaVersion: 1, version: value.version, channel: 'homologation', productionApproved: false, portalUrl: portal, files: value.files as Entry[] };
 }
 
@@ -56,7 +57,8 @@ export async function servePrivateDownloads(req: { method: string; path: string 
       res.status(200).type('html').send(req.method === 'HEAD' ? '' : html); return;
     }
     if (match![1] === 'manifest.json') { res.status(200).json(manifest); return; }
-    const item = manifest.files.find(file => file.name === match![1])!;
+    const item = manifest.files.find(file => file.name === match![1]);
+    if (!item) { res.status(404).json({ code: 'NOT_FOUND' }); return; }
     const bytes = await checkedFile(root, item.name, 16 * 1024 * 1024);
     if (bytes.length !== item.size || createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('PACKAGE_INTEGRITY_FAILED');
     res.set('Content-Disposition', `attachment; filename="${item.name}"`);

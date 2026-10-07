@@ -49,6 +49,7 @@ jobs:
         run: |
           python3 -m unittest discover -s firebase-migration/scripts -p test_hosting_runtime.py -v
           python3 -m py_compile desktop/install_windows_beta.py
+          python3 -m unittest discover -s desktop -p test_windows_beta_bundle.py -v
       - name: Build and test authenticated local IA Master without model downloads
         run: |
           set -euo pipefail
