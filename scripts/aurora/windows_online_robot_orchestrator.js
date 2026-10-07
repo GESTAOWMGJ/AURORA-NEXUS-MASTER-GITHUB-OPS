@@ -9,6 +9,11 @@ const ACTIVE_DELIVERABLE = "2026.10.07-dev.2";
 
 const robots = [
   {
+    id: "platform-unification-robot",
+    command: "node scripts/aurora/platform_unification_robot.js",
+    scope: ["platform", "policy", "cloud", "physical_server", "client", "conflict_certification"]
+  },
+  {
     id: "certification-security-gate",
     command: "node scripts/aurora/certification_security_gate.js",
     scope: ["cloud", "engine", "client"]
@@ -57,6 +62,7 @@ const requiredPolicies = [
   "firebase-migration/policy/cloud-failsafe-robot-operation-v1.json",
   "firebase-migration/policy/resolutive-algorithm-policy-v1.json",
   "firebase-migration/policy/operational-delivery-hardening-v1.json",
+  "firebase-migration/policy/platform-unification-conflict-certification-v1.json",
   "firebase-migration/policy/digital-security-certification-layer-v1.json",
   "firebase-migration/policy/certification-readiness-v1.json",
   "firebase-migration/policy/security-baseline-v1.json"
@@ -107,6 +113,7 @@ const policyChecks = requiredPolicies.map((fileName) => ({
 const deliverableText = readText("firebase-migration/policy/development-deliverable-v1.json");
 const manifestText = readText("firebase-migration/policy/manifest.json");
 const hardeningText = readText("firebase-migration/policy/operational-delivery-hardening-v1.json");
+const unificationText = readText("firebase-migration/policy/platform-unification-conflict-certification-v1.json");
 
 const semanticChecks = [
   {
@@ -114,12 +121,19 @@ const semanticChecks = [
     ok: deliverableText.includes(ACTIVE_DELIVERABLE)
       && manifestText.includes(ACTIVE_DELIVERABLE)
       && hardeningText.includes(ACTIVE_DELIVERABLE)
+      && unificationText.includes(ACTIVE_DELIVERABLE)
   },
   {
     id: "single-path-required",
     ok: deliverableText.includes("oneOperationalEntrypoint")
       && hardeningText.includes("oneActiveDevelopmentDeliverable")
       && hardeningText.includes("noParallelDeliveryTracks")
+  },
+  {
+    id: "platform-unification-required",
+    ok: deliverableText.includes("onePlatformUnificationRobot")
+      && manifestText.includes("platform-unification-conflict-certification-v1.json")
+      && unificationText.includes("AURORA-PLATFORM-UNIFICATION-001")
   },
   {
     id: "failsafe-required",
@@ -130,7 +144,7 @@ const semanticChecks = [
 
 const result = {
   orchestrator: "AURORA_CLOUD_FAILSAFE_ROBOT_ORCHESTRATOR",
-  version: "1.2.0",
+  version: "1.3.0",
   activeDeliverable: ACTIVE_DELIVERABLE,
   trigger: "CLOUD_HEALTH_OR_WINDOWS_XEON_ONLINE_CONFIRMED",
   mode: "START_ALL_SAFE_ROBOTS_WITH_FAILOVER",
@@ -144,6 +158,7 @@ const result = {
     "If cloud and server are unavailable, preserve client continuity with safe degraded read-only mode and retry queue.",
     "Use small reversible patches with validation and rollback.",
     "Keep all robots bound to the single active development deliverable.",
+    "Run platform unification before promotion to avoid conflicting platform roles.",
     "Do not expose secrets, rotate credentials or migrate clinical-sensitive data without fresh approval.",
     "Do not declare certification obtained without formal certificate."
   ],
