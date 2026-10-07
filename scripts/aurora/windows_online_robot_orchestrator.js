@@ -23,6 +23,11 @@ const robots = [
     scope: ["cloud", "physical_server", "client", "engine"]
   },
   {
+    id: "cloud-failsafe-router",
+    command: "policy: firebase-migration/policy/cloud-failsafe-robot-operation-v1.json",
+    scope: ["cloud", "physical_server", "client", "rollback"]
+  },
+  {
     id: "resolutive-algorithm-policy",
     command: "policy: firebase-migration/policy/resolutive-algorithm-policy-v1.json",
     scope: ["decision", "release", "rollback"]
@@ -41,10 +46,32 @@ const robots = [
 
 const requiredPolicies = [
   "firebase-migration/policy/autonomous-bugfix-realtime-audit-v1.json",
+  "firebase-migration/policy/cloud-failsafe-robot-operation-v1.json",
   "firebase-migration/policy/resolutive-algorithm-policy-v1.json",
   "firebase-migration/policy/digital-security-certification-layer-v1.json",
   "firebase-migration/policy/certification-readiness-v1.json",
   "firebase-migration/policy/security-baseline-v1.json"
+];
+
+const failoverPlan = [
+  {
+    priority: 1,
+    target: "CLOUD_CONTROL_PLANE",
+    mode: "primary",
+    action: "Run orchestration, gates, release coordination and client routing when health checks pass."
+  },
+  {
+    priority: 2,
+    target: "WINDOWS_XEON_PHYSICAL_SERVER",
+    mode: "fallback_and_heavy_compute",
+    action: "Run heavy builds, indexing, ingestion, repair and artifact work when online or cloud is degraded."
+  },
+  {
+    priority: 3,
+    target: "CLIENT_SAFE_DEGRADED_MODE",
+    mode: "last_safe_mode",
+    action: "Pause unsafe writes, queue retryable jobs and serve authorized read-only cached state when backends are unavailable."
+  }
 ];
 
 function exists(filePath) {
@@ -57,15 +84,18 @@ const policyChecks = requiredPolicies.map((filePath) => ({
 }));
 
 const result = {
-  orchestrator: "AURORA_WINDOWS_ONLINE_ROBOT_ORCHESTRATOR",
-  version: "1.0.0",
-  trigger: "WINDOWS_XEON_ONLINE_CONFIRMED",
-  mode: "START_ALL_SAFE_ROBOTS",
+  orchestrator: "AURORA_CLOUD_FAILSAFE_ROBOT_ORCHESTRATOR",
+  version: "1.1.0",
+  trigger: "CLOUD_HEALTH_OR_WINDOWS_XEON_ONLINE_CONFIRMED",
+  mode: "START_ALL_SAFE_ROBOTS_WITH_FAILOVER",
   passed: policyChecks.every((check) => check.ok),
+  failoverPlan,
   startupOrder: robots,
   executionRules: [
-    "Run heavy builds, indexing and sync on the Windows Xeon physical server when connected.",
+    "Use cloud control plane as primary path when health checks pass.",
+    "Run heavy builds, indexing and sync on the Windows Xeon physical server when connected or when cloud is degraded.",
     "Keep MacBook as light supervision/interface station.",
+    "If cloud and server are unavailable, preserve client continuity with safe degraded read-only mode and retry queue.",
     "Use small reversible patches with validation and rollback.",
     "Do not expose secrets, rotate credentials or migrate clinical-sensitive data without fresh approval.",
     "Do not declare certification obtained without formal certificate."
