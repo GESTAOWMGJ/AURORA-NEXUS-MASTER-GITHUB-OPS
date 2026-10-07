@@ -1,7 +1,7 @@
 {
   "id": "AURORA-ALG-RESOLUTIVE-001",
   "name": "Aurora Nexus Resolutive Algorithm Policy",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "date": "2026-10-07",
   "status": "ACTIVE_POLICY",
   "motto": "AUTOMATIC_RELIABLE_RESOLUTIVE_BY_DEFAULT",
@@ -77,7 +77,8 @@
       "NO_HARD_STOP_IS_TRIGGERED"
     ],
     "validationRole": "AUTOMATED_EVIDENCE_AND_TRACEABILITY_NOT_REPETITIVE_HUMAN_RECONFIRMATION",
-    "dataAssessmentRule": "WHEN_DATA_AFFORDS_MULTIPLE_SAFE_INTERPRETATIONS_THE_ROBOT_SELECTS_THE_MOST_PLAUSIBLE_DECISION_AND_RECORDS_CONFIDENCE_EVIDENCE_AND_RECOVERY_PATH",
+    "dataAssessmentRule": "WHEN_DATA_AFFORDS_MULTIPLE_SAFE_INTERPRETATIONS_THE_ROBOT_SELECTS_THE_MOST_PLAUSIBLE_DECISION_AND_RECORDS_CONFIDENCE_EVIDENCE_RECOVERY_PATH_AND_RISK_PROFILE",
+    "riskProfileSignalRequired": true,
     "mustNotWaitFor": [
       "REDUNDANT_PROCESS_CHECKPOINT_APPROVAL",
       "HUMAN_CONFIRMATION_WHEN_AUTOMATED_GATES_AND_BACKUP_ARE_SUFFICIENT",
@@ -89,6 +90,7 @@
       "backup_or_snapshot_reference_when_applicable",
       "validation_or_reasonable_evidence",
       "confidence_level",
+      "risk_profile",
       "rollback_or_recovery_path"
     ],
     "scopeLimits": [
@@ -99,6 +101,70 @@
       "DOES_NOT_AUTHORIZE_FORMAL_CERTIFICATION_CLAIM_WITHOUT_CERTIFICATE"
     ]
   },
+  "autonomousDecisionRiskProfiles": [
+    {
+      "profile": "LOW",
+      "label": "LOW_RISK_AUTONOMOUS_EXECUTION",
+      "allowedAction": "EXECUTE_AND_RECORD",
+      "examples": [
+        "documentation_update",
+        "test_adjustment",
+        "non_secret_config_validation",
+        "reversible_code_simplification"
+      ],
+      "minimumEvidence": [
+        "diff_or_artifact",
+        "syntax_or_static_check_when_applicable",
+        "rollback_path"
+      ]
+    },
+    {
+      "profile": "MODERATE",
+      "label": "MODERATE_RISK_AUTONOMOUS_EXECUTION_WITH_GATE",
+      "allowedAction": "EXECUTE_WHEN_AUTOMATED_GATE_AND_ROLLBACK_EXIST",
+      "examples": [
+        "bugfix_affecting_runtime_flow",
+        "smoke_or_deploy_gate_update",
+        "client_safe_mode_adjustment"
+      ],
+      "minimumEvidence": [
+        "automated_gate_or_reasonable_runtime_evidence",
+        "backup_or_snapshot_when_stateful",
+        "rollback_path",
+        "post_change_observation"
+      ]
+    },
+    {
+      "profile": "HIGH",
+      "label": "HIGH_RISK_AUTONOMOUS_PREPARATION_ONLY",
+      "allowedAction": "PREPARE_PATCH_AND_REQUIRE_MATERIAL_GATE_BEFORE_PROMOTION",
+      "examples": [
+        "iam_scope_change",
+        "production_deploy_policy_change",
+        "sensitive_data_processing_path"
+      ],
+      "minimumEvidence": [
+        "explicit_policy_basis",
+        "non_production_validation",
+        "recovery_plan",
+        "material_gate_result"
+      ]
+    },
+    {
+      "profile": "BLOCKED",
+      "label": "BLOCKED_WITHOUT_SPECIFIC_AUTHORITY",
+      "allowedAction": "DO_NOT_EXECUTE",
+      "examples": [
+        "secret_disclosure_or_rotation",
+        "irreversible_data_deletion",
+        "clinical_sensitive_migration_without_specific_gate",
+        "legal_certification_claim_without_certificate"
+      ],
+      "minimumEvidence": [
+        "specific_authority_or_certified_artifact_required"
+      ]
+    }
+  ],
   "decisionPrinciples": [
     "SINGLE_BEST_PATH_BY_DEFAULT",
     "MOST_RESOLUTIVE_SAFE_PATH_WHEN_SINGLE_PATH_IS_NOT_OBJECTIVELY_PROVABLE",
@@ -148,6 +214,7 @@
     "standingCodeAuthorizationRequired": true,
     "minimumBlockerDoctrineRequired": true,
     "boundedAutonomyDoctrineRequired": true,
+    "riskProfileSignalRequired": true,
     "processTrailRequired": true
   }
 }
