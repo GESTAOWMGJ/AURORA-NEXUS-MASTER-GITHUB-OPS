@@ -1,5 +1,9 @@
 import copy
 import json
+import os
+from pathlib import Path
+import tempfile
+import textwrap
 import subprocess
 import unittest
 from unittest.mock import patch
@@ -169,6 +173,54 @@ class ProductionProjectContractTests(unittest.TestCase):
                 patch.object(contract.subprocess, "run", side_effect=subprocess.TimeoutExpired("gcloud", 60)):
             with self.assertRaisesRegex(contract.ContractError, "^GCP_LOOKUP_FAILED_NO_MUTATION:BILLING:TIMEOUT$"):
                 contract.describe(["billing", "projects", "describe", self.project])
+
+
+class BillingApiRecoveryTests(unittest.TestCase):
+    def run_preflight(self, first, retry=0, enable=0):
+        workflow = Path(".github/workflows/aurora-firebase-production.yml").read_text()
+        block = workflow.split("- name: Verify pre-bootstrapped production identity and project", 1)[1]
+        script = textwrap.dedent(block.split("run: |\n", 1)[1].split("\n      - name:", 1)[0])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "gcloud").write_text("#!/bin/bash\necho \"gcloud $*\" >> \"$CALLS\"\nif [ \"$1\" = auth ]; then echo test-account; else exit \"$ENABLE_STATUS\"; fi\n")
+            (root / "python3").write_text("#!/bin/bash\necho python >> \"$CALLS\"\nif [ ! -f \"$SEEN\" ]; then touch \"$SEEN\"; if [ -n \"$FIRST_ERROR\" ]; then echo \"$FIRST_ERROR\"; exit 41; fi; else exit \"$RETRY_STATUS\"; fi\n")
+            for name in ("gcloud", "python3"):
+                (root / name).chmod(0o755)
+            env = dict(os.environ, PATH=str(root) + os.pathsep + os.environ["PATH"],
+                       CALLS=str(root / "calls"), SEEN=str(root / "seen"), FIRST_ERROR=first,
+                       RETRY_STATUS=str(retry), ENABLE_STATUS=str(enable),
+                       PROJECT_ID="test-project", APPROVED_PROJECT_NUMBER="123456789012",
+                       WIF_PROVIDER="fixture", PROVISION_SERVICE_ACCOUNT="test-account")
+            result = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+            return result.returncode, (root / "calls").read_text().splitlines()
+
+    def test_success_needs_no_api_mutation(self):
+        code, calls = self.run_preflight("")
+        self.assertEqual(code, 0)
+        self.assertEqual(calls.count("python"), 1)
+        self.assertFalse(any("services enable" in call for call in calls))
+
+    def test_only_disabled_billing_api_is_recovered_then_fully_revalidated(self):
+        code, calls = self.run_preflight("AURORA_PRODUCTION_BLOCKED=GCP_LOOKUP_FAILED_NO_MUTATION:BILLING:SERVICE_DISABLED")
+        self.assertEqual(code, 0)
+        self.assertEqual(calls[1:], ["python", "gcloud services enable cloudbilling.googleapis.com --project test-project --quiet", "python"])
+
+    def test_other_failures_never_enable_an_api(self):
+        for error in ("BILLING:PERMISSION_DENIED", "PROJECT:SERVICE_DISABLED", "BILLING:UNCLASSIFIED"):
+            with self.subTest(error=error):
+                code, calls = self.run_preflight("AURORA_PRODUCTION_BLOCKED=GCP_LOOKUP_FAILED_NO_MUTATION:" + error)
+                self.assertEqual(code, 41)
+                self.assertEqual(calls.count("python"), 1)
+                self.assertFalse(any("services enable" in call for call in calls))
+
+    def test_enable_or_revalidation_failure_stops_the_workflow(self):
+        error = "AURORA_PRODUCTION_BLOCKED=GCP_LOOKUP_FAILED_NO_MUTATION:BILLING:SERVICE_DISABLED"
+        code, calls = self.run_preflight(error, retry=41)
+        self.assertEqual(code, 41)
+        self.assertEqual(calls.count("python"), 2)
+        code, calls = self.run_preflight(error, enable=7)
+        self.assertEqual(code, 7)
+        self.assertEqual(calls.count("python"), 1)
 
 
 if __name__ == "__main__":
