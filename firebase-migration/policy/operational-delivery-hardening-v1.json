@@ -1,0 +1,63 @@
+{
+  "id": "AURORA-OP-DELIVERY-HARDENING-001",
+  "name": "Aurora Nexus Operational Delivery Hardening",
+  "version": "1.0.0",
+  "date": "2026-10-07",
+  "status": "ACTIVE_POLICY",
+  "activeDevelopmentDeliverable": "2026.10.07-dev.2",
+  "baseline": {
+    "mainSha": "6787233a8451632caf337de422f12a75e1b0188c",
+    "canonicalBranch": "feat/certification-readiness-20261007",
+    "mode": "SINGLE_ACTIVE_DEVELOPMENT_DELIVERABLE"
+  },
+  "purpose": "Consolidate the current development delivery into one auditable, low-friction, operationally smooth path.",
+  "consolidationRules": {
+    "oneActiveDevelopmentDeliverable": true,
+    "noParallelDeliveryTracks": true,
+    "allRuntimePoliciesMustReferenceActiveDeliverable": true,
+    "dailyClientOperationMustRemainSmooth": true,
+    "humanPromptMustNotBeRuntimeDependencyUnlessMaterialCritical": true,
+    "reviewHumanOnlyAsAdvisoryUnlessAbsoluteMaterialPendingVerification": true
+  },
+  "breakagePrevention": {
+    "scriptsMustBeSmallDeterministicAndDependencyLight": true,
+    "machineOutputsMustBeJsonWhenUsedByGates": true,
+    "codeChangesMustBeReversibleOrHaveRollback": true,
+    "cloudAndPhysicalServerMustHaveFailoverPath": true,
+    "clientMustHaveSafeDegradedMode": true,
+    "managerInterruptionMustBeMinimized": true,
+    "operationalCriticalityBlocksOnlyWhenMaterialAndUncontained": true
+  },
+  "requiredFlow": [
+    "certification_security_gate",
+    "security_privacy_update_bot",
+    "windows_online_robot_orchestrator",
+    "autonomous_bugfix_realtime_audit_policy",
+    "cloud_failsafe_policy",
+    "resolutive_algorithm_policy",
+    "development_deliverable_manifest"
+  ],
+  "promotionDiscipline": {
+    "lowRisk": "execute_record_and_continue",
+    "moderateRisk": "execute_with_automated_gate_rollback_and_observation",
+    "highRisk": "prepare_patch_validate_non_production_and_wait_for_material_gate_before_promotion",
+    "blocked": "do_not_execute_without_specific_authority_or_formal_artifact"
+  },
+  "mustNotDo": [
+    "create_new_parallel_version_without_superseding_current_deliverable",
+    "make_certification_claim_without_certificate",
+    "expose_or_rotate_secrets_without_specific_authority",
+    "destroy_real_data_without_recoverable_backup",
+    "migrate_clinical_sensitive_data_without_specific_gate",
+    "delete_infrastructure_irreversibly_without explicit recovery authority"
+  ],
+  "traceabilityRequired": [
+    "active_deliverable_version",
+    "base_main_sha",
+    "changed_scope",
+    "risk_profile",
+    "validation_or_reasonable_evidence",
+    "rollback_or_degraded_mode",
+    "remaining_material_risk_if_any"
+  ]
+}
