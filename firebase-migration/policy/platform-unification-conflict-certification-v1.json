@@ -1,0 +1,54 @@
+{
+  "id": "AURORA-PLATFORM-UNIFICATION-001",
+  "name": "Aurora Nexus Platform Unification and Conflict Certification",
+  "version": "1.0.0",
+  "date": "2026-10-07",
+  "status": "ACTIVE_POLICY",
+  "activeDevelopmentDeliverable": "2026.10.07-dev.2",
+  "certificationType": "INTERNAL_OPERATIONAL_INTEGRATION_CERTIFICATION_NOT_EXTERNAL_ISO_CERTIFICATION",
+  "purpose": "Reconcile platform components, robots, policies and client delivery paths into one conflict-free operational version.",
+  "platformScope": [
+    "GITHUB_REPOSITORY",
+    "FIREBASE_HML_CLOUD_CONTROL_PLANE",
+    "WINDOWS_XEON_PHYSICAL_SERVER",
+    "CLIENT_SAFE_DEGRADED_MODE",
+    "WEB_CLIENT",
+    "DESKTOP_CLIENT",
+    "IOS_VERSIONING_TRACK",
+    "ANDROID_VERSIONING_TRACK",
+    "INTRINSIC_AI_ENGINE",
+    "CLOUD_AI_CONTROL_PLANE"
+  ],
+  "unificationRules": {
+    "singleActiveDeliverableRequired": true,
+    "allRobotsMustReferenceActiveDeliverable": true,
+    "cloudPhysicalAndClientMustHaveNonConflictingRoles": true,
+    "policyStackMustBeCompleteBeforePromotion": true,
+    "failoverMustBeExplicit": true,
+    "managerPromptMustNotBeRuntimeDependencyUnlessMaterialCritical": true,
+    "integrationResultMustBeJsonAndAuditable": true
+  },
+  "conflictCriteria": [
+    "active_deliverable_mismatch",
+    "missing_policy_from_manifest",
+    "robot_not_bound_to_active_deliverable",
+    "cloud_and_physical_server_role_overlap_without_failover_rule",
+    "client_mode_missing_safe_degradation",
+    "production_mutation_enabled_in_hml_deliverable",
+    "clinical_sensitive_enabled_without_specific_gate",
+    "external_certification_claim_without_certificate"
+  ],
+  "requiredEvidence": [
+    "manifest_active_deliverable",
+    "development_deliverable_version",
+    "orchestrator_active_deliverable",
+    "platform_unification_robot_output",
+    "certification_security_gate_output",
+    "rollback_or_safe_degraded_mode"
+  ],
+  "resultProfiles": {
+    "CONFLICT_FREE": "Platform components are internally consistent for the active development deliverable.",
+    "ADVISORY_CONFLICT": "Non-critical mismatch exists; continue with risk signal and posterior review.",
+    "MATERIAL_CONFLICT": "Material integration conflict blocks promotion until corrected or safely contained."
+  }
+}

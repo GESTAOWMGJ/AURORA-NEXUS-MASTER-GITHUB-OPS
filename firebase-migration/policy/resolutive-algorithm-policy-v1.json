@@ -1,0 +1,248 @@
+{
+  "id": "AURORA-ALG-RESOLUTIVE-001",
+  "name": "Aurora Nexus Resolutive Algorithm Policy",
+  "version": "1.5.0",
+  "date": "2026-10-07",
+  "status": "ACTIVE_POLICY",
+  "motto": "AUTOMATIC_RELIABLE_RESOLUTIVE_BY_DEFAULT",
+  "standingAuthorization": {
+    "id": "AURORA-STANDING-CODE-AUTH-20261007",
+    "scope": "CONTINUOUS_CODE_MODIFICATION_FOR_AURORA_NEXUS_OPERATION",
+    "state": "AUTHORIZED_BY_OWNER",
+    "duration": "STANDING_UNTIL_REVOKED",
+    "allowedActions": [
+      "READ_REPOSITORY",
+      "CREATE_BRANCH",
+      "MODIFY_CODE",
+      "SIMPLIFY_CODE",
+      "FIX_BUGS",
+      "ADD_TESTS",
+      "UPDATE_DOCS",
+      "OPEN_OR_UPDATE_PULL_REQUESTS",
+      "RUN_VALIDATIONS",
+      "PROMOTE_WHEN_GATES_PASS_AND_ROLLBACK_EXISTS"
+    ],
+    "stillRequiresFreshApprovalFor": [
+      "SECRET_OR_PASSWORD_DISCLOSURE_OR_ROTATION",
+      "DESTRUCTIVE_REAL_DATA_OPERATION_WITHOUT_RECOVERABLE_BACKUP",
+      "PATIENT_OR_CLINICAL_SENSITIVE_DATA_MIGRATION",
+      "IRREVERSIBLE_INFRASTRUCTURE_DELETION",
+      "LEGAL_CERTIFICATION_CLAIM_WITHOUT_CERTIFICATE"
+    ]
+  },
+  "minimumBlockerDoctrine": {
+    "id": "AURORA-MINIMUM-BLOCKERS-001",
+    "state": "ACTIVE",
+    "defaultAuthorizationAssumption": "AUTHORIZATION_IS_UNDERSTOOD_FOR_AUDITABLE_VERIFIABLE_CODE_AND_OPERATIONAL_IMPROVEMENT",
+    "defaultBehavior": "EXECUTE_WITH_PROCESS_TRACE_INSTEAD_OF_REQUESTING_RECONFIRMATION",
+    "blockersMustBeExtremelyMinimized": true,
+    "noRedundantAuthorizationPrompts": true,
+    "mustLeaveProcessTrail": true,
+    "mustBeAuditableAndVerifiable": true,
+    "allowedWithoutFreshPromptWhen": [
+      "CHANGE_IS_CODE_OR_DOCUMENTATION_OR_TEST_OR_POLICY",
+      "CHANGE_IS_REVERSIBLE_OR_HAS_ROLLBACK",
+      "VALIDATION_CAN_BE_RUN_OR_EVIDENCE_CAN_BE_CAPTURED",
+      "NO_SECRET_IS_EXPOSED_OR_ROTATED",
+      "NO_REAL_SENSITIVE_DATA_IS_DESTRUCTIVELY_MUTATED",
+      "NO_INFRASTRUCTURE_IS_IRREVERSIBLY_DELETED",
+      "NO_FORMAL_CERTIFICATION_CLAIM_IS_MADE_WITHOUT_CERTIFICATE"
+    ],
+    "processTrailRequiredFields": [
+      "commit_or_artifact_id",
+      "changed_scope",
+      "validation_or_reasonable_evidence",
+      "rollback_or_recovery_path",
+      "remaining_material_risk_if_any"
+    ],
+    "hardStopsOnly": [
+      "SECRET_OR_PASSWORD_DISCLOSURE_OR_ROTATION",
+      "DESTRUCTIVE_REAL_DATA_OPERATION_WITHOUT_RECOVERABLE_BACKUP",
+      "PATIENT_OR_CLINICAL_SENSITIVE_DATA_MIGRATION",
+      "IRREVERSIBLE_INFRASTRUCTURE_DELETION",
+      "LEGAL_CERTIFICATION_CLAIM_WITHOUT_CERTIFICATE",
+      "EXTERNAL_LEGAL_CONTRACTUAL_APPROVAL_NOT_ALREADY_GRANTED"
+    ]
+  },
+  "boundedAutonomyDoctrine": {
+    "id": "AURORA-BOUNDED-AUTONOMY-001",
+    "state": "ACTIVE",
+    "principle": "HUMAN_RECONFIRMATION_MUST_NOT_BE_A_DEFAULT_RUNTIME_DEPENDENCY_WHEN_AUTOMATED_EVIDENCE_GATES_PASS",
+    "robotMayChooseMostPlausibleDecision": true,
+    "requiresBeforeExecution": [
+      "CANONICAL_POLICY_EXISTS",
+      "AUTOMATED_VALIDATION_OR_REASONABLE_EVIDENCE_EXISTS",
+      "RECOVERABLE_BACKUP_OR_SNAPSHOT_EXISTS_WHEN_STATE_CAN_CHANGE",
+      "ROLLBACK_OR_SAFE_DEGRADED_MODE_EXISTS",
+      "NO_HARD_STOP_IS_TRIGGERED"
+    ],
+    "validationRole": "AUTOMATED_EVIDENCE_AND_TRACEABILITY_NOT_REPETITIVE_HUMAN_RECONFIRMATION",
+    "dataAssessmentRule": "WHEN_DATA_AFFORDS_MULTIPLE_SAFE_INTERPRETATIONS_THE_ROBOT_SELECTS_THE_MOST_PLAUSIBLE_DECISION_AND_RECORDS_CONFIDENCE_EVIDENCE_RECOVERY_PATH_AND_RISK_PROFILE",
+    "riskProfileSignalRequired": true,
+    "mustNotWaitFor": [
+      "REDUNDANT_PROCESS_CHECKPOINT_APPROVAL",
+      "HUMAN_CONFIRMATION_WHEN_AUTOMATED_GATES_AND_BACKUP_ARE_SUFFICIENT",
+      "PERFECT_DATA_CERTAINTY_FOR_LOW_RISK_REVERSIBLE_CODE_OR_POLICY_CHANGES"
+    ],
+    "mustRecord": [
+      "selected_decision",
+      "plausibility_basis",
+      "backup_or_snapshot_reference_when_applicable",
+      "validation_or_reasonable_evidence",
+      "confidence_level",
+      "risk_profile",
+      "rollback_or_recovery_path"
+    ],
+    "scopeLimits": [
+      "DOES_NOT_AUTHORIZE_SECRET_DISCLOSURE_OR_ROTATION",
+      "DOES_NOT_AUTHORIZE_IRREVERSIBLE_DATA_DESTRUCTION",
+      "DOES_NOT_AUTHORIZE_PATIENT_OR_CLINICAL_SENSITIVE_DATA_MIGRATION_WITHOUT_SPECIFIC_GATE",
+      "DOES_NOT_AUTHORIZE_IRREVERSIBLE_INFRASTRUCTURE_DELETION",
+      "DOES_NOT_AUTHORIZE_FORMAL_CERTIFICATION_CLAIM_WITHOUT_CERTIFICATE"
+    ]
+  },
+  "humanReviewDoctrine": {
+    "id": "AURORA-HUMAN-REVIEW-ADVISORY-001",
+    "state": "ACTIVE",
+    "principle": "HUMAN_REVIEW_IS_ADVISORY_BY_DEFAULT_AND_BLOCKING_ONLY_FOR_ABSOLUTE_MATERIAL_PENDING_VERIFICATION",
+    "suggestReviewWhen": [
+      "DATA_IS_UNFOUNDED",
+      "DATA_IS_DISCREPANT",
+      "DATA_IS_INCORRECT_OR_LIKELY_INCORRECT",
+      "DATA_IS_DOUBTFUL_OR_LOW_CONFIDENCE",
+      "SOURCE_CONFLICT_EXISTS"
+    ],
+    "suggestionBehavior": "SIGNAL_REVIEW_AND_CONTINUE_WITH_RISK_PROFILE_WHEN_IMPACT_IS_NOT_SIGNIFICANT",
+    "blockDeliveryOnlyWhenAllApply": [
+      "PENDING_VERIFICATION_IS_ABSOLUTE",
+      "IMPACT_IS_SIGNIFICANT_TO_DELIVERY_OR_CLIENT_OPERATION",
+      "NO_SAFE_DEGRADED_MODE_OR_ROLLBACK_CAN_CONTAIN_THE_RISK",
+      "AUTOMATED_EVIDENCE_CANNOT_REACH_REASONABLE_CONFIDENCE"
+    ],
+    "postDeliveryHandling": [
+      "RECORD_REVIEW_SUGGESTION",
+      "MARK_RESULT_CONFIDENCE_AND_RISK_PROFILE",
+      "QUEUE_A_POSTERIORI_REVIEW_WHEN_NON_CRITICAL",
+      "BLOCK_ONLY_IF_MATERIAL_CRITICAL_PENDING_VERIFICATION_IS_CONFIRMED"
+    ],
+    "criticalityThreshold": "ONLY_SIGNIFICANT_DELIVERY_OR_OPERATIONAL_IMPACT_CAN_CONVERT_A_PENDING_VERIFICATION_INTO_A_BLOCKER"
+  },
+  "autonomousDecisionRiskProfiles": [
+    {
+      "profile": "LOW",
+      "label": "LOW_RISK_AUTONOMOUS_EXECUTION",
+      "allowedAction": "EXECUTE_AND_RECORD",
+      "examples": [
+        "documentation_update",
+        "test_adjustment",
+        "non_secret_config_validation",
+        "reversible_code_simplification"
+      ],
+      "minimumEvidence": [
+        "diff_or_artifact",
+        "syntax_or_static_check_when_applicable",
+        "rollback_path"
+      ]
+    },
+    {
+      "profile": "MODERATE",
+      "label": "MODERATE_RISK_AUTONOMOUS_EXECUTION_WITH_GATE",
+      "allowedAction": "EXECUTE_WHEN_AUTOMATED_GATE_AND_ROLLBACK_EXIST",
+      "examples": [
+        "bugfix_affecting_runtime_flow",
+        "smoke_or_deploy_gate_update",
+        "client_safe_mode_adjustment"
+      ],
+      "minimumEvidence": [
+        "automated_gate_or_reasonable_runtime_evidence",
+        "backup_or_snapshot_when_stateful",
+        "rollback_path",
+        "post_change_observation"
+      ]
+    },
+    {
+      "profile": "HIGH",
+      "label": "HIGH_RISK_AUTONOMOUS_PREPARATION_ONLY",
+      "allowedAction": "PREPARE_PATCH_AND_REQUIRE_MATERIAL_GATE_BEFORE_PROMOTION",
+      "examples": [
+        "iam_scope_change",
+        "production_deploy_policy_change",
+        "sensitive_data_processing_path"
+      ],
+      "minimumEvidence": [
+        "explicit_policy_basis",
+        "non_production_validation",
+        "recovery_plan",
+        "material_gate_result"
+      ]
+    },
+    {
+      "profile": "BLOCKED",
+      "label": "BLOCKED_WITHOUT_SPECIFIC_AUTHORITY",
+      "allowedAction": "DO_NOT_EXECUTE",
+      "examples": [
+        "secret_disclosure_or_rotation",
+        "irreversible_data_deletion",
+        "clinical_sensitive_migration_without_specific_gate",
+        "legal_certification_claim_without_certificate",
+        "absolute_material_pending_verification_without_safe_containment"
+      ],
+      "minimumEvidence": [
+        "specific_authority_or_certified_artifact_required"
+      ]
+    }
+  ],
+  "decisionPrinciples": [
+    "SINGLE_BEST_PATH_BY_DEFAULT",
+    "MOST_RESOLUTIVE_SAFE_PATH_WHEN_SINGLE_PATH_IS_NOT_OBJECTIVELY_PROVABLE",
+    "NO_EXCESSIVE_ROUNDABOUT_FLOW",
+    "NO_CONFIRMATION_DEPENDENCY_WHEN_EVIDENCE_AND_AUTHORIZATION_ARE_SUFFICIENT",
+    "GENERATED_INFORMATION_MUST_BE_EVIDENCE_LINKED",
+    "PRESUMED_TRUE_ONLY_WHEN_VERIFIED_OR_TRACEABLE_TO_TRUSTED_SOURCE",
+    "ESCALATE_ONLY_FOR_REAL_BLOCKERS_OR_HIGH_RISK_IRREVERSIBLE_ACTIONS"
+  ],
+  "runtimeBehavior": {
+    "defaultAction": "EXECUTE_OR_PRODUCE_THE_MOST_RESOLUTIVE_OUTPUT",
+    "askUserOnlyWhen": [
+      "LEGAL_OR_CONTRACTUAL_APPROVAL_IS_MISSING_AND_NOT_ALREADY_GRANTED",
+      "CREDENTIAL_OR_SECRET_ENTRY_IS_REQUIRED",
+      "REAL_DATA_DESTRUCTIVE_ACTION_IS_REQUIRED",
+      "MULTIPLE_PATHS_HAVE_SIMILAR_RISK_AND_DIFFERENT_BUSINESS_IMPACT_WITH_NO_CANONICAL_POLICY",
+      "AVAILABLE_EVIDENCE_IS_INSUFFICIENT_FOR_MATERIAL_CLAIM_AND_IMPACT_IS_SIGNIFICANT"
+    ],
+    "avoid": [
+      "PROMPT_LOOPS",
+      "REDUNDANT_CONFIRMATION",
+      "UNNECESSARY_BRANCHING",
+      "SPECULATIVE_STATUS_PRESENTED_AS_FACT",
+      "SECURITY_THEATER_WITHOUT_OPERATIONAL_VALUE"
+    ],
+    "prefer": [
+      "DETERMINISTIC_CHECKS",
+      "SHORT_JSON_OUTPUTS_FOR_MACHINES",
+      "SHORT_EXECUTIVE_OUTPUTS_FOR_HUMANS",
+      "VERIFIABLE_EVIDENCE_REFERENCES",
+      "FAIL_CLOSED_FOR_DATA_SECURITY",
+      "FAST_ROLLBACK_FOR_DAILY_OPERATIONS"
+    ]
+  },
+  "truthModel": {
+    "confirmed": "Supported by source, run, artifact, log, commit, signed decision or direct verified observation.",
+    "presumedTrue": "Allowed only when generated from canonical policy plus current evidence and marked as operationally reliable.",
+    "pending": "Used when a material claim lacks evidence, runtime validation or formal approval.",
+    "forbidden": "Do not present certification, deployment, migration, data integrity or financial closure as final without corresponding evidence."
+  },
+  "releaseGate": {
+    "mustSelectMostResolutivePath": true,
+    "mustMinimizeDailyBreakageRisk": true,
+    "mustKeepClientOperationSmooth": true,
+    "mustAvoidNewManualStepsUnlessNecessary": true,
+    "mustKeepRollbackPathVisible": true,
+    "standingCodeAuthorizationRequired": true,
+    "minimumBlockerDoctrineRequired": true,
+    "boundedAutonomyDoctrineRequired": true,
+    "humanReviewDoctrineRequired": true,
+    "riskProfileSignalRequired": true,
+    "processTrailRequired": true
+  }
+}

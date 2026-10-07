@@ -1,0 +1,155 @@
+{
+  "id": "AURORA-DIGSEC-CERT-LAYER-001",
+  "name": "Aurora Nexus Digital Security Certification Layer",
+  "version": "1.0.0",
+  "date": "2026-10-07",
+  "status": "SPECIFIED_FOR_CERTIFICATION_READINESS",
+  "purpose": "Add a defense-in-depth certification layer above application security, privacy governance and release management.",
+  "certificationTargets": [
+    "ISO_IEC_27001_2022",
+    "ISO_IEC_27701_2025",
+    "ISO_9001_2026",
+    "ISO_IEC_25010_2023",
+    "LGPD_ANPD"
+  ],
+  "principles": [
+    "ZERO_TRUST_BY_DEFAULT",
+    "LEAST_PRIVILEGE",
+    "FAIL_CLOSED",
+    "TENANT_ISOLATION",
+    "DEFENSE_IN_DEPTH",
+    "AUDITABILITY",
+    "DATA_MINIMIZATION",
+    "SECURE_BY_DESIGN",
+    "HUMAN_APPROVAL_FOR_HIGH_RISK_ACTIONS",
+    "NO_CERTIFICATION_CLAIM_WITHOUT_CERTIFICATE"
+  ],
+  "controlLayers": [
+    {
+      "id": "DIGSEC-01",
+      "name": "Identity and access hardening",
+      "mandatoryControls": [
+        "MFA_FOR_PRIVILEGED_USERS",
+        "NO_SHARED_ACCOUNTS",
+        "BACKEND_MEMBERSHIP_REVALIDATION",
+        "PERMISSION_CHANGE_AUDIT",
+        "MONTHLY_ACCESS_REVIEW",
+        "BREAK_GLASS_WITH_OWNER_AND_EXPIRY"
+      ],
+      "releaseGate": "BLOCK_ON_UNREVIEWED_PRIVILEGED_ACCESS"
+    },
+    {
+      "id": "DIGSEC-02",
+      "name": "Data protection and cryptography",
+      "mandatoryControls": [
+        "TLS_1_2_MINIMUM_TLS_1_3_PREFERRED",
+        "AES_256_GCM_FOR_CLINICAL_SENSITIVE_OR_SELECTED_RESTRICTED",
+        "KMS_KEY_WRAPPING",
+        "HMAC_SHA_256_FOR_INGESTION_INTEGRITY",
+        "NO_PLAINTEXT_SECRET_LOGGING",
+        "CMEK_REQUIRED_FOR_SENSITIVE_PRODUCTION_WHEN_PLATFORM_APPROVED"
+      ],
+      "releaseGate": "BLOCK_CLINICAL_SENSITIVE_UNTIL_CRYPTO_AND_CMEK_EVIDENCE"
+    },
+    {
+      "id": "DIGSEC-03",
+      "name": "Tenant isolation and application authorization",
+      "mandatoryControls": [
+        "ORG_ID_BOUNDARY_CHECKS",
+        "SECURITY_RULES_TESTS",
+        "NEGATIVE_CROSS_TENANT_TESTS",
+        "SERVER_SIDE_RBAC",
+        "AUTHENTICATED_SMOKE_TEST",
+        "ANONYMOUS_ACCESS_DENIAL_TEST"
+      ],
+      "releaseGate": "BLOCK_ON_TENANT_ISOLATION_FAILURE"
+    },
+    {
+      "id": "DIGSEC-04",
+      "name": "Secure release and supply chain",
+      "mandatoryControls": [
+        "IMMUTABLE_RELEASE_SHA",
+        "REQUIRED_CHECKS_BEFORE_MERGE",
+        "CODEQL_OR_EQUIVALENT",
+        "DEPENDENCY_REVIEW",
+        "LOCKFILES",
+        "SBOM_FOR_COMMERCIAL_RELEASE",
+        "ARTIFACT_HASHES",
+        "ROLLBACK_PLAN"
+      ],
+      "releaseGate": "BLOCK_ON_HIGH_CRITICAL_UNRESOLVED_SUPPLY_CHAIN_RISK"
+    },
+    {
+      "id": "DIGSEC-05",
+      "name": "Monitoring, logging and evidence retention",
+      "mandatoryControls": [
+        "SECURITY_LOGGING_WITH_SANITIZATION",
+        "AUDIT_EVENTS_FOR_PRIVILEGED_ACTIONS",
+        "INCIDENT_ID_AND_TIMELINE",
+        "DEPLOY_RUN_LINKS",
+        "EVIDENCE_HASHES",
+        "RETENTION_SCHEDULE"
+      ],
+      "releaseGate": "BLOCK_ON_MISSING_AUDIT_TRAIL_FOR_HIGH_RISK_ACTION"
+    },
+    {
+      "id": "DIGSEC-06",
+      "name": "Resilience and recovery",
+      "mandatoryControls": [
+        "PITR_OR_EQUIVALENT",
+        "READY_BACKUP",
+        "RESTORE_TEST_IN_NEW_DATABASE",
+        "CMEK_FAILURE_RUNBOOK",
+        "DEGRADED_MODE_PLAN",
+        "RTO_RPO_DEFINED"
+      ],
+      "releaseGate": "BLOCK_SENSITIVE_PRODUCTION_WITHOUT_RESTORE_EVIDENCE"
+    },
+    {
+      "id": "DIGSEC-07",
+      "name": "Privacy and clinical-sensitive governance",
+      "mandatoryControls": [
+        "ROPA",
+        "DPA_TEMPLATE_OR_SIGNED_DPA",
+        "SUBPROCESSOR_REGISTER",
+        "PURPOSE_LIMITATION",
+        "RETENTION_DELETION_SCHEDULE",
+        "CLINICAL_SENSITIVE_RELEASE_GATE",
+        "NO_EXTERNAL_AI_FOR_CLINICAL_SENSITIVE_WITHOUT_FORMAL_REVIEW"
+      ],
+      "releaseGate": "BLOCK_ON_PRIVACY_PURPOSE_OR_CLINICAL_GATE_FAILURE"
+    },
+    {
+      "id": "DIGSEC-08",
+      "name": "Independent assurance",
+      "mandatoryControls": [
+        "INTERNAL_AUDIT",
+        "MANAGEMENT_REVIEW",
+        "PENTEST_BEFORE_SENSITIVE_SCALE",
+        "CORRECTIVE_ACTION_REGISTER",
+        "CERTIFICATION_BODY_REVIEW_BEFORE_CERTIFIED_CLAIM"
+      ],
+      "releaseGate": "BLOCK_CERTIFIED_LABEL_UNTIL_CERTIFICATE_EXISTS"
+    }
+  ],
+  "minimumEvidenceBeforeCertificationAudit": [
+    "docs/AURORA_CERTIFICATION_READINESS_20261007.md",
+    "firebase-migration/docs/50-certification-control-matrix.md",
+    "firebase-migration/policy/certification-readiness-v1.json",
+    "firebase-migration/policy/security-baseline-v1.json",
+    "firebase-migration/docs/30-threat-model.md",
+    "firebase-migration/docs/32-security-risk-register.md",
+    "firebase-migration/docs/33-incident-response-plan.md",
+    "firebase-migration/docs/31-lgpd-ropa.md",
+    "firebase-migration/docs/34-dpa-template-lgpd.md",
+    "firebase-migration/docs/37-clinical-sensitive-release-gate.md"
+  ],
+  "automationPolicy": {
+    "botMayRecommend": true,
+    "botMayOpenBacklog": true,
+    "botMayChangeIAM": false,
+    "botMayProcessRealClinicalData": false,
+    "botMayClaimCertification": false,
+    "botMayBlockReleaseByFailedGate": true
+  }
+}

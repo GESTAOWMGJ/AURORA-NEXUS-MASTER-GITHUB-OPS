@@ -1,0 +1,108 @@
+{
+  "id": "AURORA-CERT-001",
+  "name": "Aurora Nexus Certification Readiness Profile",
+  "version": "1.0.0",
+  "date": "2026-10-07",
+  "status": "PREPARATION_NOT_CERTIFIED",
+  "certificationClaimAllowed": false,
+  "targetFrameworks": [
+    {
+      "id": "ISO_IEC_27001_2022",
+      "name": "Information security management systems",
+      "role": "PRIMARY_CERTIFICATION_TARGET",
+      "source": "https://www.iso.org/standard/27001"
+    },
+    {
+      "id": "ISO_IEC_27701_2025",
+      "name": "Privacy information management",
+      "role": "PRIVACY_CERTIFICATION_TARGET",
+      "source": "https://www.iso.org/standard/27701"
+    },
+    {
+      "id": "ISO_9001_2026",
+      "name": "Quality management systems",
+      "role": "QUALITY_MANAGEMENT_TARGET",
+      "source": "https://committee.iso.org/standard/9001"
+    },
+    {
+      "id": "ISO_IEC_25010_2023",
+      "name": "Systems and software product quality model",
+      "role": "SOFTWARE_QUALITY_REFERENCE_MODEL",
+      "source": "https://www.iso.org/standard/78176"
+    },
+    {
+      "id": "LGPD_ANPD",
+      "name": "Brazilian data protection compliance",
+      "role": "MANDATORY_LEGAL_BASELINE"
+    }
+  ],
+  "evidenceStates": [
+    "SPECIFIED",
+    "IMPLEMENTED",
+    "TESTED",
+    "CI_VERIFIED",
+    "HML_VERIFIED",
+    "PRODUCTION_VERIFIED",
+    "AUDITED_INDEPENDENTLY",
+    "CERTIFIED"
+  ],
+  "currentEvidence": {
+    "securityBaseline": {
+      "path": "firebase-migration/policy/security-baseline-v1.json",
+      "state": "IMPLEMENTED_PENDING_HML_KMS_EVIDENCE"
+    },
+    "threatModel": {
+      "path": "firebase-migration/docs/30-threat-model.md",
+      "state": "SPECIFIED"
+    },
+    "riskRegister": {
+      "path": "firebase-migration/docs/32-security-risk-register.md",
+      "state": "SPECIFIED"
+    },
+    "incidentResponsePlan": {
+      "path": "firebase-migration/docs/33-incident-response-plan.md",
+      "state": "SPECIFIED_PENDING_EXERCISE"
+    },
+    "ropa": {
+      "path": "firebase-migration/docs/31-lgpd-ropa.md",
+      "state": "SPECIFIED"
+    },
+    "clinicalSensitiveGate": {
+      "path": "firebase-migration/docs/37-clinical-sensitive-release-gate.md",
+      "state": "BLOCKED_UNTIL_FORMAL_APPROVAL_AND_HML_VALIDATION"
+    },
+    "firebaseHmlDeploy": {
+      "workflow": "Deploy Aurora Firebase Homologation",
+      "state": "HML_VERIFIED_FOR_CURRENT_RELEASE_PATH"
+    },
+    "installerValidation": {
+      "workflow": "Validate Aurora Installers",
+      "state": "CI_VERIFIED_FOR_CURRENT_BETA_PATH"
+    }
+  },
+  "requiredBeforeCertificationAudit": [
+    "FORMAL_ISMS_SCOPE_APPROVAL",
+    "STATEMENT_OF_APPLICABILITY",
+    "CONTROLLED_DOCUMENT_INDEX",
+    "INTERNAL_AUDIT_REPORT",
+    "MANAGEMENT_REVIEW_RECORD",
+    "ACCESS_REVIEW_MATRIX",
+    "RISK_TREATMENT_PLAN_WITH_DATES",
+    "BACKUP_RESTORE_EVIDENCE",
+    "INCIDENT_TABLETOP_EVIDENCE",
+    "SBOM_AND_RELEASE_PROVENANCE",
+    "VENDOR_SUBPROCESSOR_REGISTER",
+    "RETENTION_DELETION_SCHEDULE",
+    "BRANCH_RULESET_REQUIRED_CHECKS",
+    "INDEPENDENT_PENTEST_BEFORE_SENSITIVE_SCALE"
+  ],
+  "releaseGate": {
+    "noHighCriticalUnownedRisks": true,
+    "noCertificationMarketingBeforeCertificate": true,
+    "clinicalSensitiveBlockedUntilGatePasses": true,
+    "immutableReleaseShaRequired": true,
+    "artifactHashesRequired": true,
+    "backupRestoreEvidenceRequiredForSensitiveProduction": true,
+    "auditEvidenceMustReferenceCommitOrRuntimeRun": true
+  }
+}

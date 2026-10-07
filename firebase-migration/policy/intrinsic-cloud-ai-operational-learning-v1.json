@@ -1,0 +1,102 @@
+{
+  "id": "AURORA-AI-LEARNING-001",
+  "name": "Aurora Nexus Intrinsic and Cloud AI Operational Learning Policy",
+  "version": "1.0.0",
+  "date": "2026-10-07",
+  "status": "ACTIVE_POLICY",
+  "objective": "Make the intrinsic local AI engine and cloud AI control plane learn reusable resolutive skills for platform administration, audit-based problem solving, governance and autonomous operation with minimal manager burden.",
+  "standingAuthorization": {
+    "state": "AUTHORIZED_BY_OWNER",
+    "duration": "STANDING_UNTIL_REVOKED",
+    "scope": [
+      "INTRINSIC_AI_ENGINE",
+      "CLOUD_AI_CONTROL_PLANE",
+      "OPERATIONAL_LEARNING",
+      "PROBLEM_SOLVING_AUDIT_BASED",
+      "PLATFORM_ADMINISTRATION",
+      "GOVERNANCE_AUTONOMY",
+      "CLIENT_OPERATIONAL_AUTONOMY"
+    ]
+  },
+  "learningTargets": [
+    "resolutive_decision_making",
+    "single_best_path_selection",
+    "audit_based_diagnosis",
+    "root_cause_analysis",
+    "bugfix_and_breakage_recovery",
+    "cloud_physical_client_failover",
+    "security_privacy_by_design",
+    "certification_readiness",
+    "ingestion_indexing_reconciliation",
+    "financial_societary_closing",
+    "authorization_membership_debug",
+    "workflow_ci_cd_debug",
+    "client_installer_support",
+    "manager_burden_reduction"
+  ],
+  "knowledgeFlow": {
+    "sourceTypes": [
+      "verified_commits",
+      "validated_workflow_runs",
+      "incident_and_recovery_reports",
+      "approved_policies",
+      "sanitized_prompts",
+      "sanitized_lessons",
+      "synthetic_fixtures",
+      "audit_evidence",
+      "rollback_receipts"
+    ],
+    "forbiddenSources": [
+      "raw_credentials",
+      "browser_vaults",
+      "cookies_or_tokens",
+      "patient_identifiable_data",
+      "unreviewed_private_contract_text_for_common_corpus",
+      "unverified_hypothesis_as_canonical_knowledge"
+    ],
+    "localEngine": "Windows Xeon IA Master stores and retrieves private operational knowledge in the authorized tenant/local store.",
+    "cloudEngine": "Cloud control plane stores sanitized reusable patterns, policies, checks and routing rules for all sellable clients.",
+    "sharedCorpus": "Only abstracted, sanitized, evidence-linked and reusable lessons are shared across clients."
+  },
+  "governanceRules": {
+    "mustPreserveProvenance": true,
+    "mustKeepCorpusVersionAndHash": true,
+    "mustDistinguishFactInferenceAndPending": true,
+    "mustSupportRevocation": true,
+    "mustAvoidDuplicateExecutors": true,
+    "mustUseSameCanonicalEngine": true,
+    "mustMinimizeManagerInterruption": true,
+    "managerNotificationPolicy": "Notify only material progress, verified completion, actionable blocker or high-risk decision outside standing authorization."
+  },
+  "autonomyRules": {
+    "default": "solve_or_prepare_fix_without_prompt_loop",
+    "preferredOutput": "actionable_patch_or_verified_status",
+    "problemSolvingMethod": [
+      "detect_signal",
+      "collect_evidence",
+      "classify_risk_and_scope",
+      "select_single_best_path",
+      "apply_small_reversible_fix_when_authorized",
+      "validate",
+      "record_lesson",
+      "update_reusable_skill",
+      "notify_only_material_change"
+    ],
+    "askHumanOnlyWhen": [
+      "secret_or_password_needed",
+      "destructive_real_data_action_without_recoverable_backup",
+      "clinical_sensitive_migration",
+      "irreversible_infrastructure_deletion",
+      "new_financial_or_contractual_obligation",
+      "formal_certification_claim_without_certificate"
+    ]
+  },
+  "releaseGate": {
+    "mustLoadLearningPolicy": true,
+    "mustHaveLocalAndCloudLearningPaths": true,
+    "mustUseSanitizedSharedCorpus": true,
+    "mustHavePrivateTenantIsolation": true,
+    "mustHaveEvidenceLinkedLessons": true,
+    "mustHaveRollbackForOperationalChanges": true
+  }
+}
