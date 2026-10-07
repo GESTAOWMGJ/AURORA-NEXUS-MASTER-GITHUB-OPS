@@ -1,7 +1,7 @@
 {
   "id": "AURORA-ALG-RESOLUTIVE-001",
   "name": "Aurora Nexus Resolutive Algorithm Policy",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "date": "2026-10-07",
   "status": "ACTIVE_POLICY",
   "motto": "AUTOMATIC_RELIABLE_RESOLUTIVE_BY_DEFAULT",
@@ -101,6 +101,32 @@
       "DOES_NOT_AUTHORIZE_FORMAL_CERTIFICATION_CLAIM_WITHOUT_CERTIFICATE"
     ]
   },
+  "humanReviewDoctrine": {
+    "id": "AURORA-HUMAN-REVIEW-ADVISORY-001",
+    "state": "ACTIVE",
+    "principle": "HUMAN_REVIEW_IS_ADVISORY_BY_DEFAULT_AND_BLOCKING_ONLY_FOR_ABSOLUTE_MATERIAL_PENDING_VERIFICATION",
+    "suggestReviewWhen": [
+      "DATA_IS_UNFOUNDED",
+      "DATA_IS_DISCREPANT",
+      "DATA_IS_INCORRECT_OR_LIKELY_INCORRECT",
+      "DATA_IS_DOUBTFUL_OR_LOW_CONFIDENCE",
+      "SOURCE_CONFLICT_EXISTS"
+    ],
+    "suggestionBehavior": "SIGNAL_REVIEW_AND_CONTINUE_WITH_RISK_PROFILE_WHEN_IMPACT_IS_NOT_SIGNIFICANT",
+    "blockDeliveryOnlyWhenAllApply": [
+      "PENDING_VERIFICATION_IS_ABSOLUTE",
+      "IMPACT_IS_SIGNIFICANT_TO_DELIVERY_OR_CLIENT_OPERATION",
+      "NO_SAFE_DEGRADED_MODE_OR_ROLLBACK_CAN_CONTAIN_THE_RISK",
+      "AUTOMATED_EVIDENCE_CANNOT_REACH_REASONABLE_CONFIDENCE"
+    ],
+    "postDeliveryHandling": [
+      "RECORD_REVIEW_SUGGESTION",
+      "MARK_RESULT_CONFIDENCE_AND_RISK_PROFILE",
+      "QUEUE_A_POSTERIORI_REVIEW_WHEN_NON_CRITICAL",
+      "BLOCK_ONLY_IF_MATERIAL_CRITICAL_PENDING_VERIFICATION_IS_CONFIRMED"
+    ],
+    "criticalityThreshold": "ONLY_SIGNIFICANT_DELIVERY_OR_OPERATIONAL_IMPACT_CAN_CONVERT_A_PENDING_VERIFICATION_INTO_A_BLOCKER"
+  },
   "autonomousDecisionRiskProfiles": [
     {
       "profile": "LOW",
@@ -158,7 +184,8 @@
         "secret_disclosure_or_rotation",
         "irreversible_data_deletion",
         "clinical_sensitive_migration_without_specific_gate",
-        "legal_certification_claim_without_certificate"
+        "legal_certification_claim_without_certificate",
+        "absolute_material_pending_verification_without_safe_containment"
       ],
       "minimumEvidence": [
         "specific_authority_or_certified_artifact_required"
@@ -181,7 +208,7 @@
       "CREDENTIAL_OR_SECRET_ENTRY_IS_REQUIRED",
       "REAL_DATA_DESTRUCTIVE_ACTION_IS_REQUIRED",
       "MULTIPLE_PATHS_HAVE_SIMILAR_RISK_AND_DIFFERENT_BUSINESS_IMPACT_WITH_NO_CANONICAL_POLICY",
-      "AVAILABLE_EVIDENCE_IS_INSUFFICIENT_FOR_MATERIAL_CLAIM"
+      "AVAILABLE_EVIDENCE_IS_INSUFFICIENT_FOR_MATERIAL_CLAIM_AND_IMPACT_IS_SIGNIFICANT"
     ],
     "avoid": [
       "PROMPT_LOOPS",
@@ -214,6 +241,7 @@
     "standingCodeAuthorizationRequired": true,
     "minimumBlockerDoctrineRequired": true,
     "boundedAutonomyDoctrineRequired": true,
+    "humanReviewDoctrineRequired": true,
     "riskProfileSignalRequired": true,
     "processTrailRequired": true
   }
