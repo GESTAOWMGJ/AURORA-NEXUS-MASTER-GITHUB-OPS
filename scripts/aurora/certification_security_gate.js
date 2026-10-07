@@ -82,6 +82,25 @@ const policyChecks = [
       && resolutivePolicy.includes("PROMPT_LOOPS")
   },
   {
+    id: "minimum-blocker-doctrine",
+    ok: resolutivePolicy.includes("AURORA-MINIMUM-BLOCKERS-001")
+      && resolutivePolicy.includes("AUTHORIZATION_IS_UNDERSTOOD_FOR_AUDITABLE_VERIFIABLE_CODE_AND_OPERATIONAL_IMPROVEMENT")
+      && resolutivePolicy.includes("hardStopsOnly")
+      && resolutivePolicy.includes("minimumBlockerDoctrineRequired")
+  },
+  {
+    id: "bounded-autonomy-risk-profile",
+    ok: resolutivePolicy.includes("AURORA-BOUNDED-AUTONOMY-001")
+      && resolutivePolicy.includes("HUMAN_RECONFIRMATION_MUST_NOT_BE_A_DEFAULT_RUNTIME_DEPENDENCY_WHEN_AUTOMATED_EVIDENCE_GATES_PASS")
+      && resolutivePolicy.includes("riskProfileSignalRequired")
+      && resolutivePolicy.includes("autonomousDecisionRiskProfiles")
+      && resolutivePolicy.includes('"profile": "LOW"')
+      && resolutivePolicy.includes('"profile": "MODERATE"')
+      && resolutivePolicy.includes('"profile": "HIGH"')
+      && resolutivePolicy.includes('"profile": "BLOCKED"')
+      && resolutivePolicy.includes("EXECUTE_WHEN_AUTOMATED_GATE_AND_ROLLBACK_EXIST")
+  },
+  {
     id: "truth-must-be-evidence-linked",
     ok: resolutivePolicy.includes("GENERATED_INFORMATION_MUST_BE_EVIDENCE_LINKED")
       && resolutivePolicy.includes("confirmed")
@@ -119,7 +138,7 @@ const passed = fileChecks.every((check) => check.ok) && policyChecks.every((chec
 
 console.log(JSON.stringify({
   gate: "AURORA_CERTIFICATION_SECURITY_GATE",
-  version: "1.4.0",
+  version: "1.5.0",
   passed,
   fileChecks,
   policyChecks
