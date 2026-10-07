@@ -23,8 +23,20 @@ ${webUpdateClient()}
 async function createSession(user) {
   const idToken = await user.getIdToken(true);
   const response = await fetch('/__sessionLogin', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ idToken, orgId })});
-  if (!response.ok) throw new Error('SESSION_DENIED');
+  if (!response.ok) {
+    let code = 'SESSION_DENIED';
+    try { code = (await response.json())?.code || code; } catch { /* Keep a generic, non-sensitive denial. */ }
+    throw new Error(code);
+  }
   clearSetup(); await signOut(auth); location.replace(entryPath);
+}
+function accessIssueMessage(error) {
+  const code = error?.message || error?.code || '';
+  if (code === 'EMAIL_NOT_ALLOWED') return 'E-mail autenticado, mas fora da lista autorizada deste ambiente.';
+  if (code === 'MEMBERSHIP_NOT_PROVISIONED') return 'Conta autenticada, mas ainda sem vínculo operacional provisionado na organização.';
+  if (code === 'COMPANY_ACCESS_DENIED') return 'Conta autenticada, mas não autorizada para a empresa selecionada.';
+  if (code === 'SESSION_DENIED' || code === 'INVALID_LOGIN') return 'Segundo fator aceito, mas a sessão privada foi negada pela autorização do ambiente.';
+  return 'Segundo fator inválido ou expirado. Gere um novo código no autenticador e tente novamente.';
 }
 async function completeLogin(user) {
   setupUser = user;
@@ -70,7 +82,7 @@ element('mfa-submit').addEventListener('click', async () => {
     const assertion = TotpMultiFactorGenerator.assertionForSignIn(element('mfa-factor').value, element('mfa-code').value.trim());
     const credential = await resolver.resolveSignIn(assertion);
     element('mfa-code').value = ''; await completeLogin(credential.user);
-  } catch { element('mfa-status').textContent = 'Segundo fator inválido, expirado ou acesso não autorizado.'; }
+  } catch (error) { element('mfa-status').textContent = accessIssueMessage(error); }
   finally { button.disabled = false; }
 });
 element('reset-password').addEventListener('click', async () => {
