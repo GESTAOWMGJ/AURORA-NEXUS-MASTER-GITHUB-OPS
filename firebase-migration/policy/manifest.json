@@ -1,10 +1,10 @@
 {
-  "manifestVersion": 2,
+  "manifestVersion": 3,
   "generatedAt": "2026-10-07",
   "activeDeliverable": {
     "file": "development-deliverable-v1.json",
     "id": "AURORA-DEV-DELIVERABLE-001",
-    "version": "2026.10.07-dev.1",
+    "version": "2026.10.07-dev.2",
     "status": "ACTIVE_DEVELOPMENT_DELIVERABLE",
     "canonicalBranch": "feat/certification-readiness-20261007"
   },
@@ -25,7 +25,8 @@
     "autonomous-bugfix-realtime-audit-v1.json",
     "cloud-failsafe-robot-operation-v1.json",
     "intrinsic-cloud-ai-operational-learning-v1.json",
-    "resolutive-algorithm-policy-v1.json"
+    "resolutive-algorithm-policy-v1.json",
+    "operational-delivery-hardening-v1.json"
   ],
   "runtime": {
     "environment": "HOMOLOGATION",
@@ -37,6 +38,12 @@
   "singleVersionRules": {
     "oneCanonicalDeliverable": true,
     "parallelRuntimePoliciesMustReferenceActiveDeliverable": true,
-    "supersededVersionsMustNotBePromoted": true
+    "supersededVersionsMustNotBePromoted": true,
+    "newDevelopmentChangesMustAttachToActiveDeliverable": true
+  },
+  "operationalHardening": {
+    "file": "operational-delivery-hardening-v1.json",
+    "id": "AURORA-OP-DELIVERY-HARDENING-001",
+    "requiredForPromotion": true
   }
 }
