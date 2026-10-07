@@ -112,3 +112,70 @@ passou Firestore 37301903488 (461 testes Functions e 27 Rules), CodeQL
 vulnerabilidades nesse run. Esses checks são históricos após a reconciliação:
 o novo SHA exige seus próprios checks. A descrição do PR registra o SHA e os
 runs finais, sem reutilizar o verde da base anterior como aprovação.
+
+## Revalidação de 07/10/2026 — 08:27 America/Sao_Paulo
+
+Estado desta seção prevalece sobre os checkpoints históricos acima.
+Main revalidada: `28d56c80fd54eb34701830ff9fb8f3f8194e742b`.
+O mesmo PR #159 é retomado e reconciliado com os dois commits faltantes,
+preservando o cliente Windows beta.2 e o arquivo histórico exclusivo do #167.
+Nenhum novo PR, executor, ambiente ou solicitação produtiva.
+
+### Incremento mínimo e regressão
+
+O SHA anterior `85f50d2d6e294aa47d09f182d0fff20d8ed41b8a` perdeu seu timer
+quando o relógio voltou cinco minutos: o callback agendado retornava antes de
+nextCheck, deixando zero callbacks futuros. Reproduzido com relógio de parede e
+tempo decorrido independentes; sete dos oito testes iniciais passaram e essa
+regressão falhou. A candidata reagenda esse caso por scheduleNextCheck e mantém
+uma única espera limitada a 24 horas, abaixo do limite de overflow setTimeout.
+Nove testes locais passam, incluindo avanço e recuo grande do relógio.
+O CI do SHA reconciliado é registrado na descrição do PR; CI anterior não libera
+esta candidata.
+
+Compatibilidade: mesmos APIs, worker, cadência de sucesso e retry; sem mudança de
+protocolo, domínio, identidade, sessão ou persistência. Preserva trabalhos abertos
+e não adiciona cache. Produto 1.0.0-rc.1 / updater candidato 1.0.1 não publicado.
+Rollback continua sendo reverter o patch do updater; sem migração.
+Release Cockpit não é promovido por testes sintéticos.
+
+### Estado atual por plataforma
+
+| Plataforma | Código / CI | Publicação / instalação / teste real |
+| --- | --- | --- |
+| Web | main 28d56c80; CodeQL 37548936859 SUCCESS. Updater corrigido permanece no #159, sujeito ao CI final próprio. | Último HML SUCCESS: 37381514382, SHA cdaf833e763d99e0b50640158480a1be13ee3bc3, 05/10 às 19:23. Deploy e smoke autenticado passaram nesse SHA, não na candidata. SHA atualmente servido não consultado novamente. |
+| Windows | main declara cliente 0.2.0-beta.2; #169 integrado por d5ee92b4. CI do candidato 149b2178: instaladores 37498370775 e onboarding 37498370659 SUCCESS. IA Master 1.0.0 preservada. | #169 registra CLIENT_INSTALLED e probes no Windows físico, incluindo 401 anônimo. É evidência registrada no PR, não novo teste físico desta rotina; login completo, editor e rollback precisam de evidência específica antes de distribuir outra versão. |
+| Mac | Continuidade e identidade do original preservadas; nativeUpdate permanece BLOCKED_BASELINE_INSPECTION no manifesto. | Baseline instalada não reinspecionada nesta execução. Sem troca por launcher HML, instalação ou carga computacional no Mac. |
+| iOS / Android PWA | Atualizador compartilhado com web; sem build nativo novo. | Sem evidência própria de dispositivo coletada hoje. Não classificado como validado pelo CI web. |
+
+### Bloqueador de produção atualizado
+
+O último run produtivo 37508726998 (06/10 às 15:07), SHA d5ee92b4,
+falhou em Verify pre-bootstrapped production identity and project, exit 41,
+com GCP_LOOKUP_FAILED_NO_MUTATION. É falha da consulta daquele run; não comprova
+ausência do projeto, identity ou IAM. A rotina diária não amplia IAM para superá-la.
+Próxima ação do responsável cloud: diagnosticar a consulta com identidade legítima
+no fluxo existente e comprovar o preflight do SHA atual, sem divulgar credenciais.
+O antigo bloqueio Eventarc de 05/10 já foi sucedido por HML bem-sucedido; não usar
+aquela falha histórica como retrato atual de todo HML.
+
+### Segurança e próximos gates
+
+Consultadas fontes primárias de ServiceWorkerRegistration.update/updateViaCache,
+setTimeout, releases firebase-admin-node e advisories Ollama.
+CVE-2026-7482 / GHSA-x8qc-fggm-mpqg afeta Ollama <0.17.1; o README do componente
+declara 0.35.1, fora desse intervalo. Versão efetivamente instalada não foi
+revalidada hoje; não há conclusão geral de ausência de vulnerabilidades.
+Nenhum upgrade de dependência foi incluído. O audit do CI final vale somente para
+o lockfile e escopo testados.
+
+Fontes:
+- https://developer.mozilla.org/en-US/docs/Web/API/Window/setTimeout
+- https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerRegistration/update
+- https://github.com/firebase/firebase-admin-node/releases
+- https://github.com/advisories/GHSA-x8qc-fggm-mpqg
+
+Prioridades: (1) revisar e homologar o SHA final do #159; (2) diagnosticar o
+preflight produtivo GCP sem ampliação IAM; (3) comprovar baseline/rollback e teste
+real por dispositivo antes de nova distribuição. Consentimento do titular
+permanece vigente e não foi solicitado novamente.

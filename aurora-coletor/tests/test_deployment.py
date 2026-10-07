@@ -151,6 +151,15 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['version'], deployment.VERSION)
 
+    def test_windows_beta_upgrade_requires_compatible_prior_manifest(self):
+        installer = (ROOT.parent / 'desktop' / 'install_windows_beta.py').read_text(encoding='utf-8')
+        self.assertIn('prior_manifests = sorted((root / "client").glob("*/installation.json"))', installer)
+        self.assertIn('prior.get("portal") == BASE', installer)
+        self.assertIn('prior.get("environment") == "HML"', installer)
+        self.assertIn('prior.get("frontendPolicy") == "PRESERVE_DEPLOYED_MAIN"', installer)
+        self.assertIn('if not compatible:', installer)
+        self.assertIn('EXISTING_INSTALLATION_REQUIRES_REVIEW', installer)
+
     def test_errors_map_to_concrete_actions(self):
         for code, action in [('BLOCKED_HTTP_401', 'CREDENTIAL'), ('BLOCKED_HTTP_404', 'DEPLOY'),
                              ('RETRYABLE_HTTP_503', 'RETRY'), ('CLOUD_RECEIPT_MISMATCH', 'RECONCILE')]:

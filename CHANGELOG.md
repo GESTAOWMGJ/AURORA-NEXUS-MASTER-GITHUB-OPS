@@ -6,7 +6,9 @@
   atualização agendam nova tentativa após 15 minutos; sucesso mantém 24 horas.
 - Mantém um único timer e a retomada por visibilidade/conectividade, sem reload
   forçado, cache de respostas privadas ou mudança de protocolo, domínio ou identidade.
-- Seis testes sintéticos cobrem cadência, falhas, retomada e concorrência. Evidências
+- Nove testes sintéticos cobrem cadência, falhas, retomada, concorrência e ajustes
+  do relógio. Verificação de 07/10: reagenda callback antecipado e limita a espera
+  a 24 horas para evitar overflow do timer. Evidências
   por plataforma e rollback em `docs/AURORA_DAILY_UPDATE_20261005.md`.
 - Candidata somente; instalação, HML e validação em iOS/Android não são inferidas
   dos testes. Gates de publicação permanecem abertos.

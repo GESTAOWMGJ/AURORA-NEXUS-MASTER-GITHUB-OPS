@@ -20,9 +20,9 @@ COLLECTOR_SOURCE = Path(__file__).resolve().parents[1] / "aurora-coletor"
 sys.path.insert(0, str(COLLECTOR_SOURCE))
 from aurora_deployment import install_assets as install_integration_assets
 
-VERSION = "0.2.0-beta.1"
+VERSION = "0.2.0-beta.2"
 BASE = "https://wmgj-hml-jfn-20260927.web.app"
-SOURCE_SHA = "52fb02862e31920d558733d99356e627b4109fd7"
+SOURCE_SHA = "1d4721935e75d0000c336e47868194d1bc8439f7"
 MAX_BYTES = 262144
 
 
@@ -113,8 +113,23 @@ def install():
         previous = json.loads(manifest_file.read_text(encoding="utf-8"))
         if any(previous.get(k) != v for k, v in expected.items()):
             raise ValueError("INSTALLATION_IDENTITY_CONFLICT")
-    elif target.exists() or any(p.exists() for p in shortcuts):
+    elif target.exists():
         raise ValueError("EXISTING_INSTALLATION_REQUIRES_REVIEW")
+    elif any(p.exists() for p in shortcuts):
+        prior_manifests = sorted((root / "client").glob("*/installation.json")) if (root / "client").is_dir() else []
+        compatible = False
+        for prior_manifest in prior_manifests:
+            try:
+                prior = json.loads(prior_manifest.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if (prior.get("portal") == BASE and prior.get("environment") == "HML"
+                    and prior.get("frontendPolicy") == "PRESERVE_DEPLOYED_MAIN"
+                    and isinstance(prior.get("clientVersion"), str)):
+                compatible = True
+                break
+        if not compatible:
+            raise ValueError("EXISTING_INSTALLATION_REQUIRES_REVIEW")
     proof = probe()
     target.mkdir(parents=True, exist_ok=True)
     integration = install_integration_assets(COLLECTOR_SOURCE, root)

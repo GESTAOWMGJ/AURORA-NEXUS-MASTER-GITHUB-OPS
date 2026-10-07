@@ -8,7 +8,7 @@ const DAY = 86_400_000;
 const RETRY = 900_000;
 
 function harness(options: { register?: () => Promise<any>; update?: () => Promise<void> } = {}) {
-  let now = 0, updates = 0, timerId = 0;
+  let now = 0, clockOffset = 0, updates = 0, timerId = 0;
   const registrations: any[] = [];
   const timers = new Map<number, { fn: () => Promise<void>; due: number; interval?: number }>();
   const handlers = new Map<string, () => Promise<void>>();
@@ -19,7 +19,7 @@ function harness(options: { register?: () => Promise<any>; update?: () => Promis
     return options.register ? options.register() : registration;
   } } };
   new Script(webUpdateClient()).runInContext(createContext({
-    document, navigator, Date: { now: () => now },
+    document, navigator, Date: { now: () => now + clockOffset },
     window: { addEventListener: (n: string, h: any) => handlers.set(n, h) },
     setTimeout: (fn: () => Promise<void>, delay: number) => {
       const id = ++timerId; timers.set(id, { fn, due: now + delay }); return id;
@@ -32,6 +32,7 @@ function harness(options: { register?: () => Promise<any>; update?: () => Promis
   return {
     document, navigator, registrations, timers, handlers,
     updates: () => updates,
+    shiftClock: (ms: number) => { clockOffset += ms; },
     remaining: () => [...timers.values()].map(t => t.due - now),
     advance: async (ms: number) => {
       now += ms;
@@ -109,4 +110,37 @@ test('overlapping events cannot create concurrent updates or duplicate retry tim
 
 test('unsupported clients exit without scheduling work', () => {
   new Script(webUpdateClient()).runInContext(createContext({ navigator: {} }));
+});
+
+test('clock moving backward cannot stop future update checks', async () => {
+  const h = harness(); await setImmediate();
+  h.shiftClock(-300_000);
+  await h.advance(DAY);
+  assert.equal(h.updates(), 1);
+  assert.deepEqual(h.remaining(), [300_000]);
+  await h.advance(299_999); assert.equal(h.updates(), 1);
+  await h.advance(1); assert.equal(h.updates(), 2);
+  assert.deepEqual(h.remaining(), [DAY]);
+});
+
+test('clock moving forward triggers one overdue check and replaces the old timer', async () => {
+  const h = harness(); await setImmediate();
+  h.shiftClock(DAY * 2);
+  await h.handlers.get('visibilitychange')!();
+  await h.handlers.get('online')!();
+  assert.equal(h.updates(), 2);
+  assert.deepEqual(h.remaining(), [DAY]);
+  await h.advance(DAY); assert.equal(h.updates(), 3);
+  assert.deepEqual(h.remaining(), [DAY]);
+});
+
+test('a large backward clock adjustment keeps the delay below the timer overflow limit', async () => {
+  const h = harness(); await setImmediate();
+  h.shiftClock(-DAY * 30);
+  await h.advance(DAY);
+  assert.equal(h.updates(), 1);
+  assert.deepEqual(h.remaining(), [DAY]);
+  await h.advance(DAY);
+  assert.equal(h.updates(), 1);
+  assert.deepEqual(h.remaining(), [DAY]);
 });
