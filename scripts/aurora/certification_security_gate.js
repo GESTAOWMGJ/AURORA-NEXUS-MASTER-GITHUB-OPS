@@ -15,6 +15,7 @@ const requiredFiles = [
   "firebase-migration/policy/certification-readiness-v1.json",
   "firebase-migration/policy/cloud-failsafe-robot-operation-v1.json",
   "firebase-migration/policy/digital-security-certification-layer-v1.json",
+  "firebase-migration/policy/intrinsic-cloud-ai-operational-learning-v1.json",
   "firebase-migration/policy/resolutive-algorithm-policy-v1.json",
   "firebase-migration/policy/security-baseline-v1.json",
   "firebase-migration/docs/30-threat-model.md",
@@ -48,8 +49,9 @@ const securityBaseline = readText("firebase-migration/policy/security-baseline-v
 const resolutivePolicy = readText("firebase-migration/policy/resolutive-algorithm-policy-v1.json");
 const bugfixPolicy = readText("firebase-migration/policy/autonomous-bugfix-realtime-audit-v1.json");
 const cloudFailsafePolicy = readText("firebase-migration/policy/cloud-failsafe-robot-operation-v1.json");
+const learningPolicy = readText("firebase-migration/policy/intrinsic-cloud-ai-operational-learning-v1.json");
 const orchestrator = readText("scripts/aurora/windows_online_robot_orchestrator.js");
-const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy, bugfixPolicy, cloudFailsafePolicy].join("\n");
+const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy, bugfixPolicy, cloudFailsafePolicy, learningPolicy].join("\n");
 
 const policyChecks = [
   {
@@ -98,6 +100,14 @@ const policyChecks = [
       && cloudFailsafePolicy.includes("CLIENT_SAFE_DEGRADED_MODE")
   },
   {
+    id: "intrinsic-cloud-learning",
+    ok: learningPolicy.includes("AURORA-AI-LEARNING-001")
+      && learningPolicy.includes("INTRINSIC_AI_ENGINE")
+      && learningPolicy.includes("CLOUD_AI_CONTROL_PLANE")
+      && learningPolicy.includes("problemSolvingMethod")
+      && learningPolicy.includes("mustMinimizeManagerInterruption")
+  },
+  {
     id: "windows-online-orchestrator-present",
     ok: orchestrator.includes("AURORA_CLOUD_FAILSAFE_ROBOT_ORCHESTRATOR")
       && orchestrator.includes("CLOUD_HEALTH_OR_WINDOWS_XEON_ONLINE_CONFIRMED")
@@ -109,7 +119,7 @@ const passed = fileChecks.every((check) => check.ok) && policyChecks.every((chec
 
 console.log(JSON.stringify({
   gate: "AURORA_CERTIFICATION_SECURITY_GATE",
-  version: "1.3.0",
+  version: "1.4.0",
   passed,
   fileChecks,
   policyChecks
