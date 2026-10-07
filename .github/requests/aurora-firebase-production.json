@@ -5,12 +5,12 @@
   "region": "southamerica-east1",
   "organizationId": "wmgj",
   "deploymentStage": "COLD_PRODUCTION",
-  "expectedSourceSha": "67ff80d147c0ea96692becf2adf8f04bc0b3fb8c",
+  "expectedSourceSha": "148ae6caba9a040eb09b7322a4e16422fd70d742",
   "productionMutation": false,
   "sourceMutation": false,
   "clinicalSensitiveEnabled": false,
-  "requestedAt": "2026-10-06",
-  "requestReason": "EXPLICIT_OWNER_AUTHORIZATION_AND_LIVE_GCP_PROJECT_NUMBER_BILLING_VERIFIED",
+  "requestedAt": "2026-10-07",
+  "requestReason": "OWNER_AUTHORIZED_RETRY_WITH_SANITIZED_PREFLIGHT_DIAGNOSTICS",
   "status": "READY_FOR_PROVISIONING",
   "projectNumber": "616997609173"
 }
