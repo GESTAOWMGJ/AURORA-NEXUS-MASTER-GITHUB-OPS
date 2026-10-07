@@ -1,0 +1,46 @@
+{
+  "id": "AURORA-DEV-DELIVERABLE-001",
+  "name": "Aurora Nexus Single Development Deliverable",
+  "version": "2026.10.07-dev.1",
+  "date": "2026-10-07",
+  "status": "ACTIVE_DEVELOPMENT_DELIVERABLE",
+  "canonicalBranch": "feat/certification-readiness-20261007",
+  "canonicalRuntime": {
+    "environment": "HOMOLOGATION",
+    "mode": "SHADOW_FIRST_WITH_SAFE_PROMOTION_GATES",
+    "productionMutation": false,
+    "clinicalSensitiveEnabled": false
+  },
+  "deliverableScope": [
+    "certification_readiness",
+    "digital_security_layer",
+    "security_privacy_update_bot",
+    "autonomous_bugfix_realtime_audit",
+    "cloud_failsafe_robot_operation",
+    "intrinsic_cloud_ai_operational_learning",
+    "resolutive_algorithm_policy",
+    "bounded_autonomy_with_risk_profile",
+    "advisory_human_review_only_for_noncritical_uncertainty"
+  ],
+  "singleVersionRules": {
+    "oneCanonicalDeliverable": true,
+    "parallelRuntimePoliciesMustReferenceThisDeliverable": true,
+    "newDevelopmentChangesMustAttachToThisDeliverableUntilSuperseded": true,
+    "supersededVersionsMustNotBePromoted": true,
+    "deliveryMustPreferOneBestPath": true
+  },
+  "promotionRules": {
+    "lowRisk": "EXECUTE_AND_RECORD",
+    "moderateRisk": "EXECUTE_WITH_AUTOMATED_GATE_AND_ROLLBACK",
+    "highRisk": "PREPARE_AND_REQUIRE_MATERIAL_GATE_BEFORE_PROMOTION",
+    "blocked": "DO_NOT_EXECUTE_WITHOUT_SPECIFIC_AUTHORITY"
+  },
+  "humanReviewRule": "Human review is advisory unless pending verification is absolute, material to delivery or client operation, not containable by rollback or degraded mode, and automated evidence cannot reach reasonable confidence.",
+  "traceabilityRequired": [
+    "commit_sha",
+    "changed_scope",
+    "risk_profile",
+    "validation_or_reasonable_evidence",
+    "rollback_or_recovery_path"
+  ]
+}
