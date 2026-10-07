@@ -196,6 +196,8 @@ console.log(JSON.stringify({
   version: "1.9.0",
   passed,
   activeDeliverable: "2026.10.07-dev.2",
+  evidenceState: "POLICY_VALIDATION_ONLY",
+  operationalIntegrationVerified: false,
   fileChecks,
   policyChecks
 }, null, 2));
@@ -203,3 +205,4 @@ console.log(JSON.stringify({
 if (!passed) {
   process.exitCode = 1;
 }
+
