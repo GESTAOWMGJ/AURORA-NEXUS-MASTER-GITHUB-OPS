@@ -17,7 +17,9 @@ concurrency:
 jobs:
   finalize:
     name: Reconcile -> SHADOW -> native insight -> final kill switch
-    runs-on: ubuntu-latest
+    # Keep the OS baseline explicit; validate a future Ubuntu upgrade in a separate PR.
+    # GitHub-hosted image/runner patch updates continue within Ubuntu 24.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     environment: firebase-homologation
     permissions:
@@ -27,7 +29,7 @@ jobs:
       REQUEST_FILE: .github/requests/aurora-rc11-post-ingest.json
       APPS_SCRIPT_ID: 1_fQPqaq0EjaugyIF6jyuENDhJ2c2oTFm1kC-wdjmfaDqyRzy_uqwtiSW
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1; Node 24
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
@@ -57,18 +59,18 @@ jobs:
             .clinicalSensitiveEnabled==false
           ' "$REQUEST_FILE" >/dev/null
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0; Node 24
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: firebase-migration/functions/package-lock.json
 
-      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0; Node 24
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
 
-      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1; Node 24
         with:
           version: "548.0.0"
           project_id: ${{ vars.FIREBASE_HML_PROJECT_ID }}
@@ -409,7 +411,7 @@ jobs:
           test "$shadow_verified" = true
           test "$native_verified" = true
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2; Node 24
         if: always()
         with:
           name: aurora-rc11-post-ingest-evidence
