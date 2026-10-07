@@ -73,11 +73,24 @@ jobs:
           set -euo pipefail
           active_account="$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')"
           test "$active_account" = "$PROVISION_SERVICE_ACCOUNT"
-          python3 firebase-migration/scripts/production_project_contract.py \
-            --approved-project="$PROJECT_ID" \
-            --approved-number="$APPROVED_PROJECT_NUMBER" \
-            --require-wif --wif-provider="$WIF_PROVIDER" \
-            --service-account="$PROVISION_SERVICE_ACCOUNT" --verify-live
+          preflight_args=(firebase-migration/scripts/production_project_contract.py
+            "--approved-project=$PROJECT_ID" "--approved-number=$APPROVED_PROJECT_NUMBER"
+            --require-wif "--wif-provider=$WIF_PROVIDER"
+            "--service-account=$PROVISION_SERVICE_ACCOUNT" --verify-live)
+          preflight_status=0
+          preflight_result="$(python3 "${preflight_args[@]}" 2>&1)" || preflight_status=$?
+          if [ "$preflight_status" -ne 0 ]; then
+            # This exact result proves project ID/number/ACTIVE already passed.
+            # Enable only the missing lookup API, never link billing or widen IAM.
+            if [ "$preflight_result" != "AURORA_PRODUCTION_BLOCKED=GCP_LOOKUP_FAILED_NO_MUTATION:BILLING:SERVICE_DISABLED" ]; then
+              printf '%s\n' "$preflight_result" >&2
+              exit "$preflight_status"
+            fi
+            gcloud services enable cloudbilling.googleapis.com --project "$PROJECT_ID" --quiet
+            python3 "${preflight_args[@]}"
+          else
+            printf '%s\n' "$preflight_result"
+          fi
 
       - name: Enable production platform APIs
         env:
