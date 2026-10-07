@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "code": "AURORA-RESUME-20261007",
+  "baselineSha": "6787233a8451632caf337de422f12a75e1b0188c",
+  "classification": "VERIFIED_RELEASE_STATE_WITH_EXTERNAL_PENDING",
+  "architecture": {
+    "primary": "CLOUD_CONTROL_PLANE",
+    "physical": "WINDOWS_XEON_PHYSICAL_SERVER",
+    "client": "CLIENT_SAFE_DEGRADED_MODE",
+    "heavyProcessing": [
+      "CLOUD",
+      "WINDOWS_XEON"
+    ],
+    "macRole": "LIGHT_INTERFACE_AND_SUPERVISION",
+    "architectureRuntimeVerification": "PENDING"
+  },
+  "verified": [
+    {
+      "fact": "Guided Windows beta.4 implementation merged",
+      "pr": 177,
+      "sha": "6787233a8451632caf337de422f12a75e1b0188c",
+      "state": "IMPLEMENTED"
+    },
+    {
+      "fact": "Installer validation passed on baseline",
+      "run": 37655340316,
+      "state": "CI_VERIFIED"
+    },
+    {
+      "fact": "Protected HML deployment and authenticated smoke passed on baseline",
+      "run": 37654686543,
+      "state": "HML_VERIFIED"
+    },
+    {
+      "fact": "Production identity, APIs, enabled secret versions, Firestore PITR/deletion protection and cold organization verified",
+      "run": 37648242773,
+      "sha": "a23f0c3b3ecf749a67ffbf22013cc3b7530e2441",
+      "state": "COLD_PRODUCTION_VERIFIED",
+      "applicationPublicationVerified": false
+    },
+    {
+      "fact": "Latest HML post-ingest finalize passed",
+      "run": 37643558198,
+      "sha": "148ae6caba9a040eb09b7322a4e16422fd70d742",
+      "state": "HML_VERIFIED"
+    },
+    {
+      "fact": "Anonymous HML HTTP probe completed",
+      "routes": {
+        "/": 200,
+        "/setup": 200,
+        "/downloads": 303,
+        "/api/bootstrap": 401
+      },
+      "authenticatedUserInstallationVerified": false
+    }
+  ],
+  "inferences": [
+    {
+      "statement": "Prior production provisioning IAM/API blocker is resolved for the successful workflow scope",
+      "limit": "Does not prove all runtime permissions or full production application publication"
+    }
+  ],
+  "pending": [
+    {
+      "code": "PHYSICAL_NODE_OFFLINE",
+      "evidence": "Remote Desktop Commander reports Windows device offline on two checks; TRIGGERcmd status returns Trigger sent without execution receipt",
+      "nextAction": "On established Windows reconnection, inspect existing installation checkpoint and credential presence without exporting secrets, validate scoped IAM, transmit the authorized existing sample with its idempotency key and reconcile server receipt",
+      "repeatClosedHmlGates": false
+    },
+    {
+      "code": "PRODUCTION_APPLICATION_PUBLICATION_NOT_VERIFIED",
+      "evidence": "Successful production workflow provisions cold infrastructure; existing deploy workflow explicitly accepts HML only",
+      "nextAction": "Use dedicated production identity and reviewed production deployment path; do not retarget HML workflow or widen IAM"
+    },
+    {
+      "code": "NO_AUTHENTICATED_CLOUD_COMMAND_CHANNEL_IN_THIS_SESSION",
+      "evidence": "Available GitHub operations do not dispatch workflows or mutate GCP IAM; reachable light Mac shell has neither gh nor gcloud",
+      "nextAction": "Continue through existing authenticated cloud or Windows execution channel when available; never publish credentials into repository"
+    },
+    {
+      "code": "END_TO_END_FAILOVER_AND_NATIVE_INSTALL_PENDING",
+      "evidence": "Merged installer/CI/HML are separate from physical installation, first real Windows transmission and failover",
+      "nextAction": "Validate existing installed client and cloud/physical/cache/queue transitions without duplicating executors"
+    }
+  ],
+  "closedGatesPreserved": [
+    "PR127_MERGED",
+    "PROTECTED_HML_FINALIZATION",
+    "MAY2026_RECONCILIATION",
+    "FIRESTORE_PROJECTION",
+    "NATIVE_INTELLIGENCE",
+    "FINAL_WRITE_BLOCK"
+  ],
+  "prohibitedRediagnostics": [
+    "RESTORE",
+    "HMAC_ROTATION",
+    "INITIAL_INGEST",
+    "PREVIOUSLY_VERIFIED_RECONCILIATION"
+  ],
+  "organicLearning": {
+    "status": "VERSIONED_EVIDENCE_ONLY",
+    "promotedToRuntime": false,
+    "pattern": "Resume from immutable verified evidence; separate cold provisioning, application publication, dispatch receipt and real node execution",
+    "crossTenantData": false
+  },
+  "authorization": {
+    "alreadyGranted": true,
+    "repeatApprovalRequired": false,
+    "technicalEvidenceDistinctFromAuthorization": true
+  },
+  "rollback": "Evidence-only addition: revert this file; no runtime, IAM, data, secret or scheduler mutation."
+}
