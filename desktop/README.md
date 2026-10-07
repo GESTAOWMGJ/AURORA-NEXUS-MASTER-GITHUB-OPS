@@ -71,3 +71,23 @@ A descoberta local existente é POSIX/macOS e exige Python 3.10+, configuração
 Na entrega HML anterior: pacotes gerados em ambiente de construção, não instalados no Mac do titular; Desktop Commander retornou lista vazia; não houve deploy Firebase, migração, troca de domínio/DNS/SSL ou alteração de credenciais. A área `/downloads` foi incorporada ao código, não validada como publicada naquela sessão. A configuração remota não foi revalidada por um canal Firebase/Google Cloud autenticado. Não inferir ausência de recursos a partir de checkboxes antigos ou falha de acesso.
 
 Qualquer futura publicação continua exigindo revisão, ambiente autorizado e testes anônimos/autenticados. Para o aplicativo principal, a regra de baseline funcional e atualização do mesmo app, no início deste documento, é pré-requisito adicional e prevalece sobre o procedimento histórico de empacotamento HML.
+
+
+### Windows beta 0.2.0-beta.3 — pacote completo
+
+O build existente agora inclui `AURORA-NEXUS-Windows-Beta.zip`, com o instalador
+por usuário, os dois módulos locais necessários e `INSTALAR-AURORA-NEXUS.cmd`.
+Extraia todo o ZIP e execute esse arquivo no Windows com Edge e Python 3.10+.
+O cliente conserva o portal HML e o atalho AURORA NEXUS. O Mac instalado não é
+substituído pelo launcher HML experimental. iOS e web continuam usando o portal.
+
+O ZIP é reproduzível para o mesmo SHA, possui manifesto com hashes de cada arquivo
+e é distribuído na rota autenticada `/downloads`, com verificação de integridade.
+Nenhuma credencial, banco, modelo ou serviço é empacotado. O teste de extração
+executa o entrypoint de integração com dados sintéticos. CI aprovada comprova o
+pacote; instalação e login em cada dispositivo exigem evidência de execução.
+
+O frontend HML com a correção de retentativa de 15 minutos foi publicado no SHA
+`354f611f642ce6b62c489d6b06f254587aaef84b` (run `37640768716`). O pacote mantém esse
+backend e não declara produção liberada. Rollback: reinstalar o pacote anterior;
+os diretórios de versões anteriores são preservados pelo instalador.

@@ -30,3 +30,32 @@ test('HEAD checks integrity but returns no executable body',async()=>{const f=aw
 test('symlink package rejected',async t=>{const f=await fixture();try{await rm(join(f.root,f.files[0].name));try{await symlink(join(f.root,f.files[1].name),join(f.root,f.files[0].name));}catch{t.skip('symlink unavailable');return;}const r=response();await servePrivateDownloads({method:'GET',path:'/downloads/'+f.files[0].name},r,admin,f.root);assert.equal(r.statusCode,503);}finally{await f.clean();}});
 
 test('listing never advertises a missing package',async()=>{const f=await fixture();try{await rm(join(f.root,f.files[0].name));const r=response();await servePrivateDownloads({method:'GET',path:'/downloads'},r,admin,f.root);assert.equal(r.statusCode,503);}finally{await f.clean();}});
+
+
+test('beta bundle requires membership and verifies integrity before serving', async()=>{
+ const f=await fixture();
+ try {
+  const name='AURORA-NEXUS-Windows-Beta.zip';
+  await writeFile(join(f.root,name),f.bytes);
+  f.manifest.files.push({...f.files[1],name,label:'Windows beta'});
+  await writeFile(join(f.root,'manifest.json'),JSON.stringify(f.manifest));
+  const anonymous=response();
+  await servePrivateDownloads({method:'GET',path:'/downloads/'+name},anonymous,null,f.root);
+  assert.equal(anonymous.statusCode,401);
+  const allowed=response();
+  await servePrivateDownloads({method:'GET',path:'/downloads/'+name},allowed,admin,f.root);
+  assert.equal(allowed.statusCode,200);
+  assert.equal(allowed.headers['Content-Type'],'application/zip');
+  assert.deepEqual(allowed.body,f.bytes);
+  await writeFile(join(f.root,name),'tampered');
+  const damaged=response();
+  await servePrivateDownloads({method:'GET',path:'/downloads/'+name},damaged,admin,f.root);
+  assert.equal(damaged.statusCode,503);
+ } finally {await f.clean();}
+});
+
+test('legacy release remains valid and absent beta bundle is 404',async()=>{
+ const f=await fixture();
+ try {const r=response();await servePrivateDownloads({method:'GET',path:'/downloads/AURORA-NEXUS-Windows-Beta.zip'},r,admin,f.root);assert.equal(r.statusCode,404);}
+ finally {await f.clean();}
+});
