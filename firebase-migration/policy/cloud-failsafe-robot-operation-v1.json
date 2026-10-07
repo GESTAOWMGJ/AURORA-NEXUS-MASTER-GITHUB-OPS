@@ -1,0 +1,111 @@
+{
+  "id": "AURORA-CLOUD-FAILSAFE-ROBOT-001",
+  "name": "Aurora Nexus Cloud Failsafe Robot Operation",
+  "version": "1.0.0",
+  "date": "2026-10-07",
+  "status": "ACTIVE_POLICY",
+  "objective": "Keep Aurora Nexus online through cloud-first operation with controlled failover to the physical server and client-safe degraded modes.",
+  "standingAuthorization": {
+    "state": "AUTHORIZED_BY_OWNER",
+    "duration": "STANDING_UNTIL_REVOKED",
+    "scope": [
+      "CLOUD_ROBOT_OPERATION",
+      "PHYSICAL_SERVER_FAILOVER",
+      "CLIENT_CONTINUITY",
+      "AUTONOMOUS_BUGFIX",
+      "HEALTH_CHECKS",
+      "ROLLBACK_AND_RECOVERY"
+    ]
+  },
+  "operatingModel": {
+    "primary": "CLOUD_CONTROL_PLANE",
+    "secondary": "WINDOWS_XEON_PHYSICAL_SERVER",
+    "clientMode": "LOCAL_LIGHTWEIGHT_CLIENT_WITH_CLOUD_OR_SERVER_BACKEND",
+    "alwaysOnlineStrategy": "ACTIVE_CLOUD_WITH_PHYSICAL_SERVER_FAILOVER_AND_DEGRADED_READ_ONLY_CLIENT_MODE"
+  },
+  "failoverOrder": [
+    {
+      "priority": 1,
+      "target": "CLOUD_CONTROL_PLANE",
+      "useWhen": "cloud health checks, authenticated smoke and security gates pass",
+      "allowedWorkloads": [
+        "orchestration",
+        "policy gates",
+        "light validation",
+        "client routing",
+        "release coordination",
+        "security and privacy recommendations"
+      ]
+    },
+    {
+      "priority": 2,
+      "target": "WINDOWS_XEON_PHYSICAL_SERVER",
+      "useWhen": "cloud workload is degraded or heavy processing is required and server is online",
+      "allowedWorkloads": [
+        "heavy builds",
+        "indexing",
+        "large ingestion",
+        "local backup validation",
+        "runtime repair",
+        "artifact preparation"
+      ]
+    },
+    {
+      "priority": 3,
+      "target": "CLIENT_SAFE_DEGRADED_MODE",
+      "useWhen": "cloud and physical server are both unavailable or unsafe for writes",
+      "allowedWorkloads": [
+        "read-only access where cached and authorized",
+        "queued local events",
+        "status page",
+        "retry scheduler",
+        "support diagnostics without secrets"
+      ]
+    }
+  ],
+  "healthChecks": [
+    "cloud_deploy_health",
+    "firebase_hosting_reachable",
+    "functions_private_shell_reachable",
+    "authenticated_smoke_passed",
+    "anonymous_access_denied",
+    "firestore_rules_and_indexes_validated",
+    "github_actions_required_checks_green",
+    "windows_xeon_online_when_needed",
+    "backup_restore_channel_ready",
+    "client_installer_integrity_validated",
+    "rollback_artifact_available"
+  ],
+  "routingRules": {
+    "writeOperations": "require healthy authenticated backend and rollback path",
+    "readOperations": "prefer cloud, then server cache, then client read-only cache when authorized",
+    "heavyOperations": "prefer Windows Xeon when online; otherwise queue or run in cloud only if health and cost gates allow",
+    "bugfixOperations": "cloud may prepare and validate; promotion requires gates and rollback",
+    "clinicalSensitiveOperations": "blocked until clinical-sensitive gate, backup/restore proof and formal approval pass"
+  },
+  "interruptionMitigation": {
+    "target": "PLATFORM_ONLINE_BY_DEFAULT",
+    "actions": [
+      "detect_health_regression",
+      "switch_to_next_safe_target",
+      "pause_unsafe_writes",
+      "queue_retryable_jobs",
+      "serve_safe_cached_read_only_state",
+      "rollback_failed_release",
+      "record_evidence_and_notify_only_material_change"
+    ]
+  },
+  "releaseGate": {
+    "mustHaveCloudPrimaryPath": true,
+    "mustHavePhysicalServerFallbackPath": true,
+    "mustHaveClientSafeDegradedMode": true,
+    "mustHaveHealthChecks": true,
+    "mustHaveRollback": true,
+    "mustNotExposeSecrets": true,
+    "mustNotBypassAuth": true
+  },
+  "limits": [
+    "Failsafe means autonomous prevention, failover, queueing, rollback and degraded mode; it does not guarantee impossible zero downtime under every external outage.",
+    "No credential exposure, destructive real-data action, clinical-sensitive migration or certification claim is permitted without the specific gate required by policy."
+  ]
+}
