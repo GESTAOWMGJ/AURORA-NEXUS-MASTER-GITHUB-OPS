@@ -22,7 +22,8 @@
     "resolutive_algorithm_policy",
     "bounded_autonomy_with_risk_profile",
     "advisory_human_review_only_for_noncritical_uncertainty",
-    "operational_delivery_hardening"
+    "operational_delivery_hardening",
+    "platform_unification_conflict_certification"
   ],
   "singleVersionRules": {
     "oneCanonicalDeliverable": true,
@@ -30,11 +31,13 @@
     "newDevelopmentChangesMustAttachToThisDeliverableUntilSuperseded": true,
     "supersededVersionsMustNotBePromoted": true,
     "deliveryMustPreferOneBestPath": true,
-    "allRobotsMustOperateUnderThisDeliverable": true
+    "allRobotsMustOperateUnderThisDeliverable": true,
+    "platformUnificationMustPassBeforePromotion": true
   },
   "flowSimplification": {
     "oneOperationalEntrypoint": "scripts/aurora/windows_online_robot_orchestrator.js",
     "oneCertificationGate": "scripts/aurora/certification_security_gate.js",
+    "onePlatformUnificationRobot": "scripts/aurora/platform_unification_robot.js",
     "onePolicyManifest": "firebase-migration/policy/manifest.json",
     "oneHardeningPolicy": "firebase-migration/policy/operational-delivery-hardening-v1.json",
     "avoidParallelManualPromptPaths": true
@@ -47,6 +50,7 @@
   },
   "humanReviewRule": "Human review is advisory unless pending verification is absolute, material to delivery or client operation, not containable by rollback or degraded mode, and automated evidence cannot reach reasonable confidence.",
   "operationalSmoothnessRule": "The client-facing platform must prefer continuity, safe degraded mode, retry queues and reversible patches over interruption or prompt-dependent delivery.",
+  "platformUnificationRule": "Cloud, physical server, client surfaces, policy stack and robots must reconcile into one conflict-free internal operational integration result before promotion.",
   "traceabilityRequired": [
     "commit_sha",
     "base_main_sha",
@@ -54,6 +58,7 @@
     "risk_profile",
     "validation_or_reasonable_evidence",
     "rollback_or_recovery_path",
-    "operational_hardening_policy"
+    "operational_hardening_policy",
+    "platform_unification_robot_output"
   ]
 }
