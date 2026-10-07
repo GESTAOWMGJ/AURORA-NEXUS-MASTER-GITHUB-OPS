@@ -101,6 +101,16 @@ const policyChecks = [
       && resolutivePolicy.includes("EXECUTE_WHEN_AUTOMATED_GATE_AND_ROLLBACK_EXIST")
   },
   {
+    id: "human-review-advisory-unless-material-critical",
+    ok: resolutivePolicy.includes("AURORA-HUMAN-REVIEW-ADVISORY-001")
+      && resolutivePolicy.includes("HUMAN_REVIEW_IS_ADVISORY_BY_DEFAULT_AND_BLOCKING_ONLY_FOR_ABSOLUTE_MATERIAL_PENDING_VERIFICATION")
+      && resolutivePolicy.includes("SIGNAL_REVIEW_AND_CONTINUE_WITH_RISK_PROFILE_WHEN_IMPACT_IS_NOT_SIGNIFICANT")
+      && resolutivePolicy.includes("PENDING_VERIFICATION_IS_ABSOLUTE")
+      && resolutivePolicy.includes("IMPACT_IS_SIGNIFICANT_TO_DELIVERY_OR_CLIENT_OPERATION")
+      && resolutivePolicy.includes("NO_SAFE_DEGRADED_MODE_OR_ROLLBACK_CAN_CONTAIN_THE_RISK")
+      && resolutivePolicy.includes("humanReviewDoctrineRequired")
+  },
+  {
     id: "truth-must-be-evidence-linked",
     ok: resolutivePolicy.includes("GENERATED_INFORMATION_MUST_BE_EVIDENCE_LINKED")
       && resolutivePolicy.includes("confirmed")
@@ -138,7 +148,7 @@ const passed = fileChecks.every((check) => check.ok) && policyChecks.every((chec
 
 console.log(JSON.stringify({
   gate: "AURORA_CERTIFICATION_SECURITY_GATE",
-  version: "1.5.0",
+  version: "1.6.0",
   passed,
   fileChecks,
   policyChecks
