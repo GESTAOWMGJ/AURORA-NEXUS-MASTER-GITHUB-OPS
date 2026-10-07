@@ -1,4 +1,4 @@
-# IA Master local — 1.0.0
+# IA Master local — 1.0.1
 
 Incremento AURORA-IA-MASTER-001, baseline `68467209b55f1f8e281ecb5d21acb9a8211757cf`.
 O titular solicitou usar o PC como servidor físico da IA dentro do mesmo AURORA.
@@ -12,6 +12,7 @@ existente. Não cria banco operacional nem substitui o aplicativo principal.
 - Modelo local: propostas de engenharia em português, com método AURORA-MO-001,
   cache em memória de 16 resultados e nenhuma chamada a provedores externos.
 - O método é contexto versionado, não treinamento de pesos nem memória autônoma.
+  O registro sanitizado privado fica em `integration/state/ia-master/knowledge/knowledge_registry.v1.json` e é selecionado por relevância, orçamento, versão e hash; troca de corpus invalida o cache.
   Propostas não executam comandos, não alteram fonte e não publicam releases.
 - Melhorias seguem patch isolado, testes, revisão, CI, HML e rollback existentes.
 - Integrações enumeradas são capacidades/receitas. Cada conexão no runtime exige

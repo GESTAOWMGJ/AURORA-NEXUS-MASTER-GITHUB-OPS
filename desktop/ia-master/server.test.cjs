@@ -8,7 +8,10 @@ const { createMaster } = require(path.join(process.env.AURORA_TEST_BUILD, 'serve
 const token = 'x'.repeat(43);
 async function fixture(t, infer = async () => ({ text: 'Proposta sintética de revisão.', outputTokens: 8 }), options = {}) {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-master-test-'));
-  const app = createMaster({ stateDir, orgId: 'tenant-test', controlToken: token, port: 0, infer, ...options });
+  const { registry = null, ...masterOptions } = options;
+  const registryPath = registry ? path.join(stateDir, 'knowledge_registry.v1.json') : null;
+  if (registryPath) fs.writeFileSync(registryPath, JSON.stringify(registry));
+  const app = createMaster({ stateDir, orgId: 'tenant-test', controlToken: token, port: 0, infer, registryPath, ...masterOptions });
   await app.listen(); const base = 'http://127.0.0.1:' + app.server.address().port;
   t.after(async () => { app.server.closeAllConnections(); await new Promise(r => app.server.close(r)); fs.rmSync(stateDir, { recursive: true, force: true }); });
   const request = (route, body, headers = {}) => fetch(base + route, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + token, ...(body ? { 'Content-Type': 'application/json', 'X-Aurora-Local': '1' } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });
@@ -86,4 +89,78 @@ test('only one local generation runs at a time', async t => {
   const first = a.request('/api/improve', task); await ready;
   assert.equal((await a.request('/api/improve', { ...task, prompt: 'Outra proposta independente.' })).status, 429);
   finish({ text: 'Proposta final.' }); assert.equal((await first).status, 200);
+});
+
+function registryFixture(version = '1.0.0') {
+  return {
+    schemaVersion: '1.0.0',
+    taskId: 'AURORA-KNOW-HOW-XEON-001',
+    version,
+    classification: 'INTERNAL_SANITIZED_METHODS',
+    coverage: 'INITIAL_CORPUS_PARTIAL_HISTORY',
+    completeHistoricalAbsorption: false,
+    records: [
+      {
+        id: 'KH-001',
+        version: '1.0.0',
+        title: 'Ciclo de melhoria contínua',
+        knowledgeState: 'REGISTERED',
+        technicalState: 'SPECIFIED',
+        evidenceBasis: 'TEST',
+        sourceRefs: ['S01'],
+        problem: 'Hipóteses não podem virar regra ativa.',
+        procedure: ['Registrar evidência e reversão.'],
+        prompt: { text: 'Validar hipótese antes de promover.' },
+        limits: ['Sem execução arbitrária.'],
+        rollback: 'Reverter adoção.'
+      },
+      {
+        id: 'KH-020',
+        version: '1.0.0',
+        title: 'Promoção de rotina sem executor duplicado',
+        knowledgeState: 'REGISTERED',
+        technicalState: 'SPECIFIED',
+        evidenceBasis: 'TEST',
+        sourceRefs: ['S05'],
+        problem: 'Executor legado e nativo não podem produzir o mesmo efeito.',
+        procedure: ['Confrontar auroraNativeRoutines.', 'Preservar um único executor.'],
+        prompt: { text: 'Evite executor duplicado e prove não duplicidade.' },
+        limits: ['Registro declarativo não ativa rotina.'],
+        rollback: 'Restaurar executor anterior.'
+      }
+    ]
+  };
+}
+
+test('retrieves a relevant historical lesson outside the leading record', async t => {
+  let context = '';
+  const a = await fixture(t, async (_prompt, selected) => { context = selected; return { text: 'Proposta rastreável.' }; }, { registry: registryFixture() });
+  const response = await (await a.request('/api/improve', { prompt: 'Como evitar executor duplicado na rotina nativa?', classification: 'INTERNAL' })).json();
+  assert.deepEqual(response.knowledge.recordIds, ['KH-020']);
+  assert.match(context, /KH-020/);
+  assert.equal(response.knowledge.completeHistoricalAbsorption, false);
+});
+
+test('corpus change invalidates the inference cache', async t => {
+  let calls = 0;
+  const a = await fixture(t, async () => { calls++; return { text: 'Proposta versionada.' }; }, { registry: registryFixture('1.0.0') });
+  await a.request('/api/improve', task);
+  await a.request('/api/improve', task);
+  assert.equal(calls, 1);
+  const registryPath = path.join(a.stateDir, 'knowledge_registry.v1.json');
+  fs.writeFileSync(registryPath, JSON.stringify(registryFixture('1.0.1')));
+  const response = await (await a.request('/api/improve', task)).json();
+  assert.equal(calls, 2);
+  assert.equal(response.knowledge.corpusVersion, '1.0.1');
+});
+
+test('revoked records are excluded from retrieval', async t => {
+  const registry = registryFixture();
+  registry.records[1].knowledgeState = 'REVOKED';
+  let context = '';
+  const a = await fixture(t, async (_prompt, selected) => { context = selected; return { text: 'Proposta segura.' }; }, { registry });
+  const response = await (await a.request('/api/improve', { prompt: 'executor duplicado rotina nativa', classification: 'INTERNAL' })).json();
+  assert.ok(!response.knowledge.recordIds.includes('KH-020'));
+  assert.ok(!context.includes('KH-020'));
+  assert.equal(response.knowledge.rejectedCount, 1);
 });

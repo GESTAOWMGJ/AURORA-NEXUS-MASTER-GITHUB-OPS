@@ -3,6 +3,8 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
+const { spawnSync } = require("node:child_process");
 
 const ROOT = process.cwd();
 const ACTIVE_DELIVERABLE = "2026.10.07-dev.2";
@@ -142,13 +144,104 @@ const semanticChecks = [
   }
 ];
 
+const executionRequested = process.argv.includes("--execute");
+const allowedScripts = new Map([
+  ["platform-unification-robot", "scripts/aurora/platform_unification_robot.js"],
+  ["certification-security-gate", "scripts/aurora/certification_security_gate.js"],
+  ["security-privacy-update-bot", "scripts/aurora/security_privacy_update_bot.js"],
+  ["organic-improvement-backlog", "scripts/aurora/generate_improvement_backlog.js"],
+  ["candidate-change-evaluator", "scripts/aurora/evaluate_candidate_change.js"]
+]);
+
+function hashText(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function parseJsonOutput(value) {
+  try {
+    return JSON.parse(value);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function executeRobot(robot) {
+  if (robot.command.startsWith("policy: ")) {
+    const relativePath = robot.command.slice("policy: ".length);
+    if (!requiredPolicies.includes(relativePath) || !exists(relativePath)) {
+      return { id: robot.id, kind: "policy", ok: false, path: relativePath, error: "POLICY_NOT_ALLOWLISTED_OR_MISSING" };
+    }
+    try {
+      const raw = readText(relativePath);
+      const policy = JSON.parse(raw);
+      return {
+        id: robot.id,
+        kind: "policy",
+        ok: true,
+        path: relativePath,
+        policyId: policy.id || policy.policyId || null,
+        version: policy.version || null,
+        contentHash: hashText(raw)
+      };
+    } catch (_error) {
+      return { id: robot.id, kind: "policy", ok: false, path: relativePath, error: "INVALID_POLICY_JSON" };
+    }
+  }
+
+  const relativePath = allowedScripts.get(robot.id);
+  if (!relativePath || robot.command !== `node ${relativePath}` || !exists(relativePath)) {
+    return { id: robot.id, kind: "node", ok: false, error: "SCRIPT_NOT_ALLOWLISTED_OR_MISSING" };
+  }
+
+  const run = spawnSync(process.execPath, [filePath(relativePath)], {
+    cwd: ROOT,
+    env: { ...process.env, AURORA_DRY_RUN: "1" },
+    encoding: "utf8",
+    windowsHide: true,
+    shell: false,
+    timeout: 120000,
+    maxBuffer: 4 * 1024 * 1024
+  });
+  const stdout = run.stdout || "";
+  const stderr = run.stderr || "";
+  const parsed = parseJsonOutput(stdout.trim());
+
+  return {
+    id: robot.id,
+    kind: "node",
+    ok: run.status === 0 && !run.error,
+    exitCode: run.status,
+    signal: run.signal || null,
+    outputHash: hashText(stdout),
+    stderrHash: stderr ? hashText(stderr) : null,
+    reportedPassed: parsed && typeof parsed.passed === "boolean" ? parsed.passed : null,
+    error: run.error ? run.error.message : null
+  };
+}
+
+function currentRevision() {
+  const run = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    windowsHide: true,
+    shell: false
+  });
+  return run.status === 0 ? run.stdout.trim() : null;
+}
+
+const executionResults = executionRequested ? robots.map(executeRobot) : [];
+const staticPassed = policyChecks.every((check) => check.ok) && semanticChecks.every((check) => check.ok);
+const executionPassed = !executionRequested || executionResults.every((entry) => entry.ok && entry.reportedPassed !== false);
+
 const result = {
   orchestrator: "AURORA_CLOUD_FAILSAFE_ROBOT_ORCHESTRATOR",
-  version: "1.3.0",
+  version: "1.4.0",
   activeDeliverable: ACTIVE_DELIVERABLE,
+  revision: currentRevision(),
   trigger: "CLOUD_HEALTH_OR_WINDOWS_XEON_ONLINE_CONFIRMED",
   mode: "START_ALL_SAFE_ROBOTS_WITH_FAILOVER",
-  passed: policyChecks.every((check) => check.ok) && semanticChecks.every((check) => check.ok),
+  executionRequested,
+  passed: staticPassed && executionPassed,
   failoverPlan,
   startupOrder: robots,
   executionRules: [
@@ -163,8 +256,24 @@ const result = {
     "Do not declare certification obtained without formal certificate."
   ],
   policyChecks,
-  semanticChecks
+  semanticChecks,
+  executionResults
 };
+
+const receiptDir = process.env.AURORA_ROBOT_RECEIPT_DIR;
+if (executionRequested && receiptDir) {
+  if (!path.isAbsolute(receiptDir)) {
+    result.passed = false;
+    result.receiptError = "RECEIPT_DIRECTORY_MUST_BE_ABSOLUTE";
+  } else {
+    fs.mkdirSync(receiptDir, { recursive: true });
+    const receiptPath = path.join(receiptDir, `aurora-robot-run-${Date.now()}.json`);
+    const temporaryPath = `${receiptPath}.tmp`;
+    fs.writeFileSync(temporaryPath, JSON.stringify(result, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+    fs.renameSync(temporaryPath, receiptPath);
+    result.receiptPath = receiptPath;
+  }
+}
 
 console.log(JSON.stringify(result, null, 2));
 
