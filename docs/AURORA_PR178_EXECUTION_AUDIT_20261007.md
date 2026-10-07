@@ -54,6 +54,16 @@ Não foi implementado neste patch um dispatcher cloud/Xeon. Não existe prova de
 
 O patch fecha a execução **local dos validadores**, não essas pendências de processamento distribuído. Política ou CI não promovem esta lacuna a operacional.
 
+## 6. Reconciliacao e teste fisico — 07/10/2026
+
+A candidata #179 foi reconciliada com a main `2bc87dab9b2051f7f48d9cfadd00adff611cf986`, que integrou o #178. O registro `docs/evidence/AURORA_RESUME_20261007.json` tem o mesmo blob nas duas pontas e foi preservado. O diff funcional restante abrange somente o executor local, seus contratos/testes, workflow organico e declaracoes de escopo de evidencia.
+
+O canal remoto Windows voltou a responder nesta sessao. A identidade do dispositivo foi conferida e os comandos retornaram resultados, em vez de apenas confirmacao de disparo. Em checkout isolado no Windows fisico, passaram 14 testes Node de subprocessos/timeouts e 12 testes Python do transporte. O teste de timeout encerra um filho bloqueado e impede passos seguintes; nao interrompe o servidor real.
+
+Esse resultado demonstra testes sinteticos executados no dispositivo fisico. Nao demonstra identidade de integracao AURORA autenticada, recibo de ingestao atual do Firebase, dispatcher distribuido, lease/fencing ou retomada cloud/Xeon sem efeitos duplicados. Esses criterios permanecem separados e nao sao promovidos por CI.
+
+Os checks devem ser repetidos no novo SHA de reconciliacao antes da integracao. Publicacao HML e smoke autenticado permanecem evidencias proprias do SHA implantado. O relato remoto da secao 3 permanece como registro historico da auditoria anterior, nao como estado atual do dispositivo.
+
 ## Rollback
 
 Commit candidato reversível: git revert do commit de auditoria. Sem migração, novas credenciais, mudanças IAM, instalação, efeitos financeiros ou alteração do snapshot. O executor novo é opt-in de leitura e sua reversão restaura o modo declarativo anterior. A main, os instaladores e os executores legados permanecem como baseline até validação e promoção próprias.
