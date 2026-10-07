@@ -13,6 +13,7 @@ const requiredFiles = [
   "firebase-migration/docs/50-certification-control-matrix.md",
   "firebase-migration/policy/certification-readiness-v1.json",
   "firebase-migration/policy/digital-security-certification-layer-v1.json",
+  "firebase-migration/policy/resolutive-algorithm-policy-v1.json",
   "firebase-migration/policy/security-baseline-v1.json",
   "firebase-migration/docs/30-threat-model.md",
   "firebase-migration/docs/31-lgpd-ropa.md",
@@ -41,7 +42,8 @@ const fileChecks = requiredFiles.map((filePath) => ({
 const certificationProfile = readText("firebase-migration/policy/certification-readiness-v1.json");
 const digitalLayer = readText("firebase-migration/policy/digital-security-certification-layer-v1.json");
 const securityBaseline = readText("firebase-migration/policy/security-baseline-v1.json");
-const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline].join("\n");
+const resolutivePolicy = readText("firebase-migration/policy/resolutive-algorithm-policy-v1.json");
+const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy].join("\n");
 
 const policyChecks = [
   {
@@ -60,6 +62,21 @@ const policyChecks = [
   {
     id: "bot-cannot-change-iam",
     ok: digitalLayer.includes('"botMayChangeIAM": false')
+  },
+  {
+    id: "single-resolutive-path",
+    ok: resolutivePolicy.includes("SINGLE_BEST_PATH_BY_DEFAULT")
+      && resolutivePolicy.includes("MOST_RESOLUTIVE_SAFE_PATH")
+  },
+  {
+    id: "no-redundant-confirmation-loop",
+    ok: resolutivePolicy.includes("NO_CONFIRMATION_DEPENDENCY_WHEN_EVIDENCE_AND_AUTHORIZATION_ARE_SUFFICIENT")
+      && resolutivePolicy.includes("PROMPT_LOOPS")
+  },
+  {
+    id: "truth-must-be-evidence-linked",
+    ok: resolutivePolicy.includes("GENERATED_INFORMATION_MUST_BE_EVIDENCE_LINKED")
+      && resolutivePolicy.includes("confirmed")
   }
 ];
 
@@ -67,7 +84,7 @@ const passed = fileChecks.every((check) => check.ok) && policyChecks.every((chec
 
 console.log(JSON.stringify({
   gate: "AURORA_CERTIFICATION_SECURITY_GATE",
-  version: "1.0.0",
+  version: "1.1.0",
   passed,
   fileChecks,
   policyChecks
