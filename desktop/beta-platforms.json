@@ -7,10 +7,12 @@
   "reviewedMainSha": "fce9f0b94f68370ae5db23482924579c24c1931f",
   "portal": "https://wmgj-hml-jfn-20260927.web.app/",
   "windows": {
-    "clientVersion": "0.2.0-beta.3",
+    "clientVersion": "0.2.0-beta.4",
     "type": "EDGE_APP_ACCESS_CLIENT",
     "offlineDatabaseReplica": false,
-    "package": "AURORA-NEXUS-Windows-Beta.zip"
+    "package": "AURORA-NEXUS-Instalar.exe",
+    "guidedSetup": true,
+    "backgroundClientInstalled": false
   },
   "mac": {
     "strategy": "PRESERVE_EXISTING_APP_IDENTITY",

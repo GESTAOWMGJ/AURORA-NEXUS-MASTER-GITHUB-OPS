@@ -91,3 +91,19 @@ O frontend HML com a correção de retentativa de 15 minutos foi publicado no SH
 `354f611f642ce6b62c489d6b06f254587aaef84b` (run `37640768716`). O pacote mantém esse
 backend e não declara produção liberada. Rollback: reinstalar o pacote anterior;
 os diretórios de versões anteriores são preservados pelo instalador.
+
+### Windows beta 0.2.0-beta.4 — assistente guiado
+
+`AURORA-NEXUS-Instalar.exe` incorpora o instalador e seus módulos e orienta
+preparação, instalação por usuário, login e verificação no portal `/setup`.
+Requer Edge e Python 3.10+; os links de pré-requisitos abrem os sites oficiais.
+O executável não coleta credenciais nem instala dependências silenciosamente.
+O build testa extração limitada, componentes obrigatórios e recusa de sobrescrita.
+O download privado verifica hash e permissões como nos pacotes existentes.
+
+O assistente autenticado reutiliza membership e segundo fator existentes, testa
+comunicação sob demanda e encaminha às integrações e ao Motor Mestre. Não oferece
+OAuth externo ainda não implementado nem apresenta abertura de janela como login.
+A sessão mantém a duração e revogabilidade atuais. Este incremento não instala
+um agente cliente em segundo plano, não comprova failover físico/cloud e não
+altera o gerenciador existente da IA Master. O Mac original permanece preservado.

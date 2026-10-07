@@ -1,5 +1,5 @@
 /** Public entry paths select presentation only. Membership always authorizes data. */
-const RESERVED = new Set(["login", "portal", "downloads", "organic", "api", "reports", "assets", "static", "health", "healthz"]);
+const RESERVED = new Set(["login", "portal", "setup", "downloads", "organic", "api", "reports", "assets", "static", "health", "healthz"]);
 
 export function isCompanySlug(value: unknown): value is string {
   return typeof value === "string" && /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(value)

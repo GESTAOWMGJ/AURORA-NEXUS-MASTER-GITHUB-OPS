@@ -7,7 +7,7 @@ import { getAuth, setPersistence, inMemoryPersistence, signInWithEmailAndPasswor
   sendEmailVerification, reload, getIdTokenResult, signOut, multiFactor, getMultiFactorResolver,
   TotpMultiFactorGenerator } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js';
 const orgId = ${JSON.stringify(orgId)};
-const entryPath = orgId ? '/' + orgId : '/';
+const entryPath = location.pathname === '/setup' ? '/setup' : (orgId ? '/' + orgId : '/');
 const element = id => document.getElementById(id);
 const form = element('login-form'), status = element('status'), submit = element('submit');
 let auth, resolver = null, setupUser = null, totpSecret = null;
