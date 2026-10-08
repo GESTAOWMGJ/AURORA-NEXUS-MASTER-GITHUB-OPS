@@ -243,6 +243,8 @@ test("RC1.1 repair deploys install pinned function dependencies before Firebase 
 
 test("RC1.1 post-ingest waits for canonical native projection without elevating smoke permissions", () => {
   const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url), "utf8");
+  assert.match(workflow, /\.fields\.nativeDataPlane\.mapValue\.fields\.storage\.stringValue=="FIRESTORE"/);
+  assert.match(workflow, /\.fields\.nativeDataPlane\.mapValue\.fields\.sourceAccessDuringInference\.booleanValue==false/);
   assert.match(workflow, /Repair Hosting rewrite targets only if native routes are stale/);
   assert.match(workflow, /session_status.*__sessionLogin/);
   assert.match(workflow, /native_status.*api\/native-insight/);

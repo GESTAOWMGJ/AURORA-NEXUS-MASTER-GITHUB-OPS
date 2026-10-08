@@ -161,7 +161,9 @@ jobs:
               (.fields.financialCents.mapValue.fields.invoicedCents.integerValue|tonumber)==4950000 and
               (.fields.financialCents.mapValue.fields.receivedCents.integerValue|tonumber)==4950000 and
               (.fields.financialCents.mapValue.fields.outstandingCents.integerValue|tonumber)==0 and
-              .fields.dataQuality.mapValue.fields.complete.booleanValue==true
+              .fields.dataQuality.mapValue.fields.complete.booleanValue==true and
+              .fields.nativeDataPlane.mapValue.fields.storage.stringValue=="FIRESTORE" and
+              .fields.nativeDataPlane.mapValue.fields.sourceAccessDuringInference.booleanValue==false
             ' "$RUNNER_TEMP/snapshot.json" >/dev/null 2>&1; then ready=true; break; fi
             sleep 30
           done
