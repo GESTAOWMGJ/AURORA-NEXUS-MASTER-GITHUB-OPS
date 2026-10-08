@@ -67,4 +67,8 @@ Os checks devem ser repetidos no novo SHA de reconciliacao antes da integracao. 
 ## Rollback
 
 Commit candidato reversível: git revert do commit de auditoria. Sem migração, novas credenciais, mudanças IAM, instalação, efeitos financeiros ou alteração do snapshot. O executor novo é opt-in de leitura e sua reversão restaura o modo declarativo anterior. A main, os instaladores e os executores legados permanecem como baseline até validação e promoção próprias.
+## 7. Reconciliacao atual — 07/10/2026, 23:36 BRT
 
+A branch #179 foi reconciliada novamente com a main bebb0a0b62baa47b2057dbf773c87b6ca8e7e3da. O merge local 40207871a10433f6fc04d5548f7a7ccf17fba29c tinha zero commits de atraso e sete arquivos no diff residual; as mudancas de portal, smoke e instaladores da main foram preservadas.
+
+No Xeon Windows, apos essa reconciliacao, passaram novamente os 14 testes Node do executor e 12 testes Python do transporte. Esses testes sinteticos continuam separados do aceite de handoff distribuido e efeitos persistidos. Os checks GitHub devem ser lidos no SHA final da branch, incluindo esta atualizacao documental.

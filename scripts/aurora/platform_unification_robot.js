@@ -146,4 +146,3 @@ console.log(JSON.stringify(output, null, 2));
 if (!output.passed) {
   process.exitCode = 1;
 }
-

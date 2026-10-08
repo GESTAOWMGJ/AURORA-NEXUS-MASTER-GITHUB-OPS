@@ -205,4 +205,3 @@ console.log(JSON.stringify({
 if (!passed) {
   process.exitCode = 1;
 }
-
