@@ -5,7 +5,7 @@ import {test} from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {
   CANONICAL_ORIGIN, MAX_RESPONSE_BYTES, CanonicalPreflightError,
-  checkCanonicalPreflight, hasCanonicalPortalShell, hasUsableLoginForm, requestCanonical,
+  checkCanonicalPreflight, hasCanonicalPortalShell, hasUsableLoginForm, requestCanonical, requestOrigin,
 } from '../../firebase-migration/scripts/check-canonical-preflight.mjs';
 
 const project = 'wmgj-hml-jfn-20260927';
@@ -55,6 +55,33 @@ test('routing-only preflight stops before deployed Firebase APIs while preservin
   assert.equal(proof.anonymousDenied, false);
   assert.equal(proof.firebaseProjectMatched, false);
   assert.deepEqual(f.calls, ['/portal']);
+});
+
+test('technical-api preflight binds project identity and anonymous denial to the HML host only', async () => {
+  const f = fixture();
+  const resolved = [];
+  const proof = await checkCanonicalPreflight(project, {
+    ...f.options,
+    scope: 'technical-api',
+    resolveHost: async hostname => {
+      resolved.push(hostname);
+      return [{address: '192.0.2.2', family: 4}];
+    },
+  });
+  assert.equal(proof.code, 'HML_TECHNICAL_API_READY');
+  assert.equal(proof.origin, `https://${project}.web.app`);
+  assert.equal(proof.portalShellVerified, false);
+  assert.equal(proof.firebaseProjectMatched, true);
+  assert.equal(proof.anonymousDenied, true);
+  assert.deepEqual(resolved, [`${project}.web.app`]);
+  assert.deepEqual(f.calls, ['/__/firebase/init.json', '/api/bootstrap']);
+});
+
+test('unknown preflight scopes fail before DNS and HTTP', async () => {
+  const f = fixture();
+  await assert.rejects(checkCanonicalPreflight(project, {...f.options, scope: 'anything'}),
+    {code: 'CANONICAL_PREFLIGHT_SCOPE_INVALID'});
+  assert.deepEqual(f.calls, []);
 });
 
 test('canonical portal shell accepts the Aurora Next runtime but rejects private shells', () => {
@@ -216,6 +243,8 @@ test('large responses are rejected instead of accumulated as proof', async () =>
 
 test('transport itself cannot send requests to another origin', async () => {
   await assert.rejects(requestCanonical('https://example.test/portal'), {code: 'CANONICAL_ORIGIN_REQUIRED'});
+  await assert.rejects(requestOrigin(`https://${project}.web.app`, 'https://example.test/api/bootstrap'),
+    {code: 'CANONICAL_ORIGIN_REQUIRED'});
 });
 
 test('CLI rejects insecure TLS settings and invalid scope without network or secret output', () => {
