@@ -4,6 +4,7 @@ import {FieldValue, Timestamp} from 'firebase-admin/firestore';
 import {auroraDb} from '../src/firebase.ts';
 import {auroraNexusIntegrationDocuments} from '../src/auroraIntegrationRuntime.ts';
 import {issueIntegrationCredential} from '../src/auroraIntegrationCredential.ts';
+import {completeInstallation} from '../src/auroraRuntime.ts';
 
 // Exercise the real HTTP handler and native projection against an isolated transactional fixture.
 // This is not a cloud/Xeon handoff or a production Firestore test.
@@ -24,7 +25,7 @@ test('committed ingest resumes projection with the same key and one source effec
  };
  t.mock.method(db,'doc',(path:string)=>({path,id:path.split('/').pop(),get:async()=>snapshot(path)}));
  let interrupt=true;
- t.mock.method(db,'collection',(path:string)=>({limit:()=>({get:async()=>{
+ t.mock.method(db,'collection',(path:string)=>({limit:()=>({__query:true,get:async()=>{
   if(interrupt){interrupt=false;throw Error('SYNTHETIC_INTERRUPTION_AFTER_COMMIT');}
   const docs=[...state.keys()].filter(key=>key.startsWith(path+'/')&&!key.slice(path.length+1).includes('/')).map(snapshot);
   return {size:docs.length,docs};
@@ -36,7 +37,7 @@ test('committed ingest resumes projection with the same key and one source effec
  t.mock.method(db,'runTransaction',(callback:any)=>{
   const job=queue.then(async()=>{
    const writes:any[]=[];
-   const result=await callback({get:async(ref:any)=>snapshot(ref.path),
+   const result=await callback({get:async(ref:any)=>ref.__query ? ref.get() : snapshot(ref.path),
     create:(ref:any,data:any)=>writes.push({path:ref.path,data,create:true}),
     set:(ref:any,data:any)=>writes.push({path:ref.path,data,create:false})});
    for(const write of writes){if(write.create&&state.has(write.path))throw Error('ALREADY_EXISTS');}
@@ -47,9 +48,9 @@ test('committed ingest resumes projection with the same key and one source effec
  const body={sourceSystem:'ERP',externalDocumentId:'synthetic-document',sourceVersion:1,
   occurredAt:'2026-10-08T04:00:00Z',documentType:'PRODUCTION',competence:'2026-10',amountCents:null,count:1,
   workflowState:'VALIDATED',slaDueAt:null,documentFragility:'NONE',missingFieldsCount:0,nativeReady:true,sourceIndependent:true};
- const call=async()=>{
+ const call=async(override:any={},key='synthetic-same-key-20261008')=>{
   let result:any,status=0;
-  const req:any={method:'POST',headers:{},body,get:(name:string)=>({'content-type':'application/json',authorization:`Bearer ${credential.apiKey}`,'idempotency-key':'synthetic-same-key-20261008'} as any)[name]};
+  const req:any={method:'POST',headers:{},body:{...body,...override},get:(name:string)=>({'content-type':'application/json',authorization:`Bearer ${credential.apiKey}`,'idempotency-key':key} as any)[name]};
   const res:any={on(){return this;},set(){return this;},status(value:number){status=value;return this;},json(value:any){result=value;return this;}};
   await (auroraNexusIntegrationDocuments as any)(req,res);return {status,result};
  };
@@ -63,4 +64,27 @@ test('committed ingest resumes projection with the same key and one source effec
  assert.equal([...state.keys()].filter(path=>path.includes('/dashboardSnapshotHistory/')).length,1);
  assert.equal([...creates.entries()].filter(([path])=>path.includes('/dashboardSnapshotHistory/')).reduce((n,[,count])=>n+count,0),1);
  assert.equal([...state.keys()].filter(path=>path.includes('/apiIdempotency/')).length,1);
+ const versions=[...state.keys()].filter(path=>path.includes('/entityVersions/'));
+ assert.equal(versions.length,1);assert.equal(creates.get(versions[0]),1);
+ assert.equal(replay.result.installation.revision,1);
+ assert.equal(replay.result.installation.versionId,versions[0].split('/').pop());
+ assert.equal(replay.result.installation.operationalComplete,false);
+ const conflict=await call({workflowState:'FAILED'},'synthetic-new-key-20261008');
+ assert.equal(conflict.status,409);assert.equal(conflict.result.code,'SOURCE_VERSION_CONFLICT');
+ assert.equal([...state.keys()].filter(path=>path.includes('/apiIdempotency/')).length,1);
+ const projected=state.get(`${base}/dashboardSnapshots/current`);
+ // A previously committed history receipt must repair a stale current view on replay,
+ // with no second history or source/immutable-version effect.
+ state.set(`${base}/dashboardSnapshots/current`,{...projected,sourceHash:'old',integrationReadback:[]});
+ const repaired=await call();assert.equal(repaired.result.installation.firstIngestionVerified,true);
+ assert.equal(state.get(`${base}/dashboardSnapshots/current`).sourceHash,projected.sourceHash);
+ assert.equal(creates.get(versions[0]),1);
+ assert.equal([...creates.entries()].filter(([path])=>path.includes('/dashboardSnapshotHistory/')).reduce((n,[,count])=>n+count,0),1);
+ const completed=await completeInstallation(org,'synthetic-user');
+ assert.equal(completed.operationalComplete,true);
+ await completeInstallation(org,'synthetic-user');
+ assert.equal(creates.get(`${base}/runtimeCheckpoints/installation`),1);
+ state.delete(versions[0]);
+ await assert.rejects(completeInstallation(org,'synthetic-user'),/FIRST_INGESTION_PENDING/);
+ assert.equal(creates.get(`${base}/runtimeCheckpoints/installation`),1);
 });

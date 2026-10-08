@@ -198,7 +198,13 @@ export const auroraNexusAuthGate = onRequest(
       return;
     }
     if (req.path === "/setup") {
-      res.status(200).type("html").send(req.method === "HEAD" ? "" : setupPage(member));
+      const refreshCsrf = csrfTokenForSession(req.get("cookie"), AURORA_NEXUS_CSRF_HMAC_KEY.value(), CSRF_PURPOSES.refresh);
+      if (!refreshCsrf) {
+        logger.error("Aurora Nexus setup CSRF key is not configured");
+        res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança.", entry?.orgId));
+        return;
+      }
+      res.status(200).type("html").send(req.method === "HEAD" ? "" : setupPage(member, refreshCsrf));
       return;
     }
     if (isDownload) {

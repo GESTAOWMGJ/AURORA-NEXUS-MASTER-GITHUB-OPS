@@ -1,5 +1,5 @@
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { defineSecret } from "firebase-functions/params";
+import { defineSecret, defineString, projectID } from "firebase-functions/params";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -17,12 +17,33 @@ import {
 } from "./security.js";
 import { validateEvent } from "./validation.js";
 import { auroraDb as db } from "./firebase.js";
+import { HML_RUNTIME_PROJECT_ID, HML_RUNTIME_SERVICE_ACCOUNT, ingestOrganizationRejection } from "./auroraRuntimeEnvironment.js";
+export { ingestOrganizationRejection } from "./auroraRuntimeEnvironment.js";
+import { stableValue, persistedDocumentHash, mergedDocumentForAudit, immutableEntityVersionId,
+  canonicalEntityRevision, nextCanonicalEntityRevision } from "./auroraCanonicalVersions.js";
+export { persistedDocumentHash, mergedDocumentForAudit, immutableEntityVersionId,
+  canonicalEntityRevision, nextCanonicalEntityRevision } from "./auroraCanonicalVersions.js";
+
+const stableJson = (value: unknown): string => JSON.stringify(stableValue(value));
+
+// Firebase resolves this StringParam at deploy time, not during test/import.
+// Only the existing HML project receives its documented default identity.
+// Other projects require the protected pipeline's explicit runtime account.
+const AURORA_RUNTIME_SERVICE_ACCOUNT = defineString("AURORA_RUNTIME_SERVICE_ACCOUNT", {
+  default: projectID.equals(HML_RUNTIME_PROJECT_ID).thenElse(HML_RUNTIME_SERVICE_ACCOUNT, ""),
+  input: { text: {
+    nonEmpty: true,
+    validationRegex: /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.gserviceaccount\.com$/,
+    validationErrorMessage: "Supply the reviewed runtime service account for the selected project."
+  } }
+});
 
 setGlobalOptions({
   region: "southamerica-east1",
   maxInstances: 10,
   timeoutSeconds: 60,
-  memory: "512MiB"
+  memory: "512MiB",
+  serviceAccount: AURORA_RUNTIME_SERVICE_ACCOUNT
 });
 
 const HMAC_KEYRING = defineSecret("WMGJ_INGEST_HMAC_KEYRING");
@@ -38,118 +59,11 @@ class IngestDomainError extends Error {
   }
 }
 
-function stableValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (value && typeof value === "object") {
-    if (value instanceof Timestamp) return value.toDate().toISOString();
-    const record = value as Record<string, unknown>;
-    return Object.keys(record).sort().reduce<Record<string, unknown>>((acc, key) => {
-      if (!["createdAt", "updatedAt", "serverAt", "importedAt"].includes(key)) {
-        acc[key] = stableValue(record[key]);
-      }
-      return acc;
-    }, {});
-  }
-  return value;
-}
-
-function stableJson(value: unknown): string {
-  return JSON.stringify(stableValue(value));
-}
-
-type IngestOrganizationRejection =
-  | "ORGANIZATION_NOT_BOOTSTRAPPED"
-  | "ORGANIZATION_GUARDRAILS_INVALID";
-
-/**
- * A ingestão é permitida somente no tenant explicitamente preparado para
- * homologação não clínica. Comparações estritas mantêm o gate fechado para
- * campos ausentes, nulos ou serializados com o tipo incorreto.
- */
-export function ingestOrganizationRejection(
-  exists: boolean,
-  organization: Record<string, unknown> | undefined
-): IngestOrganizationRejection | null {
-  if (!exists || !organization) return "ORGANIZATION_NOT_BOOTSTRAPPED";
-
-  if (
-    organization.active !== true
-    || organization.environment !== "HOMOLOGATION"
-    || organization.projectionMode !== "SHADOW"
-    || organization.sourceMutation !== false
-    || organization.productionMutation !== false
-    || organization.clinicalSensitiveEnabled !== false
-  ) {
-    return "ORGANIZATION_GUARDRAILS_INVALID";
-  }
-
-  return null;
-}
-
-function isPlainDocumentMap(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
-/**
- * Reproduz a semântica relevante de set(..., { merge: true }) para o material
- * coberto pelo hash. Mapas são mesclados recursivamente; arrays e escalares
- * substituem o valor anterior. Sentinelas temporais não entram neste patch e
- * são removidas por stableValue antes do hash.
- */
-export function mergedDocumentForAudit(
-  previous: Record<string, unknown> | null,
-  patch: Record<string, unknown>
-): Record<string, unknown> {
-  const merged: Record<string, unknown> = previous ? { ...previous } : {};
-
-  for (const [key, value] of Object.entries(patch)) {
-    const current = merged[key];
-    if (isPlainDocumentMap(value) && Object.keys(value).length === 0) {
-      // Firestore trata um mapa vazio explícito como substituição do mapa,
-      // mesmo com merge=true.
-      merged[key] = {};
-    } else {
-      merged[key] = isPlainDocumentMap(current) && isPlainDocumentMap(value)
-        ? mergedDocumentForAudit(current, value)
-        : value;
-    }
-  }
-
-  return merged;
-}
-
-export function persistedDocumentHash(
-  previous: Record<string, unknown> | null,
-  patch: Record<string, unknown>
-): string {
-  return sha256Hex(stableJson(mergedDocumentForAudit(previous, patch)));
-}
 
 function deterministicId(entityType: string, entityKey: string): string {
   return sha256Hex(`${entityType}:${entityKey}`).slice(0, 48);
 }
 
-export function immutableEntityVersionId(
-  entityType: string,
-  entityKey: string,
-  revision: number
-): string {
-  return sha256Hex(`v1:${entityType}:${entityKey}:revision:${revision}`).slice(0, 48);
-}
-
-export function canonicalEntityRevision(value: unknown): number | null {
-  if (value === undefined || value === null) return 0;
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) return null;
-  return value;
-}
-
-export function nextCanonicalEntityRevision(value: unknown): number | null {
-  const current = canonicalEntityRevision(value);
-  if (current === null || current >= Number.MAX_SAFE_INTEGER) return null;
-  return current + 1;
-}
 
 function safeLogError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -512,6 +426,10 @@ export const ingestWmgjEvent = onRequest(
           state: "HEALTHY",
           lastEventId: event.eventId,
           lastEntityType: event.entityType,
+          ...(event.entityType === "sourceDocument" ? {
+            lastEntityId: entityId, lastVersionId: versionId, lastRevision: revision,
+            lastSourceVersion: event.sourceVersion
+          } : {}),
           lastAcceptedAt: FieldValue.serverTimestamp(),
           acceptedCount: FieldValue.increment(1),
           versionCount: FieldValue.increment(1),

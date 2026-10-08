@@ -21,6 +21,8 @@ import {
 import { auroraDb } from "./firebase.js";
 import { canonicalIntegrationDocument, parseIntegrationDocumentPayload } from "./auroraIntegrationDocument.js";
 import { loadInstallationReadiness, refreshProjection } from "./auroraRuntime.js";
+import { immutableEntityVersionId, nextCanonicalEntityRevision, persistedDocumentHash,
+  mergedDocumentForAudit, stableValue } from "./auroraCanonicalVersions.js";
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -252,13 +254,17 @@ export const auroraNexusIntegrationPing = onRequest({cors:false}, async (req,res
     res.status(401).json({ok:false, code:"INVALID_INTEGRATION_KEY"});
     return;
   }
+  const documentId=req.query?.documentId;
+  if (documentId !== undefined && (typeof documentId !== 'string' || !/^[a-f0-9]{48}$/.test(documentId))) {
+    res.status(400).json({ok:false,code:'INVALID_DOCUMENT_ID'}); return;
+  }
   res.status(200).json({
     ok:true,
     service:"aurora-nexus-integration",
     orgId:principal.orgId,
     keyId:principal.keyId,
     connector:principal.name,
-    installation:await loadInstallationReadiness(principal.orgId),
+    installation:await loadInstallationReadiness(principal.orgId, documentId),
     time:new Date().toISOString()
   });
 });
@@ -318,7 +324,10 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
     if (typeof currentVersion === "number") {
       if (payload.sourceVersion < currentVersion) return {kind:"ERROR" as const,code:"SOURCE_VERSION_REGRESSION"};
       if (payload.sourceVersion === currentVersion) {
-        if (current?.canonicalSnapshotHash !== canonical.canonicalSnapshotHash) {
+        if (current?.canonicalSnapshotHash !== canonical.canonicalSnapshotHash
+          || current.workflowState !== payload.workflowState
+          || timestampIso(current.occurredAt) !== new Date(payload.occurredAt).toISOString()
+          || (current.integration?.payloadHash !== undefined && current.integration.payloadHash !== bodyHash)) {
           return {kind:"ERROR" as const,code:"SOURCE_VERSION_CONFLICT"};
         }
         tx.create(idemRef,{
@@ -333,12 +342,19 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
     const riskLevel=payload.documentFragility === "DEGRADED_EXTRACTION"
       || ["BLOCKED","FAILED"].includes(payload.workflowState) ? "HIGH"
       : payload.documentFragility !== "NONE" || !payload.nativeReady ? "MEDIUM" : "LOW";
-    tx.set(docRef,{
+    const revision=nextCanonicalEntityRevision(current?.revision);
+    if (revision === null) return {kind:"ERROR" as const,code:"ENTITY_REVISION_CONFLICT"};
+    const entityKey=`${payload.sourceSystem}:${canonical.sourceIdHash.slice(0,32)}`;
+    const versionId=immutableEntityVersionId("sourceDocument",entityKey,revision);
+    const versionRef=auroraDb.doc(`${base}/entityVersions/${versionId}`);
+    if ((await tx.get(versionRef)).exists) return {kind:"ERROR" as const,code:"ENTITY_VERSION_CONFLICT"};
+    const patch={
       ...facts,
       orgId:principal.orgId,
       schemaVersion:1,
       entityType:"sourceDocument",
-      entityKey:`${payload.sourceSystem}:${canonical.sourceIdHash.slice(0,32)}`,
+      entityKey,
+      revision,
       sourceVersion:payload.sourceVersion,
       occurredAt:Timestamp.fromDate(new Date(payload.occurredAt)),
       competence:payload.competence,
@@ -357,14 +373,26 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
       integration:{
         keyId:principal.keyId,
         connector:principal.name,
-        transport:"AURORA_INTEGRATION_API"
+        transport:"AURORA_INTEGRATION_API",
+        payloadHash:bodyHash
       },
       createdAt:current?.createdAt ?? FieldValue.serverTimestamp(),
       updatedAt:FieldValue.serverTimestamp()
-    },{merge:true});
+    };
+    const beforeHash=current ? persistedDocumentHash(null,current) : null;
+    const afterHash=persistedDocumentHash(current,patch);
+    tx.set(docRef,patch,{merge:true});
+    tx.create(versionRef,{
+      orgId:principal.orgId, schemaVersion:1, entityType:"sourceDocument", entityId:docRef.id,
+      entityKey, revision, sourceVersion:payload.sourceVersion, idempotencyId:idemId,
+      source:patch.source, actor:{keyId:principal.keyId, connector:principal.name}, beforeHash,afterHash,
+      snapshot:stableValue(mergedDocumentForAudit(current,patch)),
+      occurredAt:patch.occurredAt, createdAt:FieldValue.serverTimestamp()
+    });
     tx.create(idemRef,{
       bodyHash,documentId:docRef.id,keyId:principal.keyId,
       sourceVersion:payload.sourceVersion,
+      versionId, revision,
       createdAt:FieldValue.serverTimestamp()
     });
     tx.create(auditRef,{
@@ -372,6 +400,7 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
       action:currentSnap.exists?"INTEGRATION_DOCUMENT_UPDATED":"INTEGRATION_DOCUMENT_CREATED",
       type:currentSnap.exists?"INTEGRATION_DOCUMENT_UPDATED":"INTEGRATION_DOCUMENT_CREATED",
       documentId:docRef.id,
+      versionId, revision, beforeHash, afterHash,
       keyId:principal.keyId,
       sourceSystem:payload.sourceSystem,
       sourceVersion:payload.sourceVersion,
@@ -385,6 +414,7 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
       component:"integration-documents",
       state:"HEALTHY",
       lastDocumentId:docRef.id,
+      lastVersionId:versionId, lastRevision:revision, lastSourceVersion:payload.sourceVersion,
       lastSourceSystem:payload.sourceSystem,
       lastAcceptedAt:FieldValue.serverTimestamp(),
       acceptedCount:FieldValue.increment(1),
@@ -413,6 +443,8 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
     sourceSystem:payload.sourceSystem,
     sourceIndependent:payload.sourceIndependent,
     nativeReady:payload.nativeReady,
-    installation:await loadInstallationReadiness(principal.orgId)
+    sourceVersion:payload.sourceVersion,
+    canonicalSnapshotHash:canonical.canonicalSnapshotHash,
+    installation:await loadInstallationReadiness(principal.orgId, canonical.id)
   });
 });

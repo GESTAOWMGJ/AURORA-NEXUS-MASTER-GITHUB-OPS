@@ -17,8 +17,29 @@ const validOrganization: Record<string, unknown> = {
   projectionMode: "SHADOW"
 };
 
-test("ingestão aceita apenas organização de homologação com todos os bloqueios explícitos", () => {
+test("ingestão mantém o contrato de homologação com todos os bloqueios explícitos", () => {
   assert.equal(ingestOrganizationRejection(true, validOrganization), null);
+});
+
+test("ingestão produtiva exige beta explícito e projeção habilitada sem liberar mutações", async (t) => {
+  const beta = {...validOrganization, environment:"PRODUCTION", deploymentStage:"PRODUCTION_BETA", projectionEnabled:true};
+  assert.equal(ingestOrganizationRejection(true, beta), null);
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["cold production", {...beta, deploymentStage:"COLD_PRODUCTION"}],
+    ["unknown stage", {...beta, deploymentStage:"PRODUCTION"}],
+    ["stage absent", {...beta, deploymentStage:undefined}],
+    ["projection disabled", {...beta, projectionEnabled:false}],
+    ["projection absent", {...beta, projectionEnabled:undefined}],
+    ["projection string", {...beta, projectionEnabled:"true"}],
+    ["organization disabled", {...beta, active:false}],
+    ["live projection", {...beta, projectionMode:"LIVE"}],
+    ["source mutation", {...beta, sourceMutation:true}],
+    ["production mutation", {...beta, productionMutation:true}],
+    ["clinical sensitive", {...beta, clinicalSensitiveEnabled:true}]
+  ];
+  for (const [name, value] of cases) await t.test(name, () => {
+    assert.equal(ingestOrganizationRejection(true, value), "ORGANIZATION_GUARDRAILS_INVALID");
+  });
 });
 
 test("ingestão falha fechado quando a organização não existe ou não tem dados", () => {

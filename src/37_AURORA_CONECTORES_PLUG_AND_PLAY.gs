@@ -5,7 +5,7 @@
  * Segredos entram somente por parâmetro de uma chamada autenticada/administrativa
  * e são persistidos em ScriptProperties. Nunca são retornados ou logados.
  */
-var AURORA_CONNECTOR_SETUP_VERSION = 'v1.1.0-firebase-native-sources';
+var AURORA_CONNECTOR_SETUP_VERSION = 'v1.1.2-read-only-connector-status';
 
 function auroraNormalizarSistemaFonte_(value) {
   var system = String(value || 'DRIVE').trim().toUpperCase();
@@ -73,6 +73,14 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
   var externalBaseUrl = String(config.externalBaseUrl || '').trim();
   var externalApiKey = String(config.externalApiKey || '');
   var activate = config.activate === true;
+  var props = PropertiesService.getScriptProperties();
+  var boundOrg = String(props.getProperty('WMGJ_FIRESTORE_ORG_ID') || '').trim();
+  if (boundOrg && boundOrg !== orgId) throw new Error('AURORA_CONNECTOR_TENANT_REBINDING_REJECTED');
+  if (activate && (typeof instalarGatilhoAutomacaoWMGJ !== 'function'
+    || typeof prepararPipelineConfiavelWMGJ_V3 !== 'function'
+    || typeof processarFilaFonteCanonicaWMGJ_ !== 'function'
+    || typeof processarFilaComExtracaoRealWMGJ_V1 !== 'function'
+    || typeof comTravaIngestaoGmailWMGJ_ !== 'function')) throw new Error('AURORA_DOCUMENT_EXECUTOR_MISSING');
   var documentSources = auroraNormalizarFontesDocumentais_(config.documentSources, driveFolderId);
 
   if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(orgId)) throw new Error('AURORA_CONNECTOR_ORG_INVALID');
@@ -90,7 +98,6 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
   var folderName = folder.getName();
   if (spreadsheetId) SpreadsheetApp.openById(spreadsheetId).getId();
 
-  var props = PropertiesService.getScriptProperties();
   var values = {
     WMGJ_PASTA_ENTRADA_ID: driveFolderId,
     WMGJ_FIRESTORE_INGEST_URL: ingestUrl,
@@ -112,9 +119,11 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
   props.setProperties(values, false);
 
   var trigger = null;
+  var firstCycle = null;
   if (activate) {
-    if (typeof instalarGatilhoAutomacaoWMGJ !== 'function') throw new Error('AURORA_AUTOMATION_INSTALLER_MISSING');
     trigger = instalarGatilhoAutomacaoWMGJ();
+    firstCycle = trigger && trigger.ok === true ? auroraExecutarPrimeiraIngestaoDocumental_()
+      : { ok:false, state:'PENDING_CANONICAL_READBACK', code:'AURORA_DOCUMENT_TRIGGER_PENDING', limit:5, firstIngestionVerified:false };
   }
 
   var result = {
@@ -141,11 +150,158 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
     } : null,
     documentSources: documentSources.map(function(item) { return { sourceId: item.sourceId, system: item.system, mode: item.mode, folderId: item.folderId, slaMinutes: item.slaMinutes, active: item.active }; }),
     nativeDataPlane: { storage: 'FIRESTORE', sourceAccessRequiredAfterIngest: false, externalAiFallbackEnabled: config.externalAiFallbackEnabled === true },
-    continuousExtraction: activate,
-    triggerInstalled: !!trigger,
+    continuousExtraction: activate && !!trigger && trigger.ok === true,
+    triggerInstalled: !!trigger && trigger.ok === true,
+    firstCycle: firstCycle,
+    firstIngestionVerified: false,
+    operationalReady: false,
     checkedAt: new Date().toISOString()
   };
   auroraConnectorLogSafe_('CONFIGURE', result);
+  return result;
+}
+
+// The authorized activation starts one bounded pass immediately instead of
+// waiting for the existing 15-minute trigger. Counts never certify cloud state.
+function auroraExecutarPrimeiraIngestaoDocumental_() {
+  try {
+    return comTravaIngestaoGmailWMGJ_(function() {
+      var preparation = prepararPipelineConfiavelWMGJ_V3(5);
+      if (!preparation || preparation.ok !== true) throw new Error('AURORA_DOCUMENT_SOURCE_PENDING');
+      var processing = processarFilaFonteCanonicaWMGJ_(5);
+      if (!processing || processing.ok !== true) throw new Error('AURORA_DOCUMENT_PROCESSING_PENDING');
+      var processed = Number(processing.processados || 0);
+      var errors = Number(processing.erros || 0);
+      var review = Number(processing.revisar || 0);
+      if (![processed, errors, review].every(function(n) { return Number.isSafeInteger(n) && n >= 0 && n <= 5; })) {
+        throw new Error('AURORA_DOCUMENT_RESULT_INVALID');
+      }
+      return { ok: errors === 0 && review === 0, state: 'PENDING_CANONICAL_READBACK',
+        processedDocuments: processed, failedDocuments: errors, reviewDocuments: review,
+        limit: 5, firstIngestionVerified: false };
+    });
+  } catch (error) {
+    var code = error && typeof error.message === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/.test(error.message)
+      ? error.message : 'AURORA_DOCUMENT_INITIAL_CYCLE_PENDING';
+    return { ok: false, state: 'PENDING_CANONICAL_READBACK', code: code, limit: 5, firstIngestionVerified: false };
+  }
+}
+
+// Public Execution API status: read-only, bounded and free of source identifiers.
+// A completed status read never proves canonical ingestion or operational readiness.
+function auroraLerStatusConectoresPlugAndPlay(expectedOrgId) {
+  var result = {
+    ok: false, code: 'AURORA_CONNECTOR_STATUS_PENDING',
+    tenantConfigured: false, tenantMatches: false,
+    configurationRead: false, configurationValid: false,
+    endpointConfigured: false, hmacConfigured: false,
+    mirrorRequired: false, dryRun: true,
+    registryConfigured: false, registryValid: false, legacySourceSelected: false,
+    sourceCount: null, reachableSourceCount: null, sourceAccessChecked: false,
+    triggerRead: false, triggerCount: null,
+    handlerCounts: { operational: null, legacyQueue: null, fiscal: null, watchdog: null, other: null },
+    firstIngestionVerified: false, operationalReady: false,
+    checkedAt: new Date().toISOString()
+  };
+  if (typeof expectedOrgId !== 'string' || !/^[a-z0-9][a-z0-9-]{1,62}$/.test(expectedOrgId)) {
+    result.code = 'AURORA_CONNECTOR_STATUS_TENANT_INVALID';
+    return result;
+  }
+  var props;
+  try {
+    props = PropertiesService.getScriptProperties();
+    var orgId = String(props.getProperty('WMGJ_FIRESTORE_ORG_ID') || '').trim();
+    result.tenantConfigured = /^[a-z0-9][a-z0-9-]{1,62}$/.test(orgId);
+    result.tenantMatches = result.tenantConfigured && orgId === expectedOrgId;
+    if (!result.tenantMatches) {
+      result.code = 'AURORA_CONNECTOR_STATUS_TENANT_MISMATCH';
+      return result;
+    }
+    var url = String(props.getProperty('WMGJ_FIRESTORE_INGEST_URL') || '').trim();
+    var keyId = String(props.getProperty('WMGJ_FIRESTORE_HMAC_KEY_ID') || '').trim();
+    var secret = String(props.getProperty('WMGJ_FIRESTORE_HMAC_SECRET') || '');
+    var mirror = String(props.getProperty('AURORA_FIRESTORE_MIRROR_REQUIRED') || 'false').toLowerCase();
+    var dryRun = String(props.getProperty('WMGJ_FIRESTORE_DRY_RUN') || 'true').toLowerCase();
+    result.endpointConfigured = /^https:\/\/[^\s]+\/ingestWmgjEvent$/.test(url);
+    result.hmacConfigured = /^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$/.test(keyId) && /^[A-Fa-f0-9]{64}$/.test(secret);
+    result.mirrorRequired = mirror === 'true';
+    result.dryRun = dryRun !== 'false';
+    result.configurationRead = true;
+    result.configurationValid = result.endpointConfigured && result.hmacConfigured
+      && /^(true|false)$/.test(mirror) && /^(true|false)$/.test(dryRun);
+  } catch (ignoreConfig) {
+    result.code = 'AURORA_CONNECTOR_STATUS_CONFIG_READ_FAILED';
+    return result;
+  }
+  var sources;
+  try {
+    var raw = props.getProperty('AURORA_DOCUMENT_SOURCE_REGISTRY');
+    result.registryConfigured = !!raw;
+    var registered = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(registered) || registered.length > 12) throw new Error('INVALID_REGISTRY');
+    registered.forEach(function(item) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)
+        || (item.active !== undefined && typeof item.active !== 'boolean')) throw new Error('INVALID_REGISTRY');
+    });
+    var seen = {};
+    sources = registered.filter(function(item) { return item && item.active !== false; });
+    sources.forEach(function(item) {
+      if (typeof item !== 'object' || Array.isArray(item)
+        || !/^[a-z0-9][a-z0-9_.-]{2,63}$/.test(item.sourceId || '')
+        || seen[item.sourceId] || ['DRIVE', 'MV', 'TASY', 'ERP'].indexOf(item.system) < 0
+        || item.mode !== 'DRIVE_FOLDER' || !/^[A-Za-z0-9_-]{10,200}$/.test(item.folderId || '')
+        || !Number.isSafeInteger(item.slaMinutes) || item.slaMinutes < 15 || item.slaMinutes > 43200) {
+        throw new Error('INVALID_REGISTRY');
+      }
+      seen[item.sourceId] = true;
+    });
+    // Match the existing executor fallback only when no nonempty registry exists.
+    if (!registered.length) {
+      var fallback = String(props.getProperty('WMGJ_PASTA_ENTRADA_ID') || '');
+      if (fallback) {
+        if (!/^[A-Za-z0-9_-]{10,200}$/.test(fallback)) throw new Error('INVALID_REGISTRY');
+        sources = [{ folderId: fallback }];
+        result.legacySourceSelected = true;
+      }
+    }
+    result.registryValid = true;
+    result.sourceCount = sources.length;
+  } catch (ignoreRegistry) {
+    result.code = 'AURORA_CONNECTOR_STATUS_REGISTRY_INVALID';
+    return result;
+  }
+  if (typeof DriveApp === 'undefined' || typeof DriveApp.getFolderById !== 'function') {
+    result.code = 'AURORA_CONNECTOR_STATUS_SOURCE_ACCESS_UNAVAILABLE';
+    return result;
+  }
+  result.reachableSourceCount = 0;
+  sources.forEach(function(source) {
+    try { if (DriveApp.getFolderById(source.folderId)) result.reachableSourceCount++; }
+    catch (ignoreAccess) {} // No source names, IDs or raw transport errors leave this function.
+  });
+  result.sourceAccessChecked = true;
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    var counts = { operational: 0, legacyQueue: 0, fiscal: 0, watchdog: 0, other: 0 };
+    triggers.forEach(function(trigger) {
+      var handler = trigger.getHandlerFunction();
+      if (handler === 'executarAutomacaoOperacionalWMGJ') counts.operational++;
+      else if (handler === 'jobProcessarFilaWMGJ') counts.legacyQueue++;
+      else if (handler === 'rodarCicloCompletoGmailFiscalFinanceiroWMGJ'
+        || handler === 'rodarCicloCompletoGmailFiscalFinanceiroWMGJ_Teste20') counts.fiscal++;
+      else if (handler === 'rodarWatchdogWMGJ' || handler === 'executarAutomacaoWMGJBlindada'
+        || handler === 'executarAutomacaoWMGJBlindada_Teste20') counts.watchdog++;
+      else counts.other++;
+    });
+    result.handlerCounts = counts;
+    result.triggerCount = triggers.length;
+    result.triggerRead = true;
+  } catch (ignoreTriggers) {
+    result.code = 'AURORA_CONNECTOR_STATUS_TRIGGER_READ_FAILED';
+    return result;
+  }
+  result.ok = true;
+  result.code = 'AURORA_CONNECTOR_STATUS_READ_COMPLETE';
   return result;
 }
 

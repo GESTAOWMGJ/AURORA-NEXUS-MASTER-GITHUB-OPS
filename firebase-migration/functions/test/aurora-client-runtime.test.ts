@@ -33,7 +33,7 @@ async function fixture(first = response()) {
   const document = { visibilityState: 'visible', activeElement: null as Element | null, getElementById(id: string) { const element = elements.get(id); assert.ok(element, 'Known DOM id: ' + id); return element; }, createElement: (_tag: string) => new Element(), addEventListener: (name: string, callback: Handler) => docHandlers.set(name, callback) };
   const calls: { url: string; options: any }[] = []; const redirects: string[] = []; const intervals: { fn: Handler; ms: number }[] = []; const timeouts = new Map<number, Handler>(); let timerId = 0;
   let fetcher = async (_url: string, _options: any): Promise<any> => first;
-  const context = createContext({ document, window: { addEventListener: (name: string, callback: Handler) => winHandlers.set(name, callback) }, navigator: { onLine: true }, location: { replace: (url: string) => redirects.push(url) }, Intl, Date, AbortController, crypto: { randomUUID: () => 'synthetic-idempotency-key' }, setInterval: (fn: Handler, ms: number) => intervals.push({ fn, ms }), setTimeout: (fn: Handler) => { const id = ++timerId; timeouts.set(id, fn); return id; }, clearTimeout: (id: number) => timeouts.delete(id), fetch: (url: string, options: any) => { calls.push({ url, options }); return fetcher(url, options); } });
+  const context = createContext({ document, window: { addEventListener: (name: string, callback: Handler) => winHandlers.set(name, callback) }, navigator: { onLine: true }, location: { hostname: 'auroranexus.com.br', search: '', hash: '', replace: (url: string) => redirects.push(url) }, Intl, Date, AbortController, crypto: { randomUUID: () => 'synthetic-idempotency-key' }, setInterval: (fn: Handler, ms: number) => intervals.push({ fn, ms }), setTimeout: (fn: Handler) => { const id = ++timerId; timeouts.set(id, fn); return id; }, clearTimeout: (id: number) => timeouts.delete(id), fetch: (url: string, options: any) => { calls.push({ url, options }); return fetcher(url, options); } });
   scripts.forEach(script => new Script(script).runInContext(context));
   await setImmediate();
   return { elements, document, calls, redirects, intervals, timeouts, docHandlers, winHandlers, context, fetchWith(fn: typeof fetcher) { fetcher = fn; }, run(code: string) { return new Script(code).runInContext(context); }, async click(id: string) { const element = elements.get(id)!; await element.handlers.get('click')!({ currentTarget: element }); }, async submit(id: string) { const element = elements.get(id)!; await element.handlers.get('submit')!({ currentTarget: element, preventDefault() {} }); } };
@@ -42,9 +42,9 @@ async function fixture(first = response()) {
 test('the actual emitted browser script parses; missing regex delimiters fail this gate', () => {
   assert.equal(scripts.length, 2);
   scripts.forEach(script => assert.doesNotThrow(() => new Script(script)));
-  const runtimeScript = scripts.find(script => script.includes('value=>!/^[A-Za-z0-9._:-]'));
-  assert.ok(runtimeScript);
-  assert.throws(() => new Script(runtimeScript.replace('value=>!/^[A-Za-z0-9._:-]', 'value=>!^[A-Za-z0-9._:-]')), SyntaxError);
+  const appScript = scripts.find(script => script.includes('value=>!/^[A-Za-z0-9._:-]'));
+  assert.ok(appScript, 'The actual operational script must retain evidence validation');
+  assert.throws(() => new Script(appScript.replace('value=>!/^[A-Za-z0-9._:-]', 'value=>!^[A-Za-z0-9._:-]')), SyntaxError);
 });
 
 test('all navigation links target existing sections, not placeholder pages', () => {
@@ -235,4 +235,17 @@ test('manager distribution approval posts a decision only and never a payment co
   assert.equal(body.expectedRevision, 0);
   assert.ok(!('payment' in body));
   assert.ok(!('transfer' in body));
+});
+
+
+test('canonical redirect guard preserves route context only for the known HML hosts', () => {
+  const guards = scripts.filter(script => script.includes('location.hostname'));
+  assert.equal(guards.length, 1);
+  for (const hostname of ['wmgj-hml-jfn-20260927.web.app', 'WMGJ-HML-JFN-20260927.FIREBASEAPP.COM', 'auroranexus.com.br', 'unrelated.invalid']) {
+    const redirects: string[] = [];
+    const location = { hostname, search: '?returnTo=%2Fsetup', hash: '#pending', replace: (url: string) => redirects.push(url) };
+    new Script(guards[0]).runInContext(createContext({ location }));
+    const isHml = hostname.toLowerCase().startsWith('wmgj-hml-jfn-20260927.');
+    assert.deepEqual(redirects, isHml ? ['https://auroranexus.com.br/portal?returnTo=%2Fsetup#pending'] : []);
+  }
 });
