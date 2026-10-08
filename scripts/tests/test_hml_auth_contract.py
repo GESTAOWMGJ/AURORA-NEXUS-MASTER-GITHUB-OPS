@@ -118,12 +118,49 @@ class WorkflowStructureTests(unittest.TestCase):
             self.assertNotRegex(smoke, r'curl[^\n]*\s-L\b')
         deploy = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")["jobs"]["deploy"]["steps"]
         negative = next(step["run"] for step in deploy if step.get("name") == "Smoke test private shell and deployed functions")
-        self.assertNotIn('.web.app', negative)
-        self.assertIn('"${base_url}/portal"', negative)
-        self.assertIn('-H "Origin: ${base_url}"', negative)
+        self.assertEqual(negative.count('.web.app'), 1)
+        self.assertIn('technical_origin="https://${PROJECT_ID}.web.app"', negative)
+        self.assertIn('test "$technical_probe" = "308 ${canonical_origin}/portal"', negative)
+        self.assertIn('"${canonical_origin}/portal"', negative)
+        self.assertIn('-H "Origin: ${canonical_origin}"', negative)
+        self.assertNotIn('base_url', negative)
         user_profiles = next(step["run"] for step in deploy if step.get("name") == "Verify user profile API rejects anonymous access")
-        self.assertIn('-H "Origin: ${base_url}"', user_profiles)
+        self.assertIn('-H "Origin: ${canonical_origin}"', user_profiles)
         self.assertNotIn('.web.app', user_profiles)
+        auth = next(step["run"] for step in deploy if step.get("name") == "Authenticated smoke test without stored password")
+        self.assertNotIn('base_url', auth)
+        self.assertIn('https://auroranexus\\.com\\.br/portal', auth)
+
+    def test_technical_probe_requires_exact_308_to_canonical_without_following(self):
+        steps = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")["jobs"]["deploy"]["steps"]
+        smoke = next(step["run"] for step in steps if step.get("name") == "Smoke test private shell and deployed functions")
+        start = smoke.index('technical_probe="$(')
+        end = smoke.index('test "$technical_probe" = "308 ${canonical_origin}/portal"', start)
+        probe = smoke[start:end] + 'test "$technical_probe" = "308 ${canonical_origin}/portal"\n'
+        self.assertNotIn('--location', probe)
+        self.assertNotRegex(probe, r'\s-L\b')
+        prefix = '''set -euo pipefail
+canonical_origin="https://auroranexus.com.br"
+technical_origin="https://wmgj-hml-jfn-20260927.web.app"
+curl() {
+  local last
+  for last; do :; done
+  test "$last" = "${technical_origin}/"
+  printf '%s' "$TEST_PROBE_RESPONSE"
+}
+'''
+        for value, expected in [
+            ('308 https://auroranexus.com.br/portal', 0),
+            ('200 ', 1), ('303 https://auroranexus.com.br/portal', 1),
+            ('308 https://wmgj-hml-jfn-20260927.web.app/portal', 1),
+            ('308 https://auroranexus.com.br/login', 1),
+            ('308 https://example.test/portal', 1),
+        ]:
+            with self.subTest(response=value):
+                result = subprocess.run(['bash', '--noprofile', '--norc', '-c', prefix + probe],
+                                        env=dict(os.environ, TEST_PROBE_RESPONSE=value),
+                                        capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, expected)
 
     def test_critical_deploy_steps_are_unique_and_gates_remain(self):
         workflow = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")

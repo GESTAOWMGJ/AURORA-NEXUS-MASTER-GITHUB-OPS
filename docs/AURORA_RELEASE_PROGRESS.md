@@ -30,7 +30,7 @@ e `init.json` ligado ao projeto HML aprovado antes da autenticação de nuvem.
 Redirect é recusado, inclusive o loop portal → Firebase técnico → portal.
 Os smokes público e autenticado usam `https://auroranexus.com.br`; login,
 membership, MFA, CSRF e gates do release assinado continuam na autoridade Firebase.
-Patch candidato sobre `17d57f1515685324c41f2c2a691bbe50a0eccef5`, com regressões
+Patch candidato sobre `de1ae74d88fdec711c6ed89fe29fe1dd755d0bc7`, com regressões
 sintéticas; não comprova DNS/TLS emitido, implantação, login real, ingestão ou GA.
 Responsável operacional: titular do domínio e maintainer HML. Próximo gate:
 concluir DNS/TLS apontando ao roteamento revisado do gateway com o AuthGate
