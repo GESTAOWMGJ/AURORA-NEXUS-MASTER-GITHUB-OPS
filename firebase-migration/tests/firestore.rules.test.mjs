@@ -231,6 +231,26 @@ before(async () => {
 
 after(async () => env?.cleanup());
 
+test('one-use onboarding must be COMPLETE and signed on direct SDK reads; clients cannot alter invitation state', async () => {
+  const uid = 'onboarding-synthetic'; const operation = 'profile-' + 'c'.repeat(64);
+  const path = `organizations/wmgj/members/${uid}`;
+  const profile = member('org_admin', {allFacilities:true,facilityIds:[],profileVersion:1,profileState:'READY',
+    authEmail:'onboarding@example.invalid',profileOperationId:operation,onboardingRequired:true,onboardingState:'INVITED',
+    onboardingInvitation:{codeDigest:'synthetic-digest-only'}});
+  const claims = {email:'onboarding@example.invalid',email_verified:true,auroraOrgId:'wmgj',auroraProfileVersion:1,
+    auroraProfileOperation:operation,auroraOnboardingRequired:true,firebase:{sign_in_provider:'password',sign_in_second_factor:'totp'}};
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(),path),profile));
+  const db = env.authenticatedContext(uid,claims).firestore();
+  await assertFails(getDoc(doc(db,'organizations/wmgj')));
+  await assertFails(setDoc(doc(db,path),{onboardingState:'COMPLETE'},{merge:true}));
+  await env.withSecurityRulesDisabled(ctx => setDoc(doc(ctx.firestore(),path),{...profile,onboardingState:'COMPLETE',onboardingInvitation:{codeDigest:''}}));
+  await assertSucceeds(getDoc(doc(db,'organizations/wmgj')));
+  const {auroraOnboardingRequired:_marker,...stripped} = claims;
+  await assertFails(getDoc(doc(env.authenticatedContext(uid,stripped).firestore(),'organizations/wmgj')));
+  await assertFails(getDoc(doc(db,'organizations/other')));
+  await assertFails(setDoc(doc(db,path),{onboardingInvitation:{codeDigest:'replacement'}},{merge:true}));
+});
+
 test('managed identities require matching company, verified email, MFA and current READY membership on direct SDK reads', async () => {
   const uid = 'managed-synthetic';
   const operation = 'profile-' + 'a'.repeat(64);

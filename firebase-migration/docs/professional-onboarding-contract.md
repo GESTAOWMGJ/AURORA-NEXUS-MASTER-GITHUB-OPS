@@ -72,6 +72,16 @@ não elimina evidências e não implementa exclusão administrativa destrutiva.
 
 ## Evidência e limites
 
+O painel Master emite uma credencial aleatória de cadastro de 256 bits,
+exibida uma vez e válida por 24 horas. Só o digest criptográfico vinculado a
+organização/UID/operação é persistido. Reemissão invalida a anterior. A pessoa
+define sua senha pessoal pelo fluxo Firebase, confirma o e-mail e cadastra MFA;
+então resgata a credencial para liberar a sessão Aurora. O Master não conhece
+a senha pessoal. Reutilização e resgate por outro UID/organização são recusados.
+Saída da sessão limpa a credencial e respostas tardias não a repõem na tela.
+O robô pertence ao registro nativo do motor, com execução governada por vínculo
+atual e MFA, como as demais rotinas do organismo Aurora Nexus.
+
 `test/aurora-user-profiles.test.ts` usa identidades sintéticas, Auth stub e loja
 transacional com rollback e assertiva de leituras antes de escritas. Abrange
 compatibilidade legada, esquema fechado, ausência de senha, permissões explícitas,

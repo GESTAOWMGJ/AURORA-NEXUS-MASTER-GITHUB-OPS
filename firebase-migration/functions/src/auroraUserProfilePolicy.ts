@@ -67,7 +67,9 @@ export function profileIdentity(actor: ProfileActor, request: ProfileRequest) {
 }
 // Claims select an identity; only a current, server-provisioned membership grants access.
 export function managedProfileMatches(decoded: Record<string, any>, data: Record<string, any> | undefined, orgId: string): boolean {
-  return decoded.auroraProfileVersion === PROFILE_VERSION && decoded.auroraOrgId === orgId
+  const onboardingAllowed = (decoded.auroraOnboardingRequired === undefined && data?.onboardingRequired === undefined)
+    || (decoded.auroraOnboardingRequired === true && data?.onboardingRequired === true && data?.onboardingState === "COMPLETE");
+  return onboardingAllowed && decoded.auroraProfileVersion === PROFILE_VERSION && decoded.auroraOrgId === orgId
     && decoded.email_verified === true && Boolean(decoded.firebase?.sign_in_second_factor)
     && typeof decoded.email === "string" && data?.authEmail === decoded.email.trim().toLowerCase()
     && data?.profileVersion === PROFILE_VERSION && data?.profileState === "READY" && data?.active === true
