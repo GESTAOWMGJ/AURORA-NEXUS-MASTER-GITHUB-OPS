@@ -11,13 +11,14 @@ const runtime = path.join(root, 'components', 'ollama', '0.35.1', 'ollama.exe');
 const startup = path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'AURORA IA Master.cmd');
 const sha = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 function verified() {
-  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
+  const bytes = fs.readFileSync(path.join(__dirname, 'manifest.json'));
+  const manifest = JSON.parse(bytes.toString());
   if (manifest.component !== 'AURORA_IA_MASTER' || manifest.version !== '1.0.0' || manifest.dirty !== false || !/^[a-f0-9]{40}$/.test(manifest.sourceRevision)) throw Error('REVIEWED_RELEASE_REQUIRED');
   for (const [name, digest] of Object.entries(manifest.files)) {
     if (name.includes('..') || path.isAbsolute(name) || name.includes(':') || sha(path.join(__dirname, name)) !== digest) throw Error('RELEASE_INTEGRITY_FAILED');
   }
   for (const name of ['server.cjs', 'manage.cjs', 'kernel/auroraMasterEngine.js']) if (!manifest.files[name]) throw Error('INCOMPLETE_RELEASE');
-  return manifest;
+  return { ...manifest, manifestSha256: crypto.createHash('sha256').update(bytes).digest('hex') };
 }
 function listener(port) {
   if (![11435, 38765].includes(port)) throw Error('INVALID_PORT');
@@ -56,12 +57,38 @@ function install(org) {
   fs.writeFileSync(path.join(state, 'installation.json'), JSON.stringify({ version: manifest.version, sourceRevision: manifest.sourceRevision, organization: org, installedAtUtc: new Date().toISOString(), binding: '127.0.0.1', externalAiEnabled: false, cloudSyncVerified: false, existingClientPreserved: true }, null, 2));
   console.log('AURORA_IA_MASTER_INSTALLED');
 }
-function start() {
-  verified();
+function assessRunningProcess(health, manifest) {
+  const observed = health?.processManifest;
+  if (health?.service !== 'AURORA_IA_MASTER' || observed?.status !== 'PROCESS_MANIFEST_OBSERVED' ||
+      observed.component !== 'AURORA_IA_MASTER' || observed.dirty !== false ||
+      !/^[a-f0-9]{40}$/.test(observed.sourceRevision) || !/^[a-f0-9]{64}$/.test(observed.manifestSha256) ||
+      typeof health.startedAt !== 'string' || !Number.isFinite(Date.parse(health.startedAt)) ||
+      new Date(health.startedAt).toISOString() !== health.startedAt) return 'LOCAL_PROCESS_RELEASE_UNVERIFIED';
+  if (health.version !== manifest.version || observed.version !== manifest.version ||
+      observed.sourceRevision !== manifest.sourceRevision || observed.manifestSha256 !== manifest.manifestSha256) return 'LOCAL_PROCESS_RELEASE_CONFLICT';
+  return 'PROCESS_MANIFEST_MATCH_REPORTED';
+}
+async function checkRunningProcess(manifest) {
+  let health;
+  try {
+    const response = await fetch('http://127.0.0.1:38765/health', { redirect: 'error', signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw Error('UNAVAILABLE');
+    const text = await response.text();
+    if (text.length > 65536) throw Error('INVALID_HEALTH');
+    health = JSON.parse(text);
+  } catch { throw Error('LOCAL_PROCESS_RELEASE_UNVERIFIED'); }
+  const result = assessRunningProcess(health, manifest);
+  if (result !== 'PROCESS_MANIFEST_MATCH_REPORTED') throw Error(result);
+}
+async function start() {
+  const manifest = verified();
   if (!fs.existsSync(runtime) || !fs.existsSync(path.join(state, 'control.key'))) throw Error('LOCAL_INSTALLATION_REQUIRED');
+  // Inspect every occupied port before creating logs or starting another component.
+  const masterListeners = owned(38765), modelListeners = owned(11435);
+  if (masterListeners.length) await checkRunningProcess(manifest);
   const env = { ...process.env, AURORA_MASTER_STATE: state, AURORA_ORG_ID: fs.readFileSync(path.join(state, 'organization.txt'), 'utf8').trim(), OLLAMA_HOST: '127.0.0.1:11435', OLLAMA_NO_CLOUD: '1', OLLAMA_MODELS: path.join(root, 'components', 'ollama-models'), OLLAMA_CONTEXT_LENGTH: '8192', OLLAMA_NUM_PARALLEL: '1', OLLAMA_MAX_LOADED_MODELS: '1', OLLAMA_KEEP_ALIVE: '5m', OLLAMA_ORIGINS: 'http://127.0.0.1:38765' };
   for (const entry of [{ port: 11435, exe: runtime, args: ['serve'], name: 'ollama' }, { port: 38765, exe: process.execPath, args: [path.join(__dirname, 'server.cjs')], name: 'ia-master' }]) {
-    if (owned(entry.port).length) continue;
+    if ((entry.port === 38765 ? masterListeners : modelListeners).length) continue;
     const out = fs.openSync(path.join(state, entry.name + '.out.log'), 'a'), err = fs.openSync(path.join(state, entry.name + '.err.log'), 'a');
     const child = spawn(entry.exe, entry.args, { detached: true, windowsHide: true, env, stdio: ['ignore', out, err] });
     child.on('error', () => console.error('LOCAL_COMPONENT_START_FAILED'));
@@ -89,12 +116,16 @@ function stop(disableStartup) {
   }
   console.log('AURORA_IA_MASTER_STOPPED_DATA_PRESERVED');
 }
-(async () => {
+module.exports = { assessRunningProcess, start };
+if (require.main === module) (async () => {
   switch (process.argv[2]) {
     case 'install': install(process.argv[3]); break;
-    case 'start': start(); break;
+    case 'start': await start(); break;
     case 'pair': await pair(); break;
     case 'stop': stop(process.argv[3] === '--disable-startup'); break;
     default: throw Error('EXPLICIT_OPERATION_REQUIRED');
   }
-})().catch(() => { console.error('AURORA_LOCAL_MANAGEMENT_FAILED'); process.exitCode = 1; });
+})().catch(error => {
+  console.error(['LOCAL_PROCESS_RELEASE_UNVERIFIED', 'LOCAL_PROCESS_RELEASE_CONFLICT', 'PORT_OWNED_BY_DIFFERENT_COMPONENT'].includes(error.message) ? error.message : 'AURORA_LOCAL_MANAGEMENT_FAILED');
+  process.exitCode = 1;
+});

@@ -43,12 +43,39 @@ async function localChat(prompt, knowledge) {
     durationMs: Math.round((result.total_duration || 0) / 1e6), model: MODEL };
 }
 
-function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = localChat, now = () => Date.now(), knowledge = '' }) {
+function observeProcessManifest(readManifest) {
+  const unknown = status => Object.freeze({ status, activeReleasePin: 'NOT_OBSERVED', fileIntegrityVerified: false, deviceInstallationVerified: false });
+  let bytes;
+  try { bytes = readManifest(); } catch { return unknown('PROCESS_MANIFEST_UNAVAILABLE'); }
+  try {
+    const manifest = JSON.parse(bytes.toString());
+    if (manifest?.component !== 'AURORA_IA_MASTER' || manifest.version !== VERSION ||
+        !/^[a-f0-9]{40}$/.test(manifest.sourceRevision) || typeof manifest.dirty !== 'boolean' ||
+        manifest.externalAiEnabled !== false) return unknown('INVALID_PROCESS_MANIFEST');
+    // Captured once, rather than rereading a replaced installation on each request.
+    // This is process metadata; it does not establish a protected cloud pin or installation receipt.
+    return Object.freeze({ status: manifest.dirty ? 'UNREVIEWED_PROCESS_MANIFEST' : 'PROCESS_MANIFEST_OBSERVED',
+      component: manifest.component, version: manifest.version, sourceRevision: manifest.sourceRevision,
+      manifestSha256: hash(bytes), dirty: manifest.dirty, activeReleasePin: 'NOT_OBSERVED',
+      fileIntegrityVerified: false, deviceInstallationVerified: false });
+  } catch { return unknown('INVALID_PROCESS_MANIFEST'); }
+}
+async function localModelState() {
+  try {
+    const response = await fetch(OLLAMA + '/api/tags', { redirect: 'error', signal: AbortSignal.timeout(1500) });
+    if (response.ok) return (await response.json()).models?.some(m => m.name === MODEL) ? 'AVAILABLE' : 'MODEL_NOT_INSTALLED';
+  } catch { /* Local failure stays explicit; no external fallback. */ }
+  return 'UNAVAILABLE';
+}
+
+function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = localChat, now = () => Date.now(), knowledge = '',
+  readManifest = () => fs.readFileSync(path.join(__dirname, 'manifest.json')), readModelState = localModelState }) {
   if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(orgId) || !/^[\w-]{40,100}$/.test(controlToken)) throw Error('LOCAL_IDENTITY_REQUIRED');
   fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   const sessions = new Map(), tickets = new Map(), cache = new Map();
   const metrics = { nativeEvaluations: 0, localModelCalls: 0, cacheHits: 0, externalAiCalls: 0, externalTokens: 0 };
   const startedAt = new Date(now()).toISOString();
+  const processManifest = observeProcessManifest(readManifest);
   let busy = false;
   function audit(action, metadata = {}) {
     fs.appendFileSync(path.join(stateDir, 'audit.jsonl'), JSON.stringify({ at: new Date(now()).toISOString(), orgId, action, version: VERSION, ...metadata }) + '\n', { mode: 0o600 });
@@ -63,7 +90,7 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
     try {
       if (req.headers.host !== '127.0.0.1:' + server.address().port || !['127.0.0.1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) return send(403, { code: 'LOCAL_HOST_REQUIRED' });
       if (req.headers.origin && req.headers.origin !== origin) return send(403, { code: 'ORIGIN_REJECTED' });
-      if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'AURORA_IA_MASTER', version: VERSION });
+      if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'AURORA_IA_MASTER', version: VERSION, startedAt, processManifest });
       if (req.method === 'GET' && ['/', '/app.js', '/app.css'].includes(req.url)) {
         const name = { '/': 'index.html', '/app.js': 'app.js', '/app.css': 'app.css' }[req.url];
         return send(200, fs.readFileSync(path.join(__dirname, name), 'utf8'), { '/': 'text/html', '/app.js': 'text/javascript', '/app.css': 'text/css' }[req.url]);
@@ -97,11 +124,8 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
       }
       if (req.url === '/api/status' && req.method === 'GET') {
         let modelState = 'UNAVAILABLE';
-        try {
-          const r = await fetch(OLLAMA + '/api/tags', { redirect: 'error', signal: AbortSignal.timeout(1500) });
-          if (r.ok) modelState = (await r.json()).models?.some(m => m.name === MODEL) ? 'AVAILABLE' : 'MODEL_NOT_INSTALLED';
-        } catch { /* Local failure stays explicit; no external fallback. */ }
-        return send(200, { version: VERSION, orgId, startedAt, model: MODEL, modelState, busy, metrics,
+        try { const observed = await readModelState(); if (['AVAILABLE', 'MODEL_NOT_INSTALLED'].includes(observed)) modelState = observed; } catch { /* No external fallback. */ }
+        return send(200, { version: VERSION, orgId, startedAt, processManifest, model: MODEL, modelState, busy, metrics,
           hardware: { logicalCpuCount: os.cpus().length, totalRamGiB: Math.round(os.totalmem() / 2**30), freeRamGiB: Math.round(os.freemem() / 2**30) },
           policy: IA_MASTER_POLICY, integrations: IA_MASTER_INTEGRATIONS, cloudSync: 'NOT_VERIFIED', operationalAuthority: 'FIREBASE_CANONICAL', selfDeployment: false });
       }

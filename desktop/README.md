@@ -107,3 +107,42 @@ OAuth externo ainda não implementado nem apresenta abertura de janela como logi
 A sessão mantém a duração e revogabilidade atuais. Este incremento não instala
 um agente cliente em segundo plano, não comprova failover físico/cloud e não
 altera o gerenciador existente da IA Master. O Mac original permanece preservado.
+
+### Continuidade beta.4 e migração do destino canônico
+
+O cliente permanece `0.2.0-beta.4`, no mesmo diretório e com os mesmos atalhos.
+A migração do HML histórico para `https://auroranexus.com.br/portal` aceita somente
+a identidade conhecida do instalador em `203670bc`, com seu manifesto anterior e
+hash de fonte exato (LF ou CRLF), ou a identidade canônica já reconhecida. Atalhos
+existentes devem corresponder ao Edge, diretório e destino dessa identidade.
+Outra versão, hash, política, promoção de gate ou modificação concorrente exige
+reconciliação; não autoriza sobrescrita.
+
+Antes de backup ou escrita, o probe sem sessão exige formulário de login completo
+no URL exato aberto pelo cliente, `/api/bootstrap` da mesma origem com
+`401 AUTH_REQUIRED` e `/__/firebase/init.json` da mesma origem com o projeto
+`wmgj-hml-jfn-20260927`. Não segue redirecionamentos e não usa a saúde do HML como
+prova do domínio canônico. O resultado registra apenas fatos limitados, nunca a
+configuração Firebase ou sua apiKey. Um título de login sozinho não satisfaz o gate.
+MFA, domínio autorizado, homologação autenticada e primeira transmissão continuam
+dependentes de evidência administrativa/operacional externa; esse probe não as comprova.
+
+Na migração, manifesto e atalhos têm backup verificável em
+`AuroraNexus/installation-rollbacks/<id>`; os atalhos são preparados antes da troca
+e o manifesto é o último marcador de commit. Falha durante a troca restaura somente
+arquivos ainda correspondentes à tentativa. Um lock existente ou mudança concorrente
+bloqueia a escrita e preserva a evidência. Configurações e dados de integração permanecem
+no local existente; nenhum executor, serviço, sessão ou modelo é iniciado.
+
+Para reverter uma migração concluída, use explicitamente o diretório de backup
+informado pelo instalador:
+
+```powershell
+python desktop/install_windows_beta.py rollback --backup "<diretorio-de-backup-informado>"
+```
+
+O rollback confere recibo, hashes, identidade e atalhos antes de restaurar os bytes
+anteriores. Não sobrescreve um cliente alterado depois da migração e não remove dados
+ou módulos de integração. Backups incompletos, de primeira instalação sem manifesto
+anterior ou modificados exigem revisão. Testes sintéticos, roundtrip WScript em diretório
+temporário no Windows e CI não representam atualização da instalação real nem login real.
