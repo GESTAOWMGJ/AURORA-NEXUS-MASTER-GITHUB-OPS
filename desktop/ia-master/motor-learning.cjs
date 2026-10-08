@@ -87,6 +87,16 @@ async function runLearningCycle({ stateDir, orgId, input, request, receiptKey, n
     return { ...verified, duplicate: false };
   } finally { fs.rmdirSync(lock); }
 }
+function readBoundedInput(inputPath) {
+  const stat = fs.lstatSync(inputPath);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32 * 1024)
+    fail('MOTOR_INPUT_FILE_REJECTED');
+  return JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+}
+function assertAuthenticatedServiceTenant(service, orgId) {
+  if (!service || service.orgId !== orgId)
+    fail('MOTOR_SERVICE_TENANT_MISMATCH');
+}
 async function main() {
   if (process.argv.length !== 3 || !path.isAbsolute(process.argv[2])) fail('MOTOR_ABSOLUTE_INPUT_REQUIRED');
   const stateDir = process.env.AURORA_MASTER_STATE;
@@ -95,10 +105,7 @@ async function main() {
   const receiptKey = fs.readFileSync(path.join(stateDir, 'control.key'), 'utf8').trim();
   // Bound untrusted disk input before allocating/parsing JSON.
   const inputPath = process.argv[2];
-  const stat = fs.lstatSync(inputPath);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32 * 1024)
-    fail('MOTOR_INPUT_FILE_REJECTED');
-  const input = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+  const input = readBoundedInput(inputPath);
   // Bind the authenticated loopback server's tenant to this local state.
   const endpoint = 'http://127.0.0.1:38765';
   const headers = { Authorization: 'Bearer ' + receiptKey, 'Content-Type': 'application/json', 'X-Aurora-Local': '1' };
@@ -108,7 +115,7 @@ async function main() {
   });
   if (!status.ok) fail('MOTOR_SERVICE_AUTH_REJECTED');
   const service = await status.json();
-  if (service?.orgId !== orgId) fail('MOTOR_SERVICE_TENANT_MISMATCH');
+  assertAuthenticatedServiceTenant(service, orgId);
   const result = await runLearningCycle({ stateDir, orgId, input, receiptKey, request: async body => {
     const response = await fetch(endpoint + '/api/improve', {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(190000),
@@ -126,4 +133,4 @@ async function main() {
   }));
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
-module.exports = { runLearningCycle, assertInput };
+module.exports = { runLearningCycle, assertInput, readBoundedInput, assertAuthenticatedServiceTenant };
