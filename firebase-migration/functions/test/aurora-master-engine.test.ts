@@ -209,3 +209,15 @@ test("HML provisioning verify loop requires the master engine exactly once", () 
   assert.ok(required.includes("auroraNexusNativeInsight"));
   assert.match(verify, /grep -Fq "\$fn" \|\| fail 80 VERIFY_FUNCTIONS/);
 });
+
+
+test("the same master exposes hourly updater intent without granting execution or claiming installation", () => {
+  const result = buildMasterOperationalState(projection, {}, now) as any;
+  assert.equal(result.routines.updaterPolicy.checkIntervalMs, 3_600_000);
+  assert.equal(result.routines.updaterPolicy.coordinatorState, "LEGACY_MIRRORED");
+  assert.equal(result.routines.updaterPolicy.nativeBinaryUpdaterVerified, false);
+  assert.equal(result.routines.updaterPolicy.oneExecutorPerEffect, true);
+  assert.equal(result.governance.arbitraryCodeExecution, false);
+  assert.equal(result.externalProviderUsed, false);
+  assert.ok(result.commandSurface.every((item: any) => item.executionAllowed === false));
+});

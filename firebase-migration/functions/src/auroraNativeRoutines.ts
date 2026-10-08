@@ -1,3 +1,6 @@
+// One cadence for the hosted maintenance registry and existing web updater.
+export const AURORA_UPDATER_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
 export type NativeRoutineState =
   | "NATIVE_ACTIVE"
   | "NATIVE_EVENT"
@@ -29,7 +32,7 @@ export const AURORA_NATIVE_ROUTINES: readonly NativeRoutine[] = Object.freeze([
   { id: "AURORA-USER-PROFILES-001", module: "M09", name: "Criação e revogação governada de perfis", cadence: "ON_DEMAND", trigger: "AUTHENTICATED_ADMIN_MFA", state: "NATIVE_GOVERNED", tenantScope: "PER_ORG", humanGate: true, sourceMutation: false },
   { id: "AURORA-PROFESSIONAL-ONBOARDING-001", module: "M09", name: "Cadastro profissional e acolhimento com SLA", cadence: "EVENT_DRIVEN", trigger: "MASTER_ISSUED_ONE_USE_INVITATION_AND_VERIFIED_MFA", state: "NATIVE_GOVERNED", tenantScope: "PER_ORG", humanGate: true, sourceMutation: false },
   { id: "AURORA-CANONICAL-RELEASE-001", module: "M10", name: "Referência única de versão e confirmação de atualização", cadence: "EVENT_DRIVEN", trigger: "REVIEWED_PROTECTED_RELEASE_PROMOTION_AND_CONNECTED_CLIENT_CHECK", state: "NATIVE_GOVERNED", tenantScope: "PLATFORM", humanGate: true, sourceMutation: false },
-  { id: "AURORA-DAILY-UPDATES-001", module: "M10", name: "Manutenção de cliente, web e mobile", cadence: "DAILY", trigger: "EXISTING_HOSTED_MAINTENANCE", state: "LEGACY_MIRRORED", tenantScope: "PLATFORM", humanGate: true, sourceMutation: false },
+  { id: "AURORA-DAILY-UPDATES-001", module: "M10", name: "AURORA Updater integrado", cadence: "HOURLY", trigger: "EXISTING_HOSTED_MAINTENANCE", state: "LEGACY_MIRRORED", tenantScope: "PLATFORM", humanGate: true, sourceMutation: false },
   { id: "AURORA-INSTALL-INTEGRATION-001", module: "M08", name: "Instalação e conexão canônica retomável", cadence: "ON_DEMAND", trigger: "INSTALLER_EXPLICIT_CONNECTION_OR_SAMPLE", state: "NATIVE_GOVERNED", tenantScope: "PER_ORG", humanGate: true, sourceMutation: false },
   { id: "AURORA-TECH-AUDIT-WEEKLY", module: "M10", name: "Auditoria técnica semanal", cadence: "WEEKLY_ORG_CONFIG", trigger: "SCHEDULE_OR_MANUAL", state: "NATIVE_GOVERNED", tenantScope: "PLATFORM", humanGate: true, sourceMutation: false },
   { id: "WMGJ-LEGACY-CYCLE-AUTONOMOUS", module: "M08", name: "Perfil legado autônomo Gmail/fiscal/financeiro (alternativo)", cadence: "DAILY_07_15_12_15_18_30_LOCAL", trigger: "APPS_SCRIPT_PROFILE", state: "LEGACY_MIRRORED", tenantScope: "PER_ORG", humanGate: false, sourceMutation: false },
@@ -48,7 +51,7 @@ export function nativeRoutineSummary(): Record<string, unknown> {
     return acc;
   }, { NATIVE_ACTIVE: 0, NATIVE_EVENT: 0, NATIVE_GOVERNED: 0, LEGACY_MIRRORED: 0 });
   return {
-    registryVersion: 2,
+    registryVersion: 3,
     source: "AURORA-MO-001",
     referenceTenant: "WMGJ",
     organism: {
@@ -65,6 +68,26 @@ export function nativeRoutineSummary(): Record<string, unknown> {
     },
     routines: AURORA_NATIVE_ROUTINES,
     counts,
+    updaterPolicy: {
+      version: 1,
+      routineId: "AURORA-DAILY-UPDATES-001",
+      coordinatorState: "LEGACY_MIRRORED",
+      checkIntervalMs: AURORA_UPDATER_CHECK_INTERVAL_MS,
+      releaseAuthorityRoutineId: "AURORA-CANONICAL-RELEASE-001",
+      intendedCoverage: ["CLOUD_ENGINE", "PHYSICAL_IA_MASTER", "WINDOWS_CLIENT", "MACOS_CLIENT", "WEB", "IOS_PWA", "ANDROID_PWA"],
+      nativeMobileSupport: "ONLY_WHEN_IMPLEMENTED_AND_VALIDATED",
+      webMechanism: "EXISTING_WEB_UPDATE_CLIENT",
+      binaryMechanism: "EXISTING_PLATFORM_UPDATER_WITH_VERIFIED_RELEASE",
+      nativeBinaryUpdaterVerified: false,
+      onlyChangedArtifacts: true,
+      oneExecutorPerEffect: true,
+      deviceAndCloudGatesIndependent: true,
+      completionRequiresPerDestinationReceipt: true,
+      baselineIdentityAndRollbackRequired: true,
+      forceReloadAllowed: false,
+      tenantRawDataTransferAllowed: false,
+      heavyComputeTarget: "AUTHORIZED_PHYSICAL_SERVER"
+    },
     ingestionRecoveryPolicy: {
       version: 2,
       source: "AURORA-MO-001",

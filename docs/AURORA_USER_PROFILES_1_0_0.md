@@ -45,3 +45,8 @@ O atualizador web/PWA agora verifica o service worker na abertura e a cada 24 ho
 Clientes que abrem o portal recebem seu código web quando acessam o destino funcional. Atualização binária de Mac/Windows exige baseline inspecionada, pacote confiável, backup, troca no mesmo destino e teste nativo. O Mac original segue offline; não foi substituído. Não há evidência de aplicação nativa iOS/Android nem validação em dispositivo mobile: a cobertura implementada aqui é PWA e ainda exige teste real nas duas plataformas.
 
 Fontes técnicas: https://firebase.google.com/docs/auth/web/totp-mfa e https://developer.mozilla.org/en-US/docs/Web/API/ServiceWorkerRegistration/updateViaCache. Dependências não são atualizadas cegamente; a rotina consulta avisos oficiais e valida compatibilidade antes da promoção.
+
+
+### Revisão de cadência — 08/10/2026
+
+A manutenção acima descrita historicamente como diária passou a horária na rotina hospedada existente. O ID `AURORA-DAILY-UPDATES-001` é preservado e segue `LEGACY_MIRRORED`. O `webUpdateClient` foi alinhado a uma hora, mantendo pausa, retomada, retry de 15 minutos e preservação do trabalho em andamento. A descrição anterior de 24 horas é histórica; política atual em AURORA-MO-001, seção 24. Isso não constitui instalação ou publicação já verificada por plataforma.

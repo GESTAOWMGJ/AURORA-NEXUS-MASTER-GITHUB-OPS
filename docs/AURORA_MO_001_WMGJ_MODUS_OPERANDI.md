@@ -688,3 +688,16 @@ Registro nativo, Release Cockpit e seção IA Master representam a capacidade; s
 presença não comprova dispositivo conectado, integração autenticada ou deploy.
 Instalação, teste físico e publicação exigem evidências separadas por SHA.
 Procedimento e limites: `desktop/ia-master/README.md`.
+
+
+## 24. Updater integrado permanente — revisão de 08/10/2026
+
+A rotina `AURORA-DAILY-UPDATES-001` conserva seu ID histórico e o executor hospedado existente, mas passa à cadência `HOURLY`, sob o nome AURORA Updater integrado. Permanece `LEGACY_MIRRORED`: não foi criado outro scheduler nem comprovado um serviço binário nativo por esta mudança. A autorização anterior cobre versões futuras dentro do escopo validado, sem reconfirmação redundante.
+
+O mesmo `webUpdateClient()` já usado no login e no portal consulta o service worker na abertura, em intervalos de uma hora de uso visível/conectado e na retomada quando a verificação está vencida. Falha transitória mantém retry de 15 minutos. Eventos simultâneos usam a mesma operação/timer; eventos antes do prazo não repetem a chamada de atualização. Sem reload forçado, cache de dados privados, nova sessão ou coleta de credenciais. Não se promete execução com navegador/app fechado ou sem suporte a service worker.
+
+A política entra no registro existente, na projeção e no Motor Mestre compartilhado. Cobertura pretendida: motor cloud, IA Master físico, Windows, macOS, web e PWA em iOS/Android. Aplicativos móveis nativos exigem caminho implementado e teste próprio. O registro expressa intenção e limites; não instala binários nem comprova atualização em cada destino. A autoridade da versão vigente continua em `AURORA-CANONICAL-RELEASE-001`, não no maior número de versão ou último commit.
+
+Atualizar apenas artefatos alterados e compatíveis, com identidade preservada, gates/backup/rollback e recibo por destino. Xeon autorizado executa cargas pesadas; MacBook continua interface leve. A retomada de ingestão/know-how mantém seu checkpoint sem segundo executor do mesmo efeito. Dado bruto e regra privada não cruzam tenants.
+
+Aceite de código: testes do JavaScript emitido, pausa/reconexão/retry/concorrência, propagação para projeção e Motor Mestre e TypeScript. Deploy, login real, atualização binária, ingestão e sincronização cloud permanecem aceites independentes. Rollback: reverter o incremento de código e política, sem apagar fontes, corpus ou checkpoints.

@@ -19,7 +19,7 @@ test("rotinas legadas ficam espelhadas até migração e nunca são fingidas com
   assert.ok(legacy.every((item) => item.id.startsWith("WMGJ-LEGACY-") || item.id === "AURORA-DAILY-UPDATES-001"));
   const maintenance = legacy.find(item => item.id === "AURORA-DAILY-UPDATES-001");
   assert.equal(maintenance?.trigger, "EXISTING_HOSTED_MAINTENANCE");
-  assert.equal(maintenance?.cadence, "DAILY");
+  assert.equal(maintenance?.cadence, "HOURLY");
 });
 
 test("aprendizado orgânico promove capacidade, não dados entre clientes", () => {
@@ -89,4 +89,35 @@ test("AURORA self-sufficient engine docs and policy artifacts are present", () =
   assert.match(policy, /fallback de exceção/);
   assert.equal(kpi.kpis.external_ai_dependency_rate.target, 0.2);
   assert.equal(kpi.kpis.mttr.target_minutes, 60);
+});
+
+
+test("integrated updater reuses one legacy coordinator and keeps native deployment unverified", () => {
+  const summary = nativeRoutineSummary() as any;
+  const updater = summary.updaterPolicy;
+  assert.equal(summary.registryVersion, 3);
+  assert.equal(AURORA_NATIVE_ROUTINES.filter(item => item.id === updater.routineId).length, 1);
+  assert.equal(updater.coordinatorState, "LEGACY_MIRRORED");
+  assert.equal(updater.checkIntervalMs, 3_600_000);
+  assert.ok(AURORA_NATIVE_ROUTINES.some(item => item.id === updater.releaseAuthorityRoutineId));
+  assert.deepEqual(updater.intendedCoverage, ["CLOUD_ENGINE", "PHYSICAL_IA_MASTER", "WINDOWS_CLIENT", "MACOS_CLIENT", "WEB", "IOS_PWA", "ANDROID_PWA"]);
+  assert.equal(updater.nativeBinaryUpdaterVerified, false);
+  assert.equal(updater.nativeMobileSupport, "ONLY_WHEN_IMPLEMENTED_AND_VALIDATED");
+  assert.equal(updater.oneExecutorPerEffect, true);
+  assert.equal(updater.onlyChangedArtifacts, true);
+  assert.equal(updater.deviceAndCloudGatesIndependent, true);
+  assert.equal(updater.completionRequiresPerDestinationReceipt, true);
+  assert.equal(updater.baselineIdentityAndRollbackRequired, true);
+  assert.equal(updater.forceReloadAllowed, false);
+  assert.equal(updater.tenantRawDataTransferAllowed, false);
+});
+
+test("updater policy reaches the existing canonical projection without tenant data", () => {
+  const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
+  const a = buildProjection(empty, new Date("2026-10-08T06:00:00Z"), { orgId: "synthetic-a", competence: "2026-10" }) as any;
+  const b = buildProjection(empty, new Date("2026-10-08T06:00:00Z"), { orgId: "synthetic-b", competence: "2026-10" }) as any;
+  assert.deepEqual(a.nativeRoutines.updaterPolicy, b.nativeRoutines.updaterPolicy);
+  assert.equal(a.nativeRoutines.updaterPolicy.tenantRawDataTransferAllowed, false);
+  a.nativeRoutines.updaterPolicy.intendedCoverage.push("UNTRUSTED");
+  assert.ok(!(nativeRoutineSummary().updaterPolicy as any).intendedCoverage.includes("UNTRUSTED"));
 });
