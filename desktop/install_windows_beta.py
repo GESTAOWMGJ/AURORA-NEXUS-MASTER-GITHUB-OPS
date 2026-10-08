@@ -125,7 +125,7 @@ def install():
             except (OSError, ValueError):
                 continue
             if ((prior.get("portal") == BASE or prior.get("portal") in {TECHNICAL_SMOKE_BASE, TECHNICAL_SMOKE_BASE + "/"}) and prior.get("environment") == "HML"
-                    and prior.get("frontendPolicy") in {"PRESERVE_DEPLOYED_MAIN", "CANONICAL_PORTAL_SINGLE_ENTRY"}
+                    and (prior.get("frontendPolicy") == "PRESERVE_DEPLOYED_MAIN" or prior.get("frontendPolicy") == "CANONICAL_PORTAL_SINGLE_ENTRY")
                     and isinstance(prior.get("clientVersion"), str)):
                 compatible = True
                 break
