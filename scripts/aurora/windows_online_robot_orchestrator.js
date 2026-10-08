@@ -3,6 +3,8 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
+const { spawnSync } = require("node:child_process");
 
 const ROOT = process.cwd();
 const ACTIVE_DELIVERABLE = "2026.10.07-dev.2";
@@ -142,13 +144,139 @@ const semanticChecks = [
   }
 ];
 
+const executionRequested = process.argv.includes("--execute");
+const allowedScripts = new Map([
+  ["platform-unification-robot", "scripts/aurora/platform_unification_robot.js"],
+  ["certification-security-gate", "scripts/aurora/certification_security_gate.js"],
+  ["security-privacy-update-bot", "scripts/aurora/security_privacy_update_bot.js"],
+  ["organic-improvement-backlog", "scripts/aurora/generate_improvement_backlog.js"],
+  ["candidate-change-evaluator", "scripts/aurora/evaluate_candidate_change.js"]
+]);
+
+function hashText(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function parseJsonOutput(value) {
+  try {
+    return JSON.parse(value);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function executeRobot(robot) {
+  if (robot.command.startsWith("policy: ")) {
+    const relativePath = robot.command.slice("policy: ".length);
+    if (!requiredPolicies.includes(relativePath) || !exists(relativePath)) {
+      return { id: robot.id, kind: "policy", ok: false, path: relativePath, error: "POLICY_NOT_ALLOWLISTED_OR_MISSING" };
+    }
+    try {
+      const raw = readText(relativePath);
+      const policy = JSON.parse(raw);
+      return {
+        id: robot.id,
+        kind: "policy",
+        ok: true,
+        path: relativePath,
+        policyId: policy.id || policy.policyId || null,
+        version: policy.version || null,
+        contentHash: hashText(raw)
+      };
+    } catch (_error) {
+      return { id: robot.id, kind: "policy", ok: false, path: relativePath, error: "INVALID_POLICY_JSON" };
+    }
+  }
+
+  const relativePath = allowedScripts.get(robot.id);
+  if (!relativePath || robot.command !== `node ${relativePath}` || !exists(relativePath)) {
+    return { id: robot.id, kind: "node", ok: false, error: "SCRIPT_NOT_ALLOWLISTED_OR_MISSING" };
+  }
+
+  const run = spawnSync(process.execPath, [filePath(relativePath)], {
+    cwd: ROOT,
+    env: { ...process.env, AURORA_DRY_RUN: "1" },
+    encoding: "utf8",
+    windowsHide: true,
+    shell: false,
+    timeout: 120000,
+    maxBuffer: 4 * 1024 * 1024
+  });
+  const stdout = run.stdout || "";
+  const stderr = run.stderr || "";
+  const parsed = parseJsonOutput(stdout.trim());
+
+  return {
+    id: robot.id,
+    kind: "node",
+    ok: run.status === 0 && !run.error,
+    exitCode: run.status,
+    signal: run.signal || null,
+    outputHash: hashText(stdout),
+    evidenceScope: "READ_ONLY_CHECK",
+    candidateEvaluated: parsed?.candidate || null,
+    stderrHash: stderr ? hashText(stderr) : null,
+    reportedPassed: parsed && typeof parsed.passed === "boolean" ? parsed.passed : null,
+    error: run.error ? run.error.message : null
+  };
+}
+
+function currentRevision() {
+  const run = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: ROOT,
+    encoding: "utf8",
+    windowsHide: true,
+    shell: false
+  });
+  return run.status === 0 ? run.stdout.trim() : null;
+}
+
+const staticPassed = policyChecks.every((check) => check.ok) && semanticChecks.every((check) => check.ok);
+const receiptDir = process.env.AURORA_ROBOT_RECEIPT_DIR;
+const executionResults = [];
+let executionError = null;
+let lockPath = null;
+if (executionRequested) {
+  if (!staticPassed) executionError = "PREFLIGHT_FAILED";
+  else if (process.platform !== "win32") executionError = "WINDOWS_EXECUTION_REQUIRED";
+  else if (!receiptDir || !path.isAbsolute(receiptDir)) executionError = "ABSOLUTE_RECEIPT_DIRECTORY_REQUIRED";
+  else {
+    try {
+      for (const policy of requiredPolicies) JSON.parse(readText(policy));
+      fs.mkdirSync(receiptDir, { recursive: true });
+      const candidateLock = path.join(receiptDir, "orchestrator.lock");
+      const fd = fs.openSync(candidateLock, "wx");
+      lockPath = candidateLock;
+      try { fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })); }
+      finally { fs.closeSync(fd); }
+      for (const robot of robots) {
+        const entry = executeRobot(robot);
+        executionResults.push(entry);
+        if (!entry.ok || entry.reportedPassed === false) break;
+      }
+    } catch (error) {
+      executionError = error.code === "EEXIST" ? "EXECUTOR_BUSY" : "PREFLIGHT_OR_EXECUTION_FAILED";
+    }
+  }
+}
+const executionPassed = !executionRequested || (!executionError && executionResults.length === robots.length
+  && executionResults.every((entry) => entry.ok && entry.reportedPassed !== false));
+
 const result = {
   orchestrator: "AURORA_CLOUD_FAILSAFE_ROBOT_ORCHESTRATOR",
-  version: "1.3.0",
+  version: "1.4.1",
   activeDeliverable: ACTIVE_DELIVERABLE,
+  revision: currentRevision(),
   trigger: "CLOUD_HEALTH_OR_WINDOWS_XEON_ONLINE_CONFIRMED",
-  mode: "START_ALL_SAFE_ROBOTS_WITH_FAILOVER",
-  passed: policyChecks.every((check) => check.ok) && semanticChecks.every((check) => check.ok),
+  mode: executionRequested ? "RUN_ALLOWED_READ_ONLY_CHECKS" : "PLAN_ONLY",
+  executionRequested,
+  executionError,
+  evidenceScope: "READ_ONLY_SCRIPT_EXECUTION_AND_POLICY_VALIDATION",
+  operationalLoopsStarted: 0,
+  cloudFailoverVerified: false,
+  deploymentPerformed: false,
+  formalCertificationObtained: false,
+  passed: staticPassed && executionPassed,
   failoverPlan,
   startupOrder: robots,
   executionRules: [
@@ -163,8 +291,27 @@ const result = {
     "Do not declare certification obtained without formal certificate."
   ],
   policyChecks,
-  semanticChecks
+  semanticChecks,
+  executionResults
 };
+
+try {
+  if (executionRequested && lockPath) {
+    const receiptPath = path.join(receiptDir, `aurora-robot-run-${Date.now()}-${process.pid}.json`);
+    const temporaryPath = `${receiptPath}.tmp`;
+    fs.writeFileSync(temporaryPath, JSON.stringify(result, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+    fs.renameSync(temporaryPath, receiptPath);
+    result.receiptPath = receiptPath;
+  }
+} catch (_error) {
+  result.passed = false;
+  result.receiptError = "RECEIPT_WRITE_FAILED";
+} finally {
+  if (lockPath) {
+    try { fs.unlinkSync(lockPath); }
+    catch (_error) { result.passed = false; result.receiptError = "LOCK_RELEASE_FAILED"; }
+  }
+}
 
 console.log(JSON.stringify(result, null, 2));
 

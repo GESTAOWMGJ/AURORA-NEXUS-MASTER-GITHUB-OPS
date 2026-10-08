@@ -1,4 +1,4 @@
-# IA Master local — 1.0.0
+# IA Master local — 1.0.2
 
 Incremento AURORA-IA-MASTER-001, baseline `68467209b55f1f8e281ecb5d21acb9a8211757cf`.
 O titular solicitou usar o PC como servidor físico da IA dentro do mesmo AURORA.
@@ -12,6 +12,7 @@ existente. Não cria banco operacional nem substitui o aplicativo principal.
 - Modelo local: propostas de engenharia em português, com método AURORA-MO-001,
   cache em memória de 16 resultados e nenhuma chamada a provedores externos.
 - O método é contexto versionado, não treinamento de pesos nem memória autônoma.
+  O registro sanitizado privado fica em `integration/state/ia-master/knowledge/knowledge_registry.v1.json` e é selecionado por relevância, orçamento, versão e hash; troca de corpus invalida o cache.
   Propostas não executam comandos, não alteram fonte e não publicam releases.
 - Melhorias seguem patch isolado, testes, revisão, CI, HML e rollback existentes.
 - Integrações enumeradas são capacidades/receitas. Cada conexão no runtime exige
@@ -77,3 +78,23 @@ o atalho de inicialização verificado. Preserva dados, modelos, auditoria, clie
 integrações. Para retomar manualmente, usar `IA Master - Iniciar.cmd`.
 Reverter o PR restaura a seção/registro anterior no próximo deploy; não muda IAM,
 DNS, credenciais ou dados. A publicação HML continua sujeita aos gates existentes.
+
+## Incremento 1.0.2 — memoria limitada e proveniencia
+
+O carregador confere bytes e SHA-256 a cada leitura e reutiliza somente o corpus
+parseado e o indice normalizado de conteudo identico, limitado a um corpus em cache.
+Timestamp nao substitui hash. Arquivo ausente, alterado durante leitura ou invalido
+nao recupera copia obsoleta. A leitura tem teto de 4 MiB e 1000 registros.
+
+Licoes SUSPENDED/REJECTED/REVOKED/SUPERSEDED ou em estado desconhecido ficam fora
+do contexto. SPECIFIED pode servir apenas de referencia para propostas: estado,
+regressao NOT_RUN, runtimeVerified e ausencia de autoridade acompanham a licao.
+Limite de contexto inclui cabecalho e bytes UTF-8. Corpus configurado indisponivel
+suspende apenas a inferencia de propostas; nunca aciona provedor externo.
+Mudanca do corpus durante geracao retorna 409 retomavel e nao publica/cacheia a
+proposta obsoleta. APIs de status e previa nativa preservam suas fronteiras.
+
+Testes adicionais: `node --test desktop/ia-master/knowledge-registry.test.cjs`.
+Os testes HTTP permanecem em server.test.cjs, incluindo indisponibilidade do corpus
+e concorrencia entre geracao e atualizacao. Ganho de desempenho, CI e instalacao
+exigem recibos do SHA e do destino; esta secao nao declara implantacao.

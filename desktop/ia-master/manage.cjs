@@ -12,7 +12,7 @@ const startup = path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Me
 const sha = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 function verified() {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'manifest.json'), 'utf8'));
-  if (manifest.component !== 'AURORA_IA_MASTER' || manifest.version !== '1.0.0' || manifest.dirty !== false || !/^[a-f0-9]{40}$/.test(manifest.sourceRevision)) throw Error('REVIEWED_RELEASE_REQUIRED');
+  if (manifest.component !== 'AURORA_IA_MASTER' || manifest.version !== '1.0.2' || manifest.dirty !== false || !/^[a-f0-9]{40}$/.test(manifest.sourceRevision)) throw Error('REVIEWED_RELEASE_REQUIRED');
   for (const [name, digest] of Object.entries(manifest.files)) {
     if (name.includes('..') || path.isAbsolute(name) || name.includes(':') || sha(path.join(__dirname, name)) !== digest) throw Error('RELEASE_INTEGRITY_FAILED');
   }

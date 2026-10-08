@@ -56,6 +56,9 @@ jobs:
           npm ci --prefix firebase-migration/functions
           python3 desktop/ia-master/build.py --output "${RUNNER_TEMP}/aurora-ia-master"
           AURORA_TEST_BUILD="${RUNNER_TEMP}/aurora-ia-master" node --test desktop/ia-master/server.test.cjs
+          node --test desktop/ia-master/knowledge-registry.test.cjs
+          python3 -m unittest discover -s desktop/ia-master -p test_build.py
+          node --test scripts/aurora/windows_online_robot_orchestrator.runtime.test.cjs
       - name: Retain local IA Master candidate with exact source manifest
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
