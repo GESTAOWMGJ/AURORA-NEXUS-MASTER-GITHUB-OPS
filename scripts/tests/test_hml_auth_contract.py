@@ -184,6 +184,16 @@ curl() {
         names = [s.get("name") for s in deploy["steps"]]
         self.assertLess(names.index(critical[7]), names.index(critical[8]))
         self.assertLess(names.index(critical[8]), names.index(critical[10]))
+        deploy_step = next(s for s in deploy["steps"] if s.get("name") == critical[8])
+        runtime_account = "299889357292-compute@developer.gserviceaccount.com"
+        self.assertEqual(deploy_step["env"]["AURORA_RUNTIME_SERVICE_ACCOUNT"], runtime_account)
+        self.assertIn(f'test "$AURORA_RUNTIME_SERVICE_ACCOUNT" = "{runtime_account}"', deploy_step["run"])
+        self.assertIn('runtime_env="functions/.env.${PROJECT_ID}"', deploy_step["run"])
+        self.assertIn("trap 'rm -f -- \"$runtime_env\"' EXIT", deploy_step["run"])
+        self.assertIn(
+            'printf \'%s\\n\' "AURORA_RUNTIME_SERVICE_ACCOUNT=$AURORA_RUNTIME_SERVICE_ACCOUNT" > "$runtime_env"',
+            deploy_step["run"],
+        )
         smoke = load_workflow(WORKFLOWS / "aurora-hml-auth-smoke-once.yml")
         self.assertEqual(smoke["on"]["push"]["branches"], ["main"])
         self.assertEqual(smoke["jobs"]["smoke"]["environment"], "firebase-homologation")

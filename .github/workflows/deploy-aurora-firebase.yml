@@ -446,15 +446,21 @@ jobs:
           PROJECT_ID: ${{ inputs.project_id }}
           APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
           VALIDATED_SHA: ${{ needs.validate.outputs.candidate_sha }}
+          AURORA_RUNTIME_SERVICE_ACCOUNT: 299889357292-compute@developer.gserviceaccount.com
           AURORA_ACTIVE_RELEASE_PUBLIC_KEY: ${{ vars.AURORA_ACTIVE_RELEASE_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
           test "$PROJECT_ID" = "$APPROVED_PROJECT"
           test "$GITHUB_SHA" = "$VALIDATED_SHA"
+          test "$AURORA_RUNTIME_SERVICE_ACCOUNT" = "299889357292-compute@developer.gserviceaccount.com"
           test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
           git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
+          runtime_env="functions/.env.${PROJECT_ID}"
+          umask 077
+          trap 'rm -f -- "$runtime_env"' EXIT
+          printf '%s\n' "AURORA_RUNTIME_SERVICE_ACCOUNT=$AURORA_RUNTIME_SERVICE_ACCOUNT" > "$runtime_env"
           node scripts/verify-active-release-storage.mjs
           node - <<'NODE'
           const fs = require('node:fs');
