@@ -520,7 +520,7 @@ jobs:
             --write-out '%{http_code}' \
             "${technical_origin}/")"
           if [ "$technical_status" = "308" ]; then
-            technical_location="$(awk 'BEGIN { IGNORECASE=1 } /^location:/ { sub(/\r$/, ""); sub(/^[^:]*:[[:space:]]*/, ""); print; exit }' "$technical_headers")"
+            technical_location="$(awk 'tolower($0) ~ /^location:/ { sub(/\r$/, ""); sub(/^[^:]*:[[:space:]]*/, ""); print; exit }' "$technical_headers")"
             test "$technical_location" = "${canonical_origin}/portal"
           elif [ "$technical_status" = "200" ]; then
             grep -Fq 'location.replace("https://auroranexus.com.br/portal' "$technical_shell"

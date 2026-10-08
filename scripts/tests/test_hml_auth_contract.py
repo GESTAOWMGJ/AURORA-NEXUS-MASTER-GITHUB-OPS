@@ -134,6 +134,7 @@ class WorkflowStructureTests(unittest.TestCase):
         self.assertIn('--dump-header "$technical_headers"', negative)
         self.assertIn('--output "$technical_shell"', negative)
         self.assertIn('if [ "$technical_status" = "308" ]; then', negative)
+        self.assertIn("tolower($0) ~ /^location:/", negative)
         self.assertIn('test "$technical_location" = "${canonical_origin}/portal"', negative)
         self.assertIn('elif [ "$technical_status" = "200" ]; then', negative)
         self.assertIn("grep -Fq 'location.replace(\"https://auroranexus.com.br/portal'", negative)
@@ -180,7 +181,7 @@ curl() {
     esac
   done
   test "$last" = "${technical_origin}/"
-  printf 'HTTP/2 %s\\r\\nlocation: %s\\r\\n\\r\\n' "$TEST_TECHNICAL_STATUS" "$TEST_TECHNICAL_LOCATION" > "$headers"
+  printf 'HTTP/2 %s\\r\\nLocation: %s\\r\\n\\r\\n' "$TEST_TECHNICAL_STATUS" "$TEST_TECHNICAL_LOCATION" > "$headers"
   printf '%s' "$TEST_TECHNICAL_BODY" > "$output"
   printf '%s' "$TEST_TECHNICAL_STATUS"
 }
