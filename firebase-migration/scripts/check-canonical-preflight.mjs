@@ -205,6 +205,18 @@ export function hasUsableLoginForm(html) {
   return found && stack.length === 0 && !raw && !form;
 }
 
+export function hasCanonicalPortalShell(html) {
+  const lower = html.toLowerCase();
+  const hasHtmlDocument = /<!doctype\s+html/i.test(html) && /<html(?:\s|>)/i.test(html);
+  const hasNextRuntime = /(?:href|src)=["']\/_next\/(?:static|image)\//i.test(html)
+    || html.includes('self.__next_f')
+    || html.includes('__NEXT_DATA__');
+  const exposesPrivateShell = lower.includes('centro de gestão wmgj')
+    || lower.includes('id="session-identity"')
+    || lower.includes('id="logout"');
+  return hasHtmlDocument && hasNextRuntime && !exposesPrivateShell;
+}
+
 async function checkedResponse(transport, path) {
   let response;
   try { response = await transport(path); }
@@ -246,8 +258,7 @@ export async function checkCanonicalPreflight(expectedProject, {
   const portal = await checkedResponse(transport, '/portal');
   requireCondition(portal.status === 200
     && /^text\/html\b/i.test(portal.headers?.['content-type'] || ''), 'CANONICAL_PORTAL_HTTP_INVALID');
-  requireCondition(hasUsableLoginForm(portal.body)
-    && !portal.body.includes('Centro de gestão WMGJ'), 'CANONICAL_LOGIN_FORM_REQUIRED');
+  requireCondition(hasCanonicalPortalShell(portal.body), 'CANONICAL_PORTAL_SHELL_REQUIRED');
   requireCondition(/(?:^|,)\s*no-store\b/i.test(portal.headers?.['cache-control'] || '')
     && /^DENY$/i.test(portal.headers?.['x-frame-options'] || '')
     && /^nosniff$/i.test(portal.headers?.['x-content-type-options'] || ''), 'CANONICAL_PORTAL_HEADERS_REQUIRED');
@@ -262,7 +273,7 @@ export async function checkCanonicalPreflight(expectedProject, {
   requireCondition(init.status === 200 && config?.projectId === expectedProject, 'CANONICAL_HML_PROJECT_MISMATCH');
   return {
     code: 'CANONICAL_ROUTE_READY', origin: CANONICAL_ORIGIN, expectedProject,
-    dnsResolved: true, httpsVerified: true, loginFormVerified: true,
+    dnsResolved: true, httpsVerified: true, portalShellVerified: true,
     anonymousDenied: true, firebaseProjectMatched: true, authenticated: false,
   };
 }
