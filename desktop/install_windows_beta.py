@@ -28,7 +28,7 @@ from aurora_deployment import install_assets as install_integration_assets, read
 
 VERSION = "0.2.0-beta.4"
 BASE = "https://auroranexus.com.br/portal"
-TECHNICAL_SMOKE_BASE = "https://wmgj-hml-jfn-20260927.web.app"
+TECHNICAL_SMOKE_BASE = BASE
 SOURCE_SHA = "203670bc562bbb48694b08e55af363a07d90a8f5"
 AUTH_PROJECT = "wmgj-hml-jfn-20260927"
 MAX_BYTES = 262144
