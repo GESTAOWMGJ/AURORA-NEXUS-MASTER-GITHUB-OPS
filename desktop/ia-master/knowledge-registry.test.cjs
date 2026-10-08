@@ -60,8 +60,9 @@ test('missing source never serves previous cached records', t => {
 test('different paths do not share mutable corpus instances', t => {
   const a = fixture(t), b = fixture(t); assert.notStrictEqual(loadRegistry(a.file), loadRegistry(b.file));
 });
-test('schema rejects duplicate IDs, count mismatch and invalid arrays', t => {
-  const f = fixture(t); f.value.recordCount = 2; assert.throws(() => validateRegistry(f.value), /COUNT_MISMATCH/);
+test('schema rejects duplicate IDs and invalid arrays; count-only mismatch is advisory', t => {
+  const f = fixture(t); f.value.recordCount = 2; f.write();
+  assert.deepEqual(loadRegistry(f.file).warnings, ['DECLARED_COUNT_MISMATCH']); assert.equal(loadRegistry(f.file).records.length, 1);
   f.value.records.push(f.value.records[0]); assert.throws(() => validateRegistry(f.value), /DUPLICATE_ID/);
   f.value.records.pop(); f.value.recordCount = 1; f.value.records[0].procedure = ['safe', {}];
   assert.throws(() => validateRegistry(f.value), /ARRAY_INVALID/);

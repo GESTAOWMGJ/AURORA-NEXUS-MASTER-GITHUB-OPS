@@ -106,7 +106,7 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
         const registry = loadRegistry(registryPath);
         return send(200, { version: VERSION, orgId, startedAt, model: MODEL, modelState, busy, metrics,
           hardware: { logicalCpuCount: os.cpus().length, totalRamGiB: Math.round(os.totalmem() / 2**30), freeRamGiB: Math.round(os.freemem() / 2**30) },
-          knowledge: { status: registry.status, corpusVersion: registry.corpusVersion, corpusHash: registry.corpusHash, loadedCount: registry.records.length, rejectedCount: registry.rejectedCount, completeHistoricalAbsorption: registry.completeHistoricalAbsorption === true },
+          knowledge: { status: registry.status, warnings: registry.warnings || [], declaredCount: registry.declaredCount ?? null, corpusVersion: registry.corpusVersion, corpusHash: registry.corpusHash, loadedCount: registry.records.length, rejectedCount: registry.rejectedCount, completeHistoricalAbsorption: registry.completeHistoricalAbsorption === true },
           policy: IA_MASTER_POLICY, integrations: IA_MASTER_INTEGRATIONS, cloudSync: 'NOT_VERIFIED', operationalAuthority: 'FIREBASE_CANONICAL', selfDeployment: false });
       }
       if (req.method !== 'POST') return send(405, { code: 'METHOD_NOT_ALLOWED' });
@@ -147,7 +147,7 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
         if (cache.size >= 16) cache.delete(cache.keys().next().value);
         cache.set(fingerprint, proposal);
       }
-      const knowledgeReceipt = { status: selected.status, corpusVersion: selected.corpusVersion, corpusHash: selected.corpusHash, recordIds: selected.recordIds, loadedCount: selected.loadedCount ?? null, rejectedCount: selected.rejectedCount ?? null, completeHistoricalAbsorption: selected.completeHistoricalAbsorption === true };
+      const knowledgeReceipt = { status: selected.status, warnings: selected.warnings || [], contextBytes: selected.contextBytes ?? null, corpusVersion: selected.corpusVersion, corpusHash: selected.corpusHash, recordIds: selected.recordIds, loadedCount: selected.loadedCount ?? null, rejectedCount: selected.rejectedCount ?? null, completeHistoricalAbsorption: selected.completeHistoricalAbsorption === true };
       audit('ENGINEERING_PROPOSAL', { inputHash: fingerprint, outputHash: hash(proposal.text), corpusHash: selected.corpusHash, knowledgeRecordIds: selected.recordIds });
       return send(200, { proposal, proposalId: fingerprint, knowledge: knowledgeReceipt, state: 'PROPOSAL_ONLY', promotionGates: IA_MASTER_POLICY.promotionGates, externalAiCalls: 0, applied: false });
     } catch (error) {

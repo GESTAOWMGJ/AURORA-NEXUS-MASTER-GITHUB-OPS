@@ -24,7 +24,7 @@ function validateRegistry(value) {
   if (value.schemaVersion !== '1.0.0' || typeof value.version !== 'string' || !value.version || value.version.length > 64) throw Error('REGISTRY_VERSION_INVALID');
   if (value.classification !== 'INTERNAL_SANITIZED_METHODS') throw Error('REGISTRY_CLASSIFICATION_INVALID');
   if (!Array.isArray(value.records) || value.records.length > MAX_RECORDS) throw Error('REGISTRY_RECORDS_INVALID');
-  if (value.recordCount !== undefined && value.recordCount !== value.records.length) throw Error('REGISTRY_COUNT_MISMATCH');
+  if (value.recordCount !== undefined && (!Number.isSafeInteger(value.recordCount) || value.recordCount < 0)) throw Error('REGISTRY_COUNT_INVALID');
   const ids = new Set();
   for (const record of value.records) {
     if (!record || typeof record !== 'object' || Array.isArray(record) || !/^[A-Z0-9-]{3,64}$/.test(record.id || '')) throw Error('REGISTRY_RECORD_INVALID');
@@ -79,7 +79,8 @@ function loadRegistry(filePath) {
       for (const key of ['procedure', 'limits', 'sourceRefs', 'prompt', 'regression']) if (record[key] && typeof record[key] === 'object') Object.freeze(record[key]);
       Object.freeze(record);
     }
-    const registry = Object.freeze({ status: 'LOADED', corpusHash, corpusVersion: parsed.version,
+    const warnings = Object.freeze(parsed.recordCount !== undefined && parsed.recordCount !== parsed.records.length ? ['DECLARED_COUNT_MISMATCH'] : []);
+    const registry = Object.freeze({ status: 'LOADED', corpusHash, corpusVersion: parsed.version, warnings, declaredCount: parsed.recordCount ?? null,
       coverage: parsed.coverage || null, completeHistoricalAbsorption: parsed.completeHistoricalAbsorption === true,
       records: Object.freeze(records), totalCount: parsed.records.length, rejectedCount: parsed.records.length - records.length });
     cached = { path: resolved, hash: corpusHash, registry };
@@ -104,10 +105,10 @@ function selectKnowledge(registry, prompt, budget = DEFAULT_BUDGET) {
   if (!Number.isSafeInteger(budget) || budget < 0 || budget > DEFAULT_BUDGET) throw Error('CONTEXT_BUDGET_INVALID');
   const base = { context: '', recordIds: [], corpusHash: registry?.corpusHash || null, corpusVersion: registry?.corpusVersion || null,
     status: registry?.status || 'DISABLED', loadedCount: registry?.records?.length || 0, rejectedCount: registry?.rejectedCount || 0,
-    completeHistoricalAbsorption: registry?.completeHistoricalAbsorption === true, contextBytes: 0 };
+    completeHistoricalAbsorption: registry?.completeHistoricalAbsorption === true, warnings: registry?.warnings || [], contextBytes: 0 };
   if (!registry || registry.status !== 'LOADED') return base;
   const header = JSON.stringify({ corpusVersion: registry.corpusVersion, corpusHash: registry.corpusHash,
-    coverage: registry.coverage, completeHistoricalAbsorption: registry.completeHistoricalAbsorption });
+    coverage: registry.coverage, warnings: registry.warnings || [], completeHistoricalAbsorption: registry.completeHistoricalAbsorption });
   let size = Buffer.byteLength(header, 'utf8');
   if (size > budget) return { ...base, status: 'CONTEXT_BUDGET_TOO_SMALL' };
   const queryTokens = tokens(prompt), normalizedPrompt = normalize(prompt);

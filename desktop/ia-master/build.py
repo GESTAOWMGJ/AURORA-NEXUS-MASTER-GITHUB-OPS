@@ -11,6 +11,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def build(output):
     output = Path(output).resolve()
+    archive = output.parent / (output.name + '.zip')
+    if archive.exists():
+        raise FileExistsError('ARCHIVE_ALREADY_EXISTS: ' + str(archive))
     output.mkdir(parents=True, exist_ok=False)
     functions = ROOT / 'firebase-migration/functions'
     subprocess.run(['node', str(functions / 'node_modules/typescript/bin/tsc'),
@@ -29,8 +32,7 @@ def build(output):
                 'files': {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
                           for p in sorted(output.rglob('*')) if p.is_file()}}
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-    archive = output.with_suffix('.zip')
-    with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as z:
+    with zipfile.ZipFile(archive, 'x', zipfile.ZIP_DEFLATED) as z:
         for p in sorted(output.rglob('*')):
             if p.is_file(): z.write(p, p.relative_to(output))
     print(json.dumps({'archive': str(archive), 'sha256': hashlib.sha256(archive.read_bytes()).hexdigest(), 'sourceRevision': revision, 'dirty': dirty}))
