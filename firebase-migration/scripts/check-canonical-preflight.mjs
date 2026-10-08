@@ -265,11 +265,13 @@ export async function checkCanonicalPreflight(expectedProject, {
     && /^DENY$/i.test(portal.headers?.['x-frame-options'] || '')
     && /^nosniff$/i.test(portal.headers?.['x-content-type-options'] || ''), 'CANONICAL_PORTAL_HEADERS_REQUIRED');
 
-  const init = await checkedResponse(transport, '/__/firebase/init.json');
-  const config = jsonBody(init, 'CANONICAL_HML_PROJECT_MISMATCH');
-  requireCondition(init.status === 200 && config?.projectId === expectedProject, 'CANONICAL_HML_PROJECT_MISMATCH');
   let anonymousDenied = false;
+  let firebaseProjectMatched = false;
   if (scope !== ROUTING_ONLY_SCOPE) {
+    const init = await checkedResponse(transport, '/__/firebase/init.json');
+    const config = jsonBody(init, 'CANONICAL_HML_PROJECT_MISMATCH');
+    requireCondition(init.status === 200 && config?.projectId === expectedProject, 'CANONICAL_HML_PROJECT_MISMATCH');
+    firebaseProjectMatched = true;
     const bootstrap = await checkedResponse(transport, '/api/bootstrap');
     const anonymous = jsonBody(bootstrap, 'CANONICAL_ANONYMOUS_DENIAL_REQUIRED');
     requireCondition(bootstrap.status === 401 && anonymous?.ok === false
@@ -279,7 +281,7 @@ export async function checkCanonicalPreflight(expectedProject, {
   return {
     code: 'CANONICAL_ROUTE_READY', origin: CANONICAL_ORIGIN, expectedProject,
     dnsResolved: true, httpsVerified: true, portalShellVerified: true,
-    anonymousDenied, firebaseProjectMatched: true, authenticated: false,
+    anonymousDenied, firebaseProjectMatched, authenticated: false,
   };
 }
 
