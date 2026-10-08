@@ -459,6 +459,9 @@ jobs:
           node - <<'NODE'
           const fs = require('node:fs');
           const {createPublicKey} = require('node:crypto');
+          if (process.env.PROJECT_ID !== 'wmgj-hml-jfn-20260927') throw Error('HML_RUNTIME_PROJECT_MISMATCH');
+          fs.appendFileSync('functions/.env.' + process.env.PROJECT_ID,
+            'AURORA_RUNTIME_SERVICE_ACCOUNT=299889357292-compute@developer.gserviceaccount.com\n');
           const key = process.env.AURORA_ACTIVE_RELEASE_PUBLIC_KEY;
           if (key) {
             if (createPublicKey(key).asymmetricKeyType !== 'ed25519') throw Error('INVALID_RELEASE_PUBLIC_KEY');
