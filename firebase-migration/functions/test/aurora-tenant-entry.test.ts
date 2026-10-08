@@ -58,8 +58,8 @@ test("authenticated navigation converges to the canonical portal; anonymous and 
     const anonymous = await invoke(path, false);
     assert.equal(anonymous.status, 200);
     assert.match(anonymous.html, /<title>Aurora Nexus \| Login<\/title>/);
-    assert.match(anonymous.html, /wmgj-hml-jfn-20260927\\.web\\.app/);
-    assert.match(anonymous.html, /location\\.replace\("https:\\/\\/auroranexus\\.com\\.br\\/portal/);
+    assert.match(anonymous.html, /wmgj-hml-jfn-20260927\.web\.app/);
+    assert.match(anonymous.html, /location\.replace\("https:\/\/auroranexus\.com\.br\/portal/);
     assert.doesNotMatch(anonymous.html, /id="session-identity"/);
   }
   const foreign = await invoke("/other-company");
