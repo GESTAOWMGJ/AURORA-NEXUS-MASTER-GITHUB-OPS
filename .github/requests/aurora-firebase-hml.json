@@ -2,11 +2,11 @@
   "requestVersion": 1,
   "confirmation": "DEPLOY_HOMOLOGATION",
   "projectId": "wmgj-hml-jfn-20260927",
-  "authorizedScope": "PR123_INGESTION_VERSIONING",
-  "expectedSourceSha": "b5843f171629375672ff783ce414f2d2e97d2a5e",
+  "authorizedScope": "PR115_HML_AUTH_CONTRACT_FIX",
+  "expectedSourceSha": "cce30d2b8f5c87a0fe2664426df5e0c550ba1400",
   "sourceMutation": false,
   "productionMutation": false,
   "clinicalSensitiveEnabled": false,
-  "requestedAt": "2026-10-04",
-  "requestReason": "OWNER_AUTHORIZED_BETA_FULL_HML_AFTER_PR127"
+  "requestedAt": "2026-10-07",
+  "requestReason": "OWNER_AUTHORIZED_HML_AUTH_MESSAGES_AFTER_PR180"
 }
