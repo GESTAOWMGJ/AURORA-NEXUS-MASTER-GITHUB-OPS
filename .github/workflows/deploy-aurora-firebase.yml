@@ -489,47 +489,54 @@ jobs:
             [$functions[] | (.id // .name // "") | split("/")[-1]] as $deployed |
             all($expected[]; . as $name | $deployed | index($name) != null)
           ' <<<"$functions" >/dev/null
-          shell="$(curl --fail --silent --show-error --max-time 30 "https://${PROJECT_ID}.web.app/")"
+          canonical_origin="https://auroranexus.com.br"
+          technical_origin="https://${PROJECT_ID}.web.app"
+          shell="$(curl --fail --silent --show-error --max-time 30 "${canonical_origin}/portal")"
           grep -Fq "Ambiente privado" <<<"$shell"
           if grep -Fq "Centro de gestão WMGJ" <<<"$shell"; then
             echo "Protected shell was exposed without login" >&2
             exit 90
           fi
+          technical_probe="$(curl --silent --show-error --max-time 30 \
+            --output /dev/null \
+            --write-out '%{http_code} %{redirect_url}' \
+            "${technical_origin}/")"
+          test "$technical_probe" = "308 ${canonical_origin}/portal"
           negative_response="$(mktemp "${RUNNER_TEMP}/aurora-negative-smoke.XXXXXX.json")"
           trap 'rm -f "$negative_response"' EXIT
           bootstrap_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
-            "https://${PROJECT_ID}.web.app/api/bootstrap")"
+            "${canonical_origin}/api/bootstrap")"
           test "$bootstrap_status" = "401"
           jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
           native_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
-            "https://${PROJECT_ID}.web.app/api/native-insight?intent=EXECUTIVE")"
+            "${canonical_origin}/api/native-insight?intent=EXECUTIVE")"
           test "$native_status" = "401"
           jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
           master_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
-            "https://${PROJECT_ID}.web.app/api/master-engine")"
+            "${canonical_origin}/api/master-engine")"
           test "$master_status" = "401"
           jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
           organic_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
-            "https://${PROJECT_ID}.web.app/organic?format=json")"
+            "${canonical_origin}/organic?format=json")"
           test "$organic_status" = "401"
           jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
           shareholder_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
-            "https://${PROJECT_ID}.web.app/reports/shareholders?format=json&competence=2026-10")"
+            "${canonical_origin}/reports/shareholders?format=json&competence=2026-10")"
           test "$shareholder_status" = "401"
           jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
           distribution_status="$(curl --silent --show-error --max-time 30 \
@@ -538,7 +545,7 @@ jobs:
             --data '{"competence":"2026-10","snapshotHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","decision":"REJECT","reason":"negative smoke","expectedRevision":0}' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
-            "https://${PROJECT_ID}.web.app/api/distribution-approval")"
+            "${canonical_origin}/api/distribution-approval")"
           test "$distribution_status" = "401"
           jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
       - name: Verify user profile API rejects anonymous access
@@ -547,7 +554,7 @@ jobs:
         run: |
           set -euo pipefail
           for method in GET POST; do
-            status="$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' --request "$method" "https://${PROJECT_ID}.web.app/api/user-profiles")"
+            status="$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' --request "$method" "https://auroranexus.com.br/api/user-profiles")"
             test "$status" = "401"
           done
 
@@ -647,7 +654,7 @@ jobs:
           fi
           echo "AUTH_SMOKE_UID_VERIFIED"
 
-          base_url="https://${PROJECT_ID}.web.app"
+          base_url="https://auroranexus.com.br"
           jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$session_payload"
           curl --fail --silent --show-error --max-time 30 \
             -X POST \
