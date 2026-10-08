@@ -97,6 +97,59 @@ test('commented controls, scripts and disabled fieldsets do not prove a usable f
   }
 });
 
+test('removal and reparsing payloads cannot create form or control tokens', () => {
+  for (const html of [
+    '<scr<script>ignored</script>ipt>' + form + '</script>',
+    '<fo<!-- ignored -->rm id="login-form">' + form + '</form>',
+    '<form id="login-form"><input na<!-- ignored -->me="email" type="email"><input name="password" type="password"><button id="submit" type="submit">Entrar</button></form>',
+    '<!-- outer <!-- inner -->' + form + '-->',
+    '<script><!--<script></script>' + form + '-->',
+    '<template><template>ignored</template>' + form + '</template>',
+    '<div data-content=\'' + form + '\'></div>',
+  ]) {
+    assert.equal(hasUsableLoginForm(html), false, html);
+  }
+});
+
+test('nested inactive scopes and raw text never supply login controls', () => {
+  for (const tag of ['script', 'style', 'textarea', 'title', 'iframe', 'xmp', 'noscript']) {
+    assert.equal(hasUsableLoginForm('<' + tag + '>' + form + '</' + tag + '>'), false, tag);
+  }
+  for (const html of [
+    '<template><template>' + form + '</template></template>',
+    '<template><script>"</template>"</script>' + form + '</template>',
+    '<div hidden>' + form + '</div>',
+    '<div style="display:none">' + form + '</div>',
+    '<svg>' + form + '</svg>', '<math>' + form + '</math>',
+  ]) assert.equal(hasUsableLoginForm(html), false, html);
+  const partial = '<form id="login-form"><input name="email" type="email"><button id="submit" type="submit">Entrar</button>';
+  assert.equal(hasUsableLoginForm(partial + '<template><input name="password" type="password"></template></form>'), false);
+});
+
+test('quoted tag delimiters remain attribute values, while real active forms still pass', () => {
+  assert.equal(hasUsableLoginForm('<div data-note=\'literal > <!-- <form>\'></div>' + form), true);
+  assert.equal(hasUsableLoginForm('<template><template>' + form + '</template></template>' + form), true);
+  assert.equal(hasUsableLoginForm('<script>const inert = "<form><template>";</script>' + form), true);
+  assert.equal(hasUsableLoginForm(form.replace('name="email"', 'required name="email"')), true);
+});
+
+test('unclosed or malformed ranges and duplicate attributes fail closed', () => {
+  for (const html of [
+    '<!--' + form, '<script>' + form, '<style>' + form, '<template>' + form,
+    '<template>' + form + '</script>', form + '<!-- unclosed', form + '<script>unclosed',
+    '<div title=\'unterminated >' + form, form + '<div title="unterminated',
+    '<form id="login-form" id="other"><input name="email" type="email"><input name="password" type="password"><button id="submit" type="submit">Entrar</button></form>',
+    '<script/>' + form, '<template/>' + form, '<form id="login-form">' + form + '</form>',
+  ]) assert.equal(hasUsableLoginForm(html), false, html);
+});
+
+test('deep inactive nesting within the response limit stays inactive', () => {
+  const nested = '<template>'.repeat(4096) + form + '</template>'.repeat(4096);
+  assert.ok(Buffer.byteLength(nested) < MAX_RESPONSE_BYTES);
+  assert.equal(hasUsableLoginForm(nested), false);
+  assert.equal(hasUsableLoginForm(nested + form), true);
+});
+
 test('portal security headers are required', async () => {
   for (const header of ['cache-control', 'x-frame-options', 'x-content-type-options']) {
     const headers = {...htmlHeaders};

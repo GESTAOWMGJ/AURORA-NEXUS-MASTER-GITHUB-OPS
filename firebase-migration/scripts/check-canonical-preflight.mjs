@@ -64,32 +64,145 @@ export function requestCanonical(path) {
   });
 }
 
-function attributes(tag) {
-  const values = new Map();
-  for (const match of tag.matchAll(/\s([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g)) {
-    values.set(match[1].toLowerCase(), match[2] ?? match[3] ?? match[4] ?? '');
-  }
-  return values;
-}
-
 function usable(attributes) {
   return !attributes.has('disabled') && !attributes.has('hidden')
     && !attributes.has('readonly')
     && !/display\s*:\s*none|visibility\s*:\s*hidden/i.test(attributes.get('style') || '');
 }
 
+const SPACE = /[\t\n\f\r ]/;
+const NAME = /[a-z0-9_:-]/i;
+const VOID_ELEMENTS = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr']);
+const RAW_ELEMENTS = new Set(['script', 'style', 'textarea', 'title', 'iframe', 'xmp',
+  'noembed', 'noframes', 'noscript']);
+
+// Read one token in the original bytes. Quoted attribute delimiters are never tags.
+function readTag(html, start) {
+  let cursor = start + 1;
+  const closing = html[cursor] === '/';
+  if (closing) cursor++;
+  if (!/[a-z]/i.test(html[cursor] || '')) return null;
+  const nameStart = cursor;
+  while (cursor < html.length && NAME.test(html[cursor])) cursor++;
+  const name = html.slice(nameStart, cursor).toLowerCase();
+  const attributes = new Map();
+  while (cursor < html.length) {
+    const beforeSpace = cursor;
+    while (cursor < html.length && SPACE.test(html[cursor])) cursor++;
+    if (html[cursor] === '>') return {name, closing, attributes, end: cursor + 1};
+    if (!closing && html[cursor] === '/' && html[cursor + 1] === '>') {
+      return VOID_ELEMENTS.has(name) ? {name, closing, attributes, end: cursor + 2} : null;
+    }
+    if (closing || cursor === beforeSpace || !/[a-z_:]/i.test(html[cursor] || '')) return null;
+    const attributeStart = cursor;
+    while (cursor < html.length && NAME.test(html[cursor])) cursor++;
+    const attribute = html.slice(attributeStart, cursor).toLowerCase();
+    if (attributes.has(attribute)) return null;
+    const afterName = cursor;
+    while (cursor < html.length && SPACE.test(html[cursor])) cursor++;
+    let value = '';
+    if (html[cursor] === '=') {
+      cursor++;
+      while (cursor < html.length && SPACE.test(html[cursor])) cursor++;
+      const quote = html[cursor];
+      if (quote === '"' || quote === "'") {
+        const valueStart = ++cursor;
+        while (cursor < html.length && html[cursor] !== quote) cursor++;
+        if (cursor === html.length) return null;
+        value = html.slice(valueStart, cursor++);
+      } else {
+        const valueStart = cursor;
+        while (cursor < html.length && !SPACE.test(html[cursor]) && html[cursor] !== '>') {
+          if ('"\'`=<'.includes(html[cursor])) return null;
+          cursor++;
+        }
+        if (cursor === valueStart) return null;
+        value = html.slice(valueStart, cursor);
+      }
+    } else cursor = afterName;
+    attributes.set(attribute, value);
+  }
+  return null;
+}
+
 export function hasUsableLoginForm(html) {
-  const visible = html.replace(/<!--[\s\S]*?-->|<(script|style|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
-  const forms = [...visible.matchAll(/(<form\b[^>]*>)([\s\S]*?)<\/form\s*>/gi)];
-  return forms.some(([, opening, content]) => {
-    const form = attributes(opening);
-    if (form.get('id') !== 'login-form' || !usable(form)
-      || /<fieldset\b[^>]*\bdisabled\b/i.test(content)) return false;
-    const controls = [...content.matchAll(/<(?:input|button)\b[^>]*>/gi)].map(match => attributes(match[0]));
-    return controls.some(a => a.get('type') === 'email' && a.get('name') === 'email' && usable(a))
-      && controls.some(a => a.get('type') === 'password' && a.get('name') === 'password' && usable(a))
-      && controls.some(a => a.get('id') === 'submit' && a.get('type') === 'submit' && usable(a));
-  });
+  const lower = html.toLowerCase();
+  const stack = [];
+  let cursor = 0, inactiveDepth = 0, raw = null, form = null, found = false;
+  while (cursor < html.length) {
+    const start = html.indexOf('<', cursor);
+    if (start < 0) break;
+    if (raw) {
+      cursor = start + 1;
+      // Legacy escaped script states need a full HTML parser; reject them conservatively.
+      if (raw === 'script' && html.startsWith('<!--', start)) return false;
+      if (!lower.startsWith('</' + raw, start)) continue;
+      const next = html[start + raw.length + 2];
+      if (next !== '>' && !SPACE.test(next || '')) continue;
+      const tag = readTag(html, start);
+      if (!tag || tag.name !== raw || !tag.closing) return false;
+      const frame = stack.pop();
+      if (frame.inactive) inactiveDepth--;
+      raw = null;
+      cursor = tag.end;
+      continue;
+    }
+    if (html.startsWith('<!--', start)) {
+      const end = html.indexOf('-->', start + 4);
+      if (end < 0) return false;
+      const nested = html.indexOf('<!--', start + 4);
+      if (nested >= 0 && nested < end) return false;
+      cursor = end + 3;
+      continue;
+    }
+    if (lower.startsWith('<!doctype ', start)) {
+      const end = html.indexOf('>', start + 10);
+      if (end < 0 || html.slice(start + 10, end).includes('<')) return false;
+      cursor = end + 1;
+      continue;
+    }
+    if (!/[a-z/]/i.test(html[start + 1] || '')) {
+      if (html[start + 1] === '!' || html[start + 1] === '?') return false;
+      cursor = start + 1;
+      continue;
+    }
+    const tag = readTag(html, start);
+    if (!tag) return false;
+    cursor = tag.end;
+    if (tag.closing) {
+      const frame = stack.pop();
+      if (!frame || frame.name !== tag.name) return false;
+      if (frame.inactive) inactiveDepth--;
+      if (frame.form) {
+        found ||= form.valid && form.email && form.password && form.submit;
+        form = null;
+      }
+      continue;
+    }
+    const attributes = tag.attributes;
+    const inactive = RAW_ELEMENTS.has(tag.name) || ['template', 'svg', 'math'].includes(tag.name)
+      || !usable(attributes);
+    const frame = {name: tag.name, inactive};
+    if (tag.name === 'form' && inactiveDepth === 0) {
+      if (form) return false;
+      form = {valid: attributes.get('id') === 'login-form' && !inactive,
+        email: false, password: false, submit: false};
+      frame.form = true;
+    }
+    if (form && inactiveDepth === 0 && tag.name === 'fieldset' && attributes.has('disabled')) form.valid = false;
+    if (form && inactiveDepth === 0 && !inactive) {
+      if (tag.name === 'input' && attributes.get('type') === 'email' && attributes.get('name') === 'email') form.email = true;
+      if (tag.name === 'input' && attributes.get('type') === 'password' && attributes.get('name') === 'password') form.password = true;
+      if (tag.name === 'button' && attributes.get('id') === 'submit' && attributes.get('type') === 'submit') form.submit = true;
+    }
+    if (!VOID_ELEMENTS.has(tag.name)) {
+      stack.push(frame);
+      if (inactive) inactiveDepth++;
+      if (RAW_ELEMENTS.has(tag.name)) raw = tag.name;
+    }
+  }
+  return found && stack.length === 0 && !raw && !form;
 }
 
 async function checkedResponse(transport, path) {
