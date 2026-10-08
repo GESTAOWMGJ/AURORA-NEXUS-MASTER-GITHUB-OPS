@@ -22,6 +22,7 @@ from aurora_deployment import install_assets as install_integration_assets
 
 VERSION = "0.2.0-beta.4"
 BASE = "https://auroranexus.com.br/portal"
+TECHNICAL_SMOKE_BASE = "https://wmgj-hml-jfn-20260927.web.app"
 SOURCE_SHA = "203670bc562bbb48694b08e55af363a07d90a8f5"
 MAX_BYTES = 262144
 
@@ -32,7 +33,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def inspect_endpoint(path):
-    request = urllib.request.Request(BASE + path, headers={"Accept": "application/json,text/html", "Cache-Control": "no-store"})
+    request = urllib.request.Request(TECHNICAL_SMOKE_BASE + path, headers={"Accept": "application/json,text/html", "Cache-Control": "no-store"})
     try:
         response = urllib.request.build_opener(NoRedirect).open(request, timeout=20)
     except urllib.error.HTTPError as error:
@@ -107,7 +108,7 @@ def install():
         shortcuts.append(desktop / "AURORA NEXUS.lnk")
     manifest_file = target / "installation.json"
     existed = manifest_file.exists()
-    expected = {"clientVersion": VERSION, "portal": BASE, "technicalFallback": "https://wmgj-hml-jfn-20260927.web.app/", "frontendPolicy": "CANONICAL_PORTAL_SINGLE_ENTRY",
+    expected = {"clientVersion": VERSION, "portal": BASE, "technicalSmokeBase": TECHNICAL_SMOKE_BASE, "frontendPolicy": "CANONICAL_PORTAL_SINGLE_ENTRY",
                 "reviewedMainSha": SOURCE_SHA, "environment": "HML", "offlineBusinessApp": False}
     if existed:
         previous = json.loads(manifest_file.read_text(encoding="utf-8"))
@@ -123,7 +124,7 @@ def install():
                 prior = json.loads(prior_manifest.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            if (prior.get("portal") == BASE and prior.get("environment") == "HML"
+            if (prior.get("portal") in {BASE, TECHNICAL_SMOKE_BASE, TECHNICAL_SMOKE_BASE + "/"} and prior.get("environment") == "HML"
                     and prior.get("frontendPolicy") in {"PRESERVE_DEPLOYED_MAIN", "CANONICAL_PORTAL_SINGLE_ENTRY"}
                     and isinstance(prior.get("clientVersion"), str)):
                 compatible = True
