@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
-const { runLearningCycle } = require('./motor-learning.cjs');
+const { runLearningCycle, readBoundedInput, assertAuthenticatedServiceTenant } = require('./motor-learning.cjs');
 const input = { key: 'same-document-v1', prompt: 'Resolve a synthetic engineering interruption.', classification: 'PUBLIC', flow: ['observe', 'propose', 'verify'] };
 const receiptKey = 'x'.repeat(48);
 const result = { state: 'PROPOSAL_ONLY', applied: false, proposalId: 'synthetic', proposal: { text: 'Synthetic proposal, not an executed change.', model: 'test' }, knowledge: { corpusHash: 'abc' } };
@@ -77,4 +77,24 @@ test('sensitive model output is not persisted', async t => {
   const f = fixture(t);
   f.request = async () => ({ ...result, proposal: { text: 'Bearer private-output-123' } });
   await assert.rejects(runLearningCycle(f), /MOTOR_SENSITIVE_OUTPUT_REJECTED/);
+});
+
+test('oversized and symlinked input files are rejected before JSON parse', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-bounded-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'large.json');
+  fs.writeFileSync(file, 'x'.repeat(32769));
+  assert.throws(() => readBoundedInput(file), /MOTOR_INPUT_FILE_REJECTED/);
+  const link = path.join(dir, 'symlink.json');
+  try {
+    fs.symlinkSync(file, link);
+    assert.throws(() => readBoundedInput(link), /MOTOR_INPUT_FILE_REJECTED/);
+  } catch (error) {
+    if (error.code !== 'EPERM' && error.code !== 'EACCES') throw error;
+  }
+});
+test('authenticated local service must belong to configured organization', () => {
+  assert.doesNotThrow(() => assertAuthenticatedServiceTenant({ orgId: 'company-a' }, 'company-a'));
+  assert.throws(() => assertAuthenticatedServiceTenant({ orgId: 'company-b' }, 'company-a'), /MOTOR_SERVICE_TENANT_MISMATCH/);
+  assert.throws(() => assertAuthenticatedServiceTenant({}, 'company-a'), /MOTOR_SERVICE_TENANT_MISMATCH/);
 });
