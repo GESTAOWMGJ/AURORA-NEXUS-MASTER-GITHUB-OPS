@@ -202,8 +202,16 @@ def read_shortcut(path):
 
 def verify_shortcut(path, target, edge, portal):
     expected = {"target": str(edge), "arguments": "--app=" + portal, "workingDirectory": str(target)}
-    if read_shortcut(path) != expected:
+    actual = read_shortcut(path)
+    if (not isinstance(actual, dict) or set(actual) != set(expected)
+            or any(not isinstance(value, str) for value in actual.values())
+            or actual["arguments"] != expected["arguments"]):
         raise ValueError("SHORTCUT_IDENTITY_CONFLICT")
+    # WScript expands Windows 8.3 paths; compare the same resolved destination.
+    # URL arguments remain exact and reparse/symlink ancestors remain forbidden.
+    for key in ("target", "workingDirectory"):
+        if safe_path(Path(actual[key])).resolve() != safe_path(Path(expected[key])).resolve():
+            raise ValueError("SHORTCUT_IDENTITY_CONFLICT")
 
 
 def write_shortcuts(target, edge, shortcuts):

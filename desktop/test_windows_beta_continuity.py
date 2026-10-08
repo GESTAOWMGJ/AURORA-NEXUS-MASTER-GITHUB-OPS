@@ -371,6 +371,17 @@ class WindowsContinuityTests(unittest.TestCase):
         native_run = subprocess.run
         with patch.object(installer, 'BASE', OLD_PORTAL + '/'):
             installer.write_shortcuts(self.target, self.edge, [self.link])
+        import ctypes
+        short = ctypes.create_unicode_buffer(32768)
+        short_name = ctypes.windll.kernel32.GetShortPathNameW
+        short_name.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint)
+        short_name.restype = ctypes.c_uint
+        length = short_name(str(self.directory), short, len(short))
+        self.assertGreater(length, 0)
+        self.assertLess(length, len(short))
+        short_root = Path(short.value)
+        installer.verify_shortcut(self.link, short_root / self.target.relative_to(self.directory),
+                                  short_root / self.edge.relative_to(self.directory), OLD_PORTAL + '/')
         self.original_link = self.link.read_bytes()
         self.run_install(shell=native_run)
         installer.verify_shortcut(self.link, self.target, self.edge, installer.BASE)
@@ -411,6 +422,16 @@ class WindowsContinuityTests(unittest.TestCase):
         probe.assert_not_called()
         self.assertEqual(self.link.read_bytes(), self.original_link)
         self.assertFalse((self.root / 'installation-rollbacks').exists())
+
+    def test_shortcut_verification_keeps_exact_url_and_directory_identity(self):
+        expected = {'target':str(self.edge), 'arguments':'--app=' + installer.BASE,
+                    'workingDirectory':str(self.target)}
+        for key, value in [('arguments', '--app=' + installer.BASE + '/'),
+                           ('target', str(self.edge.with_name('other.exe'))),
+                           ('workingDirectory', str(self.target.parent))]:
+            with self.subTest(key=key), patch.object(installer, 'read_shortcut', return_value=dict(expected, **{key:value})), \
+                 self.assertRaisesRegex(ValueError, 'SHORTCUT_IDENTITY_CONFLICT'):
+                installer.verify_shortcut(self.link, self.target, self.edge, installer.BASE)
 
 
 if __name__ == '__main__':
