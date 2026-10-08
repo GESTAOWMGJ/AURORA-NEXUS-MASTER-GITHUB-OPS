@@ -608,13 +608,27 @@ jobs:
             --data-binary @"$session_payload" \
             --output /dev/null \
             "${base_url}/__sessionLogin"
-          # Authenticated / redirects to the signed tenant's canonical page.
-          # Read the explicit pilot path; never follow arbitrary redirects with a session.
+          # Tenant paths authorize membership, then converge the browser to /portal.
+          tenant_redirect_headers="$smoke_dir/tenant-redirect.headers"
+          tenant_status="$(curl --silent --show-error --max-time 30 \
+            --cookie "$cookie_jar" \
+            --output /dev/null \
+            --dump-header "$tenant_redirect_headers" \
+            --write-out '%{http_code}' \
+            "${base_url}/wmgj")"
+          if [ "$tenant_status" != "303" ]; then
+            echo "::error::AUTH_TENANT_REDIRECT_HTTP=$tenant_status"
+            exit 91
+          fi
+          if ! grep -Eiq '^location:[[:space:]]*/portal[[:space:]]*$' "$tenant_redirect_headers"; then
+            echo "::error::AUTH_TENANT_REDIRECT_LOCATION_MISMATCH"
+            exit 91
+          fi
           private_status="$(curl --fail --silent --show-error --max-time 30 \
             --cookie "$cookie_jar" \
             --output "$private_shell" \
             --write-out '%{http_code}' \
-            "${base_url}/wmgj")"
+            "${base_url}/portal")"
           if [ "$private_status" != "200" ]; then
             echo "::error::AUTH_PRIVATE_SHELL_HTTP=$private_status"
             exit 91

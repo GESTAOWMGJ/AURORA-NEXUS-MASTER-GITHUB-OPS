@@ -1,6 +1,6 @@
 {
   "schemaVersion": "1.3.0",
-  "updatedAt": "2026-10-06",
+  "updatedAt": "2026-10-08",
   "product": "AURORA NEXUS",
   "domain": "auroranexus.com.br",
   "interfacePolicy": {
@@ -12,14 +12,18 @@
     "identityProvider": "Firebase Authentication",
     "sessionModel": "HttpOnly __session cookie created from verified Firebase ID token",
     "authorizationSecret": "AURORA_NEXUS_ALLOWED_EMAILS",
-    "failClosedWhenAccessListMissing": true
+    "failClosedWhenAccessListMissing": true,
+    "canonicalPortalUrl": "https://auroranexus.com.br/portal",
+    "singleUserFacingAccessPath": true,
+    "technicalFallbackUrl": "https://wmgj-hml-jfn-20260927.web.app/",
+    "distributeFallbackUrlToClients": false
   },
   "firebase": {
-    "currentFallbackProjectId": "wmgj-ops",
-    "currentFallbackUrl": "https://wmgj-ops.web.app/portal",
+    "currentFallbackProjectId": "wmgj-hml-jfn-20260927",
+    "currentFallbackUrl": "https://wmgj-hml-jfn-20260927.web.app/",
     "productionProjectId": "wmgj-prod-jfn-20261005",
     "hostingConfigurationInFirebaseJson": "firebase-migration/firebase.json",
-    "customDomainStatus": "PENDING_PROVIDER_DNS_SSL_AND_AUTH_SMOKE_TEST",
+    "customDomainStatus": "DOMAIN_APEX_ONLINE_BUT_PORTAL_BACKEND_INTERCONNECTION_PENDING",
     "productionProvisioningStatus": "READY_FOR_PROVISIONING",
     "productionGuardrails": {
       "deploymentStage": "COLD_PRODUCTION",
@@ -44,30 +48,30 @@
     {
       "name": "auroranexus.com.br",
       "role": "private-product-entry",
-      "target": "Firebase Hosting rewrite to auroraNexusAuthGate",
+      "target": "Canonical user-facing portal /portal; must route to the same auth gate as Firebase HML",
       "initialTraffic": "LOGIN_REQUIRED_NO_PUBLIC_DEMO",
-      "status": "PENDING_DOMAIN_OWNERSHIP_AND_SSL"
+      "status": "APEX_ONLINE_INTERCONNECTION_REQUIRED"
     },
     {
       "name": "www.auroranexus.com.br",
       "role": "redirect-or-private-entry-equivalent",
-      "target": "Firebase Hosting rewrite to auroraNexusAuthGate or provider redirect to apex",
+      "target": "Redirect to https://auroranexus.com.br/portal",
       "initialTraffic": "LOGIN_REQUIRED_NO_PUBLIC_DEMO",
-      "status": "PENDING_DOMAIN_OWNERSHIP_AND_SSL"
+      "status": "REDIRECT_TO_CANONICAL_REQUIRED"
     },
     {
       "name": "app.auroranexus.com.br",
       "role": "authenticated-application",
-      "target": "Firebase Hosting rewrite to auroraNexusAuthGate",
+      "target": "Redirect or provider-level alias to https://auroranexus.com.br/portal; no independent login surface",
       "initialTraffic": "LOGIN_REQUIRED_NO_PUBLIC_DEMO",
-      "status": "PENDING_FIREBASE_CUSTOM_DOMAIN_SETUP"
+      "status": "DISABLE_AS_SEPARATE_ENTRY_REQUIRED"
     },
     {
       "name": "wmgj.auroranexus.com.br",
       "role": "pilot-tenant-wmgj",
-      "target": "Firebase Hosting rewrite to auroraNexusAuthGate with tenant routing after session validation",
+      "target": "Redirect or tenant hint to https://auroranexus.com.br/portal; no independent login surface",
       "initialTraffic": "LOGIN_REQUIRED_WMGJ_PILOT_ONLY",
-      "status": "PENDING_FIREBASE_CUSTOM_DOMAIN_SETUP"
+      "status": "DISABLE_AS_SEPARATE_ENTRY_REQUIRED"
     },
     {
       "name": "api.auroranexus.com.br",
@@ -125,11 +129,14 @@
     "appCheckOrEquivalentPassed": false,
     "auditLogsValidated": false,
     "rollbackDocumented": true,
-    "fallbackPreserved": true
+    "fallbackPreserved": true,
+    "singleUserFacingPortalEnforced": false,
+    "firebaseFallbackHiddenFromClientLinks": true,
+    "customPortalBackedByHmlAuthGate": false
   },
   "rollback": {
-    "preserveFallbackUrl": "https://wmgj-ops.web.app/portal",
-    "doNotRemovePreviousHostingUntil": "custom-domain-ssl-auth-and-tenant-tests-pass",
+    "preserveFallbackUrl": "https://wmgj-hml-jfn-20260927.web.app/",
+    "doNotRemovePreviousHostingUntil": "canonical-portal-auth-smoke-test-passes",
     "rollbackAction": "remove DNS records for custom domains or point users back to fallback URL"
   }
 }

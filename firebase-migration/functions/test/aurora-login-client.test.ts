@@ -12,14 +12,14 @@ class Element {
   replaceChildren(){this.children=[];}
   appendChild(child:Element){this.children.push(child);}
 }
-async function fixture(managed=true) {
+async function fixture(managed=true, sessionLoginResponse:any={ok:true,json:async()=>({})}) {
   const elements=new Map<string,Element>();const el=(id:string)=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id)!;};
   const calls:any[]=[]; const redirects:string[]=[];let claims:any=managed?{auroraProfileVersion:1}:{};
   const user={emailVerified:false,getIdToken:async()=> 'synthetic-id-token'};
   let signIn:any=async()=>({user});
   const factors:any[]=[]; const winHandlers=new Map();
   const sandbox={document:{getElementById:el,createElement:()=>new Element()},window:{addEventListener:(n:string,h:any)=>winHandlers.set(n,h)},navigator:{},location:{replace:(path:string)=>redirects.push(path)},
-    fetch:async(url:string,options:any)=>{calls.push({name:'fetch',url,options});return {ok:true,json:async()=>({})};},
+    fetch:async(url:string,options:any)=>{calls.push({name:'fetch',url,options});return url==='/__sessionLogin'?sessionLoginResponse:{ok:true,json:async()=>({})};},
     initializeApp:()=>({}),getAuth:()=>({}),setPersistence:async()=>{},inMemoryPersistence:{},
     signInWithEmailAndPassword:async()=>signIn(),getIdTokenResult:async()=>({claims}),signOut:async()=>{calls.push({name:'signOut'});},
     sendPasswordResetEmail:async()=>{calls.push({name:'reset'});},sendEmailVerification:async()=>{calls.push({name:'verify'});},reload:async()=>{},
@@ -48,7 +48,7 @@ test('enrollment clears secret and requires a fresh MFA login before issuing app
   f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();await f.click('mfa-submit');
   const session=f.calls.find(c=>c.url==='/__sessionLogin');assert.ok(session);
   assert.deepEqual(JSON.parse(session.options.body),{idToken:'synthetic-id-token',orgId:'synthetic-company'});
-  assert.deepEqual(f.redirects,['/synthetic-company']);
+  assert.deepEqual(f.redirects,['/portal']);
 });
 
 test('legacy login remains compatible and explicit setup can opt in to MFA enrollment',async()=>{
@@ -61,6 +61,14 @@ test('page exit clears enrollment material; bad credentials never display provid
   assert.equal(f.el('enrollment-key').textContent,'');
   const denied=await fixture();denied.signIn(async()=>{throw new Error('sensitive-provider-detail');});await denied.submit();
   assert.doesNotMatch(denied.el('status').textContent,/sensitive-provider-detail/);
+});
+
+test('MFA success separates second-factor errors from authorization provisioning gaps',async()=>{
+  const response={ok:false,json:async()=>({code:'MEMBERSHIP_NOT_PROVISIONED'})};
+  const f=await fixture(true,response);f.user.emailVerified=true;
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();await f.click('mfa-submit');
+  assert.equal(f.el('mfa-status').textContent,'Conta autenticada, mas ainda sem vínculo operacional provisionado na organização.');
+  assert.equal(f.redirects.length,0);
 });
 
 test('admin profile shell script parses; unprivileged or first-factor sessions get no profile controls',()=>{

@@ -5,7 +5,7 @@
   "frontendVersionPolicy": "EXISTING_MAIN_NO_REDESIGN",
   "frontendVersionSource": "firebase-migration/functions/src/auroraReleaseStatus.ts",
   "reviewedMainSha": "fce9f0b94f68370ae5db23482924579c24c1931f",
-  "portal": "https://wmgj-hml-jfn-20260927.web.app/",
+  "portal": "https://auroranexus.com.br/portal",
   "windows": {
     "clientVersion": "0.2.0-beta.4",
     "type": "EDGE_APP_ACCESS_CLIENT",
@@ -24,10 +24,18 @@
     "deviceTest": "PENDING"
   },
   "web": {
-    "type": "EXISTING_PRIVATE_FIREBASE_APP",
+    "type": "CANONICAL_PRIVATE_PORTAL",
     "deployedFrontendSha": "354f611f642ce6b62c489d6b06f254587aaef84b",
-    "deploymentEvidence": "https://github.com/GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS/actions/runs/37640768716"
+    "deploymentEvidence": "https://github.com/GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS/actions/runs/37640768716",
+    "canonicalPortal": "https://auroranexus.com.br/portal",
+    "technicalFallbackUrl": "https://wmgj-hml-jfn-20260927.web.app/",
+    "singleAccessPath": true
   },
   "fullLocalCloudSync": "BLOCKED_INTEGRATION_RUNTIME_AND_DEVICE_AUTH",
-  "productionReleased": false
+  "productionReleased": false,
+  "singleAccessPolicy": {
+    "userFacingEntry": "https://auroranexus.com.br/portal",
+    "fallbackUrlIsInfrastructureOnly": true,
+    "hideFirebaseWebAppFromClientLinks": true
+  }
 }

@@ -1,3 +1,5 @@
+//go:build aurora_windows_setup
+
 package main
 import("archive/zip";"bytes";"os";"path/filepath";"testing")
 func archiveFor(names []string) []byte {var b bytes.Buffer;z:=zip.NewWriter(&b);for _,n:=range names{w,_:=z.Create(n);w.Write([]byte("fixture"))};z.Close();return b.Bytes()}
