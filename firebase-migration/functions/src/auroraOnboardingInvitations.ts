@@ -1,4 +1,4 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { isCompanySlug } from "./auroraTenantEntry.js";
 import { PROFILE_VERSION, ProfileError, normalizeProfileOnboarding, profileAdmin, type ProfileActor } from "./auroraUserProfilePolicy.js";
 import type { ProfileStore, ProfileTx } from "./auroraUserProfiles.js";
@@ -20,10 +20,18 @@ const INVITATION_OPERATION = /^onboarding-invitation-[a-f0-9]{64}$/;
 const MANAGED_UID = /^anx_[a-f0-9]{40}$/;
 const CREDENTIAL = /^ANX1-[A-Za-z0-9_-]{43}$/;
 const DIGEST = /^[a-f0-9]{64}$/;
+const DIGEST_ALGORITHM = "SCRYPT_V1";
+const SCRYPT_OPTIONS = { N: 16_384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 } as const;
+const validSalt = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{22}$/.test(value)
+  && Buffer.from(value, "base64url").length === 16 && Buffer.from(value, "base64url").toString("base64url") === value;
 const VALID_FOR_MS = 24 * 60 * 60 * 1000;
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
-const boundDigest = (orgId: string, uid: string, profileOperationId: string, invitationOperationId: string, code: string) =>
-  hash(["aurora-onboarding-invitation", "v1", orgId, uid, profileOperationId, invitationOperationId, code].join("\0"));
+async function boundDigest(orgId: string, uid: string, profileOperationId: string, invitationOperationId: string, codeSalt: string, code: string): Promise<Buffer> {
+  // SHA-256 derives a nonsecret domain-bound salt only; the credential goes directly to async scrypt.
+  const salt = createHash("sha256").update(["aurora-onboarding-invitation", "scrypt-v1", orgId, uid, profileOperationId,
+    invitationOperationId, codeSalt].join("\0")).digest();
+  return new Promise((resolve, reject) => scrypt(code, salt, 32, SCRYPT_OPTIONS, (error, key) => error ? reject(error) : resolve(key)));
+}
 const issueFingerprint = (orgId: string, actorUid: string, uid: string, profileOperationId: string) =>
   hash(JSON.stringify({ orgId, actorUid, uid, profileOperationId }));
 const validTime = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value)
@@ -66,6 +74,7 @@ export function createOnboardingInvitationEngine(store: ProfileStore, clock = Da
     const operationPath = `${base}/apiIdempotency/${invitationOperationId}`;
     // Keep the credential only in this call's memory, including transaction retries.
     const registrationPassword = `ANX1-${randomBytes(32).toString("base64url")}`;
+    const codeSalt = randomBytes(16).toString("base64url");
     return store.transaction(async tx => {
       const org = await tx.read(base);
       const administrator = await tx.read(`${base}/members/${actor.uid}`);
@@ -82,20 +91,27 @@ export function createOnboardingInvitationEngine(store: ProfileStore, clock = Da
       if (operation) {
         if (operation.type !== "ONBOARDING_INVITATION" || operation.status !== "ISSUED" || operation.fingerprint !== fingerprint
             || operation.uid !== uid || operation.orgId !== actor.orgId || operation.profileOperationId !== ready.profileOperationId
-            || !validTime(operation.expiresAtMs)) throw new ProfileError("PROFILE_REQUEST_CONFLICT");
+            || !validTime(operation.expiresAtMs) || operation.digestAlgorithm !== DIGEST_ALGORITHM
+            || !validSalt(operation.codeSalt)) throw new ProfileError("PROFILE_REQUEST_CONFLICT");
+        if (ready.onboardingInvitation?.invitationOperationId === invitationOperationId
+            && (ready.onboardingInvitation.digestAlgorithm !== DIGEST_ALGORITHM || !validSalt(ready.onboardingInvitation.codeSalt)
+              || ready.onboardingInvitation.codeSalt !== operation.codeSalt || ready.onboardingInvitation.expiresAtMs !== operation.expiresAtMs
+              || typeof ready.onboardingInvitation.codeDigest !== "string" || !DIGEST.test(ready.onboardingInvitation.codeDigest)
+              || Object.keys(ready.onboardingInvitation).length !== 5)) throw new ProfileError("PROFILE_REQUEST_CONFLICT");
         return { ok: true as const, uid, registrationPassword: null, alreadyIssued: true,
           expiresAtUtc: new Date(operation.expiresAtMs).toISOString(), invitationState: "INVITED" as const };
       }
+      const codeDigest = (await boundDigest(actor.orgId, uid, ready.profileOperationId, invitationOperationId, codeSalt, registrationPassword)).toString("hex");
       const now = clock();
       if (!validTime(now)) throw new ProfileError("ONBOARDING_CLOCK_INVALID", 503);
       const expiresAtMs = now + VALID_FOR_MS;
       const expiresAtUtc = new Date(expiresAtMs).toISOString();
       const atUtc = new Date(now).toISOString();
       tx.create(operationPath, { schemaVersion: 1, type: "ONBOARDING_INVITATION", status: "ISSUED", fingerprint,
-        actorUid: actor.uid, uid, orgId: actor.orgId, profileOperationId: ready.profileOperationId, expiresAtMs, atUtc });
+        actorUid: actor.uid, uid, orgId: actor.orgId, profileOperationId: ready.profileOperationId, expiresAtMs, atUtc,
+        digestAlgorithm: DIGEST_ALGORITHM, codeSalt });
       tx.update(memberPath, { onboardingInvitation: {
-        codeDigest: boundDigest(actor.orgId, uid, ready.profileOperationId, invitationOperationId, registrationPassword),
-        expiresAtMs, invitationOperationId
+        codeDigest, digestAlgorithm: DIGEST_ALGORITHM, codeSalt, expiresAtMs, invitationOperationId
       } });
       tx.create(`${base}/auditEvents/${invitationOperationId}-issued`, { type: "ONBOARDING_INVITATION_ISSUED",
         actorUid: actor.uid, targetUid: uid, orgId: actor.orgId, profileOperationId: ready.profileOperationId,
@@ -130,6 +146,8 @@ export function createOnboardingInvitationEngine(store: ProfileStore, clock = Da
       }
       const invitation = ready.onboardingInvitation;
       if (!invitation || typeof invitation.codeDigest !== "string" || !DIGEST.test(invitation.codeDigest)
+          || invitation.digestAlgorithm !== DIGEST_ALGORITHM || !validSalt(invitation.codeSalt)
+          || Object.keys(invitation).length !== 5
           || !validTime(invitation.expiresAtMs) || typeof invitation.invitationOperationId !== "string"
           || !INVITATION_OPERATION.test(invitation.invitationOperationId)) {
         throw new ProfileError("ONBOARDING_INVITATION_NOT_AVAILABLE", 403);
@@ -139,11 +157,13 @@ export function createOnboardingInvitationEngine(store: ProfileStore, clock = Da
       if (operation?.type !== "ONBOARDING_INVITATION" || operation.status !== "ISSUED" || operation.uid !== principal.uid
           || operation.orgId !== orgId || operation.profileOperationId !== ready.profileOperationId
           || operation.expiresAtMs !== invitation.expiresAtMs || typeof operation.actorUid !== "string"
+          || operation.digestAlgorithm !== DIGEST_ALGORITHM || operation.codeSalt !== invitation.codeSalt
           || operation.fingerprint !== issueFingerprint(orgId, operation.actorUid, principal.uid, ready.profileOperationId)) {
         throw new ProfileError("ONBOARDING_INVITATION_NOT_AVAILABLE", 403);
       }
       const expected = Buffer.from(invitation.codeDigest, "hex");
-      const supplied = Buffer.from(boundDigest(orgId, principal.uid, ready.profileOperationId, invitation.invitationOperationId, registrationPassword), "hex");
+      const supplied = await boundDigest(orgId, principal.uid, ready.profileOperationId, invitation.invitationOperationId,
+        invitation.codeSalt, registrationPassword);
       if (!timingSafeEqual(expected, supplied)) throw new ProfileError("ONBOARDING_INVITATION_INVALID", 403);
       // Re-evaluate on every callback attempt: queueing/retries cannot extend the TTL.
       const now = clock();

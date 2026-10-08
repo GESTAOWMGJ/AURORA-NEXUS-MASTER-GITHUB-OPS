@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, scryptSync } from "node:crypto";
+import { createHook } from "node:async_hooks";
 import test from "node:test";
 import { createOnboardingInvitationEngine, type VerifiedOnboardingPrincipal } from "../src/auroraOnboardingInvitations.js";
 import { ProfileError, type ProfileActor } from "../src/auroraUserProfilePolicy.js";
@@ -18,6 +19,11 @@ const principal: VerifiedOnboardingPrincipal = { uid, email: "person@example.inv
   auroraProfileOperation: profileOperationId, auroraOnboardingRequired: true };
 const rejects = (code: string) => (error: unknown) => { assert.ok(error instanceof ProfileError); assert.equal(error.code, code); return true; };
 const DAY_MS = 86_400_000;
+const expectedCredentialDigest = (code: string, invitation: Record<string, any>) => {
+  const boundSalt = createHash("sha256").update(["aurora-onboarding-invitation", "scrypt-v1", actor.orgId, uid,
+    profileOperationId, invitation.invitationOperationId, invitation.codeSalt].join("\0")).digest();
+  return scryptSync(code, boundSalt, 32, { N: 16_384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }).toString("hex");
+};
 
 function fixture() {
   const fingerprint = digest("synthetic-profile-fingerprint");
@@ -63,7 +69,7 @@ function fixture() {
     advance: (ms: number) => { now += ms; }, setTime: (ms: number) => { now = ms; }, now: () => now };
 }
 
-test("issues a 256-bit code once, stores only its bound digest, and preserves professional metadata", async () => {
+test("issues a 256-bit code once, stores only its scrypt digest and random 128-bit salt, and preserves metadata", async () => {
   const f = fixture();
   const before = structuredClone(f.rows.get(memberPath));
   const result = await f.engine.issue(actor, uid, requestId);
@@ -73,8 +79,12 @@ test("issues a 256-bit code once, stores only its bound digest, and preserves pr
   const invitation = f.rows.get(memberPath).onboardingInvitation;
   assert.equal(invitation.expiresAtMs, f.now() + DAY_MS);
   assert.equal(result.expiresAtUtc, new Date(invitation.expiresAtMs).toISOString());
-  assert.equal(invitation.codeDigest, digest(["aurora-onboarding-invitation", "v1", actor.orgId, uid,
-    profileOperationId, invitation.invitationOperationId, result.registrationPassword].join("\0")));
+  assert.equal(invitation.digestAlgorithm, "SCRYPT_V1");
+  assert.match(invitation.codeSalt, /^[A-Za-z0-9_-]{22}$/);
+  assert.equal(Buffer.from(invitation.codeSalt, "base64url").length, 16);
+  assert.equal(invitation.codeDigest, expectedCredentialDigest(result.registrationPassword!, invitation));
+  const operation = f.rows.get(`${base}/apiIdempotency/${invitation.invitationOperationId}`);
+  assert.equal(operation.codeSalt, invitation.codeSalt); assert.equal(operation.digestAlgorithm, "SCRYPT_V1");
   assert.deepEqual({ ...f.rows.get(memberPath), onboardingInvitation: undefined }, { ...before, onboardingInvitation: undefined });
   assert.equal(f.writes.length, 3);
   const persisted = JSON.stringify([...f.rows]); const journal = JSON.stringify(f.writes);
@@ -155,8 +165,10 @@ test("the same request ID cannot change target, profile operation, or issuing ad
 
 test("a new request replaces the invitation, invalidates the old code, and never resurrects it on retry", async () => {
   const f = fixture(); const first = await f.engine.issue(actor, uid, requestId);
+  const firstSalt = f.rows.get(memberPath).onboardingInvitation.codeSalt;
   f.advance(1_000); const second = await f.engine.issue(actor, uid, `${requestId}-reissue`);
   assert.notEqual(first.registrationPassword, second.registrationPassword);
+  assert.notEqual(f.rows.get(memberPath).onboardingInvitation.codeSalt, firstSalt);
   const current = structuredClone(f.rows.get(memberPath).onboardingInvitation);
   const oldRetry = await f.engine.issue(actor, uid, requestId);
   assert.equal(oldRetry.registrationPassword, null); assert.equal(oldRetry.expiresAtUtc, first.expiresAtUtc);
@@ -371,4 +383,53 @@ test("invalid clock values never create a credential record", async () => {
     const f = fixture(); f.setTime(now);
     await assert.rejects(f.engine.issue(actor, uid, requestId), rejects("ONBOARDING_CLOCK_INVALID")); assert.equal(f.writes.length, 0);
   }
+});
+
+test("malformed or absent salt, digest, algorithm, or downgraded schema rejects before scheduling scrypt", async () => {
+  for (const patch of [{ codeSalt: undefined }, { codeSalt: "" }, { codeSalt: "A".repeat(21) }, { codeSalt: "A".repeat(21) + "B" },
+    { codeSalt: "../" + "A".repeat(19) }, { codeSalt: 16 }, { codeDigest: undefined }, { codeDigest: "0".repeat(63) },
+    { digestAlgorithm: undefined }, { digestAlgorithm: "SHA256" }, { N: 1 }]) {
+    const f = fixture(); const issued = await f.engine.issue(actor, uid, requestId);
+    Object.assign(f.rows.get(memberPath).onboardingInvitation, patch);
+    let derivations = 0;
+    const hook = createHook({ init: (_id, type) => { if (type === "SCRYPTREQUEST") derivations++; } });
+    hook.enable();
+    try { await assert.rejects(f.engine.consume(principal, issued.registrationPassword!), rejects("ONBOARDING_INVITATION_NOT_AVAILABLE")); }
+    finally { hook.disable(); }
+    assert.equal(derivations, 0); assert.equal(f.rows.get(memberPath).onboardingState, "INVITED"); assert.equal(f.writes.length, 3);
+  }
+});
+
+test("operation salt and algorithm must match the current invitation and legacy digests never receive fallback", async () => {
+  for (const patch of [{ codeSalt: undefined }, { codeSalt: "A".repeat(22) }, { digestAlgorithm: undefined }, { digestAlgorithm: "SHA256" }]) {
+    const f = fixture(); const issued = await f.engine.issue(actor, uid, requestId);
+    const invitation = f.rows.get(memberPath).onboardingInvitation;
+    Object.assign(f.rows.get(`${base}/apiIdempotency/${invitation.invitationOperationId}`), patch);
+    await assert.rejects(f.engine.consume(principal, issued.registrationPassword!), rejects("ONBOARDING_INVITATION_NOT_AVAILABLE"));
+    await assert.rejects(f.engine.issue(actor, uid, requestId), rejects("PROFILE_REQUEST_CONFLICT"));
+    assert.equal(f.writes.length, 3);
+  }
+});
+
+test("expiration crossed during async scrypt still rolls back consumption", async () => {
+  const f = fixture(); const issued = await f.engine.issue(actor, uid, requestId); f.advance(DAY_MS - 1);
+  let derivations = 0;
+  const hook = createHook({ init: (_id, type) => { if (type === "SCRYPTREQUEST") { derivations++; f.advance(2); } } });
+  hook.enable();
+  try { await assert.rejects(f.engine.consume(principal, issued.registrationPassword!), rejects("ONBOARDING_INVITATION_EXPIRED")); }
+  finally { hook.disable(); }
+  assert.equal(derivations, 1); assert.equal(f.rows.get(memberPath).onboardingState, "INVITED"); assert.equal(f.writes.length, 3);
+  assert.equal([...f.rows.values()].some(row => row.type === "ONBOARDING_INVITATION_CONSUMED"), false);
+});
+
+test("transplanting both digest and nonce still fails the cryptographic organization and operation domain", async () => {
+  const f = fixture(); const first = await f.engine.issue(actor, uid, requestId);
+  const original = structuredClone(f.rows.get(memberPath).onboardingInvitation);
+  const second = await f.engine.issue(actor, uid, `${requestId}-nonce-transplant`);
+  const current = f.rows.get(memberPath).onboardingInvitation;
+  current.codeDigest = original.codeDigest; current.codeSalt = original.codeSalt;
+  f.rows.get(`${base}/apiIdempotency/${current.invitationOperationId}`).codeSalt = original.codeSalt;
+  await assert.rejects(f.engine.consume(principal, first.registrationPassword!), rejects("ONBOARDING_INVITATION_INVALID"));
+  await assert.rejects(f.engine.consume(principal, second.registrationPassword!), rejects("ONBOARDING_INVITATION_INVALID"));
+  assert.equal(f.rows.get(memberPath).onboardingState, "INVITED"); assert.equal(f.writes.length, 6);
 });
