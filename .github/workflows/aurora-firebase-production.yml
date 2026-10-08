@@ -7,6 +7,25 @@ on:
     paths:
       - ".github/requests/aurora-firebase-production.json"
   workflow_dispatch:
+    inputs:
+      deployment_stage:
+        description: "Provision infrastructure, publish backend, or publish canonical Hosting"
+        type: choice
+        default: PROVISION_ONLY
+        options: [PROVISION_ONLY, PUBLISH_BACKEND, PUBLISH_HOSTING]
+      deploy_confirmation:
+        description: "Publication requires PUBLISH_PRODUCTION_BETA"
+        type: string
+        default: VALIDATE_ONLY
+      expected_main_sha:
+        description: "Exact current main SHA reviewed for publication"
+        type: string
+      validation_run_id:
+        description: "Successful Validate Firestore Migration run at that exact main SHA"
+        type: string
+      restore_database:
+        description: "Existing prod-restore-* database with a real restore from current READY production backup"
+        type: string
 
 permissions:
   contents: read
@@ -18,6 +37,7 @@ concurrency:
 
 jobs:
   provision:
+    if: ${{ github.event_name == 'push' || inputs.deployment_stage == 'PROVISION_ONLY' }}
     name: Complete isolated cold-production Firebase setup
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -195,3 +215,141 @@ jobs:
           echo "AURORA_EXISTING_PRODUCTION_PROJECT_PROVISIONED=$PROJECT_ID"
           echo "AURORA_PRODUCTION_STAGE=COLD_PRODUCTION"
           echo "AURORA_PRODUCTION_DEPLOY_IDENTITY=$prod_sa"
+
+  publish:
+    name: Publish reviewed production beta stage
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.deployment_stage == 'PUBLISH_BACKEND' || inputs.deployment_stage == 'PUBLISH_HOSTING') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: firebase-production
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      APPROVED_PROJECT: ${{ vars.FIREBASE_PROD_PROJECT_ID }}
+      APPROVED_PROJECT_NUMBER: ${{ vars.FIREBASE_PROD_PROJECT_NUMBER }}
+      WIF_PROVIDER: ${{ vars.GCP_PROD_WIF_PROVIDER }}
+      PROVISION_SERVICE_ACCOUNT: ${{ vars.GCP_PROD_DEPLOY_SERVICE_ACCOUNT }}
+      DEPLOY_STAGE: ${{ inputs.deployment_stage }}
+      DEPLOY_CONFIRMATION: ${{ inputs.deploy_confirmation }}
+      EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+      VALIDATION_RUN_ID: ${{ inputs.validation_run_id }}
+      RESTORE_DATABASE: ${{ inputs.restore_database }}
+      GCLOUD_PROJECT: wmgj-prod-jfn-20261005
+      AURORA_RUNTIME_SERVICE_ACCOUNT: aurora-prod-runtime@wmgj-prod-jfn-20261005.iam.gserviceaccount.com
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Reject stale, implicit or different publication target
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$DEPLOY_CONFIRMATION" = PUBLISH_PRODUCTION_BETA
+          test "$APPROVED_PROJECT" = wmgj-prod-jfn-20261005
+          test "$APPROVED_PROJECT_NUMBER" = 616997609173
+          test "$EXPECTED_MAIN_SHA" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          expected="$(jq -r '.expectedSourceSha' .github/requests/aurora-firebase-production.json)"
+          git cat-file -e "$expected^{commit}"
+          git merge-base --is-ancestor "$expected" "$GITHUB_SHA"
+          current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$current_main" = "$GITHUB_SHA"
+          [[ "$VALIDATION_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
+          [[ "$RESTORE_DATABASE" =~ ^prod-restore-[a-z0-9-]{3,40}$ ]]
+          python3 firebase-migration/scripts/production_project_contract.py \
+            --approved-project="$APPROVED_PROJECT" --approved-number="$APPROVED_PROJECT_NUMBER" \
+            --require-wif --wif-provider="$WIF_PROVIDER" --service-account="$PROVISION_SERVICE_ACCOUNT"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: firebase-migration/functions/package-lock.json
+      - name: Test production publication contracts before cloud authentication
+        run: |
+          printf '%s\n' "AURORA_RUNTIME_SERVICE_ACCOUNT=$AURORA_RUNTIME_SERVICE_ACCOUNT" > firebase-migration/functions/.env.wmgj-prod-jfn-20261005
+          python3 -m unittest discover -s firebase-migration/scripts -p 'test_production_release_preflight.py'
+          npm --prefix firebase-migration/functions ci --ignore-scripts
+          npm --prefix firebase-migration/functions run build
+          node firebase-migration/scripts/production-runtime-identity.mjs
+          npm --prefix firebase-migration/functions audit --omit=dev --audit-level=high
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ vars.GCP_PROD_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_PROD_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+        with:
+          version: "548.0.0"
+          project_id: wmgj-prod-jfn-20261005
+      - name: Verify production recovery, nominal Auth configuration and exact CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')" = "$PROVISION_SERVICE_ACCOUNT"
+          python3 firebase-migration/scripts/production_release_preflight.py \
+            --evidence "$RUNNER_TEMP/aurora-production-preflight.json"
+      - name: Verify recent real nominal MFA before canonical publication
+        if: ${{ inputs.deployment_stage == 'PUBLISH_HOSTING' }}
+        env:
+          FIREBASE_PROD_SMOKE_UID: ${{ vars.FIREBASE_PROD_SMOKE_UID }}
+          FIREBASE_PROD_SMOKE_ID_TOKEN: ${{ secrets.FIREBASE_PROD_SMOKE_ID_TOKEN }}
+        run: node firebase-migration/scripts/production-canonical-smoke.mjs --identity-only
+      - name: Reconfirm immutable main immediately before publication
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/main | awk '{print $1}')" = "$GITHUB_SHA"
+      - name: Publish backend in explicit approved project
+        if: ${{ inputs.deployment_stage == 'PUBLISH_BACKEND' }}
+        working-directory: firebase-migration
+        run: |
+          set -euo pipefail
+          # Fixed scope preserves the existing HML deploy guard and avoids new executors.
+          npx --yes firebase-tools@14.17.0 deploy --config firebase.production.json \
+            --project wmgj-prod-jfn-20261005 --non-interactive \
+            --only functions:ingestWmgjEvent,functions:auroraNexusCryptoSelfTest,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusUserProfiles,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,firestore:rules,firestore:indexes
+          echo "AURORA_PRODUCTION_BACKEND_PUBLISHED_CANONICAL_ACCEPTANCE_PENDING=$GITHUB_SHA"
+      - name: Require every canonical Hosting route already deployed
+        if: ${{ inputs.deployment_stage == 'PUBLISH_HOSTING' }}
+        working-directory: firebase-migration
+        run: |
+          set -euo pipefail
+          npx --yes firebase-tools@14.17.0 functions:list --project wmgj-prod-jfn-20261005 --json > "$RUNNER_TEMP/aurora-production-functions.json"
+          python3 scripts/validate-hosting-runtime.py --config firebase.production.json \
+            --inventory "$RUNNER_TEMP/aurora-production-functions.json"
+      - name: Capture previous production Hosting release for rollback
+        if: ${{ inputs.deployment_stage == 'PUBLISH_HOSTING' }}
+        run: |
+          set -euo pipefail
+          token="$(gcloud auth print-access-token)"
+          curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer $token" -H 'x-goog-user-project: wmgj-prod-jfn-20261005' \
+            'https://firebasehosting.googleapis.com/v1beta1/projects/wmgj-prod-jfn-20261005/sites/wmgj-prod-jfn-20261005/releases?pageSize=1' \
+            | jq '{previousRelease: (.releases[0].name // null), previousVersion: (.releases[0].version.name // null)}' > "$RUNNER_TEMP/aurora-production-rollback.json"
+      - name: Publish canonical Hosting without modifying DNS
+        if: ${{ inputs.deployment_stage == 'PUBLISH_HOSTING' }}
+        working-directory: firebase-migration
+        run: |
+          npx --yes firebase-tools@14.17.0 deploy --config firebase.production.json \
+            --project wmgj-prod-jfn-20261005 --non-interactive --only hosting
+      - name: Verify canonical nominal MFA, tenant, negative access and exact runtime manifests
+        if: ${{ inputs.deployment_stage == 'PUBLISH_HOSTING' }}
+        env:
+          FIREBASE_PROD_SMOKE_UID: ${{ vars.FIREBASE_PROD_SMOKE_UID }}
+          FIREBASE_PROD_SMOKE_ID_TOKEN: ${{ secrets.FIREBASE_PROD_SMOKE_ID_TOKEN }}
+        run: |
+          node firebase-migration/scripts/production-canonical-smoke.mjs > "$RUNNER_TEMP/aurora-production-smoke.json"
+          cat "$RUNNER_TEMP/aurora-production-smoke.json"
+      - name: Preserve sanitized stage and recovery evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6, Node 24
+        with:
+          name: aurora-production-publication-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/aurora-production-preflight.json
+            ${{ runner.temp }}/aurora-production-rollback.json
+            ${{ runner.temp }}/aurora-production-smoke.json
+          if-no-files-found: ignore
+          retention-days: 14

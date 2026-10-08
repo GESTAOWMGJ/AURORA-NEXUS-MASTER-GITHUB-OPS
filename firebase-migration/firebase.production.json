@@ -1,0 +1,191 @@
+{
+  "hosting": {
+    "public": "hosting/aurora-nexus",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+          },
+          {
+            "key": "Pragma",
+            "value": "no-cache"
+          },
+          {
+            "key": "X-Content-Type-Options",
+            "value": "nosniff"
+          },
+          {
+            "key": "X-Frame-Options",
+            "value": "DENY"
+          },
+          {
+            "key": "Referrer-Policy",
+            "value": "no-referrer"
+          },
+          {
+            "key": "Permissions-Policy",
+            "value": "camera=(), microphone=(), geolocation=(), payment=()"
+          }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "/__sessionLogin",
+        "function": {
+          "functionId": "auroraNexusSessionLogin",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/__sessionLogout",
+        "function": {
+          "functionId": "auroraNexusSessionLogout",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/bootstrap",
+        "function": {
+          "functionId": "auroraNexusBootstrap",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/actions",
+        "function": {
+          "functionId": "auroraNexusAction",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/refresh",
+        "function": {
+          "functionId": "auroraNexusRefresh",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/native-insight",
+        "function": {
+          "functionId": "auroraNexusNativeInsight",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/master-engine",
+        "function": {
+          "functionId": "auroraNexusMasterEngine",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/organic",
+        "function": {
+          "functionId": "auroraNexusOrganic",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/crypto/self-test",
+        "function": {
+          "functionId": "auroraNexusCryptoSelfTest",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/integration/ping",
+        "function": {
+          "functionId": "auroraNexusIntegrationPing",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/integration-keys",
+        "function": {
+          "functionId": "auroraNexusIntegrationKeys",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/integration/documents",
+        "function": {
+          "functionId": "auroraNexusIntegrationDocuments",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/reports/shareholders",
+        "function": {
+          "functionId": "auroraNexusShareholderReport",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/distribution-approval",
+        "function": {
+          "functionId": "auroraNexusDistributionDecision",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/user-profiles",
+        "function": {
+          "functionId": "auroraNexusUserProfiles",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "**",
+        "function": {
+          "functionId": "auroraNexusAuthGate",
+          "region": "southamerica-east1"
+        }
+      }
+    ],
+    "site": "wmgj-prod-jfn-20261005"
+  },
+  "firestore": {
+    "rules": "firestore/firestore.rules",
+    "indexes": "firestore/firestore.indexes.json"
+  },
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs22",
+    "predeploy": [
+      "python3 \"$PROJECT_DIR/scripts/production_release_preflight.py\" --predeploy",
+      "python3 \"$PROJECT_DIR/../desktop/build_installers.py\" --output \"$RESOURCE_DIR/private-downloads\"",
+      "npm --prefix \"$RESOURCE_DIR\" ci --ignore-scripts",
+      "npm --prefix \"$RESOURCE_DIR\" run build",
+      "node \"$PROJECT_DIR/scripts/build-release-manifests.mjs\""
+    ]
+  },
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "hosting": {
+      "port": 5000
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4000
+    },
+    "singleProjectMode": true
+  }
+}
+
