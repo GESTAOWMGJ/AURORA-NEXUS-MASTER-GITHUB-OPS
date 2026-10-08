@@ -1,4 +1,6 @@
 /** Public entry paths select presentation only. Membership always authorizes data. */
+export const CANONICAL_PORTAL_PATH = "/portal";
+
 const RESERVED = new Set(["login", "portal", "setup", "downloads", "organic", "api", "reports", "assets", "static", "health", "healthz"]);
 
 export function isCompanySlug(value: unknown): value is string {
@@ -9,6 +11,10 @@ export function isCompanySlug(value: unknown): value is string {
 export function companyEntryPath(orgId: string): string {
   if (!isCompanySlug(orgId)) throw new Error("INVALID_COMPANY_ENTRY");
   return `/${orgId}`;
+}
+
+export function userFacingEntryPath(_memberOrgId?: string | null): string {
+  return CANONICAL_PORTAL_PATH;
 }
 
 export function companyEntry(path: string): { orgId: string; path: string; manifest: boolean } | null {
@@ -34,6 +40,15 @@ export function companyManifest(orgId: string): Record<string, unknown> {
   const path = companyEntryPath(orgId);
   return {
     name: `Aurora Nexus · ${orgId}`, short_name: "Aurora", id: path, start_url: path,
+    scope: "/", display: "standalone", background_color: "#06191e", theme_color: "#06191e",
+    description: "Acesso privado de gestão, auditoria e rastreabilidade operacional.",
+    icons: [{ src: "/aurora-icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }]
+  };
+}
+
+export function portalManifest(): Record<string, unknown> {
+  return {
+    name: "Aurora Nexus", short_name: "Aurora", id: CANONICAL_PORTAL_PATH, start_url: CANONICAL_PORTAL_PATH,
     scope: "/", display: "standalone", background_color: "#06191e", theme_color: "#06191e",
     description: "Acesso privado de gestão, auditoria e rastreabilidade operacional.",
     icons: [{ src: "/aurora-icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }]

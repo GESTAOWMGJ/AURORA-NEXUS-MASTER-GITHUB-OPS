@@ -2,7 +2,7 @@ import { userProfileSection, userProfileClient } from "./auroraUserProfileView.j
 import { webUpdateClient } from "./auroraWebUpdateClient.js";
 import { iaMasterSection } from "./auroraIaMasterView.js";
 import type { AuroraMember } from "./auroraAccess.js";
-import { companyEntry } from "./auroraTenantEntry.js";
+import { CANONICAL_PORTAL_PATH, companyEntry, userFacingEntryPath } from "./auroraTenantEntry.js";
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
@@ -10,8 +10,8 @@ function escapeHtml(value: unknown): string {
 
 export function auroraProtectedShell(member: AuroraMember, csrfTokens: { action: string; refresh: string; integrationKey: string; userProfile?: string; distributionApproval: string; logout: string }, requestedEntry = "/"): string {
   const entry = companyEntry(requestedEntry);
-  const entryPath = entry && entry.orgId === member.orgId ? entry.path : "/";
-  const manifestPath = entryPath === "/" ? "/manifest.webmanifest" : `${entryPath}/manifest.webmanifest`;
+  const entryPath = userFacingEntryPath(member.orgId);
+  const manifestPath = entryPath === CANONICAL_PORTAL_PATH ? "/manifest.webmanifest" : entryPath === "/" ? "/manifest.webmanifest" : `${entryPath}/manifest.webmanifest`;
   const capabilities = {
     createReview: ["platform_admin", "org_admin", "director", "auditor", "operator"].includes(member.role) || member.permissions.includes("actions.write"),
     resolve: ["platform_admin", "org_admin", "director", "auditor"].includes(member.role) || member.permissions.includes("actions.resolve"),
