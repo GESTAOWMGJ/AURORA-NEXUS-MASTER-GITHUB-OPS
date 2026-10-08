@@ -121,6 +121,22 @@ test('unsafe manifest paths cannot claim verified package files even when signed
   assert.equal(assessReleaseManifest(await pin(cert),'satellite',bytes,{'../escape.js':files['kernel.js']}).status,'PACKAGE_FILES_CONFLICT');
 });
 
+test('real downloads files-array schema verifies bounded unique package sizes and hashes',async()=>{
+  const name='AURORA-NEXUS-Instalar.exe',file=Buffer.from('synthetic installer');
+  const entry={name,label:'Windows',platform:'windows',size:file.length,sha256:digest(file),signed:false};
+  const assess=async(entries:any[],actual:Record<string,Uint8Array>)=>{
+    const bytes=Buffer.from(JSON.stringify({schemaVersion:1,sourceCommit:sourceSha,version:componentVersion,files:entries}));
+    const cert=certificate();cert.components.satellite!.manifestSha256=digest(bytes);
+    return assessReleaseManifest(await pin(cert),'satellite',bytes,actual);
+  };
+  assert.equal((await assess([entry],{[name]:file})).status,'PACKAGE_FILES_VERIFIED');
+  for(const entries of [[entry,entry],[{...entry,name:'../escape.exe'}],[{...entry,sha256:'b'.repeat(64)}],
+    [{...entry,size:file.length+1}],[{...entry,size:0}],[{...entry,platform:'other'}],[{...entry,signed:'false'}]]) {
+    assert.equal((await assess(entries,{[name]:file})).status,'PACKAGE_FILES_CONFLICT');
+  }
+  assert.equal((await assess([entry],{[name]:file,'extra.exe':file})).status,'PACKAGE_FILES_CONFLICT');
+});
+
 test('missing receipt, offline client and unapplied update are never current',async()=>{
   const active=await pin();assert.equal(assessActiveReleaseReceipt(active,'web',undefined,{now}).status,'NOT_REPORTED');
   for(const patch of [{connected:false},{applied:false}]) {

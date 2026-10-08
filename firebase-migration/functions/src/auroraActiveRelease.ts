@@ -115,11 +115,24 @@ export function assessReleaseManifest(pin: VerifiedActiveRelease | undefined, co
   if (!sources.length || !versions.length || sources.some(value => value !== expected.sourceSha) || versions.some(value => value !== expected.version)
       || manifest.dirty === true) return { status: "MANIFEST_IDENTITY_CONFLICT", fileIntegrityVerified: false };
   if (fileBytes === undefined) return { status: "MANIFEST_MATCH_ONLY", fileIntegrityVerified: false };
-  if (!row(manifest.files) || !Object.keys(manifest.files).length || Object.keys(manifest.files).length > 1000
-      || Object.keys(fileBytes).length !== Object.keys(manifest.files).length) return { status: "PACKAGE_FILES_CONFLICT", fileIntegrityVerified: false };
-  for (const [name, digest] of Object.entries(manifest.files)) {
+  const claims: { name: string; digest: unknown; size?: number }[] = [];
+  if (Array.isArray(manifest.files)) {
+    for (const entry of manifest.files) {
+      if (!row(entry) || !exactKeys(entry, ["name", "label", "platform", "size", "sha256", "signed"])
+          || typeof entry.name !== "string" || typeof entry.label !== "string" || !entry.label.length || entry.label.length > 100
+          || !["mac", "windows"].includes(entry.platform) || !Number.isSafeInteger(entry.size) || entry.size < 1 || entry.size > 16_777_216
+          || typeof entry.signed !== "boolean") return { status: "PACKAGE_FILES_CONFLICT", fileIntegrityVerified: false };
+      claims.push({ name: entry.name, digest: entry.sha256, size: entry.size });
+    }
+  } else if (row(manifest.files)) {
+    claims.push(...Object.entries(manifest.files).map(([name, digest]) => ({ name, digest })));
+  }
+  if (!claims.length || claims.length > 1000 || new Set(claims.map(claim => claim.name)).size !== claims.length
+      || Object.keys(fileBytes).length !== claims.length) return { status: "PACKAGE_FILES_CONFLICT", fileIntegrityVerified: false };
+  for (const { name, digest, size } of claims) {
     if (!/^[A-Za-z0-9._/-]+$/.test(name) || name.startsWith("/") || name.split("/").some(part => !part || part === "." || part === "..")
-        || !sha(digest, 64) || !Object.hasOwn(fileBytes, name) || !(fileBytes[name] instanceof Uint8Array) || hash(fileBytes[name]) !== digest) {
+        || !sha(digest, 64) || !Object.hasOwn(fileBytes, name) || !(fileBytes[name] instanceof Uint8Array)
+        || (size !== undefined && fileBytes[name].length !== size) || hash(fileBytes[name]) !== digest) {
       return { status: "PACKAGE_FILES_CONFLICT", fileIntegrityVerified: false };
     }
   }
