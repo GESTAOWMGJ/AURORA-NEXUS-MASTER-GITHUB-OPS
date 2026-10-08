@@ -84,3 +84,6 @@ test('diagnostic rejects a query, thread selector or missing ID before any read'
     assert.throws(() => ctx.diagnosticarMensagemGmailWMGJ(value), /MESSAGE_ID_INVALIDO/);
   }
 });
+
+// Register the Drive first-cycle regressions in the existing ingestion CI gate.
+require('./test-gmail-drive-onboarding.cjs');

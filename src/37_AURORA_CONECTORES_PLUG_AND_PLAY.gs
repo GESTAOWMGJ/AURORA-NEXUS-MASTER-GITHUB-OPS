@@ -5,7 +5,7 @@
  * Segredos entram somente por parâmetro de uma chamada autenticada/administrativa
  * e são persistidos em ScriptProperties. Nunca são retornados ou logados.
  */
-var AURORA_CONNECTOR_SETUP_VERSION = 'v1.1.0-firebase-native-sources';
+var AURORA_CONNECTOR_SETUP_VERSION = 'v1.1.1-first-canonical-document';
 
 function auroraNormalizarSistemaFonte_(value) {
   var system = String(value || 'DRIVE').trim().toUpperCase();
@@ -73,6 +73,14 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
   var externalBaseUrl = String(config.externalBaseUrl || '').trim();
   var externalApiKey = String(config.externalApiKey || '');
   var activate = config.activate === true;
+  var props = PropertiesService.getScriptProperties();
+  var boundOrg = String(props.getProperty('WMGJ_FIRESTORE_ORG_ID') || '').trim();
+  if (boundOrg && boundOrg !== orgId) throw new Error('AURORA_CONNECTOR_TENANT_REBINDING_REJECTED');
+  if (activate && (typeof instalarGatilhoAutomacaoWMGJ !== 'function'
+    || typeof prepararPipelineConfiavelWMGJ_V3 !== 'function'
+    || typeof processarFilaFonteCanonicaWMGJ_ !== 'function'
+    || typeof processarFilaComExtracaoRealWMGJ_V1 !== 'function'
+    || typeof comTravaIngestaoGmailWMGJ_ !== 'function')) throw new Error('AURORA_DOCUMENT_EXECUTOR_MISSING');
   var documentSources = auroraNormalizarFontesDocumentais_(config.documentSources, driveFolderId);
 
   if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(orgId)) throw new Error('AURORA_CONNECTOR_ORG_INVALID');
@@ -90,7 +98,6 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
   var folderName = folder.getName();
   if (spreadsheetId) SpreadsheetApp.openById(spreadsheetId).getId();
 
-  var props = PropertiesService.getScriptProperties();
   var values = {
     WMGJ_PASTA_ENTRADA_ID: driveFolderId,
     WMGJ_FIRESTORE_INGEST_URL: ingestUrl,
@@ -112,9 +119,11 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
   props.setProperties(values, false);
 
   var trigger = null;
+  var firstCycle = null;
   if (activate) {
-    if (typeof instalarGatilhoAutomacaoWMGJ !== 'function') throw new Error('AURORA_AUTOMATION_INSTALLER_MISSING');
     trigger = instalarGatilhoAutomacaoWMGJ();
+    firstCycle = trigger && trigger.ok === true ? auroraExecutarPrimeiraIngestaoDocumental_()
+      : { ok:false, state:'PENDING_CANONICAL_READBACK', code:'AURORA_DOCUMENT_TRIGGER_PENDING', limit:5, firstIngestionVerified:false };
   }
 
   var result = {
@@ -141,12 +150,41 @@ function auroraConfigurarConectoresPlugAndPlay(config) {
     } : null,
     documentSources: documentSources.map(function(item) { return { sourceId: item.sourceId, system: item.system, mode: item.mode, folderId: item.folderId, slaMinutes: item.slaMinutes, active: item.active }; }),
     nativeDataPlane: { storage: 'FIRESTORE', sourceAccessRequiredAfterIngest: false, externalAiFallbackEnabled: config.externalAiFallbackEnabled === true },
-    continuousExtraction: activate,
-    triggerInstalled: !!trigger,
+    continuousExtraction: activate && !!trigger && trigger.ok === true,
+    triggerInstalled: !!trigger && trigger.ok === true,
+    firstCycle: firstCycle,
+    firstIngestionVerified: false,
+    operationalReady: false,
     checkedAt: new Date().toISOString()
   };
   auroraConnectorLogSafe_('CONFIGURE', result);
   return result;
+}
+
+// The authorized activation starts one bounded pass immediately instead of
+// waiting for the existing 15-minute trigger. Counts never certify cloud state.
+function auroraExecutarPrimeiraIngestaoDocumental_() {
+  try {
+    return comTravaIngestaoGmailWMGJ_(function() {
+      var preparation = prepararPipelineConfiavelWMGJ_V3(5);
+      if (!preparation || preparation.ok !== true) throw new Error('AURORA_DOCUMENT_SOURCE_PENDING');
+      var processing = processarFilaFonteCanonicaWMGJ_(5);
+      if (!processing || processing.ok !== true) throw new Error('AURORA_DOCUMENT_PROCESSING_PENDING');
+      var processed = Number(processing.processados || 0);
+      var errors = Number(processing.erros || 0);
+      var review = Number(processing.revisar || 0);
+      if (![processed, errors, review].every(function(n) { return Number.isSafeInteger(n) && n >= 0 && n <= 5; })) {
+        throw new Error('AURORA_DOCUMENT_RESULT_INVALID');
+      }
+      return { ok: errors === 0 && review === 0, state: 'PENDING_CANONICAL_READBACK',
+        processedDocuments: processed, failedDocuments: errors, reviewDocuments: review,
+        limit: 5, firstIngestionVerified: false };
+    });
+  } catch (error) {
+    var code = error && typeof error.message === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/.test(error.message)
+      ? error.message : 'AURORA_DOCUMENT_INITIAL_CYCLE_PENDING';
+    return { ok: false, state: 'PENDING_CANONICAL_READBACK', code: code, limit: 5, firstIngestionVerified: false };
+  }
 }
 
 function auroraDiagnosticarFontesDocumentais_() {
