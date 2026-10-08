@@ -124,7 +124,7 @@ def install():
                 prior = json.loads(prior_manifest.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
-            if (prior.get("portal") in {BASE, TECHNICAL_SMOKE_BASE, TECHNICAL_SMOKE_BASE + "/"} and prior.get("environment") == "HML"
+            if ((prior.get("portal") == BASE or prior.get("portal") in {TECHNICAL_SMOKE_BASE, TECHNICAL_SMOKE_BASE + "/"}) and prior.get("environment") == "HML"
                     and prior.get("frontendPolicy") in {"PRESERVE_DEPLOYED_MAIN", "CANONICAL_PORTAL_SINGLE_ENTRY"}
                     and isinstance(prior.get("clientVersion"), str)):
                 compatible = True
