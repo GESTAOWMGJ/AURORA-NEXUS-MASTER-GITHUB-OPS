@@ -21,6 +21,19 @@ import { buildReleaseStatus } from "./auroraReleaseStatus.js";
 import { autoObserveResolvedDocumentAction } from "./auroraOrganicAutoObserve.js";
 import { loadFinancialClosingStatus } from "./auroraFinancialDecisionRuntime.js";
 import { auroraDb } from "./firebase.js";
+import { readInstallationReadiness } from "./auroraInstallationReadiness.js";
+
+export async function loadInstallationReadiness(orgId: string) {
+  return auroraDb.runTransaction(async tx => {
+    const org = await tx.get(auroraDb.doc(`organizations/${orgId}`));
+    const active = org.exists && isActiveOrganization(org.data());
+    return readInstallationReadiness(orgId, async path => {
+      if (!active) return null;
+      const snap = await tx.get(auroraDb.doc(path));
+      return snap.exists ? snap.data() ?? null : null;
+    });
+  });
+}
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -28,7 +41,7 @@ const SOURCE_LIMIT = 1000;
 const sourceCollections = ["invoices", "bankTransactions", "glosses", "actionItems", "sourceDocuments", "reconciliations", "auditFindings"] as const;
 
 type ResponseLike = { set(name: string, value: string): unknown };
-type ProjectionActor = { uid: string; role: string; source: "USER" | "SCHEDULER" };
+type ProjectionActor = { uid: string; role: string; source: "USER" | "SCHEDULER" | "INTEGRATION" };
 
 function apiHeaders(res: ResponseLike): void {
   res.set("Cache-Control", "no-store");
@@ -91,7 +104,8 @@ async function readProjectionSource(orgId: string): Promise<ProjectionSource> {
   const entries = await Promise.all(sourceCollections.map(async (name) => {
     const snapshot = await auroraDb.collection(`organizations/${orgId}/${name}`).limit(SOURCE_LIMIT + 1).get();
     if (snapshot.size > SOURCE_LIMIT) throw new Error(`SOURCE_LIMIT_EXCEEDED:${name}`);
-    return [name, snapshot.docs.map((doc) => doc.data())] as const;
+    return [name, snapshot.docs.map((doc) => name === 'sourceDocuments'
+      ? {...doc.data(), _documentId:doc.id} : doc.data())] as const;
   }));
   return Object.fromEntries(entries) as ProjectionSource;
 }
@@ -132,18 +146,28 @@ export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: Projectio
   if (projection.state === "NO_SOURCE") throw new Error("PROJECTION_NO_SOURCE");
   if (dataQuality.complete !== true) throw new Error("PROJECTION_DATA_QUALITY_BLOCKED");
 
-  const snapshotId = randomUUID();
   const sourceHash = createHash("sha256").update(JSON.stringify(stableValue(source))).digest("hex");
+  const snapshotId = actor.source === 'INTEGRATION'
+    ? createHash('sha256').update(`integration:${settings.competence}:${sourceHash}`).digest('hex')
+    : randomUUID();
   const storedProjection = {
     ...projection,
     generatedAt: FieldValue.serverTimestamp(),
     engine: { name: "aurora-projection", version: 2, mode: "SHADOW" },
     sourceLimit: SOURCE_LIMIT,
     sourceHash,
-    snapshotId
+    snapshotId,
+    integrationReadback: source.sourceDocuments.filter(doc =>
+      doc.orgId === orgId && doc.nativeReady === true && doc.sourceIndependent === true
+      && (doc.integration as {transport?:unknown}|undefined)?.transport === 'AURORA_INTEGRATION_API'
+    ).map(doc => ({documentId:doc._documentId, sourceVersion:doc.sourceVersion,
+      canonicalSnapshotHash:doc.canonicalSnapshotHash}))
   };
   const base = `organizations/${orgId}`;
   await auroraDb.runTransaction(async (tx) => {
+    // Concurrent retries of the same ingested source snapshot produce one projection history effect.
+    if (actor.source === 'INTEGRATION'
+      && (await tx.get(auroraDb.doc(`${base}/dashboardSnapshotHistory/${snapshotId}`))).exists) return;
     tx.create(auroraDb.doc(`${base}/dashboardSnapshotHistory/${snapshotId}`), storedProjection);
     tx.set(auroraDb.doc(`${base}/dashboardSnapshots/${deterministicSnapshotId(settings.competence)}`), storedProjection);
     tx.set(auroraDb.doc(`${base}/dashboardSnapshots/current`), storedProjection);
@@ -239,6 +263,7 @@ export const auroraNexusBootstrap = onRequest(
     }));
     res.status(200).json({
       ok: true,
+      installation: await loadInstallationReadiness(member.orgId),
       environment: "HOMOLOGATION",
       mode: "SHADOW",
       organization: { id: member.orgId, name: String(org.data()?.name ?? "WMGJ") },
