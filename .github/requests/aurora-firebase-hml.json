@@ -2,7 +2,7 @@
   "requestVersion": 1,
   "confirmation": "DEPLOY_HOMOLOGATION",
   "projectId": "wmgj-hml-jfn-20260927",
-  "authorizedScope": "SINGLE_PORTAL_AUTH_FLOW_HML",
+  "authorizedScope": "PR115_HML_AUTH_CONTRACT_FIX",
   "expectedSourceSha": "5defe4f2bf264f9bebe26412a7e28d2a43a14fea",
   "sourceMutation": false,
   "productionMutation": false,
