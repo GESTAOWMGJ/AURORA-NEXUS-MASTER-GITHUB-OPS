@@ -65,5 +65,6 @@ jobs:
             --ref main \
             -f project_id="$project_id" \
             -f deploy_confirmation=DEPLOY_HOMOLOGATION \
+            -f deployment_mode=SHADOW_UPDATE \
             -f expected_main_sha="$GITHUB_SHA"
           echo "AURORA_HML_DEPLOY_DISPATCHED_SHA=$GITHUB_SHA"
