@@ -87,3 +87,4 @@ test('diagnostic rejects a query, thread selector or missing ID before any read'
 
 // Register the Drive first-cycle regressions in the existing ingestion CI gate.
 require('./test-gmail-drive-onboarding.cjs');
+require('./test-gmail-connector-status.cjs');
