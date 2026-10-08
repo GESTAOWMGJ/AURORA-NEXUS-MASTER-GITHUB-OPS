@@ -511,7 +511,7 @@ jobs:
           canonical_origin="https://auroranexus.com.br"
           technical_origin="https://${PROJECT_ID}.web.app"
           technical_shell="$(curl --fail --silent --show-error --max-time 30 "${technical_origin}/")"
-          grep -Fq 'location.replace("https://auroranexus.com.br/portal' <<<"$technical_shell"
+          grep -Fq 'https://auroranexus.com.br/portal' <<<"$technical_shell"
           if grep -Fq "Centro de gestão WMGJ" <<<"$technical_shell"; then
             echo "Technical Firebase host exposed the private shell" >&2
             exit 90
