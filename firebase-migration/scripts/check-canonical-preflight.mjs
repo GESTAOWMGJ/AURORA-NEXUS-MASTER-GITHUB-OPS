@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 export const CANONICAL_ORIGIN = 'https://auroranexus.com.br';
 export const MAX_RESPONSE_BYTES = 262144;
 const TIMEOUT_MS = 20000;
+const ROUTING_ONLY_SCOPE = 'routing-only';
 
 export class CanonicalPreflightError extends Error {
   constructor(code) {
@@ -239,6 +240,7 @@ function jsonBody(response, code) {
 // Anonymous GETs only: this proves routing readiness, never login or release approval.
 export async function checkCanonicalPreflight(expectedProject, {
   resolveHost = hostname => lookup(hostname, {all: true}), transport = requestCanonical,
+  scope = process.env.CANONICAL_PREFLIGHT_SCOPE || 'full',
 } = {}) {
   requireCondition(/^wmgj-hml-jfn-[a-z0-9-]+$/.test(expectedProject || '')
     && !/prod|production|live|principal/i.test(expectedProject), 'HML_PROJECT_REQUIRED');
@@ -263,18 +265,21 @@ export async function checkCanonicalPreflight(expectedProject, {
     && /^DENY$/i.test(portal.headers?.['x-frame-options'] || '')
     && /^nosniff$/i.test(portal.headers?.['x-content-type-options'] || ''), 'CANONICAL_PORTAL_HEADERS_REQUIRED');
 
-  const bootstrap = await checkedResponse(transport, '/api/bootstrap');
-  const anonymous = jsonBody(bootstrap, 'CANONICAL_ANONYMOUS_DENIAL_REQUIRED');
-  requireCondition(bootstrap.status === 401 && anonymous?.ok === false
-    && anonymous?.code === 'AUTH_REQUIRED', 'CANONICAL_ANONYMOUS_DENIAL_REQUIRED');
-
   const init = await checkedResponse(transport, '/__/firebase/init.json');
   const config = jsonBody(init, 'CANONICAL_HML_PROJECT_MISMATCH');
   requireCondition(init.status === 200 && config?.projectId === expectedProject, 'CANONICAL_HML_PROJECT_MISMATCH');
+  let anonymousDenied = false;
+  if (scope !== ROUTING_ONLY_SCOPE) {
+    const bootstrap = await checkedResponse(transport, '/api/bootstrap');
+    const anonymous = jsonBody(bootstrap, 'CANONICAL_ANONYMOUS_DENIAL_REQUIRED');
+    requireCondition(bootstrap.status === 401 && anonymous?.ok === false
+      && anonymous?.code === 'AUTH_REQUIRED', 'CANONICAL_ANONYMOUS_DENIAL_REQUIRED');
+    anonymousDenied = true;
+  }
   return {
     code: 'CANONICAL_ROUTE_READY', origin: CANONICAL_ORIGIN, expectedProject,
     dnsResolved: true, httpsVerified: true, portalShellVerified: true,
-    anonymousDenied: true, firebaseProjectMatched: true, authenticated: false,
+    anonymousDenied, firebaseProjectMatched: true, authenticated: false,
   };
 }
 

@@ -177,6 +177,7 @@ jobs:
         env:
           PROJECT_ID: ${{ inputs.project_id }}
           APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          CANONICAL_PREFLIGHT_SCOPE: routing-only
         run: |
           set -euo pipefail
           test "$PROJECT_ID" = "$APPROVED_PROJECT"
