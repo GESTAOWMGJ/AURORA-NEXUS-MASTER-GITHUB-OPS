@@ -93,11 +93,26 @@ async function main() {
   if (!stateDir || !path.isAbsolute(stateDir)) fail('MOTOR_EXPLICIT_STATE_REQUIRED');
   const orgId = fs.readFileSync(path.join(stateDir, 'organization.txt'), 'utf8').trim();
   const receiptKey = fs.readFileSync(path.join(stateDir, 'control.key'), 'utf8').trim();
-  const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+  // Bound untrusted disk input before allocating/parsing JSON.
+  const inputPath = process.argv[2];
+  const stat = fs.lstatSync(inputPath);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32 * 1024)
+    fail('MOTOR_INPUT_FILE_REJECTED');
+  const input = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+  // Bind the authenticated loopback server's tenant to this local state.
+  const endpoint = 'http://127.0.0.1:38765';
+  const headers = { Authorization: 'Bearer ' + receiptKey, 'Content-Type': 'application/json', 'X-Aurora-Local': '1' };
+  const status = await fetch(endpoint + '/api/status', {
+    method: 'GET', redirect: 'error', signal: AbortSignal.timeout(5000),
+    headers: { Authorization: 'Bearer ' + receiptKey }
+  });
+  if (!status.ok) fail('MOTOR_SERVICE_AUTH_REJECTED');
+  const service = await status.json();
+  if (service?.orgId !== orgId) fail('MOTOR_SERVICE_TENANT_MISMATCH');
   const result = await runLearningCycle({ stateDir, orgId, input, receiptKey, request: async body => {
-    const response = await fetch('http://127.0.0.1:38765/api/improve', {
+    const response = await fetch(endpoint + '/api/improve', {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(190000),
-      headers: { Authorization: 'Bearer ' + receiptKey, 'Content-Type': 'application/json', 'X-Aurora-Local': '1' },
+      headers,
       body: JSON.stringify(body)
     });
     if (!response.ok) fail('MOTOR_LOCAL_REQUEST_' + response.status);
@@ -107,7 +122,7 @@ async function main() {
   console.log(JSON.stringify({
     recordId: result.record.recordId, orgId, state: result.record.learning.state,
     duplicate: result.duplicate, receipt: result.record.receipt,
-    knowledge: result.record.learning.knowledge, applied: false, cloudSyncVerified: false
+    applied: false, cloudSyncVerified: false
   }));
 }
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });
