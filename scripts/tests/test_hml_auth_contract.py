@@ -99,7 +99,7 @@ class WorkflowStructureTests(unittest.TestCase):
         with self.assertRaises(yaml.constructor.ConstructorError):
             yaml.load("jobs:\n  smoke: {}\n  smoke: {}\n", Loader=UniqueKeyLoader)
 
-    def test_canonical_preflight_precedes_cloud_auth_and_smokes_keep_canonical_origin(self):
+    def test_canonical_route_gate_precedes_auth_and_deploy_smokes_exact_hml_host(self):
         gate = "Require canonical HTTPS and HML routing before cloud authentication"
         for filename, (job_id, name) in TARGETS.items():
             workflow = load_workflow(WORKFLOWS / filename)
@@ -113,25 +113,36 @@ class WorkflowStructureTests(unittest.TestCase):
                           steps[gates[0]]["run"])
             smoke = next(step["run"] for step in steps if step.get("name") == name)
             self.assertIn('="https://auroranexus.com.br"', smoke)
-            self.assertNotIn('.web.app', smoke)
+            if filename == "deploy-aurora-firebase.yml":
+                self.assertIn('technical_origin="https://${PROJECT_ID}.web.app"', smoke)
+                self.assertIn('"${technical_origin}/__sessionLogin"', smoke)
+                self.assertIn('"${technical_origin}/api/bootstrap"', smoke)
+            else:
+                self.assertNotIn('.web.app', smoke)
             self.assertNotIn('--location', smoke)
             self.assertNotRegex(smoke, r'curl[^\n]*\s-L\b')
         deploy = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")["jobs"]["deploy"]["steps"]
         negative = next(step["run"] for step in deploy if step.get("name") == "Smoke test private shell and deployed functions")
         self.assertEqual(negative.count('.web.app'), 1)
         self.assertIn('technical_origin="https://${PROJECT_ID}.web.app"', negative)
+        self.assertIn('CANONICAL_PREFLIGHT_SCOPE=technical-api', negative)
         self.assertIn('technical_shell="$(curl --fail --silent --show-error --max-time 30 "${technical_origin}/")"', negative)
         self.assertIn('location.replace("https://auroranexus.com.br/portal', negative)
         self.assertIn('Technical Firebase host exposed the private shell', negative)
         self.assertIn('"${canonical_origin}/portal"', negative)
         self.assertIn('-H "Origin: ${canonical_origin}"', negative)
+        self.assertIn('"${technical_origin}/api/bootstrap"', negative)
+        self.assertNotIn('"${canonical_origin}/api/bootstrap"', negative)
         self.assertNotIn('base_url', negative)
         user_profiles = next(step["run"] for step in deploy if step.get("name") == "Verify user profile API rejects anonymous access")
         self.assertIn('-H "Origin: ${canonical_origin}"', user_profiles)
-        self.assertNotIn('.web.app', user_profiles)
+        self.assertIn('technical_origin="https://${PROJECT_ID}.web.app"', user_profiles)
+        self.assertIn('"${technical_origin}/api/user-profiles"', user_profiles)
         auth = next(step["run"] for step in deploy if step.get("name") == "Authenticated smoke test without stored password")
         self.assertNotIn('base_url', auth)
-        self.assertIn('https://auroranexus\\.com\\.br/portal', auth)
+        self.assertIn('technical_origin="https://${PROJECT_ID}.web.app"', auth)
+        self.assertIn('"${technical_origin}/__sessionLogin"', auth)
+        self.assertNotIn('AUTH_PRIVATE_SHELL_VERIFIED', auth)
 
     def test_technical_probe_requires_browser_guard_to_canonical_without_following(self):
         steps = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")["jobs"]["deploy"]["steps"]
