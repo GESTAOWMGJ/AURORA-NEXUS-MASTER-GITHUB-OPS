@@ -131,7 +131,7 @@ class WorkflowStructureTests(unittest.TestCase):
         self.assertEqual(negative.count(technical_gate), 1)
         self.assertLess(negative.index(public_gate), negative.index(technical_gate))
         self.assertIn('technical_shell="$(curl --fail --silent --show-error --max-time 30 "${technical_origin}/")"', negative)
-        self.assertIn('location.replace("https://auroranexus.com.br/portal', negative)
+        self.assertIn("grep -Fq 'https://auroranexus.com.br/portal'", negative)
         self.assertIn('Technical Firebase host exposed the private shell', negative)
         self.assertNotIn('shell="$(curl --fail --silent --show-error --max-time 30 "${canonical_origin}/portal")"', negative)
         self.assertNotIn('grep -Fq "Ambiente privado"', negative)
@@ -169,6 +169,7 @@ curl() {
 '''
         for value, expected in [
             ('<script>location.replace("https://auroranexus.com.br/portal"+location.search)</script>', 0),
+            ('Permanent Redirect. Redirecting to https://auroranexus.com.br/portal', 0),
             ('<html><title>Aurora Nexus | Login</title></html>', 1),
             ('<script>location.replace("https://example.test/portal")</script>', 1),
             ('<script>location.replace("https://auroranexus.com.br/portal")</script>Centro de gestão WMGJ', 90),
