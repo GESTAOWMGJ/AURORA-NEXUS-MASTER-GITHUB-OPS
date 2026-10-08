@@ -23,6 +23,18 @@ const AURORA_NEXUS_ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const AURORA_NEXUS_CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const SESSION_TTL_SECONDS = SESSION_TTL_MS / 1000;
+const CANONICAL_PORTAL_ORIGIN = "https://auroranexus.com.br";
+const CANONICAL_PORTAL_URL = `${CANONICAL_PORTAL_ORIGIN}${CANONICAL_PORTAL_PATH}`;
+const TECHNICAL_FIREBASE_HOSTS = new Set(["wmgj-hml-jfn-20260927.web.app", "wmgj-hml-jfn-20260927.firebaseapp.com"]);
+
+function requestedHost(req: { get(name: string): string | undefined }): string {
+  return String(req.get("x-fh-requested-host") || req.get("host") || "").toLowerCase().split(":")[0] || "";
+}
+
+function canonicalUserUrl(path: string): string {
+  if (!path || path === "/" || path === "/login") return CANONICAL_PORTAL_URL;
+  return `${CANONICAL_PORTAL_ORIGIN}${path.startsWith("/") ? path : CANONICAL_PORTAL_PATH}`;
+}
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -140,6 +152,11 @@ export const auroraNexusAuthGate = onRequest(
     setSecurityHeaders(res);
     if (!["GET", "HEAD"].includes(req.method)) {
       res.status(405).json({ ok: false, code: "METHOD_NOT_ALLOWED" });
+      return;
+    }
+
+    if (TECHNICAL_FIREBASE_HOSTS.has(requestedHost(req))) {
+      res.redirect(308, canonicalUserUrl(req.path));
       return;
     }
 
