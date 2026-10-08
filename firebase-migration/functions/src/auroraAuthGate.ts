@@ -29,7 +29,8 @@ const TECHNICAL_FIREBASE_HOSTS = new Set(["wmgj-hml-jfn-20260927.web.app", "wmgj
 
 function requestedHost(req: { get(name: string): string | undefined }): string {
   const raw = req.get("x-fh-requested-host") || req.get("x-forwarded-host") || req.get("host") || "";
-  return String(raw).toLowerCase().split(",")[0].trim().split(":")[0] || "";
+  const firstHost = String(raw).toLowerCase().split(",")[0] ?? "";
+  return firstHost.trim().split(":")[0] ?? "";
 }
 
 function canonicalUserUrl(path: string): string {
