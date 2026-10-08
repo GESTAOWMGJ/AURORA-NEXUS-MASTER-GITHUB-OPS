@@ -12,6 +12,7 @@ import {
   verifySession
 } from "./auroraAccess.js";
 import { auroraProtectedShell } from "./auroraFrontend.js";
+import { readRuntimeActiveRelease } from "./auroraActiveReleaseRuntime.js";
 import { auroraAuth } from "./firebase.js";
 import { servePrivateDownloads } from "./auroraDownloads.js";
 import { setupPage } from "./auroraSetup.js";
@@ -22,6 +23,24 @@ const AURORA_NEXUS_ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const AURORA_NEXUS_CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const SESSION_TTL_SECONDS = SESSION_TTL_MS / 1000;
+const CANONICAL_PORTAL_ORIGIN = "https://auroranexus.com.br";
+const CANONICAL_PORTAL_URL = `${CANONICAL_PORTAL_ORIGIN}${CANONICAL_PORTAL_PATH}`;
+const TECHNICAL_FIREBASE_HOSTS = new Set(["wmgj-hml-jfn-20260927.web.app", "wmgj-hml-jfn-20260927.firebaseapp.com"]);
+
+function requestedHost(req: { get(name: string): string | undefined }): string {
+  const raw = req.get("x-fh-requested-host") || req.get("x-forwarded-host") || req.get("host") || "";
+  const firstHost = String(raw).toLowerCase().split(",")[0] ?? "";
+  return firstHost.trim().split(":")[0] ?? "";
+}
+
+function canonicalUserUrl(path: string): string {
+  if (!path || path === "/" || path === "/login") return CANONICAL_PORTAL_URL;
+  return `${CANONICAL_PORTAL_ORIGIN}${path.startsWith("/") ? path : CANONICAL_PORTAL_PATH}`;
+}
+
+function technicalHostBrowserRedirect(): string {
+  return `<script>(()=>{const h=(location.hostname||"").toLowerCase();if(h==="wmgj-hml-jfn-20260927.web.app"||h==="wmgj-hml-jfn-20260927.firebaseapp.com"){location.replace("https://auroranexus.com.br/portal"+location.search+location.hash)}})();</script>`;
+}
 
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
@@ -70,6 +89,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado.", e
   <meta name="apple-mobile-web-app-title" content="Aurora Nexus">
   <link rel="manifest" href="${escapeHtml(manifestPath)}">
   <title>Aurora Nexus | Login</title>
+  ${technicalHostBrowserRedirect()}
   <style>
     :root { color-scheme: dark; --bg:#071f25; --panel:#0d2d34; --line:#1d4a53; --gold:#c6a45d; --text:#f7f1e7; --muted:#b9c7c6; }
     * { box-sizing: border-box; }
@@ -118,6 +138,14 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado.", e
       <div id="totp-setup" hidden><button id="start-totp" type="button">Configurar autenticador</button><div id="enrollment-input" hidden><p>Chave para o seu aplicativo autenticador:</p><code id="enrollment-key" style="overflow-wrap:anywhere"></code><label for="enrollment-code">Código do autenticador</label><input id="enrollment-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8"><button id="enroll-totp" type="button">Confirmar cadastro</button></div></div>
       <div id="activation-status" class="status" aria-live="polite"></div>
     </section>
+    <section id="onboarding-panel" hidden>
+      <h2>Bem-vindo à equipe</h2>
+      <p>Informe a senha de cadastro fornecida pelo Gestor Master para concluir seu acolhimento.</p>
+      <label for="registration-password">Senha de cadastro de uso único</label>
+      <input id="registration-password" type="password" autocomplete="one-time-code" maxlength="100">
+      <button id="onboarding-submit" type="button">Concluir cadastro</button>
+      <div id="onboarding-status" class="status" aria-live="polite"></div>
+    </section>
     <div class="fineprint">Sem demonstração pública. Acesso restrito a usuários previamente autorizados.</div>
   </main>
   <script type="module">${loginClient(entryOrg)}</script>
@@ -131,6 +159,11 @@ export const auroraNexusAuthGate = onRequest(
     setSecurityHeaders(res);
     if (!["GET", "HEAD"].includes(req.method)) {
       res.status(405).json({ ok: false, code: "METHOD_NOT_ALLOWED" });
+      return;
+    }
+
+    if (TECHNICAL_FIREBASE_HOSTS.has(requestedHost(req))) {
+      res.redirect(308, canonicalUserUrl(req.path));
       return;
     }
 
@@ -165,7 +198,13 @@ export const auroraNexusAuthGate = onRequest(
       return;
     }
     if (req.path === "/setup") {
-      res.status(200).type("html").send(req.method === "HEAD" ? "" : setupPage(member));
+      const refreshCsrf = csrfTokenForSession(req.get("cookie"), AURORA_NEXUS_CSRF_HMAC_KEY.value(), CSRF_PURPOSES.refresh);
+      if (!refreshCsrf) {
+        logger.error("Aurora Nexus setup CSRF key is not configured");
+        res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança.", entry?.orgId));
+        return;
+      }
+      res.status(200).type("html").send(req.method === "HEAD" ? "" : setupPage(member, refreshCsrf));
       return;
     }
     if (isDownload) {
@@ -194,7 +233,8 @@ export const auroraNexusAuthGate = onRequest(
       res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança.", entry?.orgId));
       return;
     }
-    let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; integrationKey: string; userProfile: string; distributionApproval: string; logout: string }, entry?.path);
+    const runningRelease = await readRuntimeActiveRelease();
+    let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; integrationKey: string; userProfile: string; distributionApproval: string; logout: string }, entry?.path, runningRelease.runtimeBuildWeb);
     shell = shell.replace("</nav>", '<a href="/setup">Instalação e conexões</a></nav>');
     if (["platform_admin", "org_admin", "director"].includes(member.role) || member.permissions.includes("downloads.hml.read")) {
       shell = shell.replace("</nav>", '<a href="/downloads">Instaladores Mac e Windows</a></nav>');

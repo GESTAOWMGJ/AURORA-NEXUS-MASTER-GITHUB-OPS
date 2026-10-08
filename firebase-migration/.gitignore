@@ -14,3 +14,5 @@ firestore-debug.log
 ui-debug.log
 *.local
 .DS_Store
+functions/runtime-release/
+functions/private-downloads/

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, type Transaction } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -14,13 +14,53 @@ import {
   type AuroraMember
 } from "./auroraAccess.js";
 import { validateResolutionEvidence } from "./auroraEvidence.js";
-import { buildProjection, parseActionCommand, type ProjectionSource } from "./auroraEngine.js";
+import { buildProjection, isOperationalRecord, parseActionCommand, type ProjectionSource } from "./auroraEngine.js";
 import { generateNativeInsight, parseNativeInsightIntent } from "./auroraNativeIntelligence.js";
 import { buildMasterOperationalState } from "./auroraMasterEngine.js";
 import { buildReleaseStatus } from "./auroraReleaseStatus.js";
 import { autoObserveResolvedDocumentAction } from "./auroraOrganicAutoObserve.js";
 import { loadFinancialClosingStatus } from "./auroraFinancialDecisionRuntime.js";
 import { auroraDb } from "./firebase.js";
+import { readRuntimeActiveRelease } from "./auroraActiveReleaseRuntime.js";
+import { readInstallationReadiness } from "./auroraInstallationReadiness.js";
+import { immutableEntityVersionId } from "./auroraCanonicalVersions.js";
+import { authenticatedOrganizationEnvironment } from "./auroraRuntimeEnvironment.js";
+
+export async function loadInstallationReadiness(orgId: string, documentId?: string) {
+  return auroraDb.runTransaction(async tx => {
+    const org = await tx.get(auroraDb.doc(`organizations/${orgId}`));
+    const active = org.exists && isActiveOrganization(org.data())
+      && org.data()?.projectionEnabled === true && org.data()?.projectionMode === 'SHADOW';
+    return readInstallationReadiness(orgId, async path => {
+      if (!active) return null;
+      const snap = await tx.get(auroraDb.doc(path));
+      return snap.exists ? snap.data() ?? null : null;
+    }, documentId);
+  });
+}
+
+export async function completeInstallation(orgId: string, uid: string) {
+  return auroraDb.runTransaction(async tx => {
+    const org = await tx.get(auroraDb.doc(`organizations/${orgId}`));
+    if (!org.exists || !isActiveOrganization(org.data())) throw new Error('ORGANIZATION_DISABLED');
+    if (org.data()?.projectionEnabled !== true || org.data()?.projectionMode !== 'SHADOW') {
+      throw new Error('PROJECTION_DISABLED');
+    }
+    const proof = await readInstallationReadiness(orgId, async path => {
+      const snap = await tx.get(auroraDb.doc(path));
+      return snap.exists ? snap.data() ?? null : null;
+    });
+    if (!proof.firstIngestionVerified) throw new Error('FIRST_INGESTION_PENDING');
+    if (!proof.operationalComplete) {
+      tx.set(auroraDb.doc(`organizations/${orgId}/runtimeCheckpoints/installation`), {
+        orgId, state:'COMPLETE', documentId:proof.documentId, versionId:proof.versionId,
+        sourceVersion:proof.sourceVersion, canonicalSnapshotHash:proof.canonicalSnapshotHash,
+        completedBy:uid, completedAt:FieldValue.serverTimestamp()
+      });
+    }
+    return {...proof, operationalComplete:true};
+  });
+}
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -28,7 +68,7 @@ const SOURCE_LIMIT = 1000;
 const sourceCollections = ["invoices", "bankTransactions", "glosses", "actionItems", "sourceDocuments", "reconciliations", "auditFindings"] as const;
 
 type ResponseLike = { set(name: string, value: string): unknown };
-type ProjectionActor = { uid: string; role: string; source: "USER" | "SCHEDULER" };
+type ProjectionActor = { uid: string; role: string; source: "USER" | "SCHEDULER" | "INTEGRATION" };
 
 function apiHeaders(res: ResponseLike): void {
   res.set("Cache-Control", "no-store");
@@ -87,11 +127,12 @@ async function requireAccess(req: { get(name: string): string | undefined }, res
   return null;
 }
 
-async function readProjectionSource(orgId: string): Promise<ProjectionSource> {
+async function readProjectionSource(orgId: string, tx: Transaction): Promise<ProjectionSource> {
   const entries = await Promise.all(sourceCollections.map(async (name) => {
-    const snapshot = await auroraDb.collection(`organizations/${orgId}/${name}`).limit(SOURCE_LIMIT + 1).get();
+    const snapshot = await tx.get(auroraDb.collection(`organizations/${orgId}/${name}`).limit(SOURCE_LIMIT + 1));
     if (snapshot.size > SOURCE_LIMIT) throw new Error(`SOURCE_LIMIT_EXCEEDED:${name}`);
-    return [name, snapshot.docs.map((doc) => doc.data())] as const;
+    return [name, snapshot.docs.map((doc) => name === 'sourceDocuments'
+      ? {...doc.data(), _documentId:doc.id} : doc.data())] as const;
   }));
   return Object.fromEntries(entries) as ProjectionSource;
 }
@@ -114,8 +155,8 @@ function deterministicSnapshotId(competence: string): string {
   return createHash("sha256").update(`dashboardSnapshot:${competence}`).digest("hex").slice(0, 48);
 }
 
-async function projectionSettings(orgId: string): Promise<{ competence: string; enabled: boolean }> {
-  const organization = await auroraDb.doc(`organizations/${orgId}`).get();
+async function projectionSettings(orgId: string, tx: Transaction): Promise<{ competence: string; enabled: boolean }> {
+  const organization = await tx.get(auroraDb.doc(`organizations/${orgId}`));
   if (!organization.exists || !isActiveOrganization(organization.data())) throw new Error("ORGANIZATION_DISABLED");
   const data = organization.data() ?? {};
   const competence = safeString(data.projectionCompetence, 7) ?? "";
@@ -124,26 +165,52 @@ async function projectionSettings(orgId: string): Promise<{ competence: string; 
 }
 
 export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: ProjectionActor = { uid: "scheduler", role: "system", source: "SCHEDULER" }): Promise<Record<string, unknown>> {
-  const settings = await projectionSettings(orgId);
+  return auroraDb.runTransaction(async (tx) => {
+  // Source and current projection share the transaction read point. A paused worker
+  // cannot publish an old source snapshot over a newer committed revision.
+  const settings = await projectionSettings(orgId, tx);
   if (!settings.enabled) throw new Error("PROJECTION_DISABLED");
-  const source = await readProjectionSource(orgId);
+  const source = await readProjectionSource(orgId, tx);
   const projection = buildProjection(source, new Date(), { orgId, competence: settings.competence });
   const dataQuality = projection.dataQuality as Record<string, unknown>;
   if (projection.state === "NO_SOURCE") throw new Error("PROJECTION_NO_SOURCE");
   if (dataQuality.complete !== true) throw new Error("PROJECTION_DATA_QUALITY_BLOCKED");
 
-  const snapshotId = randomUUID();
   const sourceHash = createHash("sha256").update(JSON.stringify(stableValue(source))).digest("hex");
+  const snapshotId = actor.source === 'INTEGRATION'
+    ? createHash('sha256').update(`integration:${settings.competence}:${sourceHash}`).digest('hex')
+    : randomUUID();
   const storedProjection = {
     ...projection,
     generatedAt: FieldValue.serverTimestamp(),
     engine: { name: "aurora-projection", version: 2, mode: "SHADOW" },
     sourceLimit: SOURCE_LIMIT,
     sourceHash,
-    snapshotId
+    snapshotId,
+    integrationReadback: source.sourceDocuments.filter(doc =>
+      isOperationalRecord(doc) && doc.orgId === orgId && doc.nativeReady === true && doc.sourceIndependent === true
+      && typeof doc.entityKey === 'string' && Number.isSafeInteger(doc.revision)
+      && Number(doc.revision) >= 1 && /^[a-f0-9]{64}$/.test(String(doc.canonicalSnapshotHash ?? ''))
+    ).map(doc => ({documentId:doc._documentId, sourceVersion:doc.sourceVersion,
+      revision:doc.revision, versionId:immutableEntityVersionId('sourceDocument',String(doc.entityKey),Number(doc.revision)),
+      canonicalSnapshotHash:doc.canonicalSnapshotHash}))
   };
   const base = `organizations/${orgId}`;
-  await auroraDb.runTransaction(async (tx) => {
+    const historyRef = auroraDb.doc(`${base}/dashboardSnapshotHistory/${snapshotId}`);
+    const history = actor.source === 'INTEGRATION' ? await tx.get(historyRef) : null;
+    if (history?.exists) {
+      const recorded = history.data();
+      if (recorded?.sourceHash !== sourceHash || recorded.orgId !== orgId || recorded.snapshotId !== snapshotId) {
+        throw new Error('PROJECTION_HISTORY_CONFLICT');
+      }
+      const currentRef = auroraDb.doc(`${base}/dashboardSnapshots/current`);
+      const current = await tx.get(currentRef);
+      if (current.data()?.sourceHash !== sourceHash) {
+        tx.set(auroraDb.doc(`${base}/dashboardSnapshots/${deterministicSnapshotId(settings.competence)}`), recorded);
+        tx.set(currentRef, recorded);
+      }
+      return projection;
+    }
     tx.create(auroraDb.doc(`${base}/dashboardSnapshotHistory/${snapshotId}`), storedProjection);
     tx.set(auroraDb.doc(`${base}/dashboardSnapshots/${deterministicSnapshotId(settings.competence)}`), storedProjection);
     tx.set(auroraDb.doc(`${base}/dashboardSnapshots/current`), storedProjection);
@@ -160,8 +227,8 @@ export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: Projectio
       sanitized: true,
       sensitivity: "INTERNAL"
     });
-  });
   return projection;
+  });
 }
 
 function visibleProjection(projection: Record<string, unknown>, member: AuroraMember): Record<string, unknown> {
@@ -183,12 +250,13 @@ export const auroraNexusBootstrap = onRequest(
     if (!can(member, "dashboard.read", ["platform_admin", "org_admin", "director", "auditor", "operator", "finance", "viewer"])) { res.status(403).json({ ok: false, code: "PERMISSION_DENIED" }); return; }
     const mayReadActions = can(member, "actions.read", ["platform_admin", "org_admin", "director", "auditor", "operator", "finance"]);
     const mayReadFinancialStatus = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
-    const [org, snapshot, actions] = await Promise.all([
+    const [org, snapshot, actions, canonicalVersion] = await Promise.all([
       auroraDb.doc(`organizations/${member.orgId}`).get(),
       auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get(),
       mayReadActions
         ? auroraDb.collection(`organizations/${member.orgId}/actionItems`).limit(100).get()
-        : Promise.resolve(null)
+        : Promise.resolve(null),
+      readRuntimeActiveRelease()
     ]);
     const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
     const competence = safeString(org.data()?.projectionCompetence, 7) ?? new Date().toISOString().slice(0, 7);
@@ -239,7 +307,8 @@ export const auroraNexusBootstrap = onRequest(
     }));
     res.status(200).json({
       ok: true,
-      environment: "HOMOLOGATION",
+      installation: await loadInstallationReadiness(member.orgId),
+      environment: authenticatedOrganizationEnvironment(org.exists ? org.data() : undefined),
       mode: "SHADOW",
       organization: { id: member.orgId, name: String(org.data()?.name ?? "WMGJ") },
       member: { email: member.email, role: member.role, mfaVerified: member.mfaVerified },
@@ -251,6 +320,7 @@ export const auroraNexusBootstrap = onRequest(
       }),
       financialStatus,
       release: buildReleaseStatus(org.data() ?? {}),
+      canonicalVersion,
       actions: safeActions,
       actionSummary,
       recentActivity
@@ -271,7 +341,10 @@ export const auroraNexusNativeInsight = onRequest(
     const intent = parseNativeInsightIntent(String(req.query.intent ?? "EXECUTIVE"));
     if (!intent) { res.status(400).json({ ok: false, code: "INVALID_NATIVE_INTENT" }); return; }
 
-    const snapshot = await auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get();
+    const [snapshot, organization] = await Promise.all([
+      auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get(),
+      auroraDb.doc(`organizations/${member.orgId}`).get()
+    ]);
     if (!snapshot.exists) {
       res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_SNAPSHOT_REQUIRED" });
       return;
@@ -299,7 +372,7 @@ export const auroraNexusNativeInsight = onRequest(
     const projection = visibleProjection(rawProjection, member);
     res.status(200).json({
       ok: true,
-      environment: "HOMOLOGATION",
+      environment: authenticatedOrganizationEnvironment(organization.exists ? organization.data() : undefined),
       mode: "FIREBASE_NATIVE",
       sourceAccessDuringInference: false,
       externalAiUsed: false,
@@ -349,13 +422,15 @@ export const auroraNexusMasterEngine = onRequest(
     const financialStatus = competence
       ? await loadFinancialClosingStatus(member.orgId, competence)
       : null;
-    const release = buildReleaseStatus(org.data() ?? {});
+    const canonicalVersion = await readRuntimeActiveRelease();
+    const release = { ...buildReleaseStatus(org.data() ?? {}), canonicalVersion };
     res.status(200).json({
       ok: true,
-      environment: "HOMOLOGATION",
+      environment: authenticatedOrganizationEnvironment(org.exists ? org.data() : undefined),
       mode: "AURORA_MASTER_NATIVE",
       sourceAccessDuringInference: false,
       externalAiUsed: false,
+      canonicalVersion,
       master: buildMasterOperationalState(projection, { financialStatus, release })
     });
   }
@@ -372,11 +447,19 @@ export const auroraNexusRefresh = onRequest(
     if (!validCsrf(req.get("cookie"), req.get("x-aurora-csrf"), CSRF_HMAC_KEY.value(), CSRF_PURPOSES.refresh)) { res.status(403).json({ ok: false, code: "CSRF_REJECTED" }); return; }
     if (!can(member, "dashboard.refresh", ["platform_admin", "org_admin", "director", "auditor"])) { res.status(403).json({ ok: false, code: "PERMISSION_DENIED" }); return; }
     try {
+      if (req.body?.operation === 'COMPLETE_INSTALLATION') {
+        const installation = await completeInstallation(member.orgId, member.uid);
+        res.status(200).json({ok:true, orgId:member.orgId, installation});
+        return;
+      }
+      if (req.body?.operation !== undefined && req.body.operation !== 'REFRESH') {
+        res.status(400).json({ok:false, code:'INVALID_OPERATION'}); return;
+      }
       const projection = await refreshProjection(member.orgId, { uid: member.uid, role: member.role, source: "USER" });
       res.status(200).json({ ok: true, projection: visibleProjection(projection, member) });
     } catch (error) {
       const code = error instanceof Error ? error.message : "PROJECTION_FAILED";
-      const status = ["PROJECTION_DISABLED", "PROJECTION_NO_SOURCE", "PROJECTION_DATA_QUALITY_BLOCKED", "PROJECTION_COMPETENCE_REQUIRED"].includes(code) ? 409 : 500;
+      const status = ["PROJECTION_DISABLED", "PROJECTION_NO_SOURCE", "PROJECTION_DATA_QUALITY_BLOCKED", "PROJECTION_COMPETENCE_REQUIRED", "FIRST_INGESTION_PENDING", "ORGANIZATION_DISABLED"].includes(code) ? 409 : 500;
       if (status === 500) logger.error("Aurora projection failed", { code });
       res.status(status).json({ ok: false, code: status === 500 ? "PROJECTION_FAILED" : code });
     }

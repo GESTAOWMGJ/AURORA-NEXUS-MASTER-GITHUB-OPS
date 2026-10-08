@@ -25,6 +25,23 @@ on:
         required: false
         default: ""
         type: string
+      publish_active_release:
+        description: "Promote the reviewed release after canonical smoke and configured signing keys"
+        required: false
+        default: false
+        type: boolean
+      active_release_ci_run_id:
+        description: "Successful Validate Firestore Migration run at this exact main SHA"
+        required: false
+        type: string
+      active_release_review_pr:
+        description: "Merged PR with human approval at its final reviewed head"
+        required: false
+        type: string
+      active_release_previous_sha256:
+        description: "Current certificate SHA256, or NONE for the first reviewed promotion"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -153,9 +170,39 @@ jobs:
           set -euo pipefail
           test "$(git -C ../.. rev-parse HEAD)" = "$GITHUB_SHA"
           npm ci
-          npm test
           npm run build
+          npm test
           npm audit --omit=dev --audit-level=high
+      - name: Require canonical HTTPS and HML routing before cloud authentication
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          CANONICAL_PREFLIGHT_SCOPE: routing-only
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = "$APPROVED_PROJECT"
+          node firebase-migration/scripts/check-canonical-preflight.mjs "$PROJECT_ID"
+      - name: Require canonical publisher configuration before cloud changes
+        env:
+          PUBLISH_ACTIVE_RELEASE: ${{ inputs.publish_active_release }}
+          AURORA_ACTIVE_RELEASE_PUBLIC_KEY: ${{ vars.AURORA_ACTIVE_RELEASE_PUBLIC_KEY }}
+          AURORA_ACTIVE_RELEASE_PRIVATE_KEY: ${{ secrets.AURORA_ACTIVE_RELEASE_PRIVATE_KEY }}
+          RELEASE_CI_RUN_ID: ${{ inputs.active_release_ci_run_id }}
+          RELEASE_REVIEW_PR: ${{ inputs.active_release_review_pr }}
+          RELEASE_PREVIOUS_SHA256: ${{ inputs.active_release_previous_sha256 }}
+        run: |
+          node - <<'NODE'
+          const {createPrivateKey,createPublicKey}=require('node:crypto');
+          const e=process.env,requested=e.PUBLISH_ACTIVE_RELEASE==='true',key=e.AURORA_ACTIVE_RELEASE_PUBLIC_KEY;
+          if(key && !requested)throw Error('CANONICAL_RELEASE_PROMOTION_REQUIRED');
+          if(requested){
+            const publicKey=createPublicKey(key),privateKey=createPrivateKey(e.AURORA_ACTIVE_RELEASE_PRIVATE_KEY);
+            if(publicKey.asymmetricKeyType!=='ed25519'||privateKey.asymmetricKeyType!=='ed25519'
+              ||!publicKey.export({type:'spki',format:'der'}).equals(createPublicKey(privateKey).export({type:'spki',format:'der'})))throw Error('RELEASE_SIGNING_CONFIGURATION_REQUIRED');
+            if(![e.RELEASE_CI_RUN_ID,e.RELEASE_REVIEW_PR].every(id=>/^[1-9][0-9]{0,19}$/.test(id||''))
+              ||!(e.RELEASE_PREVIOUS_SHA256==='NONE'||/^[a-f0-9]{64}$/.test(e.RELEASE_PREVIOUS_SHA256||'')))throw Error('RELEASE_EVIDENCE_IDS_REQUIRED');
+          }
+          NODE
       - name: Require protected deployment configuration
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -164,6 +211,7 @@ jobs:
           DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
           SMOKE_UID: ${{ vars.FIREBASE_HML_SMOKE_UID }}
           SMOKE_EMAIL: ${{ vars.FIREBASE_HML_SMOKE_EMAIL }}
+          AURORA_ACTIVE_RELEASE_PUBLIC_KEY: ${{ vars.AURORA_ACTIVE_RELEASE_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           test -n "$APPROVED_PROJECT"
@@ -386,7 +434,7 @@ jobs:
             --data '{"pageSize":100}' \
             "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:listCollectionIds")"
           jq -e '
-            ([.collectionIds[]? | select(. != "organizations")] | length) == 0
+            ([.collectionIds[]? | select(. != "organizations" and . != "platformRuntime")] | length) == 0
           ' <<<"$collections_json" >/dev/null
           if ! jq -e '(.nextPageToken // "") == ""' <<<"$collections_json" >/dev/null; then
             echo "::error::HML_ROOT_COLLECTIONS_INCOMPLETE"
@@ -398,14 +446,31 @@ jobs:
           PROJECT_ID: ${{ inputs.project_id }}
           APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
           VALIDATED_SHA: ${{ needs.validate.outputs.candidate_sha }}
+          AURORA_RUNTIME_SERVICE_ACCOUNT: 299889357292-compute@developer.gserviceaccount.com
+          AURORA_ACTIVE_RELEASE_PUBLIC_KEY: ${{ vars.AURORA_ACTIVE_RELEASE_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
           test "$PROJECT_ID" = "$APPROVED_PROJECT"
           test "$GITHUB_SHA" = "$VALIDATED_SHA"
+          test "$AURORA_RUNTIME_SERVICE_ACCOUNT" = "299889357292-compute@developer.gserviceaccount.com"
           test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
           git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
+          runtime_env="functions/.env.${PROJECT_ID}"
+          umask 077
+          trap 'rm -f -- "$runtime_env"' EXIT
+          printf '%s\n' "AURORA_RUNTIME_SERVICE_ACCOUNT=$AURORA_RUNTIME_SERVICE_ACCOUNT" > "$runtime_env"
+          node scripts/verify-active-release-storage.mjs
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const {createPublicKey} = require('node:crypto');
+          const key = process.env.AURORA_ACTIVE_RELEASE_PUBLIC_KEY;
+          if (key) {
+            if (createPublicKey(key).asymmetricKeyType !== 'ed25519') throw Error('INVALID_RELEASE_PUBLIC_KEY');
+            fs.appendFileSync('functions/.env.' + process.env.PROJECT_ID, 'AURORA_ACTIVE_RELEASE_PUBLIC_KEY=' + JSON.stringify(key) + '\n');
+          }
+          NODE
           npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusUserProfiles,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
       - name: Smoke test private shell and deployed functions
         env:
@@ -439,65 +504,91 @@ jobs:
             [$functions[] | (.id // .name // "") | split("/")[-1]] as $deployed |
             all($expected[]; . as $name | $deployed | index($name) != null)
           ' <<<"$functions" >/dev/null
-          shell="$(curl --fail --silent --show-error --max-time 30 "https://${PROJECT_ID}.web.app/")"
-          grep -Fq "Ambiente privado" <<<"$shell"
-          if grep -Fq "Centro de gestão WMGJ" <<<"$shell"; then
-            echo "Protected shell was exposed without login" >&2
+          CANONICAL_PREFLIGHT_SCOPE=routing-only \
+            node firebase-migration/scripts/check-canonical-preflight.mjs "$PROJECT_ID"
+          CANONICAL_PREFLIGHT_SCOPE=technical-api \
+            node firebase-migration/scripts/check-canonical-preflight.mjs "$PROJECT_ID"
+          canonical_origin="https://auroranexus.com.br"
+          technical_origin="https://${PROJECT_ID}.web.app"
+          technical_headers="$(mktemp "${RUNNER_TEMP}/aurora-technical-headers.XXXXXX")"
+          technical_shell="$(mktemp "${RUNNER_TEMP}/aurora-technical-shell.XXXXXX")"
+          negative_response="$(mktemp "${RUNNER_TEMP}/aurora-negative-smoke.XXXXXX.json")"
+          trap 'rm -f "$technical_headers" "$technical_shell" "$negative_response"' EXIT
+          technical_status="$(curl --silent --show-error --max-time 30 \
+            --dump-header "$technical_headers" \
+            --output "$technical_shell" \
+            --write-out '%{http_code}' \
+            "${technical_origin}/")"
+          if [ "$technical_status" = "308" ]; then
+            technical_location="$(awk 'tolower($0) ~ /^location:/ { sub(/\r$/, ""); sub(/^[^:]*:[[:space:]]*/, ""); print; exit }' "$technical_headers")"
+            test "$technical_location" = "${canonical_origin}/portal"
+          elif [ "$technical_status" = "200" ]; then
+            grep -Fq 'location.replace("https://auroranexus.com.br/portal' "$technical_shell"
+          else
+            echo "::error title=Unexpected technical root response::HTTP ${technical_status}; expected 200 browser guard or 308 canonical redirect." >&2
             exit 90
           fi
-          negative_response="$(mktemp "${RUNNER_TEMP}/aurora-negative-smoke.XXXXXX.json")"
-          trap 'rm -f "$negative_response"' EXIT
+          if grep -Fq "Centro de gestão WMGJ" "$technical_shell"; then
+            echo "Technical Firebase host exposed the private shell" >&2
+            exit 90
+          fi
+          assert_auth_required() {
+            local endpoint="$1" status="$2" response="$3" code
+            if [ "$status" = "401" ] && jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$response" >/dev/null 2>&1; then
+              return
+            fi
+            code="$(jq -r '.code // "NON_JSON"' "$response" 2>/dev/null || printf 'NON_JSON')"
+            echo "::error title=Anonymous smoke contract mismatch::${endpoint} returned HTTP ${status} with code ${code}." >&2
+            exit 91
+          }
           bootstrap_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
-            "https://${PROJECT_ID}.web.app/api/bootstrap")"
-          test "$bootstrap_status" = "401"
-          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+            "${technical_origin}/api/bootstrap")"
+          assert_auth_required "bootstrap" "$bootstrap_status" "$negative_response"
           native_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
-            "https://${PROJECT_ID}.web.app/api/native-insight?intent=EXECUTIVE")"
-          test "$native_status" = "401"
-          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+            "${technical_origin}/api/native-insight?intent=EXECUTIVE")"
+          assert_auth_required "native-insight" "$native_status" "$negative_response"
           master_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
-            "https://${PROJECT_ID}.web.app/api/master-engine")"
-          test "$master_status" = "401"
-          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+            "${technical_origin}/api/master-engine")"
+          assert_auth_required "master-engine" "$master_status" "$negative_response"
           organic_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
-            "https://${PROJECT_ID}.web.app/organic?format=json")"
-          test "$organic_status" = "401"
-          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+            "${technical_origin}/organic?format=json")"
+          assert_auth_required "organic" "$organic_status" "$negative_response"
           shareholder_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
-            "https://${PROJECT_ID}.web.app/reports/shareholders?format=json&competence=2026-10")"
-          test "$shareholder_status" = "401"
-          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+            "${technical_origin}/reports/shareholders?format=json&competence=2026-10")"
+          assert_auth_required "shareholders" "$shareholder_status" "$negative_response"
           distribution_status="$(curl --silent --show-error --max-time 30 \
             -X POST \
             -H 'Content-Type: application/json' \
+            -H "Origin: ${canonical_origin}" -H 'Sec-Fetch-Site: same-origin' \
             --data '{"competence":"2026-10","snapshotHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","decision":"REJECT","reason":"negative smoke","expectedRevision":0}' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
-            "https://${PROJECT_ID}.web.app/api/distribution-approval")"
-          test "$distribution_status" = "401"
-          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+            "${technical_origin}/api/distribution-approval")"
+          assert_auth_required "distribution-approval" "$distribution_status" "$negative_response"
       - name: Verify user profile API rejects anonymous access
         env:
           PROJECT_ID: ${{ inputs.project_id }}
         run: |
           set -euo pipefail
+          canonical_origin="https://auroranexus.com.br"
+          technical_origin="https://${PROJECT_ID}.web.app"
           for method in GET POST; do
-            status="$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' --request "$method" "https://${PROJECT_ID}.web.app/api/user-profiles")"
+            status="$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' --request "$method" -H "Origin: ${canonical_origin}" -H 'Sec-Fetch-Site: same-origin' "${technical_origin}/api/user-profiles")"
             test "$status" = "401"
           done
 
@@ -519,7 +610,6 @@ jobs:
           auth_response="$smoke_dir/auth-response.json"
           session_payload="$smoke_dir/session-payload.json"
           cookie_jar="$smoke_dir/cookies.txt"
-          private_shell="$smoke_dir/private-shell.html"
           bootstrap_response="$smoke_dir/bootstrap.json"
           native_response="$smoke_dir/native.json"
           master_response="$smoke_dir/master.json"
@@ -597,56 +687,23 @@ jobs:
           fi
           echo "AUTH_SMOKE_UID_VERIFIED"
 
-          base_url="https://${PROJECT_ID}.web.app"
+          canonical_origin="https://auroranexus.com.br"
+          technical_origin="https://${PROJECT_ID}.web.app"
           jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$session_payload"
           curl --fail --silent --show-error --max-time 30 \
             -X POST \
             -H 'Content-Type: application/json' \
-            -H "Origin: ${base_url}" \
+            -H "Origin: ${canonical_origin}" \
             -H 'Sec-Fetch-Site: same-origin' \
             --cookie-jar "$cookie_jar" \
             --data-binary @"$session_payload" \
             --output /dev/null \
-            "${base_url}/__sessionLogin"
-          # Tenant paths authorize membership, then converge the browser to /portal.
-          tenant_redirect_headers="$smoke_dir/tenant-redirect.headers"
-          tenant_status="$(curl --silent --show-error --max-time 30 \
-            --cookie "$cookie_jar" \
-            --output /dev/null \
-            --dump-header "$tenant_redirect_headers" \
-            --write-out '%{http_code}' \
-            "${base_url}/wmgj")"
-          if [ "$tenant_status" != "303" ]; then
-            echo "::error::AUTH_TENANT_REDIRECT_HTTP=$tenant_status"
-            exit 91
-          fi
-          if ! grep -Eiq '^location:[[:space:]]*/portal[[:space:]]*$' "$tenant_redirect_headers"; then
-            echo "::error::AUTH_TENANT_REDIRECT_LOCATION_MISMATCH"
-            exit 91
-          fi
-          private_status="$(curl --fail --silent --show-error --max-time 30 \
-            --cookie "$cookie_jar" \
-            --output "$private_shell" \
-            --write-out '%{http_code}' \
-            "${base_url}/portal")"
-          if [ "$private_status" != "200" ]; then
-            echo "::error::AUTH_PRIVATE_SHELL_HTTP=$private_status"
-            exit 91
-          fi
-          if ! grep -Fq "Centro de gestão WMGJ" "$private_shell"; then
-            echo "::error::AUTH_PRIVATE_SHELL_CONTENT_MISMATCH"
-            exit 91
-          fi
-          if grep -Fq "Ambiente privado" "$private_shell"; then
-            echo "Authenticated smoke remained on the login shell" >&2
-            exit 91
-          fi
-          echo "AUTH_PRIVATE_SHELL_VERIFIED"
+            "${technical_origin}/__sessionLogin"
           curl --fail --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --cookie "$cookie_jar" \
             --output "$bootstrap_response" \
-            "${base_url}/api/bootstrap"
+            "${technical_origin}/api/bootstrap"
           jq -e --arg email "$SMOKE_EMAIL" '
             .ok == true and
             .environment == "HOMOLOGATION" and
@@ -663,7 +720,7 @@ jobs:
             --cookie "$cookie_jar" \
             --output "$native_response" \
             --write-out '%{http_code}' \
-            "${base_url}/api/native-insight?intent=EXECUTIVE")"
+            "${technical_origin}/api/native-insight?intent=EXECUTIVE")"
           case "$native_status" in
             200)
               jq -e '
@@ -693,7 +750,7 @@ jobs:
             --cookie "$cookie_jar" \
             --output "$master_response" \
             --write-out '%{http_code}' \
-            "${base_url}/api/master-engine")"
+            "${technical_origin}/api/master-engine")"
           case "$master_status" in
             200)
               jq -e '
@@ -725,7 +782,7 @@ jobs:
             -H 'Accept: application/json' \
             --cookie "$cookie_jar" \
             --output "$organic_response" \
-            "${base_url}/organic?format=json"
+            "${technical_origin}/organic?format=json"
           jq -e '
             .ok == true and
             .environment == "HOMOLOGATION" and
@@ -734,3 +791,99 @@ jobs:
             (.sectors | index("AUDIT")) != null and
             (.sectors | index("FINANCE")) != null
           ' "$organic_response" >/dev/null
+          if [ '${{ inputs.publish_active_release }}' = 'true' ]; then
+            curl --fail --silent --show-error --max-time 30 -X POST \
+              -H 'Content-Type: application/json' -H 'Origin: https://auroranexus.com.br' \
+              -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$smoke_dir/canonical-cookies.txt" \
+              --data-binary @"$session_payload" --output /dev/null \
+              'https://auroranexus.com.br/__sessionLogin'
+            curl --fail --silent --show-error --max-time 30 \
+              --cookie "$smoke_dir/canonical-cookies.txt" -H 'Accept: application/json' \
+              --output "$smoke_dir/canonical-bootstrap.json" \
+              'https://auroranexus.com.br/api/bootstrap'
+            jq -e --arg sha "$GITHUB_SHA" '
+              .ok == true and .organization.id == "wmgj" and
+              .canonicalVersion.runtimeBuild.sourceSha == $sha and
+              .canonicalVersion.runtimeBuild.fileIntegrityVerified == true and
+              .canonicalVersion.runtimeBuildWeb.sourceSha == $sha and
+              .canonicalVersion.runtimeBuildWeb.fileIntegrityVerified == true
+            ' "$smoke_dir/canonical-bootstrap.json" >/dev/null
+            jq '{sourceSha:.canonicalVersion.runtimeBuild.sourceSha,
+              serverManifestSha256:.canonicalVersion.runtimeBuild.manifestSha256,
+              webManifestSha256:.canonicalVersion.runtimeBuildWeb.manifestSha256}' \
+              "$smoke_dir/canonical-bootstrap.json" > "$RUNNER_TEMP/aurora-canonical-runtime-smoke.json"
+          fi
+      - name: Verify canonical source-bound runtime
+        if: ${{ inputs.publish_active_release }}
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          node - <<'NODE'
+          const fs=require('node:fs'),crypto=require('node:crypto');
+          const proof=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+'/aurora-canonical-runtime-smoke.json','utf8'));
+          if(proof.sourceSha!==process.env.EXPECTED_SHA)throw Error('CANONICAL_SOURCE_CONFLICT');
+          for(const component of ['server','web']){
+            const bytes=fs.readFileSync('firebase-migration/functions/runtime-release/'+component+'-manifest.json');
+            if(crypto.createHash('sha256').update(bytes).digest('hex')!==proof[component+'ManifestSha256'])throw Error('CANONICAL_MANIFEST_CONFLICT');
+          }
+          console.log('CANONICAL_SOURCE_BOUND_RUNTIME_VERIFIED');
+          NODE
+      - name: Preserve exact release manifests
+        if: ${{ inputs.publish_active_release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-active-release-manifests-${{ github.sha }}
+          path: firebase-migration/functions/runtime-release/*-manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-active-release:
+    name: Publish verified canonical active release
+    if: ${{ inputs.publish_active_release && inputs.deploy_confirmation == 'DEPLOY_HOMOLOGATION' }}
+    needs: [validate, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: firebase-homologation
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      pull-requests: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Build reviewed publisher
+        working-directory: firebase-migration/functions
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+      - uses: actions/download-artifact@v4
+        with:
+          name: aurora-active-release-manifests-${{ github.sha }}
+          path: firebase-migration/functions/runtime-release
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      - name: Publish exact reviewed release with compare-and-swap
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GCLOUD_PROJECT: ${{ inputs.project_id }}
+          AURORA_ACTIVE_RELEASE_SHA: ${{ github.sha }}
+          AURORA_ACTIVE_RELEASE_PUBLIC_KEY: ${{ vars.AURORA_ACTIVE_RELEASE_PUBLIC_KEY }}
+          AURORA_ACTIVE_RELEASE_PRIVATE_KEY: ${{ secrets.AURORA_ACTIVE_RELEASE_PRIVATE_KEY }}
+          AURORA_ACTIVE_RELEASE_CI_RUN_ID: ${{ inputs.active_release_ci_run_id }}
+          AURORA_ACTIVE_RELEASE_DEPLOY_RUN_ID: ${{ github.run_id }}
+          AURORA_ACTIVE_RELEASE_REVIEW_PR: ${{ inputs.active_release_review_pr }}
+          AURORA_ACTIVE_RELEASE_PREVIOUS_SHA256: ${{ inputs.active_release_previous_sha256 }}
+          AURORA_ACTIVE_RELEASE_SERVER_MANIFEST: firebase-migration/functions/runtime-release/server-manifest.json
+          AURORA_ACTIVE_RELEASE_WEB_MANIFEST: firebase-migration/functions/runtime-release/web-manifest.json
+          AURORA_ACTIVE_RELEASE_SATELLITE_MANIFEST: firebase-migration/functions/runtime-release/satellite-manifest.json
+        run: |
+          export AURORA_ACTIVE_RELEASE_PRODUCT_VERSION="$(node -p "require('./firebase-migration/functions/lib/auroraReleaseStatus.js').AURORA_PRODUCT_VERSION")"
+          node firebase-migration/scripts/publish-active-release.mjs

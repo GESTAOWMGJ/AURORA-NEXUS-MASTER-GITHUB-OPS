@@ -1,4 +1,5 @@
 const test = require('node:test');
+require('./test-gmail-sanitized-status.cjs');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
@@ -84,3 +85,7 @@ test('diagnostic rejects a query, thread selector or missing ID before any read'
     assert.throws(() => ctx.diagnosticarMensagemGmailWMGJ(value), /MESSAGE_ID_INVALIDO/);
   }
 });
+
+// Register the Drive first-cycle regressions in the existing ingestion CI gate.
+require('./test-gmail-drive-onboarding.cjs');
+require('./test-gmail-connector-status.cjs');

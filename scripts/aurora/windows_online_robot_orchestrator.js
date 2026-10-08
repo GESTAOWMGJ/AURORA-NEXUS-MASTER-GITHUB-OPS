@@ -2,6 +2,8 @@
 "use strict";
 
 const fs = require("node:fs");
+const { spawnSync } = require("node:child_process");
+const { createHash } = require("node:crypto");
 const path = require("node:path");
 
 const ROOT = process.cwd();
@@ -147,7 +149,10 @@ const result = {
   version: "1.3.0",
   activeDeliverable: ACTIVE_DELIVERABLE,
   trigger: "CLOUD_HEALTH_OR_WINDOWS_XEON_ONLINE_CONFIRMED",
-  mode: "START_ALL_SAFE_ROBOTS_WITH_FAILOVER",
+  mode: "PLAN_ONLY",
+  evidenceState: "SPECIFIED",
+  operationalIntegrationVerified: false,
+  failoverExecuted: false,
   passed: policyChecks.every((check) => check.ok) && semanticChecks.every((check) => check.ok),
   failoverPlan,
   startupOrder: robots,
@@ -166,8 +171,77 @@ const result = {
   semanticChecks
 };
 
-console.log(JSON.stringify(result, null, 2));
+// This is a bounded local executor, not a remote dispatcher or a failover router.
+// Existing authenticated cloud ingestion remains in aurora_cloud_sync.py.
+const SAFE_ROBOTS = new Set([
+  "platform-unification-robot", "certification-security-gate",
+  "security-privacy-update-bot", "organic-improvement-backlog"
+]);
 
-if (!result.passed) {
-  process.exitCode = 1;
+function executeSafeRobots(plan, options = {}) {
+  const root = options.root || ROOT;
+  const timeoutMs = options.timeoutMs ?? 30000;
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) {
+    throw new Error("INVALID_TIMEOUT");
+  }
+  const run = options.run || spawnSync;
+  const receipts = [];
+  let failed = !plan.passed;
+  for (const robot of plan.startupOrder) {
+    if (failed) {
+      receipts.push({ id: robot.id, state: "NOT_EXECUTED_PRIOR_FAILURE" });
+      continue;
+    }
+    if (!SAFE_ROBOTS.has(robot.id)) {
+      receipts.push({ id: robot.id, state: robot.command.startsWith("policy:")
+        ? "DECLARATIVE_POLICY" : "EXPLICIT_INPUT_REQUIRED" });
+      continue;
+    }
+    // Resolve from fixed source registry, never from a supplied command string.
+    const fixed = robots.find(item => item.id === robot.id);
+    const script = fixed.command.slice("node ".length);
+    let execution;
+    try {
+      execution = run(process.execPath, [path.join(root, script)], {
+        cwd: root, shell: false, timeout: timeoutMs, maxBuffer: 1024 * 1024,
+        encoding: "utf8", windowsHide: true,
+        // Read-only robots do not need cloud/integration credentials.
+        env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot,
+          AURORA_DRY_RUN: "1" }
+      });
+    } catch (_) {
+      execution = { status: null, error: { code: "SPAWN_FAILED" } };
+    }
+    const stdout = String(execution.stdout || "");
+    let output;
+    try { output = JSON.parse(stdout); } catch (_) { output = null; }
+    const gate = robot.id !== "organic-improvement-backlog";
+    const validOutput = output && (gate ? output.passed === true
+      : Array.isArray(output.backlog) && output.dryRun === true);
+    const ok = execution.status === 0 && !execution.error && !execution.signal && Boolean(validOutput);
+    receipts.push({ id: robot.id, state: ok ? "LOCAL_EXECUTION_VERIFIED" : "FAILED",
+      exitCode: Number.isInteger(execution.status) ? execution.status : null,
+      failure: ok ? null : execution.error?.code === "ETIMEDOUT" ? "TIMEOUT"
+        : execution.error ? "SPAWN_OR_BUFFER_ERROR" : execution.signal ? "SIGNAL"
+        : execution.status !== 0 ? "NONZERO_EXIT" : "OUTPUT_CONTRACT_REJECTED",
+      outputSha256: createHash("sha256").update(stdout).digest("hex") });
+    failed = !ok;
+  }
+  return { ...plan, mode: "EXECUTE_LOCAL_READ_ONLY", passed: !failed,
+    evidenceState: "LOCAL_EXECUTION_RECEIPTS", localRobotsPassed: !failed,
+    operationalIntegrationVerified: false, failoverExecuted: false,
+    executionLocation: "CURRENT_HOST", receipts };
 }
+
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  if (args.some(arg => arg !== "--execute-local") || args.length > 1) {
+    console.log(JSON.stringify({ passed: false, code: "UNSUPPORTED_ARGUMENT" }));
+    process.exitCode = 1;
+  } else {
+    const output = args.includes("--execute-local") ? executeSafeRobots(result) : result;
+    console.log(JSON.stringify(output, null, 2));
+    if (!output.passed) process.exitCode = 1;
+  }
+}
+module.exports = { executeSafeRobots, result };

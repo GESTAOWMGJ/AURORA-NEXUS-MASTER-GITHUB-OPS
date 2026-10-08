@@ -33,7 +33,13 @@ class WindowsBetaBundleTests(unittest.TestCase):
                                      'prepare-integration', '--target', str(state)],
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout)['version'], '1.0.0')
+            integration = json.loads(result.stdout)
+            self.assertEqual(integration['version'], '1.0.1')
+            component = state / 'integration' / integration['version']
+            installed_manifest = json.loads((component / 'manifest.json').read_text())
+            self.assertEqual(installed_manifest['version'], integration['version'])
+            for name, digest in installed_manifest['sha256'].items():
+                self.assertEqual(hashlib.sha256((component / name).read_bytes()).hexdigest(), digest)
 
     def test_bundle_rejects_unpinned_source(self):
         with tempfile.TemporaryDirectory() as temp:

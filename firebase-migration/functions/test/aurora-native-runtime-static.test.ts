@@ -17,7 +17,7 @@ test("native insight is hard-gated on Firebase snapshot and never falls back to 
 });
 
 test("projection engine remains the Firebase materialization boundary", () => {
-  assert.match(runtime, /const source = await readProjectionSource\(orgId\)/);
+  assert.match(runtime, /const source = await readProjectionSource\(orgId, tx\)/);
   assert.match(runtime, /dashboardSnapshots\/current/);
   assert.match(runtime, /sourceHash/);
 });

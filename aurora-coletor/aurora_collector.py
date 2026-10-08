@@ -22,6 +22,7 @@ import sqlite3
 import ssl
 import sys
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any
 from urllib import error, request
@@ -193,27 +194,31 @@ def ensure_db(state_dir: Path) -> sqlite3.Connection:
     state_dir.mkdir(parents=True, exist_ok=True)
     db_path = state_dir / "collector-state.sqlite3"
     conn = sqlite3.connect(str(db_path))
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS queue (
-          local_id TEXT PRIMARY KEY,
-          org TEXT NOT NULL,
-          facility TEXT NOT NULL,
-          technical_identity_id TEXT NOT NULL,
-          file_sha256 TEXT NOT NULL,
-          normalized_sha256 TEXT NOT NULL,
-          attempts INTEGER NOT NULL DEFAULT 0,
-          state TEXT NOT NULL,
-          next_attempt_at TEXT,
-          receipt_id TEXT,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL,
-          CHECK (state IN ('PENDING', 'RETRY', 'AWAITING_REVIEW', 'BLOCKED'))
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS queue (
+              local_id TEXT PRIMARY KEY,
+              org TEXT NOT NULL,
+              facility TEXT NOT NULL,
+              technical_identity_id TEXT NOT NULL,
+              file_sha256 TEXT NOT NULL,
+              normalized_sha256 TEXT NOT NULL,
+              attempts INTEGER NOT NULL DEFAULT 0,
+              state TEXT NOT NULL,
+              next_attempt_at TEXT,
+              receipt_id TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              CHECK (state IN ('PENDING', 'RETRY', 'AWAITING_REVIEW', 'BLOCKED'))
+            )
+            """
         )
-        """
-    )
-    conn.commit()
+        conn.commit()
+    except BaseException:
+        conn.close()
+        raise
     return conn
 
 
@@ -466,12 +471,12 @@ def scan_counts(config: dict[str, Any]) -> dict[str, int]:
     allowed = set(config["allowedExtensions"])
     max_bytes = int(config["maxFileBytes"])
     recursive = bool(config.get("recursive", False))
-    ensure_db(state_dir)
-    files = iter_files(watch_dir, recursive, allowed, max_bytes)
-    return {
-        "eligible": len(files),
-        "state_ready": 1,
-    }
+    with closing(ensure_db(state_dir)):
+        files = iter_files(watch_dir, recursive, allowed, max_bytes)
+        return {
+            "eligible": len(files),
+            "state_ready": 1,
+        }
 
 
 def queue_status_counts(conn: sqlite3.Connection) -> dict[str, int]:
@@ -503,96 +508,96 @@ def transmit_once(config: dict[str, Any]) -> dict[str, int]:
     identity_id = str(config["technicalIdentityId"])
     endpoint = str(config["endpoint"])
 
-    conn = ensure_db(state_dir)
-    conn.row_factory = sqlite3.Row
+    with closing(ensure_db(state_dir)) as conn:
+        conn.row_factory = sqlite3.Row
 
-    result = {
-        "checked": 0,
-        "queued": 0,
-        "sent": 0,
-        "retry": 0,
-        "blocked": 0,
-        "skipped": 0,
-        "auth_failed": 0,
-    }
-
-    for path in iter_files(watch_dir, recursive, allowed, max_bytes):
-        result["checked"] += 1
-        try:
-            extension, raw, normalized = normalize_content(path)
-        except PermanentFileError:
-            # Hash bytes only; do not store the file path/name.
-            try:
-                file_hash = sha256_file(path)
-            except OSError:
-                result["skipped"] += 1
-                continue
-            normalized_hash = sha256_bytes(b"blocked-normalization")
-            local_id = local_id_for(org, facility, identity_id, file_hash)
-            upsert_seen(conn, local_id, org, facility, identity_id, file_hash, normalized_hash)
-            mark_blocked(conn, local_id)
-            result["blocked"] += 1
-            continue
-
-        file_hash = sha256_bytes(raw)
-        normalized_hash = sha256_bytes(normalized)
-        local_id = local_id_for(org, facility, identity_id, file_hash)
-        state = upsert_seen(conn, local_id, org, facility, identity_id, file_hash, normalized_hash)
-
-        row = conn.execute("SELECT state, next_attempt_at FROM queue WHERE local_id = ?", (local_id,)).fetchone()
-        if row and row["state"] == "AWAITING_REVIEW":
-            result["skipped"] += 1
-            continue
-        if row and row["state"] == "BLOCKED":
-            result["blocked"] += 1
-            continue
-        if row and row["state"] == "RETRY" and not row_due(row):
-            result["skipped"] += 1
-            continue
-
-        result["queued"] += 1
-        attempts = increment_attempt(conn, local_id)
-        payload = build_payload(config, extension, file_hash, normalized_hash, raw)
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "X-Aurora-Org": org,
-            "X-Aurora-Facility": facility,
-            "X-Aurora-Technical-Identity": identity_id,
-            "X-Aurora-Content-Sha256": normalized_hash,
-            "X-Aurora-Local-Id": local_id,
+        result = {
+            "checked": 0,
+            "queued": 0,
+            "sent": 0,
+            "retry": 0,
+            "blocked": 0,
+            "skipped": 0,
+            "auth_failed": 0,
         }
 
-        try:
-            status, response_text = post_payload(endpoint, payload, headers)
-        except Exception:
-            mark_retry(conn, local_id, attempts)
-            result["retry"] += 1
-            continue
-
-        if status in (401, 403):
-            mark_blocked(conn, local_id)
-            result["auth_failed"] += 1
-            raise AuthorizationError("autorização rejeitada; ciclo interrompido")
-        if status in RETRYABLE_STATUS_CODES or status >= 500:
-            mark_retry(conn, local_id, attempts)
-            result["retry"] += 1
-            continue
-        if 200 <= status < 300:
+        for path in iter_files(watch_dir, recursive, allowed, max_bytes):
+            result["checked"] += 1
             try:
-                receipt_id, _state = validate_receipt(response_text, normalized_hash)
+                extension, raw, normalized = normalize_content(path)
             except PermanentFileError:
+                # Hash bytes only; do not store the file path/name.
+                try:
+                    file_hash = sha256_file(path)
+                except OSError:
+                    result["skipped"] += 1
+                    continue
+                normalized_hash = sha256_bytes(b"blocked-normalization")
+                local_id = local_id_for(org, facility, identity_id, file_hash)
+                upsert_seen(conn, local_id, org, facility, identity_id, file_hash, normalized_hash)
                 mark_blocked(conn, local_id)
                 result["blocked"] += 1
                 continue
-            mark_awaiting_review(conn, local_id, receipt_id)
-            result["sent"] += 1
-            continue
 
-        mark_blocked(conn, local_id)
-        result["blocked"] += 1
+            file_hash = sha256_bytes(raw)
+            normalized_hash = sha256_bytes(normalized)
+            local_id = local_id_for(org, facility, identity_id, file_hash)
+            state = upsert_seen(conn, local_id, org, facility, identity_id, file_hash, normalized_hash)
 
-    result.update(queue_status_counts(conn))
-    return result
+            row = conn.execute("SELECT state, next_attempt_at FROM queue WHERE local_id = ?", (local_id,)).fetchone()
+            if row and row["state"] == "AWAITING_REVIEW":
+                result["skipped"] += 1
+                continue
+            if row and row["state"] == "BLOCKED":
+                result["blocked"] += 1
+                continue
+            if row and row["state"] == "RETRY" and not row_due(row):
+                result["skipped"] += 1
+                continue
+
+            result["queued"] += 1
+            attempts = increment_attempt(conn, local_id)
+            payload = build_payload(config, extension, file_hash, normalized_hash, raw)
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "X-Aurora-Org": org,
+                "X-Aurora-Facility": facility,
+                "X-Aurora-Technical-Identity": identity_id,
+                "X-Aurora-Content-Sha256": normalized_hash,
+                "X-Aurora-Local-Id": local_id,
+            }
+
+            try:
+                status, response_text = post_payload(endpoint, payload, headers)
+            except Exception:
+                mark_retry(conn, local_id, attempts)
+                result["retry"] += 1
+                continue
+
+            if status in (401, 403):
+                mark_blocked(conn, local_id)
+                result["auth_failed"] += 1
+                raise AuthorizationError("autorização rejeitada; ciclo interrompido")
+            if status in RETRYABLE_STATUS_CODES or status >= 500:
+                mark_retry(conn, local_id, attempts)
+                result["retry"] += 1
+                continue
+            if 200 <= status < 300:
+                try:
+                    receipt_id, _state = validate_receipt(response_text, normalized_hash)
+                except PermanentFileError:
+                    mark_blocked(conn, local_id)
+                    result["blocked"] += 1
+                    continue
+                mark_awaiting_review(conn, local_id, receipt_id)
+                result["sent"] += 1
+                continue
+
+            mark_blocked(conn, local_id)
+            result["blocked"] += 1
+
+        result.update(queue_status_counts(conn))
+        return result
 
 
 def print_counts(prefix: str, counts: dict[str, int]) -> None:

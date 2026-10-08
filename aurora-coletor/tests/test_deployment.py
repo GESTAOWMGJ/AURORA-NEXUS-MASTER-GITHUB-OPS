@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import aurora_deployment as deployment
 import aurora_cloud_sync as sync
-from test_cloud_sync import fixture, response, ORG, ORIGIN
+from test_cloud_sync import fixture, response, processed_response, ORG, ORIGIN
 
 
 class DeploymentTests(unittest.TestCase):
@@ -50,21 +50,149 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(network.call_count, 1)
         self.assertFalse(retry['receiptVerifiedThisRun'])
 
-    def test_cached_receipt_skips_post_but_revalidates_authentication(self):
+    def test_cached_receipt_reposts_same_payload_key_and_revalidates_authentication(self):
         network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, response(self.payload))])
         first = self.run_setup(token='test-token', send=True, transport=network)
+        original_post = network.call_args.args
         self.assertTrue(first['receiptVerifiedThisRun'])
-        network = Mock(return_value=(200, {'ok': True, 'orgId': ORG}))
+        self.assertFalse(first['processingVerifiedThisRun'])
+        network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}),
+                                   (200, processed_response(self.payload, True))])
         second = self.run_setup(token='rotated-token', send=True, transport=network)
-        self.assertEqual(network.call_count, 1)
-        self.assertTrue(network.call_args.args[0].endswith('/ping'))
-        self.assertEqual(second['status'], 'PREVIOUS_RECEIPT_CACHED')
+        self.assertEqual(network.call_count, 2)
+        self.assertEqual(network.call_args.args[0], original_post[0])
+        self.assertEqual(network.call_args.args[2:], original_post[2:])
+        self.assertEqual(second['status'], 'SAMPLE_RECEIPT_VERIFIED')
         self.assertTrue(second['previousReceiptCached'])
-        self.assertFalse(second['receiptVerifiedThisRun'])
+        self.assertTrue(second['receiptVerifiedThisRun'])
+        self.assertTrue(second['processingVerifiedThisRun'])
+        # Preserve the exact v1 receipt accepted by the rollback component.
+        legacy_expected = dict(sync.synchronize(self.payload, ORIGIN, ORG),
+                               status='DUPLICATE', cloudReceiptVerified=True)
+        self.assertEqual(second['receipt'], legacy_expected)
         self.assertFalse(second['fullSynchronizationVerified'])
         denied = self.run_setup(send=True, transport=Mock())
         self.assertEqual(denied['status'], 'BLOCKED')
-        self.assertEqual(denied['receipt'], first['receipt'])
+        self.assertEqual(denied['receipt'], second['receipt'])
+        self.assertFalse(denied['processingVerifiedThisRun'])
+
+    def test_first_post_before_setup_then_same_key_replay_after_setup(self):
+        reply = processed_response(self.payload, operational_complete=False)
+        network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, reply)])
+        first = self.run_setup(token='test-token', send=True, transport=network)
+        original_post = network.call_args.args
+        self.assertEqual(first['status'], 'SAMPLE_RECEIPT_VERIFIED')
+        self.assertTrue(first['receiptVerifiedThisRun'])
+        self.assertTrue(first['processingVerifiedThisRun'])
+        self.assertEqual(first['processingProof'], reply['installation'])
+        self.assertIs(first['processingProof']['operationalComplete'], False)
+        self.assertEqual(first['nextAction'], 'COMPLETE_AUTHENTICATED_SETUP')
+        self.assertEqual(first['receipt']['status'], 'ACCEPTED')
+        checkpoint = deployment.read_json(self.state / deployment.STATE_NAME)
+        self.assertEqual(checkpoint['receipt'], first['receipt'])
+        self.assertEqual(checkpoint['processingProof'], first['processingProof'])
+
+        # A ping after authenticated setup still cannot upgrade this cached proof.
+        ping = Mock(return_value=(200, {'ok': True, 'orgId': ORG,
+                                       'installation': processed_response(self.payload)['installation']}))
+        connected = self.run_setup(token='test-token', connect=True, transport=ping)
+        self.assertEqual(ping.call_count, 1)
+        self.assertTrue(ping.call_args.args[0].endswith('/ping'))
+        self.assertEqual(connected['receipt'], first['receipt'])
+        self.assertEqual(connected['processingProof'], first['processingProof'])
+        self.assertFalse(connected['processingVerifiedThisRun'])
+
+        wrong_version = processed_response(self.payload, duplicate=True, operational_complete=False)
+        wrong_version['installation']['sourceVersion'] = 2
+        rejected = self.run_setup(token='test-token', send=True, transport=Mock(
+            side_effect=[(200, {'ok': True, 'orgId': ORG}), (200, wrong_version)]))
+        self.assertEqual(rejected['status'], 'BLOCKED')
+        self.assertEqual(rejected['code'], 'CLOUD_PROCESSING_PROOF_MISMATCH')
+        self.assertEqual(rejected['receipt'], first['receipt'])
+        self.assertEqual(rejected['processingProof'], first['processingProof'])
+        self.assertFalse(rejected['processingVerifiedThisRun'])
+        self.assertFalse(rejected['receiptVerifiedThisRun'])
+
+        # Completing setup is external to this collector; only a bound POST proves it.
+        completed_reply = processed_response(self.payload, duplicate=True, operational_complete=True)
+        network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (200, completed_reply)])
+        completed = self.run_setup(token='rotated-token', send=True, transport=network)
+        self.assertEqual(network.call_count, 2)
+        self.assertEqual(network.call_args.args[0], original_post[0])
+        self.assertEqual(network.call_args.args[2:], original_post[2:])
+        self.assertEqual(completed['sampleKey'], first['sampleKey'])
+        self.assertTrue(completed['previousReceiptCached'])
+        self.assertTrue(completed['processingVerifiedThisRun'])
+        self.assertEqual(completed['processingProof'], completed_reply['installation'])
+        self.assertIs(completed['processingProof']['operationalComplete'], True)
+        self.assertEqual(completed['nextAction'], 'VERIFY_CONTINUITY_WITH_SUBSEQUENT_EVENTS')
+        self.assertEqual(completed['receipt'], dict(first['receipt'], status='DUPLICATE'))
+        for result in (first, connected, completed):
+            self.assertFalse(result['fullSynchronizationVerified'])
+            self.assertFalse(result['productionReleased'])
+
+    def test_connect_with_cached_receipt_remains_ping_only_without_current_processing_proof(self):
+        first = self.run_setup(token='test-token', send=True, transport=Mock(
+            side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, processed_response(self.payload))]))
+        network = Mock(return_value=(200, {'ok': True, 'orgId': ORG,
+                                          'installation': processed_response(self.payload)['installation']}))
+        result = self.run_setup(token='test-token', connect=True, transport=network)
+        self.assertEqual(network.call_count, 1)
+        self.assertTrue(network.call_args.args[0].endswith('/ping'))
+        self.assertEqual(result['status'], 'PREVIOUS_RECEIPT_CACHED')
+        self.assertEqual(result['receipt'], first['receipt'])
+        self.assertFalse(result['receiptVerifiedThisRun'])
+        self.assertFalse(result['processingVerifiedThisRun'])
+
+    def test_cached_v1_receipt_migrates_without_changing_payload_or_key(self):
+        first = self.run_setup(token='test-token', send=True, transport=Mock(
+            side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, response(self.payload))]))
+        first['componentVersion'] = '1.0.0'
+        del first['processingProof']
+        deployment.atomic_json(self.state / deployment.STATE_NAME, first)
+        network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}),
+                                   (200, processed_response(self.payload, True))])
+        result = self.run_setup(token='test-token', send=True, transport=network)
+        self.assertEqual(result['componentVersion'], '1.0.1')
+        self.assertEqual(result['sampleKey'], first['sampleKey'])
+        self.assertTrue(result['processingVerifiedThisRun'])
+
+    def test_cached_receipt_timeout_then_pending_projection_retries_same_post(self):
+        first = self.run_setup(token='test-token', send=True, transport=Mock(
+            side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, response(self.payload))]))
+        posts = []
+        for reply in (sync.SyncError('RETRYABLE_TRANSPORT_ERROR'),
+                      (200, dict(response(self.payload, True),
+                                 installation={'state': 'PENDING_PROJECTION', 'firstIngestionVerified': False})),
+                      (200, processed_response(self.payload, True))):
+            network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), reply])
+            result = self.run_setup(token='test-token', send=True, transport=network)
+            posts.append(network.call_args.args[2:])
+            self.assertEqual(result['sampleKey'], first['sampleKey'])
+            if len(posts) == 1:
+                self.assertEqual(result['status'], 'BLOCKED')
+                self.assertEqual(result['receipt'], first['receipt'])
+                self.assertFalse(result['processingVerifiedThisRun'])
+            elif len(posts) == 2:
+                self.assertEqual(result['processingProof']['state'], 'PENDING_PROJECTION')
+                self.assertFalse(result['processingVerifiedThisRun'])
+        self.assertEqual(posts[0], posts[1])
+        self.assertEqual(posts[1], posts[2])
+        self.assertTrue(result['processingVerifiedThisRun'])
+
+    def test_cached_receipt_wrong_tenant_or_projection_never_claims_processing(self):
+        original = self.run_setup(token='test-token', send=True, transport=Mock(
+            side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, response(self.payload))]))
+        wrong = processed_response(self.payload, True)
+        wrong['installation']['sourceVersion'] = 2
+        for replies in ([(200, {'ok': True, 'orgId': 'other-org'})],
+                        [(200, {'ok': True, 'orgId': ORG}), (200, wrong)]):
+            network = Mock(side_effect=replies)
+            result = self.run_setup(token='test-token', send=True, transport=network)
+            self.assertEqual(result['status'], 'BLOCKED')
+            self.assertEqual(result['receipt'], original['receipt'])
+            self.assertFalse(result['processingVerifiedThisRun'])
+            self.assertFalse(result['receiptVerifiedThisRun'])
 
     def test_timeout_after_post_reuses_idempotency_on_resume(self):
         network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), sync.SyncError('RETRYABLE_TRANSPORT_ERROR')])
@@ -89,7 +217,10 @@ class DeploymentTests(unittest.TestCase):
         before = checkpoint.read_bytes()
         for org, origin, payload in [('other-org', ORIGIN, self.payload),
                                      (ORG, 'https://other.invalid', self.payload),
-                                     (ORG, ORIGIN, dict(self.payload, amountCents=3))]:
+                                     (ORG, ORIGIN, dict(self.payload, amountCents=3)),
+                                     (ORG, ORIGIN, dict(self.payload, externalDocumentId='synthetic-other')),
+                                     (ORG, ORIGIN, dict(self.payload, sourceSystem='MV')),
+                                     (ORG, ORIGIN, dict(self.payload, sourceVersion=2))]:
             network = Mock()
             with self.assertRaisesRegex(sync.SyncError, 'CHECKPOINT_'):
                 deployment.run(payload, origin, org, self.state, 'test', True, True, network)
@@ -145,19 +276,56 @@ class DeploymentTests(unittest.TestCase):
             deployment.install_assets(ROOT, self.state)
         self.assertEqual(module.read_text(), 'tampered')
 
+
+    def test_cached_processing_proof_tamper_blocks_before_network(self):
+        first = self.run_setup(token='test-token', send=True, transport=Mock(
+            side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, processed_response(self.payload))]))
+        first['processingProof']['canonicalSnapshotHash'] = 'a' * 64
+        checkpoint = self.state / deployment.STATE_NAME
+        deployment.atomic_json(checkpoint, first)
+        before = checkpoint.read_bytes()
+        network = Mock()
+        with self.assertRaisesRegex(sync.SyncError, 'CHECKPOINT_RECEIPT_CONFLICT'):
+            self.run_setup(token='test-token', send=True, transport=network)
+        network.assert_not_called()
+        self.assertEqual(checkpoint.read_bytes(), before)
+
+    def test_error_details_and_credentials_are_not_persisted(self):
+        secret = 'synthetic-private-secret'
+        network = Mock(side_effect=sync.SyncError('bad response contains ' + secret))
+        result = self.run_setup(token=secret, send=True, transport=network)
+        self.assertEqual(result['code'], 'INTEGRATION_FAILED')
+        self.assertNotIn(secret, json.dumps(result))
+        self.assertNotIn(secret, (self.state / deployment.STATE_NAME).read_text())
+
+    def test_component_patch_preserves_legacy_bundle_and_records_reviewed_hashes(self):
+        legacy = self.state / 'integration' / '1.0.0'
+        legacy.mkdir(parents=True)
+        sentinel = legacy / 'aurora_deployment.py'
+        sentinel.write_bytes(b'# synthetic legacy bundle')
+        before = sentinel.read_bytes()
+        result = deployment.install_assets(ROOT, self.state)
+        self.assertEqual(result['version'], '1.0.1')
+        manifest = deployment.read_json(self.state / 'integration' / deployment.VERSION / 'manifest.json')
+        self.assertEqual(manifest['schemaVersion'], deployment.SCHEMA)
+        self.assertEqual(manifest['version'], deployment.VERSION)
+        for name in deployment.ASSETS:
+            self.assertEqual(manifest['sha256'][name], deployment.hashlib.sha256((ROOT / name).read_bytes()).hexdigest())
+        self.assertEqual(sentinel.read_bytes(), before)
+
     def test_installer_entrypoint_prepares_component_without_network(self):
         result = subprocess.run([sys.executable, str(ROOT.parent / 'desktop' / 'install_windows_beta.py'),
                                  'prepare-integration', '--target', str(self.state)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['version'], deployment.VERSION)
 
-    def test_windows_beta_upgrade_requires_compatible_prior_manifest(self):
+    def test_windows_beta_does_not_trust_generic_manifest_fields_of_other_versions(self):
         installer = (ROOT.parent / 'desktop' / 'install_windows_beta.py').read_text(encoding='utf-8')
-        self.assertIn('prior_manifests = sorted((root / "client").glob("*/installation.json"))', installer)
-        self.assertIn('prior.get("portal") == BASE', installer)
-        self.assertIn('prior.get("environment") == "HML"', installer)
-        self.assertIn('prior.get("frontendPolicy") == "PRESERVE_DEPLOYED_MAIN"', installer)
-        self.assertIn('if not compatible:', installer)
+        # Behavioral coverage lives in test_windows_beta_continuity.py on Linux/Windows.
+        # This packaging contract forbids restoring the old permissive version scan.
+        self.assertNotIn('prior_manifests', installer)
+        self.assertIn('known_identity(previous, expected)', installer)
+        self.assertIn('elif any(p.exists() for p in shortcuts):', installer)
         self.assertIn('EXISTING_INSTALLATION_REQUIRES_REVIEW', installer)
 
     def test_errors_map_to_concrete_actions(self):

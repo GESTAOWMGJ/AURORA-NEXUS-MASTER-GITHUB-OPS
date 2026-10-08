@@ -127,7 +127,11 @@ const output = {
   activeDeliverable: ACTIVE_DELIVERABLE,
   resultProfile,
   passed: resultProfile !== "MATERIAL_CONFLICT",
+  evidenceState: "POLICY_VALIDATION_ONLY",
+  operationalIntegrationVerified: false,
   integrationCertification: {
+    certified: false,
+    evidenceScope: "REPOSITORY_POLICY_CONSISTENCY_ONLY",
     type: "INTERNAL_OPERATIONAL_INTEGRATION_CERTIFICATION_NOT_EXTERNAL_ISO_CERTIFICATION",
     conflictFree: resultProfile === "CONFLICT_FREE",
     promotionBlocked: resultProfile === "MATERIAL_CONFLICT"

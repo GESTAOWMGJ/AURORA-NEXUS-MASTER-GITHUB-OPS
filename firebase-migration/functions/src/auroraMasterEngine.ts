@@ -113,6 +113,7 @@ export function buildMasterOperationalState(
       reason: "O Motor Mestre não autoriza distribuição. A decisão pertence ao endpoint autenticado com MFA, revisão e evidência financeira."
     },
     release: {
+      canonicalVersion: release.canonicalVersion ?? null,
       productVersion: release.productVersion ?? null, releaseTrain: release.releaseTrain ?? null,
       engineeringReadinessPercent: release.engineeringReadinessPercent ?? null
     },
