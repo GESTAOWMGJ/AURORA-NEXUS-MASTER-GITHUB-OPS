@@ -40,9 +40,11 @@ async function fixture(first = response()) {
 }
 
 test('the actual emitted browser script parses; missing regex delimiters fail this gate', () => {
-  assert.equal(scripts.length, 1);
+  assert.equal(scripts.length, 2);
   scripts.forEach(script => assert.doesNotThrow(() => new Script(script)));
-  assert.throws(() => new Script(scripts[0].replace('value=>!/^[A-Za-z0-9._:-]', 'value=>!^[A-Za-z0-9._:-]')), SyntaxError);
+  const runtimeScript = scripts.find(script => script.includes('value=>!/^[A-Za-z0-9._:-]'));
+  assert.ok(runtimeScript);
+  assert.throws(() => new Script(runtimeScript.replace('value=>!/^[A-Za-z0-9._:-]', 'value=>!^[A-Za-z0-9._:-]')), SyntaxError);
 });
 
 test('all navigation links target existing sections, not placeholder pages', () => {
