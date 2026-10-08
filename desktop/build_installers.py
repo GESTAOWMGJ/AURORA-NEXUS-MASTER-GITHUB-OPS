@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse, hashlib, json, os, pathlib, plistlib, shutil, stat, subprocess, tempfile, zipfile
 
 VERSION = '0.2.0-hml.20261001'
-PORTAL = 'https://wmgj-hml-jfn-20260927.web.app/'
+PORTAL = 'https://auroranexus.com.br/portal'
 MAC_NAME = 'AURORA-NEXUS-Mac-HML.zip'
 WIN_NAME = 'AURORA-NEXUS-Windows-x64-HML.exe'
 NOTICE = '''AURORA NEXUS — CLIENTE DE ACESSO | HOMOLOGAÇÃO
@@ -16,8 +16,8 @@ Destino: ''' + PORTAL + '''
 Este cliente abre o portal no navegador padrão e utiliza a autenticação do servidor.
 Não é um ERP offline, não contém senha e não instala um servidor local.
 A compilação/instalação NÃO comprova disponibilidade, login ou deploy do portal.
-O portal de homologação ainda depende da liberação e dos testes de infraestrutura.
-Não aponta para wmgj-ops. Não substitui o aplicativo existente.
+O portal canônico concentra o acesso do cliente; endpoints Firebase/Cloud Run são infraestrutura.
+Não publique URLs técnicas como caminho de usuário. Não substitui o aplicativo existente.
 
 Esta distribuição não possui assinatura de editor nem notarização Apple.
 Se Gatekeeper, SmartScreen ou política institucional bloquear, interrompa.
