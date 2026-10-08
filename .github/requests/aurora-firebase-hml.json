@@ -3,10 +3,10 @@
   "confirmation": "DEPLOY_HOMOLOGATION",
   "projectId": "wmgj-hml-jfn-20260927",
   "authorizedScope": "PR115_HML_AUTH_CONTRACT_FIX",
-  "expectedSourceSha": "5e99de1415ab646b90b4aebfe768e8090512c1a0",
+  "expectedSourceSha": "d908db91c99df6489d485b19512cef1117902ad6",
   "sourceMutation": false,
   "productionMutation": false,
   "clinicalSensitiveEnabled": false,
   "requestedAt": "2026-10-08",
-  "requestReason": "OWNER_AUTHORIZED_HML_AURORA_DNS_ONLY_REDIRECT_FOR_FORWARDED_FIREBASE_HOSTS"
+  "requestReason": "OWNER_AUTHORIZED_HML_AURORA_DNS_ONLY_SMOKE_CONTRACT"
 }
