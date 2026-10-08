@@ -411,6 +411,37 @@ test("operation salt and algorithm must match the current invitation and legacy 
   }
 });
 
+test("already expired invitations reject before scheduling scrypt and preserve their records", async () => {
+  for (const elapsed of [DAY_MS, DAY_MS + 1]) {
+    const f = fixture(); const issued = await f.engine.issue(actor, uid, requestId); f.advance(elapsed);
+    const invitation = structuredClone(f.rows.get(memberPath).onboardingInvitation);
+    let derivations = 0;
+    const hook = createHook({ init: (_id, type) => { if (type === "SCRYPTREQUEST") derivations++; } });
+    hook.enable();
+    try { await assert.rejects(f.engine.consume(principal, issued.registrationPassword!), rejects("ONBOARDING_INVITATION_EXPIRED")); }
+    finally { hook.disable(); }
+    assert.equal(derivations, 0); assert.equal(f.rows.get(memberPath).onboardingState, "INVITED");
+    assert.deepEqual(f.rows.get(memberPath).onboardingInvitation, invitation);
+    assert.equal(f.rows.get(`${base}/apiIdempotency/${invitation.invitationOperationId}`).status, "ISSUED");
+    assert.equal(f.writes.length, 3);
+    assert.equal([...f.rows.values()].some(row => row.type === "ONBOARDING_INVITATION_CONSUMED"), false);
+  }
+});
+
+test("invalid consume clock values reject before scheduling scrypt", async () => {
+  for (const now of [NaN, Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER]) {
+    const f = fixture(); const issued = await f.engine.issue(actor, uid, requestId); f.setTime(now);
+    const invitation = structuredClone(f.rows.get(memberPath).onboardingInvitation);
+    let derivations = 0;
+    const hook = createHook({ init: (_id, type) => { if (type === "SCRYPTREQUEST") derivations++; } });
+    hook.enable();
+    try { await assert.rejects(f.engine.consume(principal, issued.registrationPassword!), rejects("ONBOARDING_CLOCK_INVALID")); }
+    finally { hook.disable(); }
+    assert.equal(derivations, 0); assert.equal(f.rows.get(memberPath).onboardingState, "INVITED");
+    assert.deepEqual(f.rows.get(memberPath).onboardingInvitation, invitation); assert.equal(f.writes.length, 3);
+  }
+});
+
 test("expiration crossed during async scrypt still rolls back consumption", async () => {
   const f = fixture(); const issued = await f.engine.issue(actor, uid, requestId); f.advance(DAY_MS - 1);
   let derivations = 0;

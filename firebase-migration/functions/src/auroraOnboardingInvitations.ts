@@ -161,6 +161,10 @@ export function createOnboardingInvitationEngine(store: ProfileStore, clock = Da
           || operation.fingerprint !== issueFingerprint(orgId, operation.actorUid, principal.uid, ready.profileOperationId)) {
         throw new ProfileError("ONBOARDING_INVITATION_NOT_AVAILABLE", 403);
       }
+      // Reject unusable invitations cheaply; the post-derivation clock below remains mandatory on every retry.
+      const beforeDerivation = clock();
+      if (!validTime(beforeDerivation)) throw new ProfileError("ONBOARDING_CLOCK_INVALID", 503);
+      if (beforeDerivation >= invitation.expiresAtMs) throw new ProfileError("ONBOARDING_INVITATION_EXPIRED", 410);
       const expected = Buffer.from(invitation.codeDigest, "hex");
       const supplied = await boundDigest(orgId, principal.uid, ready.profileOperationId, invitation.invitationOperationId,
         invitation.codeSalt, registrationPassword);
