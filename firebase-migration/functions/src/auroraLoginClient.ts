@@ -1,13 +1,15 @@
 import { webUpdateClient } from "./auroraWebUpdateClient.js";
+import { userFacingEntryPath } from "./auroraTenantEntry.js";
 // Browser-only security setup. No password, verification link or TOTP secret is sent to application APIs.
 export function loginClient(orgId: string | null): string {
+  const entryPath = userFacingEntryPath(orgId);
   return `
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js';
 import { getAuth, setPersistence, inMemoryPersistence, signInWithEmailAndPassword, sendPasswordResetEmail,
   sendEmailVerification, reload, getIdTokenResult, signOut, multiFactor, getMultiFactorResolver,
   TotpMultiFactorGenerator } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js';
 const orgId = ${JSON.stringify(orgId)};
-const entryPath = location.pathname === '/setup' ? '/setup' : (orgId ? '/' + orgId : '/');
+const entryPath = location.pathname === '/setup' ? '/setup' : ${JSON.stringify(entryPath)};
 const element = id => document.getElementById(id);
 const form = element('login-form'), status = element('status'), submit = element('submit');
 let auth, resolver = null, setupUser = null, totpSecret = null;

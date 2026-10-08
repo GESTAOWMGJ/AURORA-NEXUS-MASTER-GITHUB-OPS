@@ -112,7 +112,7 @@ test('late bootstrap response cannot restore private data after logout', async (
   const pending = f.run('load()'); await f.click('logout'); complete(response()); await pending;
   assert.equal(f.elements.get('content')!.hidden, true);
   assert.equal(f.elements.get('invoiced')!.textContent, '—');
-  assert.deepEqual(f.redirects, ['/']);
+  assert.deepEqual(f.redirects, ['/portal']);
 });
 
 test('failed logout does not claim server session termination and can be retried', async () => {
@@ -120,7 +120,7 @@ test('failed logout does not claim server session termination and can be retried
   assert.equal(f.redirects.length, 0); assert.equal(f.elements.get('content')!.hidden, true);
   assert.match(f.elements.get('notice')!.textContent, /servidor não foi confirmado/);
   assert.equal(f.elements.get('logout')!.disabled, false);
-  f.fetchWith(async () => response()); await f.click('logout'); assert.deepEqual(f.redirects, ['/']);
+  f.fetchWith(async () => response()); await f.click('logout'); assert.deepEqual(f.redirects, ['/portal']);
 });
 
 test('timeout aborts the read and reports unconfirmed freshness', async () => {

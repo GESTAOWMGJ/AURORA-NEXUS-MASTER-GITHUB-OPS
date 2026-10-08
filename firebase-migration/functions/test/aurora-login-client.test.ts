@@ -48,7 +48,7 @@ test('enrollment clears secret and requires a fresh MFA login before issuing app
   f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();await f.click('mfa-submit');
   const session=f.calls.find(c=>c.url==='/__sessionLogin');assert.ok(session);
   assert.deepEqual(JSON.parse(session.options.body),{idToken:'synthetic-id-token',orgId:'synthetic-company'});
-  assert.deepEqual(f.redirects,['/synthetic-company']);
+  assert.deepEqual(f.redirects,['/portal']);
 });
 
 test('legacy login remains compatible and explicit setup can opt in to MFA enrollment',async()=>{

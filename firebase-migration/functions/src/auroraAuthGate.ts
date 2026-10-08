@@ -16,7 +16,7 @@ import { auroraAuth } from "./firebase.js";
 import { servePrivateDownloads } from "./auroraDownloads.js";
 import { setupPage } from "./auroraSetup.js";
 import { loginClient } from "./auroraLoginClient.js";
-import { companyEntry, companyEntryAllowsMember, companyEntryPath, companyManifest, isCompanySlug } from "./auroraTenantEntry.js";
+import { CANONICAL_PORTAL_PATH, companyEntry, companyEntryAllowsMember, companyEntryPath, companyManifest, isCompanySlug, portalManifest, userFacingEntryPath } from "./auroraTenantEntry.js";
 
 const AURORA_NEXUS_ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const AURORA_NEXUS_CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -135,6 +135,10 @@ export const auroraNexusAuthGate = onRequest(
     }
 
     const entry = companyEntry(req.path);
+    if (req.path === "/manifest.webmanifest" || req.path === "/portal/manifest.webmanifest") {
+      res.status(200).type("application/manifest+json").send(JSON.stringify(portalManifest()));
+      return;
+    }
     if (entry?.manifest) {
       // Public installation metadata only; it neither resolves nor authorizes a tenant.
       res.status(200).type("application/manifest+json").send(JSON.stringify(companyManifest(entry.orgId)));
@@ -168,8 +172,12 @@ export const auroraNexusAuthGate = onRequest(
       await servePrivateDownloads(req, res, member);
       return;
     }
-    if (!entry && ["/", "/login", "/portal"].includes(req.path) && isCompanySlug(member.orgId)) {
-      res.redirect(303, companyEntryPath(member.orgId));
+    if (["/", "/login"].includes(req.path)) {
+      res.redirect(303, CANONICAL_PORTAL_PATH);
+      return;
+    }
+    if (entry && isCompanySlug(member.orgId) && entry.orgId === member.orgId && req.path !== userFacingEntryPath(member.orgId)) {
+      res.redirect(303, userFacingEntryPath(member.orgId));
       return;
     }
     const csrfSecret = AURORA_NEXUS_CSRF_HMAC_KEY.value();

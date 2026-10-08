@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import type { DecodedIdToken } from "firebase-admin/auth";
-import { companyEntry, companyEntryAllowsMember, companyEntryPath, companyManifest, sessionOrganization } from "../src/auroraTenantEntry.js";
+import { companyEntry, companyEntryAllowsMember, companyEntryPath, companyManifest, portalManifest, sessionOrganization, userFacingEntryPath } from "../src/auroraTenantEntry.js";
 import { auroraProtectedShell } from "../src/auroraFrontend.js";
 import { resolveMember, verifyAuroraAccess } from "../src/auroraAccess.js";
 import { auroraAuth, auroraDb } from "../src/firebase.js";
@@ -11,7 +11,7 @@ import { auroraNexusAuthGate } from "../src/auroraAuthGate.js";
 const member = { uid: "synthetic-user", email: "user@example.invalid", orgId: "synthetic-company", role: "viewer", permissions: [], facilityIds: [], allFacilities: false, mfaVerified: false };
 const csrf = { action: "test-action", refresh: "test-refresh", integrationKey: "test-integration", distributionApproval: "test-distribution", logout: "test-logout" };
 
-test("authenticated root redirects while the canonical pilot page renders; anonymous and foreign tenants stay denied", async context => {
+test("authenticated navigation converges to the canonical portal; anonymous and foreign tenants stay denied", async context => {
   const names = ["AURORA_NEXUS_ALLOWED_EMAILS", "AURORA_NEXUS_CSRF_HMAC_KEY"];
   const previous = names.map(name => process.env[name]);
   process.env[names[0]] = member.email;
@@ -43,8 +43,9 @@ test("authenticated root redirects while the canonical pilot page renders; anony
       name.toLowerCase() === "cookie" && authenticated ? "__session=synthetic" : undefined } as any, res);
     return { status, html, location };
   }
-  assert.deepEqual(await invoke("/"), { status: 303, html: "", location: "/wmgj" });
-  const pilot = await invoke("/wmgj");
+  assert.deepEqual(await invoke("/"), { status: 303, html: "", location: "/portal" });
+  assert.deepEqual(await invoke("/wmgj"), { status: 303, html: "", location: "/portal" });
+  const pilot = await invoke("/portal");
   assert.equal(pilot.status, 200);
   assert.match(pilot.html, /Centro de gestão WMGJ/);
   assert.match(pilot.html, /id="session-identity"/);
@@ -66,10 +67,14 @@ test("company URLs preserve login, PWA start and same-origin return", () => {
   const manifest = companyManifest(member.orgId);
   assert.equal(manifest.id, "/synthetic-company");
   assert.equal(manifest.start_url, "/synthetic-company");
+  const canonical = portalManifest();
+  assert.equal(canonical.id, "/portal");
+  assert.equal(canonical.start_url, "/portal");
+  assert.equal(userFacingEntryPath(member.orgId), "/portal");
   assert.equal(companyEntry("/synthetic-company/manifest.webmanifest")?.manifest, true);
   const html = auroraProtectedShell(member, csrf, "/synthetic-company/login");
-  assert.match(html, /href="\/synthetic-company\/manifest.webmanifest"/);
-  assert.equal((html.match(/location\.replace\("\/synthetic-company"\)/g) || []).length, 2);
+  assert.match(html, /href="\/manifest.webmanifest"/);
+  assert.equal((html.match(/location\.replace\("\/portal"\)/g) || []).length, 2);
   assert.match(html, /Centro de gestão SYNTHETIC-COMPANY/);
   assert.doesNotMatch(html, /Centro de gestão WMGJ|GPT|OpenAI|Gemini|chatgpt\.site/i);
 });
@@ -92,7 +97,7 @@ test("changing URL or login body never confers another organization", () => {
   }
   const html = auroraProtectedShell(member, csrf, "//evil.invalid");
   assert.doesNotMatch(html, /evil\.invalid/);
-  assert.match(html, /location\.replace\("\/"\)/);
+  assert.match(html, /location\.replace\("\/portal"\)/);
 });
 
 test("signed tenant selector keeps pilot compatibility and invalid claims fail closed", () => {
