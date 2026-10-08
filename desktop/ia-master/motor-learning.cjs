@@ -88,10 +88,21 @@ async function runLearningCycle({ stateDir, orgId, input, request, receiptKey, n
   } finally { fs.rmdirSync(lock); }
 }
 function readBoundedInput(inputPath) {
-  const stat = fs.lstatSync(inputPath);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 32 * 1024)
-    fail('MOTOR_INPUT_FILE_REJECTED');
-  return JSON.parse(fs.readFileSync(inputPath, 'utf8'));
+  // Single descriptor read prevents a symlink-swap race between path check and read.
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0);
+  let fd;
+  try {
+    fd = fs.openSync(inputPath, flags);
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > 32 * 1024)
+      fail('MOTOR_INPUT_FILE_REJECTED');
+    const bytes = Buffer.alloc(32 * 1024 + 1);
+    const size = fs.readSync(fd, bytes, 0, bytes.length, 0);
+    if (size > 32 * 1024) fail('MOTOR_INPUT_FILE_REJECTED');
+    return JSON.parse(bytes.toString('utf8', 0, size));
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
 }
 function assertAuthenticatedServiceTenant(service, orgId) {
   if (!service || service.orgId !== orgId)
