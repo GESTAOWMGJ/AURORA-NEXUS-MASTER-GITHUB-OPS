@@ -108,3 +108,26 @@ Permissões do operador: `firebaseauth.configs.create`, `.get`, `.update` e
 permissões de configuração. Fontes oficiais:
 [initializeAuth](https://docs.cloud.google.com/identity-platform/docs/reference/rest/v2/projects.identityPlatform/initializeAuth),
 [TOTP](https://docs.cloud.google.com/identity-platform/docs/admin/enabling-totp-mfa).
+
+## Atualização verificada — 08/10/2026, 06:05–06:35 UTC
+
+O diagnóstico Auth ausente acima foi superado às 06:05:56 UTC: initialization e
+configuração autenticadas foram concluídas no projeto aprovado; email/senha,
+MFA/TOTP e domínio auroranexus.com.br relidos e verificados. Nenhuma sessão MFA
+nominal foi comprovada.
+
+Às 06:33:12 UTC, CONFIGURE_AURORA_PROD_RUNTIME.ps1 criou/verificou a identidade
+runtime aprovada: somente custom role Auth com quatro permissões e datastore.user
+condicionado ao DB default no projeto; secretAccessor nos três segredos específicos.
+Deployer recebeu leitor de metadata IAM e actAs somente nos SAs runtime/build.
+Os roles existentes do build não foram alterados. A aplicação não foi publicada.
+O script é idempotente, verifica contrato/projeto/número antes de escrita e recusa
+custom roles/grants divergentes. Read-only é padrão; -Apply exige escopo já autorizado.
+
+Coletor 1.0.1 instalado no Xeon, dois hashes do manifesto conferidos, 0 divergências;
+1.0.0 e checkpoint anterior preservados. PR198 integrado em main 5d4762d, CI no
+head f2ac1e3: Functions 641/641, regras 29/29, estáticos 3/3. Esse resultado não
+é deploy nem recibo de ingestão. A publicação Apps Script no run 37738319750
+parou em clasp push com invalid_grant; o status proprietário ainda não foi lido.
+Backup produtivo nativo continua sem READY no corte de 06:35 UTC; PITR/agenda
+não substituem esse recibo nem restore do mesmo backup.

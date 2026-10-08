@@ -344,7 +344,7 @@ jobs:
           cat "$RUNNER_TEMP/aurora-production-smoke.json"
       - name: Preserve sanitized stage and recovery evidence
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6, Node 24
         with:
           name: aurora-production-publication-${{ github.run_id }}
           path: |
