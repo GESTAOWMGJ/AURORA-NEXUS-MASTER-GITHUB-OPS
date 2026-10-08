@@ -26,3 +26,11 @@ autorizada; executar primeiro ciclo limitado nessa identidade; reconciliar um
 documento, uma versão imutável e sua projeção, sem efeito duplicado em retomada.
 Nenhuma ScriptProperty, trigger real, fonte, DNS, IAM ou deployment é alterado
 pela candidata. Rollback de código: reverter o commit sem apagar fila/memória.
+
+## Status administrativo somente leitura
+
+`auroraLerStatusConectoresPlugAndPlay(expectedOrgId)` é público para a Execution API existente. O único parâmetro é o tenant esperado, minúsculo e validado; a resposta contém apenas flags, contagens e códigos fixos. Divergência de tenant bloqueia leitura de secrets, registry, fontes e gatilhos. JSON de registry malformado não usa fallback silencioso. O acesso às pastas existentes é contado por `getFolderById`, sem nomes, IDs, listagem de arquivos ou payloads na resposta. Nenhum gatilho é criado, nenhum documento é processado e nenhum log em Sheets é gravado.
+
+O wrapper reutiliza `PropertiesService`, `DriveApp` e `ScriptApp`, já contemplados pelo manifest OAuth atual; não requer novo scope nem cliente OAuth. No contexto `build-appscript` já autenticado, o contrato é `bash tools/run-clasp-checked.sh auroraLerStatusConectoresPlugAndPlay "$RUNNER_TEMP/connector-status.json" '["wmgj"]'`. O workflow atual de deploy ainda não chama esse wrapper e executar o workflow completo também faz push/redeploy; essa operação não equivale a uma consulta isolada.
+
+`ok=true` significa conclusão da leitura de status. `firstIngestionVerified` e `operationalReady` permanecem `false`: recibo, versão imutável, projeção e isolamento de tenant exigem readback canônico separado. Contagens de gatilhos abrangem apenas o usuário OAuth executor da consulta.
