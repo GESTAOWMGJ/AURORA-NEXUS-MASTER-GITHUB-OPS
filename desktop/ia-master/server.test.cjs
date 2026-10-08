@@ -164,3 +164,29 @@ test('revoked records are excluded from retrieval', async t => {
   assert.ok(!context.includes('KH-020'));
   assert.equal(response.knowledge.rejectedCount, 1);
 });
+
+
+test('corrupt configured corpus blocks model inference without external fallback', async t => {
+  let calls = 0;
+  const a = await fixture(t, async () => { calls++; return { text: 'Synthetic proposal.' }; }, { registry: registryFixture() });
+  fs.writeFileSync(path.join(a.stateDir, 'knowledge_registry.v1.json'), '{invalid');
+  const response = await a.request('/api/improve', task);
+  assert.equal(response.status, 503); assert.equal((await response.json()).code, 'KNOWLEDGE_UNAVAILABLE');
+  assert.equal(calls, 0); assert.equal(a.metrics.externalAiCalls, 0);
+});
+
+test('corpus revoked or changed during generation cannot return or cache stale proposal', async t => {
+  let release, started, calls = 0;
+  const ready = new Promise(resolve => { started = resolve; });
+  const a = await fixture(t, async () => {
+    calls++;
+    if (calls === 1) { started(); await new Promise(resolve => { release = resolve; }); }
+    return { text: 'Synthetic version-bound proposal.' };
+  }, { registry: registryFixture() });
+  const pending = a.request('/api/improve', task); await ready;
+  fs.writeFileSync(path.join(a.stateDir, 'knowledge_registry.v1.json'), JSON.stringify(registryFixture('1.0.1')));
+  release(); const first = await pending;
+  assert.equal(first.status, 409); assert.equal((await first.json()).code, 'CORPUS_CHANGED_DURING_INFERENCE');
+  const second = await a.request('/api/improve', task); assert.equal(second.status, 200);
+  assert.equal((await second.json()).knowledge.corpusVersion, '1.0.1'); assert.equal(calls, 2);
+});

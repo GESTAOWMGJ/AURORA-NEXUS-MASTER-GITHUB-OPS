@@ -8,7 +8,7 @@ const { buildMasterOperationalState } = require('./kernel/auroraMasterEngine.js'
 const { IA_MASTER_POLICY, IA_MASTER_INTEGRATIONS } = require('./kernel/auroraIaMaster.js');
 const { loadRegistry, selectKnowledge } = require('./knowledge-registry.cjs');
 
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 const MODEL = 'qwen3:8b';
 const OLLAMA = 'http://127.0.0.1:11435';
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -124,6 +124,7 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
       if (typeof body.prompt !== 'string' || body.prompt.trim().length < 8 || body.prompt.length > 6000) return send(400, { code: 'PROMPT_LIMIT' });
       if (/-----BEGIN .*PRIVATE KEY|\bBearer\s+[\w.-]+|\bsk-[a-zA-Z0-9]{12,}|\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/i.test(body.prompt)) return send(403, { code: 'SENSITIVE_INPUT_REJECTED' });
       const registry = loadRegistry(registryPath);
+      if (registryPath && registry.status !== 'LOADED') return send(503, { code: 'KNOWLEDGE_UNAVAILABLE', externalFallbackUsed: false });
       const selected = registryPath
         ? selectKnowledge(registry, body.prompt)
         : { context: knowledge.slice(0, 12000), recordIds: [], corpusHash: hash(knowledge), corpusVersion: 'LEGACY_MODUS_OPERANDI', status: 'LEGACY_FALLBACK' };
@@ -139,6 +140,10 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
         try { proposal = await infer(body.prompt, selected.context); } finally { busy = false; }
         if (!proposal || typeof proposal.text !== 'string' || proposal.text.length > 50000) throw Error('LOCAL_MODEL_INVALID_OUTPUT');
         metrics.localModelCalls++;
+        if (registryPath && loadRegistry(registryPath).corpusHash !== nextCorpusHash) {
+          cache.clear();
+          return send(409, { code: 'CORPUS_CHANGED_DURING_INFERENCE', retryable: true, applied: false });
+        }
         if (cache.size >= 16) cache.delete(cache.keys().next().value);
         cache.set(fingerprint, proposal);
       }

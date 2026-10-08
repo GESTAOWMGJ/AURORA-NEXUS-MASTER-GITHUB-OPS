@@ -24,7 +24,7 @@ def build(output):
     dirty = bool(subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=all', '--',
                  'desktop/ia-master', 'firebase-migration/functions/src',
                  'docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md'], cwd=ROOT, text=True).strip())
-    manifest = {'component': 'AURORA_IA_MASTER', 'version': '1.0.1', 'sourceRevision': revision,
+    manifest = {'component': 'AURORA_IA_MASTER', 'version': '1.0.2', 'sourceRevision': revision,
                 'dirty': dirty, 'nodeMinimumMajor': 22, 'externalAiEnabled': False,
                 'files': {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
                           for p in sorted(output.rglob('*')) if p.is_file()}}

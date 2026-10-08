@@ -1,4 +1,4 @@
-# IA Master local — 1.0.1
+# IA Master local — 1.0.2
 
 Incremento AURORA-IA-MASTER-001, baseline `68467209b55f1f8e281ecb5d21acb9a8211757cf`.
 O titular solicitou usar o PC como servidor físico da IA dentro do mesmo AURORA.
@@ -78,3 +78,23 @@ o atalho de inicialização verificado. Preserva dados, modelos, auditoria, clie
 integrações. Para retomar manualmente, usar `IA Master - Iniciar.cmd`.
 Reverter o PR restaura a seção/registro anterior no próximo deploy; não muda IAM,
 DNS, credenciais ou dados. A publicação HML continua sujeita aos gates existentes.
+
+## Incremento 1.0.2 — memoria limitada e proveniencia
+
+O carregador confere bytes e SHA-256 a cada leitura e reutiliza somente o corpus
+parseado e o indice normalizado de conteudo identico, limitado a um corpus em cache.
+Timestamp nao substitui hash. Arquivo ausente, alterado durante leitura ou invalido
+nao recupera copia obsoleta. A leitura tem teto de 4 MiB e 1000 registros.
+
+Licoes SUSPENDED/REJECTED/REVOKED/SUPERSEDED ou em estado desconhecido ficam fora
+do contexto. SPECIFIED pode servir apenas de referencia para propostas: estado,
+regressao NOT_RUN, runtimeVerified e ausencia de autoridade acompanham a licao.
+Limite de contexto inclui cabecalho e bytes UTF-8. Corpus configurado indisponivel
+suspende apenas a inferencia de propostas; nunca aciona provedor externo.
+Mudanca do corpus durante geracao retorna 409 retomavel e nao publica/cacheia a
+proposta obsoleta. APIs de status e previa nativa preservam suas fronteiras.
+
+Testes adicionais: `node --test desktop/ia-master/knowledge-registry.test.cjs`.
+Os testes HTTP permanecem em server.test.cjs, incluindo indisponibilidade do corpus
+e concorrencia entre geracao e atualizacao. Ganho de desempenho, CI e instalacao
+exigem recibos do SHA e do destino; esta secao nao declara implantacao.
