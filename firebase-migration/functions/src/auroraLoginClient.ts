@@ -13,8 +13,9 @@ const entryPath = location.pathname === '/setup' ? '/setup' : ${JSON.stringify(e
 const element = id => document.getElementById(id);
 const form = element('login-form'), status = element('status'), submit = element('submit');
 let auth, resolver = null, setupUser = null, totpSecret = null;
+let onboardingUser = null, onboardingRetrySession = false;
 const clearSetup = () => { totpSecret = null; element('enrollment-key').textContent = ''; element('enrollment-code').value = ''; };
-window.addEventListener('pagehide', clearSetup);
+window.addEventListener('pagehide', () => { clearSetup(); onboardingUser = null; onboardingRetrySession = false; const input = element('registration-password'); if (input) input.value = ''; });
 try {
   const config = await fetch('/__/firebase/init.json', {cache:'no-store'});
   if (!config.ok) throw new Error('CONFIG_UNAVAILABLE');
@@ -45,6 +46,17 @@ async function completeLogin(user) {
   const token = await getIdTokenResult(user, true);
   const setupRequired = token.claims.auroraProfileVersion !== undefined || element('secure-setup').checked;
   if (!setupRequired || (user.emailVerified && token.claims.firebase?.sign_in_second_factor)) {
+    if (token.claims.auroraOnboardingRequired === true) {
+      // The server's current membership decides whether onboarding is still pending.
+      try { await createSession(user); return; }
+      catch (error) {
+        if (!['EMAIL_NOT_ALLOWED','MEMBERSHIP_NOT_PROVISIONED'].includes(error?.message)) throw error;
+        onboardingUser = user; onboardingRetrySession = false; form.hidden = true; element('mfa-panel').hidden = true;
+        element('activation-panel').hidden = true; element('onboarding-panel').hidden = false;
+        element('onboarding-status').textContent = 'Conclua o acolhimento para abrir seu acesso individual.';
+        return;
+      }
+    }
     await createSession(user); return;
   }
   form.hidden = true; element('mfa-panel').hidden = true; element('activation-panel').hidden = false;
@@ -85,6 +97,27 @@ element('mfa-submit').addEventListener('click', async () => {
     const credential = await resolver.resolveSignIn(assertion);
     element('mfa-code').value = ''; await completeLogin(credential.user);
   } catch (error) { element('mfa-status').textContent = accessIssueMessage(error); }
+  finally { button.disabled = false; }
+});
+element('onboarding-submit')?.addEventListener('click', async () => {
+  const button = element('onboarding-submit'); button.disabled = true;
+  try {
+    if (!onboardingUser) throw new Error('ONBOARDING_LOGIN_REQUIRED');
+    if (onboardingRetrySession) {
+      try { await createSession(onboardingUser); onboardingUser = null; return; }
+      catch (error) { if (!['EMAIL_NOT_ALLOWED','MEMBERSHIP_NOT_PROVISIONED'].includes(error?.message)) throw new Error('ONBOARDING_SESSION_RETRY'); }
+    }
+    const registrationPassword = element('registration-password').value.trim();
+    element('registration-password').value = '';
+    const idToken = await onboardingUser.getIdToken(true);
+    onboardingRetrySession = true; // A lost response may hide a successful, irreversible consumption.
+    const response = await fetch('/api/user-profiles', {method:'POST',headers:{'Content-Type':'application/json'},cache:'no-store',body:JSON.stringify({action:'REDEEM_ONBOARDING',idToken,registrationPassword})});
+    if (!response.ok) throw new Error('ONBOARDING_REJECTED');
+    try { await createSession(onboardingUser); onboardingUser = null; }
+    catch { throw new Error('ONBOARDING_SESSION_RETRY'); }
+  } catch (error) { element('onboarding-status').textContent = error?.message === 'ONBOARDING_REJECTED'
+      ? 'Senha de cadastro inválida, expirada ou já utilizada. Se o acolhimento já foi concluído, entre novamente; caso contrário, solicite nova emissão ao Gestor Master.'
+      : 'Não foi possível confirmar sua sessão. Toque em Concluir cadastro novamente ou entre novamente para retomar o acesso.'; }
   finally { button.disabled = false; }
 });
 element('reset-password').addEventListener('click', async () => {

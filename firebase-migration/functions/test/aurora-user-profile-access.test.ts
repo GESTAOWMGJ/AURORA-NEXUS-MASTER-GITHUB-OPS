@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import { auroraAuth, auroraDb } from '../src/firebase.js';
-import { auroraNexusUserProfiles } from '../src/auroraUserProfileRuntime.js';
+import { auroraNexusUserProfiles, profileStore } from '../src/auroraUserProfileRuntime.js';
+import { createOnboardingInvitationEngine } from '../src/auroraOnboardingInvitations.js';
 import { CSRF_PURPOSES, csrfTokenForSession, verifyAuroraAccess } from '../src/auroraAccess.js';
 import { auroraNexusSessionLogin } from '../src/auroraAuthGate.js';
 
@@ -78,4 +80,71 @@ test('real session handler rejects managed first factor and wrong company before
   const result=await f.invoke(auroraNexusSessionLogin,'POST',{idToken:'synthetic',orgId:org});
   assert.equal(result.status,204); assert.deepEqual(f.mutations,['session']);
   assert.match(result.responseHeaders['Set-Cookie'],/HttpOnly; Secure; SameSite=Strict/);
+});
+
+test('new onboarding marker cannot obtain a session or SDK identity before consumption',async context=>{
+  const f=fixture(context);
+  f.decoded({auroraProfileVersion:1,auroraProfileOperation:operation,auroraOnboardingRequired:true});
+  f.member({profileVersion:1,profileOperationId:operation,profileState:'READY',authEmail:email,onboardingRequired:true,onboardingState:'INVITED'});
+  assert.equal(await verifyAuroraAccess(cookie,email),null);
+  assert.equal((await f.invoke(auroraNexusSessionLogin,'POST',{idToken:'synthetic',orgId:org})).status,403);
+  assert.deepEqual(f.mutations,[]);
+  f.member({onboardingState:'COMPLETE'});
+  assert.equal((await verifyAuroraAccess(cookie,email))?.role,'org_admin');
+  f.decoded({auroraOnboardingRequired:undefined});
+  assert.equal(await verifyAuroraAccess(cookie,email),null,'removing signed onboarding marker cannot downgrade protection');
+});
+
+test('onboarding handler rejects foreign Origin, bad JSON and first-factor identities before mutation',async context=>{
+  const f=fixture(context);
+  const body={action:'REDEEM_ONBOARDING',idToken:'synthetic-token',registrationPassword:'ANX1-'+'A'.repeat(43)};
+  for (const headers of [{origin:'https://evil.invalid'}, {origin:'https://auroranexus.com.br','sec-fetch-site':'cross-site'}]) {
+    assert.equal((await f.invoke(auroraNexusUserProfiles,'POST',body,headers)).status,403);
+  }
+  const valid={origin:'https://auroranexus.com.br'};
+  assert.equal((await f.invoke(auroraNexusUserProfiles,'POST',body,{...valid,'content-type':'text/plain'})).status,415);
+  assert.equal((await f.invoke(auroraNexusUserProfiles,'POST',{...body,orgId:'other-company'},valid)).status,400);
+  f.decoded({auroraProfileVersion:1,auroraProfileOperation:operation,auroraOnboardingRequired:true,firebase:{sign_in_provider:'password'}});
+  assert.equal((await f.invoke(auroraNexusUserProfiles,'POST',body,valid)).result.code,'ONBOARDING_IDENTITY_REQUIRED');
+  assert.deepEqual(f.mutations,[]);
+});
+
+test('real onboarding handler consumes the UID-bound code once and only then permits a session',async context=>{
+  const f=fixture(context), hash=(value:string)=>createHash('sha256').update(value).digest('hex');
+  const profileOperationId='profile-'+hash('synthetic-runtime-profile');
+  const targetUid='anx_'+hash(profileOperationId).slice(0,40), fingerprint=hash('synthetic-runtime-fingerprint');
+  const base=`organizations/${org}`, memberPath=`${base}/members/${targetUid}`;
+  const rows=new Map<string,any>([
+    [base,{active:true,userProfilesEnabled:true}],
+    [`${base}/members/${uid}`,{active:true,role:'org_admin',allFacilities:true}],
+    [memberPath,{active:true,role:'org_admin',allFacilities:true,profileVersion:1,profileState:'READY',
+      profileOperationId,profileFingerprint:fingerprint,authEmail:email,onboardingRequired:true,onboardingState:'INVITED',
+      onboarding:{jobTitle:'Synthetic administrator',duties:['Synthetic onboarding'],managerUid:uid,welcomeDueHours:24}}],
+    [`${base}/apiIdempotency/${profileOperationId}`,{status:'READY',uid:targetUid,fingerprint}]
+  ]);
+  context.mock.method(auroraDb,'doc',(path:string)=>({path,get:async()=>({exists:rows.has(path),data:()=>rows.get(path)})}));
+  context.mock.method(auroraDb,'runTransaction',async(body:any)=>{
+    const draft=new Map([...rows].map(([path,data])=>[path,structuredClone(data)]));let wrote=false;
+    const result=await body({
+      get:async(ref:any)=>{assert.equal(wrote,false,'Firestore reads precede writes');return {data:()=>structuredClone(draft.get(ref.path))};},
+      create:(ref:any,data:any)=>{wrote=true;assert.equal(draft.has(ref.path),false);draft.set(ref.path,structuredClone(data));},
+      update:(ref:any,data:any)=>{wrote=true;assert.ok(draft.has(ref.path));draft.set(ref.path,{...draft.get(ref.path),...structuredClone(data)});}
+    });
+    rows.clear();draft.forEach((data,path)=>rows.set(path,data));return result;
+  });
+  f.decoded({uid:targetUid,auroraProfileVersion:1,auroraProfileOperation:profileOperationId,auroraOnboardingRequired:true});
+  const sessionBody={idToken:'synthetic-token',orgId:org};
+  assert.equal((await f.invoke(auroraNexusSessionLogin,'POST',sessionBody)).status,403);
+  const code=await createOnboardingInvitationEngine(profileStore).issue(
+    {uid,orgId:org,role:'org_admin',allFacilities:true,mfaVerified:true},targetUid,'synthetic-runtime-invitation');
+  const body={action:'REDEEM_ONBOARDING',idToken:'synthetic-token',registrationPassword:code.registrationPassword};
+  const response=await f.invoke(auroraNexusUserProfiles,'POST',body,{origin:'https://auroranexus.com.br',cookie:'','x-aurora-csrf':''});
+  assert.equal(response.status,200);assert.equal(response.result.onboardingState,'COMPLETE');
+  assert.equal(rows.get(memberPath).onboardingInvitation.codeDigest,'');
+  assert.equal(JSON.stringify([...rows]).includes(code.registrationPassword!),false);
+  assert.equal((await f.invoke(auroraNexusUserProfiles,'POST',body,{origin:'https://auroranexus.com.br'})).status,403);
+  assert.equal((await f.invoke(auroraNexusSessionLogin,'POST',sessionBody)).status,204);
+  assert.deepEqual(f.mutations,['session']);
+  rows.get(memberPath).active=false;
+  assert.equal((await f.invoke(auroraNexusSessionLogin,'POST',sessionBody)).status,403,'live revocation still closes session issuance');
 });

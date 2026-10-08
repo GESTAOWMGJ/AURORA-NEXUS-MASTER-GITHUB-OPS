@@ -27,9 +27,15 @@ service cloud.firestore {
 
     // Managed users must complete email verification and a real MFA sign-in,
     // including direct SDK reads that do not pass through the HTTP session gate.
+    function onboardingIdentityAllowed(profile, token) {
+      return (!('onboardingRequired' in profile) && !('auroraOnboardingRequired' in token))
+        || (profile.onboardingRequired == true && token.auroraOnboardingRequired == true
+          && profile.onboardingState == 'COMPLETE');
+    }
+
     function profileIdentityAllowed(orgId, profile) {
       let token = request.auth.token;
-      return (!('profileVersion' in profile) && !('auroraProfileVersion' in token))
+      return onboardingIdentityAllowed(profile, token) && ((!('profileVersion' in profile) && !('auroraProfileVersion' in token))
         || (profile.profileVersion == 1
           && profile.profileState == 'READY'
           && token.auroraProfileVersion == 1
@@ -40,7 +46,7 @@ service cloud.firestore {
           && token.firebase.sign_in_second_factor.size() > 0
           && token.auroraProfileOperation is string
           && token.auroraProfileOperation.matches('^profile-[a-f0-9]{64}$')
-          && token.auroraProfileOperation == profile.profileOperationId);
+          && token.auroraProfileOperation == profile.profileOperationId));
     }
 
     function activeMember(orgId) {
