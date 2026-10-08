@@ -99,7 +99,7 @@ class WorkflowStructureTests(unittest.TestCase):
         with self.assertRaises(yaml.constructor.ConstructorError):
             yaml.load("jobs:\n  smoke: {}\n  smoke: {}\n", Loader=UniqueKeyLoader)
 
-    def test_canonical_preflight_precedes_cloud_auth_and_smokes_keep_canonical_origin(self):
+    def test_canonical_route_gate_precedes_auth_and_deploy_smokes_exact_hml_host(self):
         gate = "Require canonical HTTPS and HML routing before cloud authentication"
         for filename, (job_id, name) in TARGETS.items():
             workflow = load_workflow(WORKFLOWS / filename)
@@ -113,31 +113,56 @@ class WorkflowStructureTests(unittest.TestCase):
                           steps[gates[0]]["run"])
             smoke = next(step["run"] for step in steps if step.get("name") == name)
             self.assertIn('="https://auroranexus.com.br"', smoke)
-            self.assertNotIn('.web.app', smoke)
+            if filename == "deploy-aurora-firebase.yml":
+                self.assertIn('technical_origin="https://${PROJECT_ID}.web.app"', smoke)
+                self.assertIn('"${technical_origin}/__sessionLogin"', smoke)
+                self.assertIn('"${technical_origin}/api/bootstrap"', smoke)
+            else:
+                self.assertNotIn('.web.app', smoke)
             self.assertNotIn('--location', smoke)
             self.assertNotRegex(smoke, r'curl[^\n]*\s-L\b')
         deploy = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")["jobs"]["deploy"]["steps"]
         negative = next(step["run"] for step in deploy if step.get("name") == "Smoke test private shell and deployed functions")
         self.assertEqual(negative.count('.web.app'), 1)
         self.assertIn('technical_origin="https://${PROJECT_ID}.web.app"', negative)
-        self.assertIn('technical_shell="$(curl --fail --silent --show-error --max-time 30 "${technical_origin}/")"', negative)
-        self.assertIn('location.replace("https://auroranexus.com.br/portal', negative)
+        public_gate = 'CANONICAL_PREFLIGHT_SCOPE=routing-only'
+        technical_gate = 'CANONICAL_PREFLIGHT_SCOPE=technical-api'
+        self.assertEqual(negative.count(public_gate), 1)
+        self.assertEqual(negative.count(technical_gate), 1)
+        self.assertLess(negative.index(public_gate), negative.index(technical_gate))
+        self.assertIn('technical_headers="$(mktemp "${RUNNER_TEMP}/aurora-technical-headers.XXXXXX")"', negative)
+        self.assertIn('--dump-header "$technical_headers"', negative)
+        self.assertIn('--output "$technical_shell"', negative)
+        self.assertIn('if [ "$technical_status" = "308" ]; then', negative)
+        self.assertIn("tolower($0) ~ /^location:/", negative)
+        self.assertIn('test "$technical_location" = "${canonical_origin}/portal"', negative)
+        self.assertIn('elif [ "$technical_status" = "200" ]; then', negative)
+        self.assertIn("grep -Fq 'location.replace(\"https://auroranexus.com.br/portal'", negative)
         self.assertIn('Technical Firebase host exposed the private shell', negative)
-        self.assertIn('"${canonical_origin}/portal"', negative)
+        self.assertEqual(negative.count('assert_auth_required "'), 6)
+        self.assertIn('code="$(jq -r', negative)
+        self.assertIn('Anonymous smoke contract mismatch', negative)
+        self.assertNotIn('shell="$(curl --fail --silent --show-error --max-time 30 "${canonical_origin}/portal")"', negative)
+        self.assertNotIn('grep -Fq "Ambiente privado"', negative)
         self.assertIn('-H "Origin: ${canonical_origin}"', negative)
+        self.assertIn('"${technical_origin}/api/bootstrap"', negative)
+        self.assertNotIn('"${canonical_origin}/api/bootstrap"', negative)
         self.assertNotIn('base_url', negative)
         user_profiles = next(step["run"] for step in deploy if step.get("name") == "Verify user profile API rejects anonymous access")
         self.assertIn('-H "Origin: ${canonical_origin}"', user_profiles)
-        self.assertNotIn('.web.app', user_profiles)
+        self.assertIn('technical_origin="https://${PROJECT_ID}.web.app"', user_profiles)
+        self.assertIn('"${technical_origin}/api/user-profiles"', user_profiles)
         auth = next(step["run"] for step in deploy if step.get("name") == "Authenticated smoke test without stored password")
         self.assertNotIn('base_url', auth)
-        self.assertIn('https://auroranexus\\.com\\.br/portal', auth)
+        self.assertIn('technical_origin="https://${PROJECT_ID}.web.app"', auth)
+        self.assertIn('"${technical_origin}/__sessionLogin"', auth)
+        self.assertNotIn('AUTH_PRIVATE_SHELL_VERIFIED', auth)
 
     def test_technical_probe_requires_browser_guard_to_canonical_without_following(self):
         steps = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")["jobs"]["deploy"]["steps"]
         smoke = next(step["run"] for step in steps if step.get("name") == "Smoke test private shell and deployed functions")
-        start = smoke.index('technical_shell="$(')
-        end = smoke.index('negative_response=', start)
+        start = smoke.index('technical_headers="$(mktemp')
+        end = smoke.index('assert_auth_required() {', start)
         probe = smoke[start:end]
         self.assertNotIn('--location', probe)
         self.assertNotRegex(probe, r'\s-L\b')
@@ -145,23 +170,69 @@ class WorkflowStructureTests(unittest.TestCase):
 canonical_origin="https://auroranexus.com.br"
 technical_origin="https://wmgj-hml-jfn-20260927.web.app"
 curl() {
-  local last
-  for last; do :; done
+  local headers="" output="" last=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dump-header) headers="$2"; shift 2 ;;
+      --output) output="$2"; shift 2 ;;
+      --write-out|--max-time) shift 2 ;;
+      --silent|--show-error) shift ;;
+      *) last="$1"; shift ;;
+    esac
+  done
   test "$last" = "${technical_origin}/"
-  printf '%s' "$TEST_TECHNICAL_SHELL"
+  printf 'HTTP/2 %s\\r\\nLocation: %s\\r\\n\\r\\n' "$TEST_TECHNICAL_STATUS" "$TEST_TECHNICAL_LOCATION" > "$headers"
+  printf '%s' "$TEST_TECHNICAL_BODY" > "$output"
+  printf '%s' "$TEST_TECHNICAL_STATUS"
 }
 '''
-        for value, expected in [
-            ('<script>location.replace("https://auroranexus.com.br/portal"+location.search)</script>', 0),
-            ('<html><title>Aurora Nexus | Login</title></html>', 1),
-            ('<script>location.replace("https://example.test/portal")</script>', 1),
-            ('<script>location.replace("https://auroranexus.com.br/portal")</script>Centro de gestão WMGJ', 90),
+        for status, location, body, expected in [
+            ('308', 'https://auroranexus.com.br/portal', '', 0),
+            ('200', '', '<script>location.replace("https://auroranexus.com.br/portal"+location.search)</script>', 0),
+            ('308', 'https://example.test/portal', '', 1),
+            ('200', '', '<html><title>Aurora Nexus | Login</title></html>', 1),
+            ('200', '', '<script>location.replace("https://auroranexus.com.br/portal")</script>Centro de gestão WMGJ', 90),
+            ('302', 'https://auroranexus.com.br/portal', '', 90),
         ]:
-            with self.subTest(html=value):
-                result = subprocess.run(['bash', '--noprofile', '--norc', '-c', prefix + probe],
-                                        env=dict(os.environ, TEST_TECHNICAL_SHELL=value),
-                                        capture_output=True, timeout=10)
-                self.assertEqual(result.returncode, expected)
+            with self.subTest(status=status, location=location, body=body):
+                with tempfile.TemporaryDirectory() as temporary:
+                    result = subprocess.run(['bash', '--noprofile', '--norc', '-c', prefix + probe],
+                                            env=dict(os.environ, RUNNER_TEMP=temporary,
+                                                     TEST_TECHNICAL_STATUS=status,
+                                                     TEST_TECHNICAL_LOCATION=location,
+                                                     TEST_TECHNICAL_BODY=body),
+                                            capture_output=True, timeout=10)
+                    self.assertEqual(result.returncode, expected, result.stderr.decode())
+
+    def test_anonymous_contract_mismatch_is_sanitized_and_actionable(self):
+        steps = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")["jobs"]["deploy"]["steps"]
+        smoke = next(step["run"] for step in steps if step.get("name") == "Smoke test private shell and deployed functions")
+        start = smoke.index('assert_auth_required() {')
+        end = smoke.index('bootstrap_status=', start)
+        helper = smoke[start:end]
+        for status, payload, expected, expected_code in [
+            ('401', '{"ok":false,"code":"AUTH_REQUIRED"}', 0, None),
+            ('403', '{"ok":false,"code":"CROSS_SITE_REJECTED","secret":"must-not-leak"}', 91, 'CROSS_SITE_REJECTED'),
+            ('401', 'not-json-with-secret', 91, 'NON_JSON'),
+        ]:
+            with self.subTest(status=status, payload=payload):
+                with tempfile.TemporaryDirectory() as temporary:
+                    response = Path(temporary) / 'response.json'
+                    response.write_text(payload, encoding='utf-8')
+                    script = f'''set -euo pipefail
+{helper}
+assert_auth_required "synthetic-endpoint" "{status}" "{response}"
+'''
+                    result = subprocess.run(['bash', '--noprofile', '--norc', '-c', script],
+                                            capture_output=True, timeout=10)
+                    self.assertEqual(result.returncode, expected, result.stderr.decode())
+                    stderr = result.stderr.decode()
+                    self.assertNotIn('must-not-leak', stderr)
+                    self.assertNotIn('not-json-with-secret', stderr)
+                    if expected_code:
+                        self.assertIn('synthetic-endpoint', stderr)
+                        self.assertIn(f'HTTP {status}', stderr)
+                        self.assertIn(f'code {expected_code}', stderr)
 
     def test_critical_deploy_steps_are_unique_and_gates_remain(self):
         workflow = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")

@@ -8,6 +8,8 @@ export const CANONICAL_ORIGIN = 'https://auroranexus.com.br';
 export const MAX_RESPONSE_BYTES = 262144;
 const TIMEOUT_MS = 20000;
 const ROUTING_ONLY_SCOPE = 'routing-only';
+const TECHNICAL_API_SCOPE = 'technical-api';
+const FULL_SCOPE = 'full';
 
 export class CanonicalPreflightError extends Error {
   constructor(code) {
@@ -20,11 +22,11 @@ function requireCondition(condition, code) {
   if (!condition) throw new CanonicalPreflightError(code);
 }
 
-// The origin is fixed. TLS verification and redirect rejection are never optional.
-export function requestCanonical(path) {
+// The selected origin is fixed. TLS verification and redirect rejection are never optional.
+export function requestOrigin(origin, path) {
   return new Promise((resolveResponse, reject) => {
-    const url = new URL(path, CANONICAL_ORIGIN);
-    if (url.origin !== CANONICAL_ORIGIN) {
+    const url = new URL(path, origin);
+    if (url.origin !== origin) {
       reject(new CanonicalPreflightError('CANONICAL_ORIGIN_REQUIRED'));
       return;
     }
@@ -63,6 +65,10 @@ export function requestCanonical(path) {
     req.on('error', () => fail('CANONICAL_HTTPS_FAILED'));
     req.end();
   });
+}
+
+export function requestCanonical(path) {
+  return requestOrigin(CANONICAL_ORIGIN, path);
 }
 
 function usable(attributes) {
@@ -239,16 +245,21 @@ function jsonBody(response, code) {
 
 // Anonymous GETs only: this proves routing readiness, never login or release approval.
 export async function checkCanonicalPreflight(expectedProject, {
-  resolveHost = hostname => lookup(hostname, {all: true}), transport = requestCanonical,
+  resolveHost = hostname => lookup(hostname, {all: true}), transport,
   scope = process.env.CANONICAL_PREFLIGHT_SCOPE || 'full',
 } = {}) {
   requireCondition(/^wmgj-hml-jfn-[a-z0-9-]+$/.test(expectedProject || '')
     && !/prod|production|live|principal/i.test(expectedProject), 'HML_PROJECT_REQUIRED');
+  requireCondition([FULL_SCOPE, ROUTING_ONLY_SCOPE, TECHNICAL_API_SCOPE].includes(scope),
+    'CANONICAL_PREFLIGHT_SCOPE_INVALID');
+  const technicalApi = scope === TECHNICAL_API_SCOPE;
+  const origin = technicalApi ? `https://${expectedProject}.web.app` : CANONICAL_ORIGIN;
+  const selectedTransport = transport || (path => requestOrigin(origin, path));
   let addresses;
   let dnsTimer;
   try {
     addresses = await Promise.race([
-      resolveHost(new URL(CANONICAL_ORIGIN).hostname),
+      resolveHost(new URL(origin).hostname),
       new Promise((_, reject) => { dnsTimer = setTimeout(() => reject(new Error('DNS_TIMEOUT')), TIMEOUT_MS); }),
     ]);
   }
@@ -257,30 +268,34 @@ export async function checkCanonicalPreflight(expectedProject, {
   requireCondition(Array.isArray(addresses) && addresses.length > 0
     && addresses.every(entry => isIP(entry.address)), 'CANONICAL_DNS_FAILED');
 
-  const portal = await checkedResponse(transport, '/portal');
-  requireCondition(portal.status === 200
-    && /^text\/html\b/i.test(portal.headers?.['content-type'] || ''), 'CANONICAL_PORTAL_HTTP_INVALID');
-  requireCondition(hasCanonicalPortalShell(portal.body), 'CANONICAL_PORTAL_SHELL_REQUIRED');
-  requireCondition(/(?:^|,)\s*no-store\b/i.test(portal.headers?.['cache-control'] || '')
-    && /^DENY$/i.test(portal.headers?.['x-frame-options'] || '')
-    && /^nosniff$/i.test(portal.headers?.['x-content-type-options'] || ''), 'CANONICAL_PORTAL_HEADERS_REQUIRED');
+  let portalShellVerified = false;
+  if (!technicalApi) {
+    const portal = await checkedResponse(selectedTransport, '/portal');
+    requireCondition(portal.status === 200
+      && /^text\/html\b/i.test(portal.headers?.['content-type'] || ''), 'CANONICAL_PORTAL_HTTP_INVALID');
+    requireCondition(hasCanonicalPortalShell(portal.body), 'CANONICAL_PORTAL_SHELL_REQUIRED');
+    requireCondition(/(?:^|,)\s*no-store\b/i.test(portal.headers?.['cache-control'] || '')
+      && /^DENY$/i.test(portal.headers?.['x-frame-options'] || '')
+      && /^nosniff$/i.test(portal.headers?.['x-content-type-options'] || ''), 'CANONICAL_PORTAL_HEADERS_REQUIRED');
+    portalShellVerified = true;
+  }
 
   let anonymousDenied = false;
   let firebaseProjectMatched = false;
   if (scope !== ROUTING_ONLY_SCOPE) {
-    const init = await checkedResponse(transport, '/__/firebase/init.json');
+    const init = await checkedResponse(selectedTransport, '/__/firebase/init.json');
     const config = jsonBody(init, 'CANONICAL_HML_PROJECT_MISMATCH');
     requireCondition(init.status === 200 && config?.projectId === expectedProject, 'CANONICAL_HML_PROJECT_MISMATCH');
     firebaseProjectMatched = true;
-    const bootstrap = await checkedResponse(transport, '/api/bootstrap');
+    const bootstrap = await checkedResponse(selectedTransport, '/api/bootstrap');
     const anonymous = jsonBody(bootstrap, 'CANONICAL_ANONYMOUS_DENIAL_REQUIRED');
     requireCondition(bootstrap.status === 401 && anonymous?.ok === false
       && anonymous?.code === 'AUTH_REQUIRED', 'CANONICAL_ANONYMOUS_DENIAL_REQUIRED');
     anonymousDenied = true;
   }
   return {
-    code: 'CANONICAL_ROUTE_READY', origin: CANONICAL_ORIGIN, expectedProject,
-    dnsResolved: true, httpsVerified: true, portalShellVerified: true,
+    code: technicalApi ? 'HML_TECHNICAL_API_READY' : 'CANONICAL_ROUTE_READY', origin, expectedProject,
+    dnsResolved: true, httpsVerified: true, portalShellVerified,
     anonymousDenied, firebaseProjectMatched, authenticated: false,
   };
 }
