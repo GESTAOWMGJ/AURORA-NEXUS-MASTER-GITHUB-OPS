@@ -27,7 +27,7 @@ def response(payload, duplicate=False):
 
 
 
-def processed_response(payload, duplicate=False, revision=1, org=ORG):
+def processed_response(payload, duplicate=False, revision=1, org=ORG, operational_complete=True):
     normalized = sync.validate_payload(payload)
     source_hash = sync.digest(org + ':' + normalized['sourceSystem'] + ':' + normalized['externalDocumentId'])
     receipt = response(normalized, duplicate)
@@ -35,7 +35,7 @@ def processed_response(payload, duplicate=False, revision=1, org=ORG):
                    canonicalSnapshotHash=sync.canonical_snapshot_hash(normalized))
     receipt['installation'] = {
         'state': 'FIRST_INGESTION_VERIFIED', 'firstIngestionVerified': True,
-        'operationalComplete': True, 'documentId': source_hash[:48],
+        'operationalComplete': operational_complete, 'documentId': source_hash[:48],
         'sourceSystem': normalized['sourceSystem'], 'sourceVersion': normalized['sourceVersion'],
         'revision': revision,
         'versionId': sync.digest('v1:sourceDocument:' + normalized['sourceSystem'] + ':'
@@ -139,7 +139,9 @@ class SyncTests(unittest.TestCase):
                        {'sourceVersion': 2}, {'sourceVersion': True}, {'revision': 0},
                        {'revision': True}, {'versionId': 'b' * 48},
                        {'canonicalSnapshotHash': 'c' * 64}, {'verifiedAt': 'not-a-date'},
-                       {'firstIngestionVerified': False}, {'operationalComplete': False}):
+                       {'firstIngestionVerified': False}, {'operationalComplete': None},
+                       {'operationalComplete': 0}, {'operationalComplete': 1},
+                       {'operationalComplete': 'false'}):
             invalid = copy.deepcopy(valid)
             invalid['installation'].update(change)
             network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (200, invalid)])
@@ -149,6 +151,21 @@ class SyncTests(unittest.TestCase):
         receipt = sync.synchronize(payload, ORIGIN, ORG, 'synthetic-key', True, network)
         self.assertTrue(receipt['processing']['firstIngestionVerified'])
         self.assertEqual(receipt['processing']['revision'], 1)
+
+    def test_first_data_proof_before_setup_retains_full_bound_evidence(self):
+        payload = fixture()
+        reply = processed_response(payload, operational_complete=False)
+        network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, reply)])
+        receipt = sync.synchronize(payload, ORIGIN, ORG, 'synthetic-key', True, network)
+        self.assertEqual(receipt['status'], 'ACCEPTED')
+        self.assertTrue(receipt['cloudReceiptVerified'])
+        self.assertEqual(receipt['processing'], reply['installation'])
+        self.assertTrue(receipt['processing']['firstIngestionVerified'])
+        self.assertIs(receipt['processing']['operationalComplete'], False)
+        del reply['installation']['operationalComplete']
+        network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, reply)])
+        with self.assertRaisesRegex(sync.SyncError, 'PROCESSING_PROOF'):
+            sync.synchronize(payload, ORIGIN, ORG, 'synthetic-key', True, network)
 
     def test_matching_document_from_another_tenant_cannot_prove_processing(self):
         payload = fixture()

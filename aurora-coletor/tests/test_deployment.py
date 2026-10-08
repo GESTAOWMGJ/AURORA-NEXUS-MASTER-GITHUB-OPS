@@ -76,6 +76,61 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(denied['receipt'], second['receipt'])
         self.assertFalse(denied['processingVerifiedThisRun'])
 
+    def test_first_post_before_setup_then_same_key_replay_after_setup(self):
+        reply = processed_response(self.payload, operational_complete=False)
+        network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, reply)])
+        first = self.run_setup(token='test-token', send=True, transport=network)
+        original_post = network.call_args.args
+        self.assertEqual(first['status'], 'SAMPLE_RECEIPT_VERIFIED')
+        self.assertTrue(first['receiptVerifiedThisRun'])
+        self.assertTrue(first['processingVerifiedThisRun'])
+        self.assertEqual(first['processingProof'], reply['installation'])
+        self.assertIs(first['processingProof']['operationalComplete'], False)
+        self.assertEqual(first['nextAction'], 'COMPLETE_AUTHENTICATED_SETUP')
+        self.assertEqual(first['receipt']['status'], 'ACCEPTED')
+        checkpoint = deployment.read_json(self.state / deployment.STATE_NAME)
+        self.assertEqual(checkpoint['receipt'], first['receipt'])
+        self.assertEqual(checkpoint['processingProof'], first['processingProof'])
+
+        # A ping after authenticated setup still cannot upgrade this cached proof.
+        ping = Mock(return_value=(200, {'ok': True, 'orgId': ORG,
+                                       'installation': processed_response(self.payload)['installation']}))
+        connected = self.run_setup(token='test-token', connect=True, transport=ping)
+        self.assertEqual(ping.call_count, 1)
+        self.assertTrue(ping.call_args.args[0].endswith('/ping'))
+        self.assertEqual(connected['receipt'], first['receipt'])
+        self.assertEqual(connected['processingProof'], first['processingProof'])
+        self.assertFalse(connected['processingVerifiedThisRun'])
+
+        wrong_version = processed_response(self.payload, duplicate=True, operational_complete=False)
+        wrong_version['installation']['sourceVersion'] = 2
+        rejected = self.run_setup(token='test-token', send=True, transport=Mock(
+            side_effect=[(200, {'ok': True, 'orgId': ORG}), (200, wrong_version)]))
+        self.assertEqual(rejected['status'], 'BLOCKED')
+        self.assertEqual(rejected['code'], 'CLOUD_PROCESSING_PROOF_MISMATCH')
+        self.assertEqual(rejected['receipt'], first['receipt'])
+        self.assertEqual(rejected['processingProof'], first['processingProof'])
+        self.assertFalse(rejected['processingVerifiedThisRun'])
+        self.assertFalse(rejected['receiptVerifiedThisRun'])
+
+        # Completing setup is external to this collector; only a bound POST proves it.
+        completed_reply = processed_response(self.payload, duplicate=True, operational_complete=True)
+        network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (200, completed_reply)])
+        completed = self.run_setup(token='rotated-token', send=True, transport=network)
+        self.assertEqual(network.call_count, 2)
+        self.assertEqual(network.call_args.args[0], original_post[0])
+        self.assertEqual(network.call_args.args[2:], original_post[2:])
+        self.assertEqual(completed['sampleKey'], first['sampleKey'])
+        self.assertTrue(completed['previousReceiptCached'])
+        self.assertTrue(completed['processingVerifiedThisRun'])
+        self.assertEqual(completed['processingProof'], completed_reply['installation'])
+        self.assertIs(completed['processingProof']['operationalComplete'], True)
+        self.assertEqual(completed['nextAction'], 'VERIFY_CONTINUITY_WITH_SUBSEQUENT_EVENTS')
+        self.assertEqual(completed['receipt'], dict(first['receipt'], status='DUPLICATE'))
+        for result in (first, connected, completed):
+            self.assertFalse(result['fullSynchronizationVerified'])
+            self.assertFalse(result['productionReleased'])
+
     def test_connect_with_cached_receipt_remains_ping_only_without_current_processing_proof(self):
         first = self.run_setup(token='test-token', send=True, transport=Mock(
             side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, processed_response(self.payload))]))

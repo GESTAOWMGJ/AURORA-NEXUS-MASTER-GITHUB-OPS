@@ -122,7 +122,7 @@ def processing_proof(payload, org, installation):
     expected_version_id = (digest('v1:sourceDocument:' + payload['sourceSystem'] + ':'
                                 + source_hash[:32] + ':revision:' + str(revision))[:48])
     if (state != 'FIRST_INGESTION_VERIFIED' or installation.get('firstIngestionVerified') is not True
-            or installation.get('operationalComplete') is not True
+            or type(installation.get('operationalComplete')) is not bool
             or installation.get('documentId') != source_hash[:48]
             or installation.get('sourceSystem') != payload['sourceSystem']
             or type(installation.get('sourceVersion')) is not int
@@ -135,7 +135,9 @@ def processing_proof(payload, org, installation):
         verified_at = timestamp(installation.get('verifiedAt'))
     except SyncError:
         raise SyncError('CLOUD_PROCESSING_PROOF_MISMATCH') from None
-    return {'state': state, 'firstIngestionVerified': True, 'operationalComplete': True,
+    # First data can be verified before the authenticated setup is completed.
+    return {'state': state, 'firstIngestionVerified': True,
+            'operationalComplete': installation['operationalComplete'],
             'documentId': source_hash[:48], 'sourceSystem': payload['sourceSystem'],
             'sourceVersion': payload['sourceVersion'], 'revision': revision,
             'versionId': expected_version_id, 'canonicalSnapshotHash': canonical_snapshot_hash(payload),

@@ -146,8 +146,10 @@ def run(raw, origin, org, state_dir, token=None, connect=False, send=False,
                     result.update(connectionVerified=True, receiptVerifiedThisRun=True, receipt=receipt,
                                   processingProof=proof, processingVerifiedThisRun=proof['firstIngestionVerified'],
                                   status='SAMPLE_RECEIPT_VERIFIED',
-                                  nextAction=('VERIFY_CONTINUITY_WITH_SUBSEQUENT_EVENTS' if proof['firstIngestionVerified']
-                                              else 'RETRY_SAME_SAMPLE_FOR_CANONICAL_PROCESSING'))
+                                  nextAction=('RETRY_SAME_SAMPLE_FOR_CANONICAL_PROCESSING'
+                                              if not proof['firstIngestionVerified'] else
+                                              'VERIFY_CONTINUITY_WITH_SUBSEQUENT_EVENTS'
+                                              if proof['operationalComplete'] else 'COMPLETE_AUTHENTICATED_SETUP'))
                 else:
                     sync.connect(origin, org, token, transport)
                     result.update(connectionVerified=True, status='CONNECTION_VERIFIED',

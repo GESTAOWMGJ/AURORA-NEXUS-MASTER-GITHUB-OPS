@@ -49,8 +49,12 @@ em argumento, arquivo de amostra, checkpoint, comentário ou log.
 - `SAMPLE_RECEIPT_VERIFIED` comprova o recibo atual. A conclusão da primeira
   operação exige proof do POST para o mesmo documento, sistema, sourceVersion,
   hash canônico e versão imutável/revision; o ping não fornece essa prova.
-  Resposta antiga ou projeção pendente mantém processamento pendente. Proof
-  divergente bloqueia e preserva o recibo anterior. `fullSynchronizationVerified`
+  Proof válido com `operationalComplete=false` confirma a primeira ingestão e
+  preserva recibo/campos de versão; exige `COMPLETE_AUTHENTICATED_SETUP` no fluxo
+  autenticado existente. Só `operationalComplete=true` libera a próxima ação de
+  verificar continuidade, sem declarar sincronização completa. Resposta antiga
+  ou projeção pendente mantém processamento pendente. Proof divergente bloqueia
+  e preserva o recibo anterior. `fullSynchronizationVerified`
   e `productionReleased` permanecem false mesmo com primeira ingestão confirmada.
 - Mudança de destino/amostra, arquivo adulterado, schema incompatível, link ou
   lock concorrente bloqueia e preserva o estado. Lock após encerramento abrupto
