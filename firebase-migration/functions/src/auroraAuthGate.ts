@@ -12,6 +12,7 @@ import {
   verifySession
 } from "./auroraAccess.js";
 import { auroraProtectedShell } from "./auroraFrontend.js";
+import { readRuntimeActiveRelease } from "./auroraActiveReleaseRuntime.js";
 import { auroraAuth } from "./firebase.js";
 import { servePrivateDownloads } from "./auroraDownloads.js";
 import { setupPage } from "./auroraSetup.js";
@@ -118,6 +119,14 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado.", e
       <div id="totp-setup" hidden><button id="start-totp" type="button">Configurar autenticador</button><div id="enrollment-input" hidden><p>Chave para o seu aplicativo autenticador:</p><code id="enrollment-key" style="overflow-wrap:anywhere"></code><label for="enrollment-code">Código do autenticador</label><input id="enrollment-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8"><button id="enroll-totp" type="button">Confirmar cadastro</button></div></div>
       <div id="activation-status" class="status" aria-live="polite"></div>
     </section>
+    <section id="onboarding-panel" hidden>
+      <h2>Bem-vindo à equipe</h2>
+      <p>Informe a senha de cadastro fornecida pelo Gestor Master para concluir seu acolhimento.</p>
+      <label for="registration-password">Senha de cadastro de uso único</label>
+      <input id="registration-password" type="password" autocomplete="one-time-code" maxlength="100">
+      <button id="onboarding-submit" type="button">Concluir cadastro</button>
+      <div id="onboarding-status" class="status" aria-live="polite"></div>
+    </section>
     <div class="fineprint">Sem demonstração pública. Acesso restrito a usuários previamente autorizados.</div>
   </main>
   <script type="module">${loginClient(entryOrg)}</script>
@@ -194,7 +203,8 @@ export const auroraNexusAuthGate = onRequest(
       res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança.", entry?.orgId));
       return;
     }
-    let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; integrationKey: string; userProfile: string; distributionApproval: string; logout: string }, entry?.path);
+    const runningRelease = await readRuntimeActiveRelease();
+    let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; integrationKey: string; userProfile: string; distributionApproval: string; logout: string }, entry?.path, runningRelease.runtimeBuildWeb);
     shell = shell.replace("</nav>", '<a href="/setup">Instalação e conexões</a></nav>');
     if (["platform_admin", "org_admin", "director"].includes(member.role) || member.permissions.includes("downloads.hml.read")) {
       shell = shell.replace("</nav>", '<a href="/downloads">Instaladores Mac e Windows</a></nav>');

@@ -16,10 +16,10 @@ async function fixture(managed=true, sessionLoginResponse:any={ok:true,json:asyn
   const elements=new Map<string,Element>();const el=(id:string)=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id)!;};
   const calls:any[]=[]; const redirects:string[]=[];let claims:any=managed?{auroraProfileVersion:1}:{};
   const user={emailVerified:false,getIdToken:async()=> 'synthetic-id-token'};
-  let signIn:any=async()=>({user});
+  let signIn:any=async()=>({user}); let redemption:any={ok:true,json:async()=>({})}; let currentSessionResponse=sessionLoginResponse;
   const factors:any[]=[]; const winHandlers=new Map();
   const sandbox={document:{getElementById:el,createElement:()=>new Element()},window:{addEventListener:(n:string,h:any)=>winHandlers.set(n,h)},navigator:{},location:{replace:(path:string)=>redirects.push(path)},
-    fetch:async(url:string,options:any)=>{calls.push({name:'fetch',url,options});return url==='/__sessionLogin'?sessionLoginResponse:{ok:true,json:async()=>({})};},
+    fetch:async(url:string,options:any)=>{calls.push({name:'fetch',url,options});return url==='/__sessionLogin'?currentSessionResponse:url==='/api/user-profiles'?(typeof redemption==='function'?await redemption():redemption):{ok:true,json:async()=>({})};},
     initializeApp:()=>({}),getAuth:()=>({}),setPersistence:async()=>{},inMemoryPersistence:{},
     signInWithEmailAndPassword:async()=>signIn(),getIdTokenResult:async()=>({claims}),signOut:async()=>{calls.push({name:'signOut'});},
     sendPasswordResetEmail:async()=>{calls.push({name:'reset'});},sendEmailVerification:async()=>{calls.push({name:'verify'});},reload:async()=>{},
@@ -31,7 +31,7 @@ async function fixture(managed=true, sessionLoginResponse:any={ok:true,json:asyn
   const withoutImports=script.replace(/^import[\s\S]*?from 'https:\/\/[^']+';\n/gm,'');
   assert.ok(executable); const context=createContext(sandbox);
   await new Script('(async()=>{'+withoutImports+'})()').runInContext(context);
-  return {el,calls,redirects,user,factors,winHandlers,claims:(value:any)=>{claims=value;},signIn:(fn:any)=>{signIn=fn;},async click(id:string){await el(id).handlers.get('click')();},async submit(){await el('login-form').handlers.get('submit')({preventDefault(){}});}};
+  return {el,calls,redirects,user,factors,winHandlers,claims:(value:any)=>{claims=value;},sessionResponse:(value:any)=>{currentSessionResponse=value;},redemption:(value:any)=>{redemption=value;},signIn:(fn:any)=>{signIn=fn;},async click(id:string){await el(id).handlers.get('click')();},async submit(){await el('login-form').handlers.get('submit')({preventDefault(){}});}};
 }
 
 test('managed first access does not issue app session or send verification before user action',async()=>{
@@ -77,4 +77,34 @@ test('admin profile shell script parses; unprivileged or first-factor sessions g
   const html=auroraProtectedShell(member,csrf);
   assert.match(html,/id="user-profile-form"/);for(const match of html.matchAll(/<script>([\s\S]*?)<\/script>/g))assert.doesNotThrow(()=>new Script(match[1]));
   for(const patch of [{role:'viewer'},{mfaVerified:false},{allFacilities:false}])assert.doesNotMatch(auroraProtectedShell({...member,...patch},csrf),/id="user-profile-form"/);
+});
+
+test('emitted onboarding client redeems only after verified email/MFA, clears credential and opens private session',async()=>{
+  const f=await fixture(true,{ok:false,json:async()=>({code:'EMAIL_NOT_ALLOWED'})});
+  f.user.emailVerified=true; f.claims({auroraProfileVersion:1,auroraOnboardingRequired:true,firebase:{sign_in_second_factor:'totp'}});
+  await f.submit(); assert.equal(f.el('onboarding-panel').hidden,false); assert.equal(f.redirects.length,0);
+  f.el('registration-password').value='ANX1-'+'A'.repeat(43); f.sessionResponse({ok:true,json:async()=>({})});
+  await f.click('onboarding-submit');
+  const call=f.calls.find(c=>c.url==='/api/user-profiles');
+  assert.deepEqual(JSON.parse(call.options.body),{action:'REDEEM_ONBOARDING',idToken:'synthetic-id-token',registrationPassword:'ANX1-'+'A'.repeat(43)});
+  assert.equal(f.el('registration-password').value,''); assert.deepEqual(f.redirects,['/portal']);
+});
+
+test('consumed onboarding identity reenters without redeeming a credential; page exit clears invitation input',async()=>{
+  const f=await fixture(); f.user.emailVerified=true;
+  f.claims({auroraProfileVersion:1,auroraOnboardingRequired:true,firebase:{sign_in_second_factor:'totp'}});
+  await f.submit(); assert.deepEqual(f.redirects,['/portal']); assert.equal(f.calls.some(c=>c.url==='/api/user-profiles'),false);
+  f.el('registration-password').value='synthetic-one-use'; f.winHandlers.get('pagehide')(); assert.equal(f.el('registration-password').value,'');
+});
+
+test('lost redemption response and failed post-consumption session resume without replaying one-use password',async()=>{
+  for (const lostResponse of [false,true]) {
+    const f=await fixture(true,{ok:false,json:async()=>({code:'EMAIL_NOT_ALLOWED'})});
+    f.user.emailVerified=true; f.claims({auroraProfileVersion:1,auroraOnboardingRequired:true,firebase:{sign_in_second_factor:'totp'}});
+    await f.submit(); f.el('registration-password').value='ANX1-'+'B'.repeat(43);
+    f.redemption(async()=>{if(lostResponse)throw new Error('synthetic-response-lost-after-commit');return {ok:true};});
+    await f.click('onboarding-submit'); assert.equal(f.redirects.length,0); assert.equal(f.el('registration-password').value,'');
+    f.sessionResponse({ok:true,json:async()=>({})}); await f.click('onboarding-submit');
+    assert.deepEqual(f.redirects,['/portal']); assert.equal(f.calls.filter(c=>c.url==='/api/user-profiles').length,1);
+  }
 });

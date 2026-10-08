@@ -25,6 +25,23 @@ on:
         required: false
         default: ""
         type: string
+      publish_active_release:
+        description: "Promote the reviewed release after canonical smoke and configured signing keys"
+        required: false
+        default: false
+        type: boolean
+      active_release_ci_run_id:
+        description: "Successful Validate Firestore Migration run at this exact main SHA"
+        required: false
+        type: string
+      active_release_review_pr:
+        description: "Merged PR with human approval at its final reviewed head"
+        required: false
+        type: string
+      active_release_previous_sha256:
+        description: "Current certificate SHA256, or NONE for the first reviewed promotion"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -156,6 +173,27 @@ jobs:
           npm test
           npm run build
           npm audit --omit=dev --audit-level=high
+      - name: Require canonical publisher configuration before cloud changes
+        env:
+          PUBLISH_ACTIVE_RELEASE: ${{ inputs.publish_active_release }}
+          AURORA_ACTIVE_RELEASE_PUBLIC_KEY: ${{ vars.AURORA_ACTIVE_RELEASE_PUBLIC_KEY }}
+          AURORA_ACTIVE_RELEASE_PRIVATE_KEY: ${{ secrets.AURORA_ACTIVE_RELEASE_PRIVATE_KEY }}
+          RELEASE_CI_RUN_ID: ${{ inputs.active_release_ci_run_id }}
+          RELEASE_REVIEW_PR: ${{ inputs.active_release_review_pr }}
+          RELEASE_PREVIOUS_SHA256: ${{ inputs.active_release_previous_sha256 }}
+        run: |
+          node - <<'NODE'
+          const {createPrivateKey,createPublicKey}=require('node:crypto');
+          const e=process.env,requested=e.PUBLISH_ACTIVE_RELEASE==='true',key=e.AURORA_ACTIVE_RELEASE_PUBLIC_KEY;
+          if(key && !requested)throw Error('CANONICAL_RELEASE_PROMOTION_REQUIRED');
+          if(requested){
+            const publicKey=createPublicKey(key),privateKey=createPrivateKey(e.AURORA_ACTIVE_RELEASE_PRIVATE_KEY);
+            if(publicKey.asymmetricKeyType!=='ed25519'||privateKey.asymmetricKeyType!=='ed25519'
+              ||!publicKey.export({type:'spki',format:'der'}).equals(createPublicKey(privateKey).export({type:'spki',format:'der'})))throw Error('RELEASE_SIGNING_CONFIGURATION_REQUIRED');
+            if(![e.RELEASE_CI_RUN_ID,e.RELEASE_REVIEW_PR].every(id=>/^[1-9][0-9]{0,19}$/.test(id||''))
+              ||!(e.RELEASE_PREVIOUS_SHA256==='NONE'||/^[a-f0-9]{64}$/.test(e.RELEASE_PREVIOUS_SHA256||'')))throw Error('RELEASE_EVIDENCE_IDS_REQUIRED');
+          }
+          NODE
       - name: Require protected deployment configuration
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -164,6 +202,7 @@ jobs:
           DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
           SMOKE_UID: ${{ vars.FIREBASE_HML_SMOKE_UID }}
           SMOKE_EMAIL: ${{ vars.FIREBASE_HML_SMOKE_EMAIL }}
+          AURORA_ACTIVE_RELEASE_PUBLIC_KEY: ${{ vars.AURORA_ACTIVE_RELEASE_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           test -n "$APPROVED_PROJECT"
@@ -386,7 +425,7 @@ jobs:
             --data '{"pageSize":100}' \
             "https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:listCollectionIds")"
           jq -e '
-            ([.collectionIds[]? | select(. != "organizations")] | length) == 0
+            ([.collectionIds[]? | select(. != "organizations" and . != "platformRuntime")] | length) == 0
           ' <<<"$collections_json" >/dev/null
           if ! jq -e '(.nextPageToken // "") == ""' <<<"$collections_json" >/dev/null; then
             echo "::error::HML_ROOT_COLLECTIONS_INCOMPLETE"
@@ -398,6 +437,7 @@ jobs:
           PROJECT_ID: ${{ inputs.project_id }}
           APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
           VALIDATED_SHA: ${{ needs.validate.outputs.candidate_sha }}
+          AURORA_ACTIVE_RELEASE_PUBLIC_KEY: ${{ vars.AURORA_ACTIVE_RELEASE_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
@@ -406,6 +446,16 @@ jobs:
           test "$(git -C .. rev-parse HEAD)" = "$VALIDATED_SHA"
           git -C .. fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
           test "$(git -C .. rev-parse refs/remotes/origin/main)" = "$VALIDATED_SHA"
+          node scripts/verify-active-release-storage.mjs
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const {createPublicKey} = require('node:crypto');
+          const key = process.env.AURORA_ACTIVE_RELEASE_PUBLIC_KEY;
+          if (key) {
+            if (createPublicKey(key).asymmetricKeyType !== 'ed25519') throw Error('INVALID_RELEASE_PUBLIC_KEY');
+            fs.appendFileSync('functions/.env.' + process.env.PROJECT_ID, 'AURORA_ACTIVE_RELEASE_PUBLIC_KEY=' + JSON.stringify(key) + '\n');
+          }
+          NODE
           npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusUserProfiles,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
       - name: Smoke test private shell and deployed functions
         env:
@@ -734,3 +784,99 @@ jobs:
             (.sectors | index("AUDIT")) != null and
             (.sectors | index("FINANCE")) != null
           ' "$organic_response" >/dev/null
+          if [ '${{ inputs.publish_active_release }}' = 'true' ]; then
+            curl --fail --silent --show-error --max-time 30 -X POST \
+              -H 'Content-Type: application/json' -H 'Origin: https://auroranexus.com.br' \
+              -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$smoke_dir/canonical-cookies.txt" \
+              --data-binary @"$session_payload" --output /dev/null \
+              'https://auroranexus.com.br/__sessionLogin'
+            curl --fail --silent --show-error --max-time 30 \
+              --cookie "$smoke_dir/canonical-cookies.txt" -H 'Accept: application/json' \
+              --output "$smoke_dir/canonical-bootstrap.json" \
+              'https://auroranexus.com.br/api/bootstrap'
+            jq -e --arg sha "$GITHUB_SHA" '
+              .ok == true and .organization.id == "wmgj" and
+              .canonicalVersion.runtimeBuild.sourceSha == $sha and
+              .canonicalVersion.runtimeBuild.fileIntegrityVerified == true and
+              .canonicalVersion.runtimeBuildWeb.sourceSha == $sha and
+              .canonicalVersion.runtimeBuildWeb.fileIntegrityVerified == true
+            ' "$smoke_dir/canonical-bootstrap.json" >/dev/null
+            jq '{sourceSha:.canonicalVersion.runtimeBuild.sourceSha,
+              serverManifestSha256:.canonicalVersion.runtimeBuild.manifestSha256,
+              webManifestSha256:.canonicalVersion.runtimeBuildWeb.manifestSha256}' \
+              "$smoke_dir/canonical-bootstrap.json" > "$RUNNER_TEMP/aurora-canonical-runtime-smoke.json"
+          fi
+      - name: Verify canonical source-bound runtime
+        if: ${{ inputs.publish_active_release }}
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          node - <<'NODE'
+          const fs=require('node:fs'),crypto=require('node:crypto');
+          const proof=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+'/aurora-canonical-runtime-smoke.json','utf8'));
+          if(proof.sourceSha!==process.env.EXPECTED_SHA)throw Error('CANONICAL_SOURCE_CONFLICT');
+          for(const component of ['server','web']){
+            const bytes=fs.readFileSync('firebase-migration/functions/runtime-release/'+component+'-manifest.json');
+            if(crypto.createHash('sha256').update(bytes).digest('hex')!==proof[component+'ManifestSha256'])throw Error('CANONICAL_MANIFEST_CONFLICT');
+          }
+          console.log('CANONICAL_SOURCE_BOUND_RUNTIME_VERIFIED');
+          NODE
+      - name: Preserve exact release manifests
+        if: ${{ inputs.publish_active_release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-active-release-manifests-${{ github.sha }}
+          path: firebase-migration/functions/runtime-release/*-manifest.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-active-release:
+    name: Publish verified canonical active release
+    if: ${{ inputs.publish_active_release && inputs.deploy_confirmation == 'DEPLOY_HOMOLOGATION' }}
+    needs: [validate, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: firebase-homologation
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      pull-requests: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: Build reviewed publisher
+        working-directory: firebase-migration/functions
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+      - uses: actions/download-artifact@v4
+        with:
+          name: aurora-active-release-manifests-${{ github.sha }}
+          path: firebase-migration/functions/runtime-release
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      - name: Publish exact reviewed release with compare-and-swap
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GCLOUD_PROJECT: ${{ inputs.project_id }}
+          AURORA_ACTIVE_RELEASE_SHA: ${{ github.sha }}
+          AURORA_ACTIVE_RELEASE_PUBLIC_KEY: ${{ vars.AURORA_ACTIVE_RELEASE_PUBLIC_KEY }}
+          AURORA_ACTIVE_RELEASE_PRIVATE_KEY: ${{ secrets.AURORA_ACTIVE_RELEASE_PRIVATE_KEY }}
+          AURORA_ACTIVE_RELEASE_CI_RUN_ID: ${{ inputs.active_release_ci_run_id }}
+          AURORA_ACTIVE_RELEASE_DEPLOY_RUN_ID: ${{ github.run_id }}
+          AURORA_ACTIVE_RELEASE_REVIEW_PR: ${{ inputs.active_release_review_pr }}
+          AURORA_ACTIVE_RELEASE_PREVIOUS_SHA256: ${{ inputs.active_release_previous_sha256 }}
+          AURORA_ACTIVE_RELEASE_SERVER_MANIFEST: firebase-migration/functions/runtime-release/server-manifest.json
+          AURORA_ACTIVE_RELEASE_WEB_MANIFEST: firebase-migration/functions/runtime-release/web-manifest.json
+          AURORA_ACTIVE_RELEASE_SATELLITE_MANIFEST: firebase-migration/functions/runtime-release/satellite-manifest.json
+        run: |
+          export AURORA_ACTIVE_RELEASE_PRODUCT_VERSION="$(node -p "require('./firebase-migration/functions/lib/auroraReleaseStatus.js').AURORA_PRODUCT_VERSION")"
+          node firebase-migration/scripts/publish-active-release.mjs

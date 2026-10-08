@@ -151,13 +151,13 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(result.stdout)['version'], deployment.VERSION)
 
-    def test_windows_beta_upgrade_requires_compatible_prior_manifest(self):
+    def test_windows_beta_does_not_trust_generic_manifest_fields_of_other_versions(self):
         installer = (ROOT.parent / 'desktop' / 'install_windows_beta.py').read_text(encoding='utf-8')
-        self.assertIn('prior_manifests = sorted((root / "client").glob("*/installation.json"))', installer)
-        self.assertIn('prior.get("portal") == BASE', installer)
-        self.assertIn('prior.get("environment") == "HML"', installer)
-        self.assertIn('prior.get("frontendPolicy") == "PRESERVE_DEPLOYED_MAIN"', installer)
-        self.assertIn('if not compatible:', installer)
+        # Behavioral coverage lives in test_windows_beta_continuity.py on Linux/Windows.
+        # This packaging contract forbids restoring the old permissive version scan.
+        self.assertNotIn('prior_manifests', installer)
+        self.assertIn('known_identity(previous, expected)', installer)
+        self.assertIn('elif any(p.exists() for p in shortcuts):', installer)
         self.assertIn('EXISTING_INSTALLATION_REQUIRES_REVIEW', installer)
 
     def test_errors_map_to_concrete_actions(self):

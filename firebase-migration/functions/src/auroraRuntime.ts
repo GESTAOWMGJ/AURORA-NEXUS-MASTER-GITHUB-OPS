@@ -21,6 +21,7 @@ import { buildReleaseStatus } from "./auroraReleaseStatus.js";
 import { autoObserveResolvedDocumentAction } from "./auroraOrganicAutoObserve.js";
 import { loadFinancialClosingStatus } from "./auroraFinancialDecisionRuntime.js";
 import { auroraDb } from "./firebase.js";
+import { readRuntimeActiveRelease } from "./auroraActiveReleaseRuntime.js";
 import { readInstallationReadiness } from "./auroraInstallationReadiness.js";
 
 export async function loadInstallationReadiness(orgId: string) {
@@ -207,12 +208,13 @@ export const auroraNexusBootstrap = onRequest(
     if (!can(member, "dashboard.read", ["platform_admin", "org_admin", "director", "auditor", "operator", "finance", "viewer"])) { res.status(403).json({ ok: false, code: "PERMISSION_DENIED" }); return; }
     const mayReadActions = can(member, "actions.read", ["platform_admin", "org_admin", "director", "auditor", "operator", "finance"]);
     const mayReadFinancialStatus = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
-    const [org, snapshot, actions] = await Promise.all([
+    const [org, snapshot, actions, canonicalVersion] = await Promise.all([
       auroraDb.doc(`organizations/${member.orgId}`).get(),
       auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get(),
       mayReadActions
         ? auroraDb.collection(`organizations/${member.orgId}/actionItems`).limit(100).get()
-        : Promise.resolve(null)
+        : Promise.resolve(null),
+      readRuntimeActiveRelease()
     ]);
     const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
     const competence = safeString(org.data()?.projectionCompetence, 7) ?? new Date().toISOString().slice(0, 7);
@@ -276,6 +278,7 @@ export const auroraNexusBootstrap = onRequest(
       }),
       financialStatus,
       release: buildReleaseStatus(org.data() ?? {}),
+      canonicalVersion,
       actions: safeActions,
       actionSummary,
       recentActivity
@@ -374,13 +377,15 @@ export const auroraNexusMasterEngine = onRequest(
     const financialStatus = competence
       ? await loadFinancialClosingStatus(member.orgId, competence)
       : null;
-    const release = buildReleaseStatus(org.data() ?? {});
+    const canonicalVersion = await readRuntimeActiveRelease();
+    const release = { ...buildReleaseStatus(org.data() ?? {}), canonicalVersion };
     res.status(200).json({
       ok: true,
       environment: "HOMOLOGATION",
       mode: "AURORA_MASTER_NATIVE",
       sourceAccessDuringInference: false,
       externalAiUsed: false,
+      canonicalVersion,
       master: buildMasterOperationalState(projection, { financialStatus, release })
     });
   }
