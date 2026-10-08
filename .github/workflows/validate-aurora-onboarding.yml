@@ -44,6 +44,8 @@ jobs:
         run: python -m unittest discover -s aurora-coletor/tests -p test_cloud_sync.py -v
       - name: Resumable installer, interrupted send and package tests
         run: python -m unittest discover -s aurora-coletor/tests -p test_deployment.py -v
+      - name: Collector SQLite lifecycle and persisted receipt regression
+        run: python -m unittest discover -s aurora-coletor/tests -p test_collector_lifecycle.py -v
 
   validate:
     name: Test local discovery without deployment
