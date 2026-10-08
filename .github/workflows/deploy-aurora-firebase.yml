@@ -506,11 +506,12 @@ jobs:
             echo "Protected shell was exposed without login" >&2
             exit 90
           fi
-          technical_probe="$(curl --silent --show-error --max-time 30 \
-            --output /dev/null \
-            --write-out '%{http_code} %{redirect_url}' \
-            "${technical_origin}/")"
-          test "$technical_probe" = "308 ${canonical_origin}/portal"
+          technical_shell="$(curl --fail --silent --show-error --max-time 30 "${technical_origin}/")"
+          grep -Fq 'location.replace("https://auroranexus.com.br/portal' <<<"$technical_shell"
+          if grep -Fq "Centro de gestão WMGJ" <<<"$technical_shell"; then
+            echo "Technical Firebase host exposed the private shell" >&2
+            exit 90
+          fi
           negative_response="$(mktemp "${RUNNER_TEMP}/aurora-negative-smoke.XXXXXX.json")"
           trap 'rm -f "$negative_response"' EXIT
           bootstrap_status="$(curl --silent --show-error --max-time 30 \

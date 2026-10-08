@@ -5,7 +5,7 @@ import type { AuroraMember } from "./auroraAccess.js";
 import { CANONICAL_PORTAL_PATH, companyEntry, userFacingEntryPath } from "./auroraTenantEntry.js";
 
 function technicalHostBrowserRedirect(): string {
-  return `<script>(()=>{const h=location.hostname.toLowerCase();if(h==="wmgj-hml-jfn-20260927.web.app"||h==="wmgj-hml-jfn-20260927.firebaseapp.com"){location.replace("https://auroranexus.com.br/portal"+location.search+location.hash)}})();</script>`;
+  return `<script>(()=>{const h=(location.hostname||"").toLowerCase();if(h==="wmgj-hml-jfn-20260927.web.app"||h==="wmgj-hml-jfn-20260927.firebaseapp.com"){location.replace("https://auroranexus.com.br/portal"+location.search+location.hash)}})();</script>`;
 }
 
 function escapeHtml(value: unknown): string {
