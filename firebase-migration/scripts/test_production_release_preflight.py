@@ -6,7 +6,8 @@ from pathlib import Path
 
 from production_project_contract import ContractError
 from production_release_preflight import (PROJECT, NUMBER, REGION, validate_database, select_backup,
-    validate_restore, validate_auth, validate_ci, validate_restore_operation)
+    validate_restore, validate_auth, validate_ci, validate_restore_operation, validate_runtime_identity,
+    validate_published_runtime, RUNTIME_ACCOUNT, RUNTIME_AUTH_ROLE, AUTH_PERMISSIONS)
 
 NOW = dt.datetime(2026, 10, 8, 6, tzinfo=dt.timezone.utc)
 BACKUP = {"name": f"projects/{PROJECT}/locations/{REGION}/backups/proof", "database": f"projects/{PROJECT}/databases/(default)",
@@ -14,6 +15,13 @@ BACKUP = {"name": f"projects/{PROJECT}/locations/{REGION}/backups/proof", "datab
 ORG = {"fields": {"active": {"booleanValue": True}, "environment": {"stringValue": "PRODUCTION"},
        "clinicalSensitiveEnabled": {"booleanValue": False}, "productionMutation": {"booleanValue": False},
        "sourceMutation": {"booleanValue": False}, "projectionMode": {"stringValue": "SHADOW"}}}
+MEMBER = "serviceAccount:" + RUNTIME_ACCOUNT
+RUNTIME_POLICY = {"bindings": [
+    {"role": RUNTIME_AUTH_ROLE, "members": [MEMBER]},
+    {"role": "roles/datastore.user", "members": [MEMBER], "condition": {
+        "expression": f'resource.name=="projects/{PROJECT}/databases/(default)"'}}]}
+AUTH_ROLE = {"name": RUNTIME_AUTH_ROLE, "includedPermissions": sorted(AUTH_PERMISSIONS)}
+SECRET_POLICY = {"bindings": [{"role": "roles/secretmanager.secretAccessor", "members": [MEMBER]}]}
 
 
 class ProductionPublicationGateTests(unittest.TestCase):
@@ -149,6 +157,53 @@ class ProductionPublicationGateTests(unittest.TestCase):
         for route in config["hosting"]["rewrites"]:
             self.assertIn("functions:" + route["function"]["functionId"], scope, route["source"])
         self.assertIn("functions:auroraNexusUserProfiles", scope)
+
+    def test_approved_runtime_with_exact_auth_and_database_scopes_accepted(self):
+        validate_runtime_identity({"email": RUNTIME_ACCOUNT}, RUNTIME_POLICY, AUTH_ROLE, [SECRET_POLICY] * 3)
+
+    def test_default_hml_or_disabled_runtime_account_rejected(self):
+        for account in ({"email": "616997609173-compute@developer.gserviceaccount.com"},
+                        {"email": "299889357292-compute@developer.gserviceaccount.com"},
+                        {"email": RUNTIME_ACCOUNT, "disabled": True}):
+            with self.subTest(account=account), self.assertRaisesRegex(ContractError, "APPROVED_RUNTIME_ACCOUNT_REQUIRED"):
+                validate_runtime_identity(account, RUNTIME_POLICY, AUTH_ROLE, [SECRET_POLICY] * 3)
+
+    def test_runtime_editor_owner_or_firebase_admin_rejected(self):
+        for role in ("roles/editor", "roles/owner", "roles/firebase.admin"):
+            with self.subTest(role=role), self.assertRaisesRegex(ContractError, "RUNTIME_BROAD_ROLE_REJECTED"):
+                policy = copy.deepcopy(RUNTIME_POLICY)
+                policy["bindings"].append({"role": role, "members": [MEMBER]})
+                validate_runtime_identity({"email": RUNTIME_ACCOUNT}, policy, AUTH_ROLE, [SECRET_POLICY] * 3)
+
+    def test_runtime_auth_cannot_acquire_config_delete_or_missing_permissions(self):
+        for permissions in (AUTH_PERMISSIONS | {"firebaseauth.configs.update"},
+                            AUTH_PERMISSIONS | {"firebaseauth.users.delete"},
+                            AUTH_PERMISSIONS - {"firebaseauth.users.createSession"}):
+            with self.subTest(permissions=permissions), self.assertRaisesRegex(ContractError, "RUNTIME_AUTH_PERMISSIONS_MISMATCH"):
+                validate_runtime_identity({"email": RUNTIME_ACCOUNT}, RUNTIME_POLICY,
+                    dict(AUTH_ROLE, includedPermissions=sorted(permissions)), [SECRET_POLICY] * 3)
+
+    def test_runtime_database_wide_or_wrong_project_scope_rejected(self):
+        for condition in ({}, {"expression": "true"},
+                          {"expression": 'resource.name=="projects/wmgj-ops/databases/(default)"'}):
+            with self.subTest(condition=condition), self.assertRaisesRegex(ContractError, "RUNTIME_DEFAULT_DATABASE_SCOPE_REQUIRED"):
+                policy = copy.deepcopy(RUNTIME_POLICY); policy["bindings"][1]["condition"] = condition
+                validate_runtime_identity({"email": RUNTIME_ACCOUNT}, policy, AUTH_ROLE, [SECRET_POLICY] * 3)
+
+    def test_runtime_needs_all_three_scoped_secrets_without_metadata_only_substitute(self):
+        for secrets in ([SECRET_POLICY] * 2, [SECRET_POLICY, SECRET_POLICY, {"bindings": [
+                         {"role": "roles/secretmanager.viewer", "members": [MEMBER]}]}]):
+            with self.subTest(secrets=secrets), self.assertRaisesRegex(ContractError, "RUNTIME_SECRET_SCOPES_REQUIRED"):
+                validate_runtime_identity({"email": RUNTIME_ACCOUNT}, RUNTIME_POLICY, AUTH_ROLE, secrets)
+
+    def test_active_handler_with_default_runtime_is_not_hosting_acceptance(self):
+        function = {"name": f"projects/{PROJECT}/locations/{REGION}/functions/auroraNexusUserProfiles",
+                    "state": "ACTIVE", "serviceConfig": {"serviceAccountEmail": RUNTIME_ACCOUNT}}
+        validate_published_runtime([function], {"auroraNexusUserProfiles"})
+        for replacement in ({"serviceConfig": {"serviceAccountEmail": "616997609173-compute@developer.gserviceaccount.com"}},
+                            {"state": "DEPLOYING"}, {"name": "projects/wmgj-ops/locations/southamerica-east1/functions/auroraNexusUserProfiles"}):
+            with self.subTest(replacement=replacement), self.assertRaisesRegex(ContractError, "PUBLISHED_APPROVED_RUNTIME_REQUIRED"):
+                validate_published_runtime([dict(function, **replacement)], {"auroraNexusUserProfiles"})
 
 
 if __name__ == "__main__":

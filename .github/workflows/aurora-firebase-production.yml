@@ -237,6 +237,7 @@ jobs:
       VALIDATION_RUN_ID: ${{ inputs.validation_run_id }}
       RESTORE_DATABASE: ${{ inputs.restore_database }}
       GCLOUD_PROJECT: wmgj-prod-jfn-20261005
+      AURORA_RUNTIME_SERVICE_ACCOUNT: aurora-prod-runtime@wmgj-prod-jfn-20261005.iam.gserviceaccount.com
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -268,9 +269,11 @@ jobs:
           cache-dependency-path: firebase-migration/functions/package-lock.json
       - name: Test production publication contracts before cloud authentication
         run: |
+          printf '%s\n' "AURORA_RUNTIME_SERVICE_ACCOUNT=$AURORA_RUNTIME_SERVICE_ACCOUNT" > firebase-migration/functions/.env.wmgj-prod-jfn-20261005
           python3 -m unittest discover -s firebase-migration/scripts -p 'test_production_release_preflight.py'
           npm --prefix firebase-migration/functions ci --ignore-scripts
           npm --prefix firebase-migration/functions run build
+          node firebase-migration/scripts/production-runtime-identity.mjs
           npm --prefix firebase-migration/functions audit --omit=dev --audit-level=high
       - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
         with:

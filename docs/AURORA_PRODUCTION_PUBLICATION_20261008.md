@@ -18,6 +18,9 @@ não disponível, sem deduzir ausência de usuários. Bootstrap atual não execu
 `initializeAuth`; a inicialização específica é a correção candidata verificável.
 Config público do domínio continua apontando `wmgj-ops`.
 As quatro variáveis GitHub e WIF ACTIVE correspondem ao projeto aprovado.
+Build default real é Compute SA produtivo com Editor; não copiar seus grants
+para o runtime. Publicação exige `aurora-prod-runtime@wmgj-prod-jfn-20261005.iam.gserviceaccount.com`
+explícito no SDK/arquivo env produtivo. HML mantém sua própria identidade.
 Run [37648242773](https://github.com/GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS/actions/runs/37648242773)
 preparou COLD_PRODUCTION; não publicou aplicativo. Reviewer existente preservado.
 
@@ -35,6 +38,13 @@ produtivo de até 24h, restore real `prod-restore-*` proveniente desse backup,
 paridade dos guardrails, Auth email/MFA com TOTP habilitado e domínio canônico
 exclusivo. Não usa HML como prova.
 PITR ativo não é backup nem teste de restore. Fontes/dados clínicos não são lidos.
+Runtime exige conta aprovada não desativada, Auth custom role com somente
+users.get/createSession/create/update, datastore.user limitado ao DB default e
+accessor nos três segredos específicos. Owner/Editor/firebase.admin no runtime
+bloqueiam publicação. Metadata IAM fica em memória; só conta técnica/resultado
+entram no recibo. Deployer requer acesso read-only de IAM para esse gate; não
+usa a identidade Compute/Editor como substituto. Antes do Hosting, todas as
+funções publicadas devem reportar esse runtime aprovado, ACTIVE e região correta.
 Antes do Hosting, token nominal recente é verificado com revogação e MFA real;
 custom/anonymous não satisfazem o aceite. Smoke verifica cookie, tenant, negativas,
 TLS sem redirecionamento e manifests server/web no mesmo SHA. Valores de token,

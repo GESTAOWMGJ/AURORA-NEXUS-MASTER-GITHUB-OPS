@@ -19,6 +19,10 @@ PROJECT = "wmgj-prod-jfn-20261005"
 NUMBER = "616997609173"
 ORIGIN = "https://auroranexus.com.br"
 REGION = "southamerica-east1"
+RUNTIME_ACCOUNT = f"aurora-prod-runtime@{PROJECT}.iam.gserviceaccount.com"
+RUNTIME_AUTH_ROLE = f"projects/{PROJECT}/roles/auroraRuntimeAuth"
+AUTH_PERMISSIONS = {"firebaseauth.users.get", "firebaseauth.users.createSession",
+                    "firebaseauth.users.create", "firebaseauth.users.update"}
 
 
 def require(condition, code):
@@ -80,6 +84,38 @@ def validate_auth(config):
     require(any(isinstance(provider, dict) and provider.get("state") in ("ENABLED", "MANDATORY")
                 and isinstance(provider.get("totpProviderConfig"), dict)
                 for provider in mfa.get("providerConfigs", [])), "AUTH_TOTP_PROVIDER_REQUIRED")
+
+
+def validate_runtime_identity(account, policy, auth_role, secret_policies):
+    require(account.get("email") == RUNTIME_ACCOUNT and account.get("disabled") is not True,
+            "APPROVED_RUNTIME_ACCOUNT_REQUIRED")
+    member = "serviceAccount:" + RUNTIME_ACCOUNT
+    bindings = [binding for binding in policy.get("bindings", []) if member in binding.get("members", [])]
+    roles = {binding.get("role") for binding in bindings}
+    require(roles <= {RUNTIME_AUTH_ROLE, "roles/datastore.user", "roles/logging.logWriter"}, "RUNTIME_BROAD_ROLE_REJECTED")
+    require(any(binding.get("role") == RUNTIME_AUTH_ROLE and not binding.get("condition") for binding in bindings),
+            "RUNTIME_AUTH_ROLE_REQUIRED")
+    require(auth_role.get("name") == RUNTIME_AUTH_ROLE and auth_role.get("deleted") is not True
+            and set(auth_role.get("includedPermissions", [])) == AUTH_PERMISSIONS,
+            "RUNTIME_AUTH_PERMISSIONS_MISMATCH")
+    database = f"projects/{PROJECT}/databases/(default)"
+    data = [binding for binding in bindings if binding.get("role") == "roles/datastore.user"]
+    require(bool(data) and all(binding.get("condition", {}).get("expression", "").replace(" ", "").replace("'", '"')
+                             == f'resource.name=="{database}"' for binding in data), "RUNTIME_DEFAULT_DATABASE_SCOPE_REQUIRED")
+    require(len(secret_policies) == 3 and all(any(binding.get("role") == "roles/secretmanager.secretAccessor"
+            and member in binding.get("members", []) and not binding.get("condition")
+            for binding in secret.get("bindings", [])) for secret in secret_policies), "RUNTIME_SECRET_SCOPES_REQUIRED")
+
+
+def validate_published_runtime(functions, expected):
+    require(isinstance(functions, list), "FUNCTION_INVENTORY_INVALID")
+    found = {function.get("name", "").rsplit("/", 1)[-1]: function for function in functions}
+    for handler in expected:
+        function = found.get(handler, {})
+        require(function.get("name", "").startswith(f"projects/{PROJECT}/locations/{REGION}/functions/")
+                and function.get("state") == "ACTIVE"
+                and function.get("serviceConfig", {}).get("serviceAccountEmail") == RUNTIME_ACCOUNT,
+                "PUBLISHED_APPROVED_RUNTIME_REQUIRED")
 
 
 def validate_restore_operation(operations, database, backup):
@@ -166,6 +202,12 @@ def main():
             print("AURORA_PRODUCTION_PREDEPLOY_CONTRACT_VALID")
             return 0
         verify_live(PROJECT, NUMBER)
+        validate_runtime_identity(
+            metadata("iam", "service-accounts", "describe", RUNTIME_ACCOUNT, f"--project={PROJECT}"),
+            metadata("projects", "get-iam-policy", PROJECT),
+            metadata("iam", "roles", "describe", "auroraRuntimeAuth", f"--project={PROJECT}"),
+            [metadata("secrets", "get-iam-policy", secret, f"--project={PROJECT}") for secret in
+             ("AURORA_NEXUS_ALLOWED_EMAILS", "AURORA_NEXUS_CSRF_HMAC_KEY", "WMGJ_INGEST_HMAC_KEYRING")])
         validate_ci(read_json(f"https://api.github.com/repos/GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS/actions/runs/{os.environ.get('VALIDATION_RUN_ID', '')}",
                              {"Authorization": f"Bearer {os.environ.get('GH_TOKEN', '')}", "Accept": "application/vnd.github+json"}), head)
         validate_database(metadata("firestore", "databases", "describe", "--database=(default)", f"--project={PROJECT}"))
@@ -188,9 +230,13 @@ def main():
             require(version.get("state") == "ENABLED", "PRODUCTION_SECRET_VERSION_REQUIRED")
         validate_auth(read_json(f"https://identitytoolkit.googleapis.com/admin/v2/projects/{PROJECT}/config", headers))
         if os.environ["DEPLOY_STAGE"] == "PUBLISH_HOSTING":
+            config = json.loads((ROOT / "firebase-migration/firebase.production.json").read_text(encoding="utf-8"))
+            validate_published_runtime(metadata("functions", "list", "--v2", f"--project={PROJECT}"),
+                                       {route["function"]["functionId"] for route in config["hosting"]["rewrites"]})
             require(read_json(f"{ORIGIN}/__/firebase/init.json").get("projectId") == PROJECT, "CANONICAL_DOMAIN_PROJECT_MISMATCH")
         proof = {"schemaVersion": 1, "gate": "PRODUCTION_RELEASE_PREFLIGHT", "verifiedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
                  "projectId": PROJECT, "projectNumber": NUMBER, "sourceSha": head, "stage": os.environ["DEPLOY_STAGE"],
+                 "runtimeServiceAccount": RUNTIME_ACCOUNT,
                  "backup": backup["name"], "backupSnapshot": backup["snapshotTime"], "restoreDatabase": restored_name, "restoreOperation": operation,
                  "guardrailHash": hashlib.sha256(json.dumps(guardrail_fields(source), sort_keys=True).encode()).hexdigest(),
                  "canonicalOrigin": ORIGIN, "clinicalSensitiveEnabled": False, "sourceMutation": False,
