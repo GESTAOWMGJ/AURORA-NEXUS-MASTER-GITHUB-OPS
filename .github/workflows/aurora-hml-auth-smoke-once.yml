@@ -18,6 +18,20 @@ jobs:
     timeout-minutes: 15
     environment: firebase-homologation
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned 2026-10-01
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4 pinned 2026-10-01
+        with:
+          node-version: "22"
+      - name: Require canonical HTTPS and HML routing before cloud authentication
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          node firebase-migration/scripts/check-canonical-preflight.mjs "$PROJECT_ID"
       - name: Authenticate to HML with WIF
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2 pinned 2026-10-01
         with:
@@ -43,8 +57,8 @@ jobs:
           test -n "$SMOKE_UID"
           test -n "$SMOKE_EMAIL"
 
-          base="https://${PROJECT_ID}.web.app"
-          shell="$(curl --fail --silent --show-error --max-time 30 "$base/")"
+          base="https://auroranexus.com.br"
+          shell="$(curl --fail --silent --show-error --max-time 30 "$base/portal")"
           grep -Fq "Ambiente privado" <<<"$shell"
           if grep -Fq "Operação WMGJ" <<<"$shell"; then
             echo "ANONYMOUS_PRIVATE_DATA_EXPOSED"
@@ -113,7 +127,7 @@ jobs:
           jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$tmp/session.json"
           curl --fail --silent --show-error --max-time 30 -X POST -H 'Content-Type: application/json' -H "Origin: ${base}" -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$tmp/cookies.txt" --data-binary @"$tmp/session.json" -o /dev/null "$base/__sessionLogin"
 
-          curl --fail --silent --show-error --max-time 30 --cookie "$tmp/cookies.txt" -o "$tmp/private.html" "$base/"
+          curl --fail --silent --show-error --max-time 30 --cookie "$tmp/cookies.txt" -o "$tmp/private.html" "$base/portal"
           grep -Fq "Operação WMGJ" "$tmp/private.html"
 
           curl --fail --silent --show-error --max-time 30 -H 'Accept: application/json' --cookie "$tmp/cookies.txt" -o "$tmp/bootstrap.json" "$base/api/bootstrap"
