@@ -28,7 +28,9 @@ const CANONICAL_PORTAL_URL = `${CANONICAL_PORTAL_ORIGIN}${CANONICAL_PORTAL_PATH}
 const TECHNICAL_FIREBASE_HOSTS = new Set(["wmgj-hml-jfn-20260927.web.app", "wmgj-hml-jfn-20260927.firebaseapp.com"]);
 
 function requestedHost(req: { get(name: string): string | undefined }): string {
-  return String(req.get("x-fh-requested-host") || req.get("host") || "").toLowerCase().split(":")[0] || "";
+  const raw = req.get("x-fh-requested-host") || req.get("x-forwarded-host") || req.get("host") || "";
+  const firstHost = String(raw).toLowerCase().split(",")[0] ?? "";
+  return firstHost.trim().split(":")[0] ?? "";
 }
 
 function canonicalUserUrl(path: string): string {
