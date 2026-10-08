@@ -5,6 +5,7 @@ on:
     paths:
       - 'aurora-coletor/**'
       - 'desktop/install_windows_beta.py'
+      - 'desktop/test_windows_beta_continuity.py'
       - 'src/01_PIPELINE_CONFIABILIDADE_WMGJ.gs'
       - 'src/04_EXTRACAO_DOCUMENTAL_WMGJ.gs'
       - 'src/35_AURORA_FIRESTORE_BRIDGE_WMGJ.gs'
@@ -15,6 +16,7 @@ on:
     paths:
       - 'aurora-coletor/**'
       - 'desktop/install_windows_beta.py'
+      - 'desktop/test_windows_beta_continuity.py'
       - '.github/workflows/validate-aurora-onboarding.yml'
   workflow_dispatch:
 
@@ -46,6 +48,8 @@ jobs:
         run: python -m unittest discover -s aurora-coletor/tests -p test_deployment.py -v
       - name: Collector SQLite lifecycle and persisted receipt regression
         run: python -m unittest discover -s aurora-coletor/tests -p test_collector_lifecycle.py -v
+      - name: Canonical portal gate, beta.4 continuity and rollback tests
+        run: python -m unittest discover -s desktop -p test_windows_beta_continuity.py -v
 
   validate:
     name: Test local discovery without deployment
