@@ -94,7 +94,7 @@ test('large unexpected responses are rejected without reading their private body
 });
 
 test('deploy status logs and artifact select only the sanitized output, not raw execution JSON', () => {
-  const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'deploy-appscript.yml'), 'utf8');
+  const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'deploy-appscript.yml'), 'utf8').replace(/\r\n/g, '\n');
   const status = workflow.match(/      - name: Read authorized connector binding without operational activation\n([\s\S]*?)(?=      - name:)/)?.[1];
   assert.ok(status);
   assert.ok(status.includes('auroraLerStatusConectoresPlugAndPlay'));
