@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, type Transaction } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -14,7 +14,7 @@ import {
   type AuroraMember
 } from "./auroraAccess.js";
 import { validateResolutionEvidence } from "./auroraEvidence.js";
-import { buildProjection, parseActionCommand, type ProjectionSource } from "./auroraEngine.js";
+import { buildProjection, isOperationalRecord, parseActionCommand, type ProjectionSource } from "./auroraEngine.js";
 import { generateNativeInsight, parseNativeInsightIntent } from "./auroraNativeIntelligence.js";
 import { buildMasterOperationalState } from "./auroraMasterEngine.js";
 import { buildReleaseStatus } from "./auroraReleaseStatus.js";
@@ -23,16 +23,41 @@ import { loadFinancialClosingStatus } from "./auroraFinancialDecisionRuntime.js"
 import { auroraDb } from "./firebase.js";
 import { readRuntimeActiveRelease } from "./auroraActiveReleaseRuntime.js";
 import { readInstallationReadiness } from "./auroraInstallationReadiness.js";
+import { immutableEntityVersionId } from "./auroraCanonicalVersions.js";
 
-export async function loadInstallationReadiness(orgId: string) {
+export async function loadInstallationReadiness(orgId: string, documentId?: string) {
   return auroraDb.runTransaction(async tx => {
     const org = await tx.get(auroraDb.doc(`organizations/${orgId}`));
-    const active = org.exists && isActiveOrganization(org.data());
+    const active = org.exists && isActiveOrganization(org.data())
+      && org.data()?.projectionEnabled === true && org.data()?.projectionMode === 'SHADOW';
     return readInstallationReadiness(orgId, async path => {
       if (!active) return null;
       const snap = await tx.get(auroraDb.doc(path));
       return snap.exists ? snap.data() ?? null : null;
+    }, documentId);
+  });
+}
+
+export async function completeInstallation(orgId: string, uid: string) {
+  return auroraDb.runTransaction(async tx => {
+    const org = await tx.get(auroraDb.doc(`organizations/${orgId}`));
+    if (!org.exists || !isActiveOrganization(org.data())) throw new Error('ORGANIZATION_DISABLED');
+    if (org.data()?.projectionEnabled !== true || org.data()?.projectionMode !== 'SHADOW') {
+      throw new Error('PROJECTION_DISABLED');
+    }
+    const proof = await readInstallationReadiness(orgId, async path => {
+      const snap = await tx.get(auroraDb.doc(path));
+      return snap.exists ? snap.data() ?? null : null;
     });
+    if (!proof.firstIngestionVerified) throw new Error('FIRST_INGESTION_PENDING');
+    if (!proof.operationalComplete) {
+      tx.set(auroraDb.doc(`organizations/${orgId}/runtimeCheckpoints/installation`), {
+        orgId, state:'COMPLETE', documentId:proof.documentId, versionId:proof.versionId,
+        sourceVersion:proof.sourceVersion, canonicalSnapshotHash:proof.canonicalSnapshotHash,
+        completedBy:uid, completedAt:FieldValue.serverTimestamp()
+      });
+    }
+    return {...proof, operationalComplete:true};
   });
 }
 
@@ -101,9 +126,9 @@ async function requireAccess(req: { get(name: string): string | undefined }, res
   return null;
 }
 
-async function readProjectionSource(orgId: string): Promise<ProjectionSource> {
+async function readProjectionSource(orgId: string, tx: Transaction): Promise<ProjectionSource> {
   const entries = await Promise.all(sourceCollections.map(async (name) => {
-    const snapshot = await auroraDb.collection(`organizations/${orgId}/${name}`).limit(SOURCE_LIMIT + 1).get();
+    const snapshot = await tx.get(auroraDb.collection(`organizations/${orgId}/${name}`).limit(SOURCE_LIMIT + 1));
     if (snapshot.size > SOURCE_LIMIT) throw new Error(`SOURCE_LIMIT_EXCEEDED:${name}`);
     return [name, snapshot.docs.map((doc) => name === 'sourceDocuments'
       ? {...doc.data(), _documentId:doc.id} : doc.data())] as const;
@@ -129,8 +154,8 @@ function deterministicSnapshotId(competence: string): string {
   return createHash("sha256").update(`dashboardSnapshot:${competence}`).digest("hex").slice(0, 48);
 }
 
-async function projectionSettings(orgId: string): Promise<{ competence: string; enabled: boolean }> {
-  const organization = await auroraDb.doc(`organizations/${orgId}`).get();
+async function projectionSettings(orgId: string, tx: Transaction): Promise<{ competence: string; enabled: boolean }> {
+  const organization = await tx.get(auroraDb.doc(`organizations/${orgId}`));
   if (!organization.exists || !isActiveOrganization(organization.data())) throw new Error("ORGANIZATION_DISABLED");
   const data = organization.data() ?? {};
   const competence = safeString(data.projectionCompetence, 7) ?? "";
@@ -139,9 +164,12 @@ async function projectionSettings(orgId: string): Promise<{ competence: string; 
 }
 
 export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: ProjectionActor = { uid: "scheduler", role: "system", source: "SCHEDULER" }): Promise<Record<string, unknown>> {
-  const settings = await projectionSettings(orgId);
+  return auroraDb.runTransaction(async (tx) => {
+  // Source and current projection share the transaction read point. A paused worker
+  // cannot publish an old source snapshot over a newer committed revision.
+  const settings = await projectionSettings(orgId, tx);
   if (!settings.enabled) throw new Error("PROJECTION_DISABLED");
-  const source = await readProjectionSource(orgId);
+  const source = await readProjectionSource(orgId, tx);
   const projection = buildProjection(source, new Date(), { orgId, competence: settings.competence });
   const dataQuality = projection.dataQuality as Record<string, unknown>;
   if (projection.state === "NO_SOURCE") throw new Error("PROJECTION_NO_SOURCE");
@@ -159,16 +187,29 @@ export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: Projectio
     sourceHash,
     snapshotId,
     integrationReadback: source.sourceDocuments.filter(doc =>
-      doc.orgId === orgId && doc.nativeReady === true && doc.sourceIndependent === true
-      && (doc.integration as {transport?:unknown}|undefined)?.transport === 'AURORA_INTEGRATION_API'
+      isOperationalRecord(doc) && doc.orgId === orgId && doc.nativeReady === true && doc.sourceIndependent === true
+      && typeof doc.entityKey === 'string' && Number.isSafeInteger(doc.revision)
+      && Number(doc.revision) >= 1 && /^[a-f0-9]{64}$/.test(String(doc.canonicalSnapshotHash ?? ''))
     ).map(doc => ({documentId:doc._documentId, sourceVersion:doc.sourceVersion,
+      revision:doc.revision, versionId:immutableEntityVersionId('sourceDocument',String(doc.entityKey),Number(doc.revision)),
       canonicalSnapshotHash:doc.canonicalSnapshotHash}))
   };
   const base = `organizations/${orgId}`;
-  await auroraDb.runTransaction(async (tx) => {
-    // Concurrent retries of the same ingested source snapshot produce one projection history effect.
-    if (actor.source === 'INTEGRATION'
-      && (await tx.get(auroraDb.doc(`${base}/dashboardSnapshotHistory/${snapshotId}`))).exists) return;
+    const historyRef = auroraDb.doc(`${base}/dashboardSnapshotHistory/${snapshotId}`);
+    const history = actor.source === 'INTEGRATION' ? await tx.get(historyRef) : null;
+    if (history?.exists) {
+      const recorded = history.data();
+      if (recorded?.sourceHash !== sourceHash || recorded.orgId !== orgId || recorded.snapshotId !== snapshotId) {
+        throw new Error('PROJECTION_HISTORY_CONFLICT');
+      }
+      const currentRef = auroraDb.doc(`${base}/dashboardSnapshots/current`);
+      const current = await tx.get(currentRef);
+      if (current.data()?.sourceHash !== sourceHash) {
+        tx.set(auroraDb.doc(`${base}/dashboardSnapshots/${deterministicSnapshotId(settings.competence)}`), recorded);
+        tx.set(currentRef, recorded);
+      }
+      return projection;
+    }
     tx.create(auroraDb.doc(`${base}/dashboardSnapshotHistory/${snapshotId}`), storedProjection);
     tx.set(auroraDb.doc(`${base}/dashboardSnapshots/${deterministicSnapshotId(settings.competence)}`), storedProjection);
     tx.set(auroraDb.doc(`${base}/dashboardSnapshots/current`), storedProjection);
@@ -185,8 +226,8 @@ export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: Projectio
       sanitized: true,
       sensitivity: "INTERNAL"
     });
-  });
   return projection;
+  });
 }
 
 function visibleProjection(projection: Record<string, unknown>, member: AuroraMember): Record<string, unknown> {
@@ -402,11 +443,19 @@ export const auroraNexusRefresh = onRequest(
     if (!validCsrf(req.get("cookie"), req.get("x-aurora-csrf"), CSRF_HMAC_KEY.value(), CSRF_PURPOSES.refresh)) { res.status(403).json({ ok: false, code: "CSRF_REJECTED" }); return; }
     if (!can(member, "dashboard.refresh", ["platform_admin", "org_admin", "director", "auditor"])) { res.status(403).json({ ok: false, code: "PERMISSION_DENIED" }); return; }
     try {
+      if (req.body?.operation === 'COMPLETE_INSTALLATION') {
+        const installation = await completeInstallation(member.orgId, member.uid);
+        res.status(200).json({ok:true, orgId:member.orgId, installation});
+        return;
+      }
+      if (req.body?.operation !== undefined && req.body.operation !== 'REFRESH') {
+        res.status(400).json({ok:false, code:'INVALID_OPERATION'}); return;
+      }
       const projection = await refreshProjection(member.orgId, { uid: member.uid, role: member.role, source: "USER" });
       res.status(200).json({ ok: true, projection: visibleProjection(projection, member) });
     } catch (error) {
       const code = error instanceof Error ? error.message : "PROJECTION_FAILED";
-      const status = ["PROJECTION_DISABLED", "PROJECTION_NO_SOURCE", "PROJECTION_DATA_QUALITY_BLOCKED", "PROJECTION_COMPETENCE_REQUIRED"].includes(code) ? 409 : 500;
+      const status = ["PROJECTION_DISABLED", "PROJECTION_NO_SOURCE", "PROJECTION_DATA_QUALITY_BLOCKED", "PROJECTION_COMPETENCE_REQUIRED", "FIRST_INGESTION_PENDING", "ORGANIZATION_DISABLED"].includes(code) ? 409 : 500;
       if (status === 500) logger.error("Aurora projection failed", { code });
       res.status(status).json({ ok: false, code: status === 500 ? "PROJECTION_FAILED" : code });
     }
