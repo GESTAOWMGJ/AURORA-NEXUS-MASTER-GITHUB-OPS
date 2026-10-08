@@ -170,8 +170,8 @@ jobs:
           set -euo pipefail
           test "$(git -C ../.. rev-parse HEAD)" = "$GITHUB_SHA"
           npm ci
-          npm test
           npm run build
+          npm test
           npm audit --omit=dev --audit-level=high
       - name: Require canonical publisher configuration before cloud changes
         env:
