@@ -1,9 +1,9 @@
 /** AURORA-ORG-001: bounded tool composition and observational feedback.
  * Pure functions only. No model training, I/O, new datastore or source mutation.
  */
-import {digest, HASH, TEMPLATES, type Memory, type Proposal, type Signal} from './auroraOrganicCore.js';
+import {digest, fail, HASH, TEMPLATES, type Memory, type Proposal, type Signal} from './auroraOrganicCore.js';
 
-export const LEARNING_VERSION = '1.2.0';
+export const LEARNING_VERSION = '1.2.1';
 const STEPS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   REWORK_CHECKLIST: ['VERIFY_CURRENT_EVIDENCE', 'GROUP_DISTINCT_CASES', 'REVIEW_REWORK_CAUSE', 'REVIEW_CORRECTIVE_ROUTINE', 'RECORD_OBSERVED_OUTCOME'],
   DECISION_REGISTER: ['VERIFY_CURRENT_EVIDENCE', 'GROUP_DISTINCT_CASES', 'REVIEW_VALIDATED_DECISIONS', 'CHECK_APPLICABILITY_BEFORE_REUSE', 'RECORD_OBSERVED_OUTCOME'],
@@ -27,6 +27,18 @@ export type ToolReport = {
 type ObservedRun = {id: string; proposalId: string; revision: number; fingerprint: string; outcome: string|null};
 type Approved = {status: string; revision: number; fingerprint: string; planFingerprint?: string};
 type LearningInput = {orgId: string; version: number; memory: Memory|null; runs: ObservedRun[]; approvals: Record<string, Approved>};
+
+function assertLearningScope(orgId: string, memory: Memory|null): void {
+  // Scope comes from the authenticated tenant, never from an imported checkpoint.
+  if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{1,63}$/.test(orgId)
+    || (memory && (memory.schemaVersion !== 'aurora.organic.memory.v1'
+      || memory.org !== orgId
+      || !Array.isArray(memory.signals) || !Array.isArray(memory.proposals)
+      || memory.signals.some(e=>!e || e.org !== orgId)
+      || memory.proposals.some(p=>!p || p.org !== orgId)))) {
+    fail('MEMORY_SCOPE_OR_SCHEMA_INVALID');
+  }
+}
 
 function selected(memory: Memory, p: Proposal): Signal[] {
   const refs = new Set(p.signalRefs), blocked = new Set(memory.deferredSignalRefs);
@@ -71,6 +83,7 @@ export function buildToolReport(memory: Memory, p: Proposal, plan: ToolPlan): To
 
 /** Derived from the existing checkpoint; no parallel memory or automatic activation. */
 export function learningCycle(s: LearningInput) {
+  assertLearningScope(s.orgId,s.memory);
   const memory=s.memory, blocked=new Set(memory?.deferredSignalRefs??[]);
   const verified=(memory?.signals??[]).filter(e=>!blocked.has(e.id));
   const groups=new Map<string,Signal[]>();
@@ -105,5 +118,11 @@ export function learningCycle(s: LearningInput) {
       causalBenefitEstablished:false,measuredFinancialGain:null
     };
   });
-  return {schemaVersion:'aurora.organic.learning.v1',version:LEARNING_VERSION,stateVersion:s.version,org:s.orgId,mode:'GOVERNED_READ_ONLY',needs,tools,modelTraining:false,automaticActivation:false};
+  return {schemaVersion:'aurora.organic.learning.v1',version:LEARNING_VERSION,stateVersion:s.version,org:s.orgId,mode:'GOVERNED_READ_ONLY',
+    intelligenceBoundary: {
+      tenantId:s.orgId, mode:'TENANT_PRIVATE', personalizationSource:'CURRENT_TENANT_ONLY',
+      sharedCapabilities:'VERSIONED_VALIDATED_ABSTRACTIONS_ONLY',
+      tenantDataTransfer:false, tenantRuleTransfer:false
+    },
+    needs,tools,modelTraining:false,automaticActivation:false};
 }

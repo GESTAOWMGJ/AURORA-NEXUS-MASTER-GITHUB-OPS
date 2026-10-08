@@ -42,3 +42,66 @@ test('unsupported template or modified plan cannot execute',async()=>{const f=aw
 test('public cycle excludes raw source names and private proof data',async()=>{const f=await run('BENEFIT'),text=JSON.stringify(publicState(f.state));for(const bad of ['action-1','invoice-1','doc-1','reviewer-1','snapshotHash'])assert.ok(!text.includes(bad),bad);});
 test('two cases stay a need, never become an executable tool',()=>{const f={schemaVersion:'aurora.organic.signal.v1' as const,org:'wmgj',sector:'AUDIT',kind:'REWORK' as const,category:'AUDIT' as const,toolId:null,outcome:null};const es=[1,2].map(i=>({...f,id:digest(['e',i]),caseRef:digest(['c',i]),evidenceRefs:[digest(['d',i])],decisionRef:digest(['v',i])}));const m=reconcile('wmgj',null,es,new Set(['AUDIT']),()=>true);const out=learningCycle({orgId:'wmgj',version:1,memory:m,runs:[],approvals:{}});assert.equal(out.needs[0]!.distinctCases,2);assert.equal(out.tools.length,0);});
 test('read does not mutate existing checkpoint or source records',async()=>{const f=await run('BENEFIT'),before=JSON.stringify(f.state),records=JSON.stringify(f.records);await transition(f.state,null,actor,f.org,f.read,'read');assert.equal(JSON.stringify(f.state),before);assert.equal(JSON.stringify(f.records),records);});
+
+test('learning rejects a checkpoint from another company before exposing observations',async()=>{
+ const f=await prepare();
+ assert.throws(()=>learningCycle({...f.state,orgId:'company-b'}),/MEMORY_SCOPE_OR_SCHEMA_INVALID/);
+});
+test('learning rejects mixed tenant signals including deferred ones',async()=>{
+ const f=await prepare(),s=structuredClone(f.state),e=s.memory!.signals[0]!;
+ e.org='company-b';s.memory!.deferredSignalRefs.push(e.id);
+ assert.throws(()=>learningCycle(s),/MEMORY_SCOPE_OR_SCHEMA_INVALID/);
+});
+test('learning rejects a foreign proposal instead of relabeling it',async()=>{
+ const f=await prepare(),s=structuredClone(f.state);
+ s.memory!.proposals[0]!.org='company-b';
+ assert.throws(()=>learningCycle(s),/MEMORY_SCOPE_OR_SCHEMA_INVALID/);
+});
+test('learning requires a valid tenant even with an empty memory',()=>{
+ for(const orgId of ['', 'company/a', ' company-a ']){
+  assert.throws(()=>learningCycle({orgId,version:0,memory:null,runs:[],approvals:{}}),/MEMORY_SCOPE_OR_SCHEMA_INVALID/);
+ }
+ const empty=learningCycle({orgId:'company-a',version:0,memory:null,runs:[],approvals:{}});
+ assert.deepEqual(empty.needs,[]);assert.deepEqual(empty.tools,[]);
+});
+test('public state refuses a memory mislabeled as the requested company',async()=>{
+ const f=await prepare(),s={...f.state,orgId:'company-b'};
+ assert.throws(()=>publicState(s),/MEMORY_SCOPE_OR_SCHEMA_INVALID/);
+});
+async function prepareCompany(orgId:string){
+ const f=fixture(),records:Record<string,Record<string,unknown>>={};
+ for(const [path,value] of Object.entries(f.records)){
+  const copy=structuredClone(value);if(copy.orgId!==undefined)copy.orgId=orgId;
+  records[path.replace('organizations/wmgj/','organizations/'+orgId+'/')]=copy;
+ }
+ const read=async(path:string)=>records[path]??null;
+ const member={...actor,orgId};let state:State|null=null;
+ for(let i=1;i<=3;i++)state=(await transition(state,{type:'OBSERVE',expectedVersion:i-1,kind:'REWORK',category:'AUDIT',sector:'AUDIT',actionId:'action-'+i},member,f.org,read,'op-'+i)).state;
+ return {records,read,org:f.org,actor:member,state:state!};
+}
+test('same local source names and commands in two companies produce isolated knowledge',async()=>{
+ const a=await prepareCompany('company-a'),b=await prepareCompany('company-b');
+ const la=learningCycle(a.state),lb=learningCycle(b.state);
+ assert.notEqual(la.needs[0]!.id,lb.needs[0]!.id);
+ assert.notEqual(la.tools[0]!.id,lb.tools[0]!.id);
+ assert.notEqual(la.tools[0]!.fingerprint,lb.tools[0]!.fingerprint);
+ assert.notDeepEqual(a.state.memory!.signals.map(s=>s.id),b.state.memory!.signals.map(s=>s.id));
+ assert.deepEqual(la.intelligenceBoundary,{tenantId:'company-a',mode:'TENANT_PRIVATE',personalizationSource:'CURRENT_TENANT_ONLY',sharedCapabilities:'VERSIONED_VALIDATED_ABSTRACTIONS_ONLY',tenantDataTransfer:false,tenantRuleTransfer:false});
+});
+test('adverse learning in company A does not suspend or change company B',async()=>{
+ const a=await prepareCompany('company-a'),b=await prepareCompany('company-b');
+ const before=JSON.stringify(b.state);
+ a.state=(await transition(a.state,proposalCommand(a.state,'APPROVE_PILOT'),a.actor,a.org,a.read,'approve')).state;
+ a.state=(await transition(a.state,proposalCommand(a.state,'EXECUTE'),a.actor,a.org,a.read,'execute')).state;
+ a.state=(await transition(a.state,{type:'OUTCOME',expectedVersion:a.state.version,runId:a.state.runs[0]!.id,outcome:'ADVERSE'},a.actor,a.org,a.read,'outcome')).state;
+ assert.equal(learningCycle(a.state).tools[0]!.nextAction,'SUSPEND_AND_REVIEW');
+ assert.equal(learningCycle(b.state).tools[0]!.nextAction,'REVIEW_CANDIDATE');
+ assert.equal(learningCycle(b.state).tools[0]!.adverseHistory,false);
+ assert.equal(JSON.stringify(b.state),before);
+});
+test('company B report cannot consume company A plan or checkpoint',async()=>{
+ const a=await prepareCompany('company-a'),b=await prepareCompany('company-b');
+ const plan=compileToolPlan(a.state.memory!,a.state.memory!.proposals[0]!);
+ assert.throws(()=>buildToolReport(b.state.memory!,b.state.memory!.proposals[0]!,plan),/CURRENT_EVIDENCE_REQUIRED/);
+ await assert.rejects(transition(a.state,null,b.actor,b.org,b.read,'read'),/MEMORY_SCOPE_OR_SCHEMA_INVALID/);
+});
