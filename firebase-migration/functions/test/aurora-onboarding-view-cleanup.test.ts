@@ -8,7 +8,7 @@ const member = { uid: "synthetic-master", email: "synthetic@example.invalid", or
   permissions: [], facilityIds: [], allFacilities: true, mfaVerified: true };
 const html = auroraProtectedShell(member, { action: "synthetic-action", refresh: "synthetic-refresh", integrationKey: "synthetic-integration",
   distributionApproval: "synthetic-distribution", userProfile: "synthetic-profile", logout: "synthetic-logout" });
-const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]!);
+const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)].map(match => match[1]!);
 const credential = "ANX1-" + "S".repeat(43);
 const snapshot = { projection: { competence: "2026-10", financialCents: {}, operations: {}, coverage: {}, modules: [] }, actions: [] };
 const profiles = { ok: true, engineEnabled: true, currentAdminUid: member.uid, profiles: [

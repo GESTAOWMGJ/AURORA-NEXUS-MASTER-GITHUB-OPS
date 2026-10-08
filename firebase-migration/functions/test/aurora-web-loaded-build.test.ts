@@ -39,7 +39,7 @@ function deferred<T>() {
 async function fixture(loaded: LoadedWebBuild | null = build, initial = snapshot()) {
   const html = auroraProtectedShell(member, { action: "synthetic-action", refresh: "synthetic-refresh", integrationKey: "synthetic-integration",
     distributionApproval: "synthetic-distribution", logout: "synthetic-logout" }, "/portal", loaded ?? undefined);
-  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]!);
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)].map(match => match[1]!);
   const elements = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(match => [match[1]!, new Element()]));
   const el = (id: string) => { const value = elements.get(id); assert.ok(value, `Known DOM id: ${id}`); return value; };
   const calls: { url: string; options: any }[] = [], redirects: string[] = [], intervals: { callback: Handler; ms: number }[] = [];
