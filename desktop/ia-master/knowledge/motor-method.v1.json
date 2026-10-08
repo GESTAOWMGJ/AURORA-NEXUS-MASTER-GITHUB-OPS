@@ -1,0 +1,43 @@
+{
+  "id": "KH-021",
+  "version": "1.0.0",
+  "title": "Aprendizado motor continuo governado e inteligencia privada por empresa",
+  "sourceRefs": [
+    "https://chatgpt.com/skills?skill_id=6ac6ffdd7ef08191b543ca2d1a145bbc",
+    "USER_DIRECTIVE_2026-10-07"
+  ],
+  "evidenceBasis": "USER_DIRECTIVE_AND_SKILL_VALIDATION",
+  "knowledgeState": "REGISTERED",
+  "technicalState": "SPECIFIED",
+  "runtimeVerified": false,
+  "problem": "Incorporar desafios, prompts disponiveis, respostas e fluxo operacional ao conhecimento AURORA sem misturar clientes nem confundir proposta com execucao.",
+  "procedure": [
+    "Recuperar decisoes e memoria somente do orgId autenticado; confirmar vinculo empresarial antes de operar dados privados.",
+    "Resumir prompt, resposta e fluxo; remover credenciais e identificadores privados; registrar proveniencia e estado.",
+    "Colaborar com IA Mestre local, ChatGPT e IA externa autorizada; permitir analises simultaneas com um unico proprietario de efeitos.",
+    "Validar a resolucao no Xeon ou CI autorizado; separar CI, deploy, instalacao e operacao real.",
+    "Persistir idempotentemente e ler de volta o aprendizado privado; compartilhar apenas capacidades genericas revisadas e versionadas.",
+    "Comprovar corpus carregado, recuperacao e uso; manter sincronizacao cloud e continuidade como provas separadas."
+  ],
+  "prompt": {
+    "version": "1.0.0",
+    "kind": "NEW_SANITIZED_NORMALIZATION",
+    "text": "Aplicar KH-021: registrar desafio, prompt disponivel, resposta verificada e fluxo como aprendizado governado. Preservar inteligencia privada de cada empresa e consentimentos registrados. Provar uma entrada por chave, recuperacao e uso; distinguir proposta, execucao, validacao e continuidade."
+  },
+  "regression": {
+    "state": "SKILL_FORWARD_TEST_PASSED",
+    "cases": [
+      "CI nao demonstra adocao pelo Xeon.",
+      "Org/CNPJ desconhecidos nao autorizam operar dados de cliente.",
+      "Mesmo identificador em duas empresas nao une memoria.",
+      "Registro local nao demonstra captura automatica do historico externo."
+    ]
+  },
+  "limits": [
+    "Sem dados ou regras privadas de clientes no corpus comum.",
+    "Sem captura automatica de outras sessoes do ChatGPT.",
+    "Sem treinamento automatico de pesos.",
+    "Uma chamada local nao demonstra executor distribuido nem servico continuo."
+  ],
+  "rollback": "Restaurar atomicamente a versao anterior do corpus preservada, sem apagar memorias privadas."
+}

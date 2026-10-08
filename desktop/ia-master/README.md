@@ -77,3 +77,33 @@ o atalho de inicialização verificado. Preserva dados, modelos, auditoria, clie
 integrações. Para retomar manualmente, usar `IA Master - Iniciar.cmd`.
 Reverter o PR restaura a seção/registro anterior no próximo deploy; não muda IAM,
 DNS, credenciais ou dados. A publicação HML continua sujeita aos gates existentes.
+
+## Aprendizado motor governado — incremento 1.0.0
+
+`motor-learning.cjs` adapta o endpoint loopback autenticado já existente. Executar
+um ciclo com um JSON sanitizado contendo `key`, `prompt`, `classification` e `flow`:
+
+```powershell
+$env:AURORA_MASTER_STATE = Join-Path $env:LOCALAPPDATA 'AuroraNexus\integration\state\ia-master'
+node desktop/ia-master/motor-learning.cjs C:\caminho-absoluto\entrada-sanitizada.json
+```
+
+Usar somente contexto de engenharia PUBLIC/INTERNAL sem dados de clientes. A
+identidade vem de `organization.txt`; a chave de controle configurada é usada
+internamente. O registro privado fica em `learning/{orgId}/{recordId}.json`, com
+prompt/resposta/fluxo, estado PROPOSED, proveniência do corpus e recibo HMAC.
+A mesma chave/input devolve a mesma entrada sem repetir inferência. Outro input
+com a mesma chave, estado estrangeiro ou recibo alterado são rejeitados. Lock
+impede dois proprietários locais; lock abandonado exige revisão, sem takeover
+automático. Isso não oferece fencing distribuído cloud/Xeon.
+
+A habilidade AURORA Aprendizado Motor orienta esse ciclo em tarefas posteriores.
+Não há timer novo, coleta de outras sessões nem alteração de pesos. A API direta
+continua auditando hashes; persistência detalhada exige este adaptador autorizado.
+`knowledge/motor-method.v1.json` contém apenas o método genérico revisado, sem
+memórias de cliente; incorporar ao corpus instalado exige validação e readback.
+Dados privados não são promovidos automaticamente ao corpus comum.
+
+Verificar `node --test desktop/ia-master/motor-learning.test.cjs`. O teste do
+servidor também carrega essas regressões no CI existente. Remover o adaptador
+desativa a captura futura, preservando registros e a IA Mestre instalada.

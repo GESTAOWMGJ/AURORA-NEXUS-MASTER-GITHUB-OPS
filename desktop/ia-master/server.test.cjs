@@ -1,3 +1,5 @@
+// Exercise private motor persistence in the existing installer CI gate.
+require('./motor-learning.test.cjs');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
