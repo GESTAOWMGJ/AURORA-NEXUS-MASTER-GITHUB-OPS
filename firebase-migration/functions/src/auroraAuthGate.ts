@@ -38,6 +38,10 @@ function canonicalUserUrl(path: string): string {
   return `${CANONICAL_PORTAL_ORIGIN}${path.startsWith("/") ? path : CANONICAL_PORTAL_PATH}`;
 }
 
+function technicalHostBrowserRedirect(): string {
+  return `<script>(()=>{const h=(location.hostname||"").toLowerCase();if(h==="wmgj-hml-jfn-20260927.web.app"||h==="wmgj-hml-jfn-20260927.firebaseapp.com"){location.replace("https://auroranexus.com.br/portal"+location.search+location.hash)}})();</script>`;
+}
+
 function escapeHtml(value: unknown): string {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -85,6 +89,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado.", e
   <meta name="apple-mobile-web-app-title" content="Aurora Nexus">
   <link rel="manifest" href="${escapeHtml(manifestPath)}">
   <title>Aurora Nexus | Login</title>
+  ${technicalHostBrowserRedirect()}
   <style>
     :root { color-scheme: dark; --bg:#071f25; --panel:#0d2d34; --line:#1d4a53; --gold:#c6a45d; --text:#f7f1e7; --muted:#b9c7c6; }
     * { box-sizing: border-box; }
@@ -193,7 +198,13 @@ export const auroraNexusAuthGate = onRequest(
       return;
     }
     if (req.path === "/setup") {
-      res.status(200).type("html").send(req.method === "HEAD" ? "" : setupPage(member));
+      const refreshCsrf = csrfTokenForSession(req.get("cookie"), AURORA_NEXUS_CSRF_HMAC_KEY.value(), CSRF_PURPOSES.refresh);
+      if (!refreshCsrf) {
+        logger.error("Aurora Nexus setup CSRF key is not configured");
+        res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança.", entry?.orgId));
+        return;
+      }
+      res.status(200).type("html").send(req.method === "HEAD" ? "" : setupPage(member, refreshCsrf));
       return;
     }
     if (isDownload) {

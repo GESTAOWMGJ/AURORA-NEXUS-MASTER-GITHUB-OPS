@@ -49,13 +49,20 @@ test("master consumes current entities after PR123 revisions, never the history 
     } }) };
   }) as any);
   t.mock.method(auroraDb, "runTransaction", (async (callback: any) => {
+    let writeStarted = false;
     const tx = {
+      get: async (ref: {get: () => Promise<unknown>}) => {
+        assert.equal(writeStarted, false, 'all source reads must precede projection writes in the same transaction');
+        return ref.get();
+      },
       create: (ref: { path: string }, data: any) => {
+        writeStarted = true;
         assert.ok(ref.path.startsWith(`${base}/dashboardSnapshotHistory/`) || ref.path.startsWith(`${base}/auditEvents/`));
         assert.equal(stored.has(ref.path), false, "immutable history must not be overwritten");
         stored.set(ref.path, data);
       },
       set: (ref: { path: string }, data: any) => {
+        writeStarted = true;
         assert.ok(ref.path.startsWith(`${base}/dashboardSnapshots/`), "projection must not mutate ingested entities or versions");
         stored.set(ref.path, data);
       }

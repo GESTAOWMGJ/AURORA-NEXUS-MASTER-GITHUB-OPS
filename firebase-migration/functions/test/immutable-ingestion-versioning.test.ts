@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { immutableEntityVersionId } from '../src/auroraCanonicalVersions.ts';
 
-const backend = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
-const rules = readFileSync(new URL("../../firestore/firestore.rules", import.meta.url), "utf8");
+const backend = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8").replace(/\r\n/g, '\n');
+const rules = readFileSync(new URL("../../firestore/firestore.rules", import.meta.url), "utf8").replace(/\r\n/g, '\n');
 
 test("accepted ingestion persists an immutable version snapshot", () => {
   assert.match(backend, /immutableEntityVersionId\(/);
@@ -20,10 +21,14 @@ test("accepted ingestion persists an immutable version snapshot", () => {
 });
 
 test("version identity is bound to the canonical entity revision", () => {
-  assert.match(
-    backend,
-    /sha256Hex\(`v1:\$\{entityType\}:\$\{entityKey\}:revision:\$\{revision\}`\)\.slice\(0, 48\)/
-  );
+  assert.equal(immutableEntityVersionId('sourceDocument','DRIVE:known',1),'599ac3dc7348351b014b82f571bb0f445e9cb72c92390c3e');
+  assert.equal(immutableEntityVersionId('sourceDocument','DRIVE:known',2),'2146fa9dd713cc31c61926b1b1f5a5a793c3be43a3574066');
+  assert.notEqual(immutableEntityVersionId('sourceDocument','DRIVE:known',1),
+    immutableEntityVersionId('sourceDocument','DRIVE:known',2));
+  assert.notEqual(immutableEntityVersionId('sourceDocument','DRIVE:known',1),
+    immutableEntityVersionId('invoice','DRIVE:known',1));
+  assert.notEqual(immutableEntityVersionId('sourceDocument','DRIVE:known',1),
+    immutableEntityVersionId('sourceDocument','DRIVE:other',1));
   assert.match(backend, /const revision = nextCanonicalEntityRevision\(previous\?\.revision\)/);
   assert.match(backend, /revision,\n\s+sourceVersion: event\.sourceVersion/);
   assert.match(backend, /versionId: result\.versionId/);

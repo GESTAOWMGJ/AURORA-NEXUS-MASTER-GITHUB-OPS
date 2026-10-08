@@ -173,6 +173,14 @@ jobs:
           npm run build
           npm test
           npm audit --omit=dev --audit-level=high
+      - name: Require canonical HTTPS and HML routing before cloud authentication
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = "$APPROVED_PROJECT"
+          node firebase-migration/scripts/check-canonical-preflight.mjs "$PROJECT_ID"
       - name: Require canonical publisher configuration before cloud changes
         env:
           PUBLISH_ACTIVE_RELEASE: ${{ inputs.publish_active_release }}
@@ -489,6 +497,7 @@ jobs:
             [$functions[] | (.id // .name // "") | split("/")[-1]] as $deployed |
             all($expected[]; . as $name | $deployed | index($name) != null)
           ' <<<"$functions" >/dev/null
+          node firebase-migration/scripts/check-canonical-preflight.mjs "$PROJECT_ID"
           canonical_origin="https://auroranexus.com.br"
           technical_origin="https://${PROJECT_ID}.web.app"
           shell="$(curl --fail --silent --show-error --max-time 30 "${canonical_origin}/portal")"
@@ -497,11 +506,12 @@ jobs:
             echo "Protected shell was exposed without login" >&2
             exit 90
           fi
-          technical_probe="$(curl --silent --show-error --max-time 30 \
-            --output /dev/null \
-            --write-out '%{http_code} %{redirect_url}' \
-            "${technical_origin}/")"
-          test "$technical_probe" = "308 ${canonical_origin}/portal"
+          technical_shell="$(curl --fail --silent --show-error --max-time 30 "${technical_origin}/")"
+          grep -Fq 'location.replace("https://auroranexus.com.br/portal' <<<"$technical_shell"
+          if grep -Fq "Centro de gestão WMGJ" <<<"$technical_shell"; then
+            echo "Technical Firebase host exposed the private shell" >&2
+            exit 90
+          fi
           negative_response="$(mktemp "${RUNNER_TEMP}/aurora-negative-smoke.XXXXXX.json")"
           trap 'rm -f "$negative_response"' EXIT
           bootstrap_status="$(curl --silent --show-error --max-time 30 \
@@ -542,6 +552,7 @@ jobs:
           distribution_status="$(curl --silent --show-error --max-time 30 \
             -X POST \
             -H 'Content-Type: application/json' \
+            -H "Origin: ${canonical_origin}" -H 'Sec-Fetch-Site: same-origin' \
             --data '{"competence":"2026-10","snapshotHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","decision":"REJECT","reason":"negative smoke","expectedRevision":0}' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
@@ -553,8 +564,9 @@ jobs:
           PROJECT_ID: ${{ inputs.project_id }}
         run: |
           set -euo pipefail
+          canonical_origin="https://auroranexus.com.br"
           for method in GET POST; do
-            status="$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' --request "$method" "https://auroranexus.com.br/api/user-profiles")"
+            status="$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' --request "$method" -H "Origin: ${canonical_origin}" -H 'Sec-Fetch-Site: same-origin' "${canonical_origin}/api/user-profiles")"
             test "$status" = "401"
           done
 
@@ -654,17 +666,17 @@ jobs:
           fi
           echo "AUTH_SMOKE_UID_VERIFIED"
 
-          base_url="https://auroranexus.com.br"
+          canonical_origin="https://auroranexus.com.br"
           jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$session_payload"
           curl --fail --silent --show-error --max-time 30 \
             -X POST \
             -H 'Content-Type: application/json' \
-            -H "Origin: ${base_url}" \
+            -H "Origin: ${canonical_origin}" \
             -H 'Sec-Fetch-Site: same-origin' \
             --cookie-jar "$cookie_jar" \
             --data-binary @"$session_payload" \
             --output /dev/null \
-            "${base_url}/__sessionLogin"
+            "${canonical_origin}/__sessionLogin"
           # Tenant paths authorize membership, then converge the browser to /portal.
           tenant_redirect_headers="$smoke_dir/tenant-redirect.headers"
           tenant_status="$(curl --silent --show-error --max-time 30 \
@@ -672,12 +684,12 @@ jobs:
             --output /dev/null \
             --dump-header "$tenant_redirect_headers" \
             --write-out '%{http_code}' \
-            "${base_url}/wmgj")"
+            "${canonical_origin}/wmgj")"
           if [ "$tenant_status" != "303" ]; then
             echo "::error::AUTH_TENANT_REDIRECT_HTTP=$tenant_status"
             exit 91
           fi
-          if ! grep -Eiq '^location:[[:space:]]*/portal[[:space:]]*$' "$tenant_redirect_headers"; then
+          if ! grep -Eiq '^location:[[:space:]]*https://auroranexus\.com\.br/portal[[:space:]]*$' "$tenant_redirect_headers"; then
             echo "::error::AUTH_TENANT_REDIRECT_LOCATION_MISMATCH"
             exit 91
           fi
@@ -685,7 +697,7 @@ jobs:
             --cookie "$cookie_jar" \
             --output "$private_shell" \
             --write-out '%{http_code}' \
-            "${base_url}/portal")"
+            "${canonical_origin}/portal")"
           if [ "$private_status" != "200" ]; then
             echo "::error::AUTH_PRIVATE_SHELL_HTTP=$private_status"
             exit 91
@@ -703,7 +715,7 @@ jobs:
             -H 'Accept: application/json' \
             --cookie "$cookie_jar" \
             --output "$bootstrap_response" \
-            "${base_url}/api/bootstrap"
+            "${canonical_origin}/api/bootstrap"
           jq -e --arg email "$SMOKE_EMAIL" '
             .ok == true and
             .environment == "HOMOLOGATION" and
@@ -720,7 +732,7 @@ jobs:
             --cookie "$cookie_jar" \
             --output "$native_response" \
             --write-out '%{http_code}' \
-            "${base_url}/api/native-insight?intent=EXECUTIVE")"
+            "${canonical_origin}/api/native-insight?intent=EXECUTIVE")"
           case "$native_status" in
             200)
               jq -e '
@@ -750,7 +762,7 @@ jobs:
             --cookie "$cookie_jar" \
             --output "$master_response" \
             --write-out '%{http_code}' \
-            "${base_url}/api/master-engine")"
+            "${canonical_origin}/api/master-engine")"
           case "$master_status" in
             200)
               jq -e '
@@ -782,7 +794,7 @@ jobs:
             -H 'Accept: application/json' \
             --cookie "$cookie_jar" \
             --output "$organic_response" \
-            "${base_url}/organic?format=json"
+            "${canonical_origin}/organic?format=json"
           jq -e '
             .ok == true and
             .environment == "HOMOLOGATION" and

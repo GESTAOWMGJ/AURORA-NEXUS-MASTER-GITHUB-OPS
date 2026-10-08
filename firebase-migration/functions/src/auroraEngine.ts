@@ -52,6 +52,10 @@ function isTestRecord(record: Record<string, unknown>): boolean {
   ].some((value) => TEST_RECORD_MARKERS.has(normalized(value)));
 }
 
+export function isOperationalRecord(record: Record<string, unknown>): boolean {
+  return !isTestRecord(record);
+}
+
 function isValidated(record: Record<string, unknown>): boolean {
   return [record.workflowState, record.workflow_state]
     .some((value) => VALIDATED_STATES.has(normalized(value)));
@@ -67,7 +71,7 @@ function financialStatus(record: Record<string, unknown>): string {
 
 function withoutTestRecords(source: ProjectionSource): ProjectionSource {
   return Object.fromEntries(
-    Object.entries(source).map(([name, records]) => [name, records.filter((record) => !isTestRecord(record))])
+    Object.entries(source).map(([name, records]) => [name, records.filter(isOperationalRecord)])
   ) as ProjectionSource;
 }
 
