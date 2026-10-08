@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - 'firebase-migration/**'
+      - 'scripts/aurora/**'
+      - 'policy/aurora-external-ai-reduction-policy.md'
+      - 'config/aurora-kpi-baseline.json'
       - 'aurora-coletor/aurora_organic.py'
       - 'skills/aurora-nexus-organic/**'
       - 'AGENTS.md'
@@ -33,6 +36,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Verify robot execution contracts
+        run: |
+          node --test scripts/aurora/windows_online_robot_orchestrator.test.js
+          node scripts/aurora/windows_online_robot_orchestrator.js --execute-local > robot-execution.json
       - name: Install locked dependencies
         working-directory: firebase-migration/functions
         run: npm ci --ignore-scripts
@@ -71,6 +78,22 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: aurora-organic-1.1.0-hml-${{ github.run_id }}
-          path: organic-evidence/
+          path: |
+            organic-evidence/
+            robot-execution.json
           if-no-files-found: error
           retention-days: 30
+
+
+  windows-robot-contract:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Windows subprocess and timeout contracts
+        run: node --test scripts/aurora/windows_online_robot_orchestrator.test.js

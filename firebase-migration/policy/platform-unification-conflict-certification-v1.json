@@ -50,5 +50,15 @@
     "CONFLICT_FREE": "Platform components are internally consistent for the active development deliverable.",
     "ADVISORY_CONFLICT": "Non-critical mismatch exists; continue with risk signal and posterior review.",
     "MATERIAL_CONFLICT": "Material integration conflict blocks promotion until corrected or safely contained."
-  }
+  },
+  "evidenceScope": "REPOSITORY_POLICY_CONSISTENCY_ONLY",
+  "operationalCertificationGranted": false,
+  "runtimeEvidenceRequired": [
+    "exact_source_sha",
+    "authenticated_org_and_node_identity",
+    "remote_job_id_and_completion_receipt",
+    "cloud_and_xeon_failure_injection",
+    "no_duplicate_effects",
+    "recovery_and_rollback_receipts"
+  ]
 }
