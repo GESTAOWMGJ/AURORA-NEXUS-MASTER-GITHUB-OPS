@@ -20,6 +20,22 @@ import {
 const projectId = 'wmgj-firestore-rules-test';
 let env;
 
+test('canonical release pointer and immutable history remain server-owned even for organizational administrators', async () => {
+  const path='platformRuntime/activeRelease',history=path+'/history/release-synthetic';
+  await env.withSecurityRulesDisabled(async ctx=>{
+    await setDoc(doc(ctx.firestore(),path),{certificate:{sourceSha:'a'.repeat(40)},signature:'synthetic-envelope'});
+    await setDoc(doc(ctx.firestore(),history),{certificateSha256:'b'.repeat(64)});
+  });
+  for(const db of [env.unauthenticatedContext().firestore(),env.authenticatedContext('admin',{
+    auroraOrgId:'wmgj',email_verified:true,firebase:{sign_in_second_factor:'totp'}}).firestore()]){
+    for(const target of [path,history]){
+      await assertFails(getDoc(doc(db,target)));
+      await assertFails(setDoc(doc(db,target),{signature:'replacement'},{merge:true}));
+      await assertFails(deleteDoc(doc(db,target)));
+    }
+  }
+});
+
 function member(role, overrides = {}) {
   return {
     role,

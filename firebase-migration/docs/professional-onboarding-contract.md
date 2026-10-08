@@ -73,8 +73,11 @@ não elimina evidências e não implementa exclusão administrativa destrutiva.
 ## Evidência e limites
 
 O painel Master emite uma credencial aleatória de cadastro de 256 bits,
-exibida uma vez e válida por 24 horas. Só o digest criptográfico vinculado a
-organização/UID/operação é persistido. Reemissão invalida a anterior. A pessoa
+exibida uma vez e válida por 24 horas. Só o resultado de `scrypt` assíncrono
+(`N=16384`, `r=8`, `p=1`) e um salt aleatório de 128 bits, vinculados a
+organização/UID/perfil/operação, são persistidos. A comparação usa tempo constante
+e o prazo é rechecado depois da derivação em cada tentativa da transação.
+Reemissão invalida a anterior. A pessoa
 define sua senha pessoal pelo fluxo Firebase, confirma o e-mail e cadastra MFA;
 então resgata a credencial para liberar a sessão Aurora. O Master não conhece
 a senha pessoal. Reutilização e resgate por outro UID/organização são recusados.
