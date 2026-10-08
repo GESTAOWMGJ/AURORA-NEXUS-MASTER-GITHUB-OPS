@@ -19,7 +19,7 @@ import (
 var payload []byte
 var sourceCommit = "unversioned"
 const version = "0.2.0-beta.4"
-const portal = "https://wmgj-hml-jfn-20260927.web.app"
+const portal = "https://auroranexus.com.br/portal"
 var required = []string{"desktop/install_windows_beta.py", "aurora-coletor/aurora_deployment.py", "aurora-coletor/aurora_cloud_sync.py"}
 
 func extract(data []byte, root string) error {

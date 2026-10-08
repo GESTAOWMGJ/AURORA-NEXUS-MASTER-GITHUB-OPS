@@ -12,7 +12,7 @@ async function fixture() {
  const bytes=Buffer.from('synthetic-package');
  const files=['AURORA-NEXUS-Mac-HML.zip','AURORA-NEXUS-Windows-x64-HML.exe'].map((name,i)=>({name,label:i?'Windows':'Mac',platform:i?'windows':'mac',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),signed:false}));
  for(const f of files)await writeFile(join(root,f.name),bytes);
- const manifest={schemaVersion:1,version:'test-hml',channel:'homologation',productionApproved:false,portalUrl:'https://wmgj-hml-jfn-20260927.web.app/',files};
+ const manifest={schemaVersion:1,version:'test-hml',channel:'homologation',productionApproved:false,portalUrl:'https://auroranexus.com.br/portal',files};
  await writeFile(join(root,'manifest.json'),JSON.stringify(manifest));
  return {root,bytes,files,manifest,clean:()=>rm(root,{recursive:true,force:true})};
 }
