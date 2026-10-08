@@ -96,6 +96,26 @@ jobs:
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auditarSegurancaApiWMGJ "$RUNNER_TEMP/appscript-security.json"
           jq -e '.response.ok==true' "$RUNNER_TEMP/appscript-security.json" >/dev/null
 
+      - name: Read authorized connector binding without operational activation
+        working-directory: build-appscript
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f "$RUNNER_TEMP/connector-status.raw.json" "$RUNNER_TEMP/connector-status.sanitized.tmp"' EXIT
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraLerStatusConectoresPlugAndPlay "$RUNNER_TEMP/connector-status.raw.json" '["wmgj"]'
+          node "$GITHUB_WORKSPACE/tools/sanitize-connector-status.js" "$RUNNER_TEMP/connector-status.raw.json" > "$RUNNER_TEMP/connector-status.sanitized.tmp"
+          mv "$RUNNER_TEMP/connector-status.sanitized.tmp" "$RUNNER_TEMP/connector-status.json"
+          cat "$RUNNER_TEMP/connector-status.json"
+
+      - name: Preserve sanitized connector status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned in existing recovery workflow
+        with:
+          name: appscript-connector-status
+          path: ${{ runner.temp }}/connector-status.json
+          retention-days: 14
+          if-no-files-found: ignore
+
       - name: Preserve deploy-operation separation
         run: |
           echo "Apps Script source deployed and Execution API validated."
