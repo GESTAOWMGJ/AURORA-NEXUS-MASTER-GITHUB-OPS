@@ -510,49 +510,67 @@ jobs:
             node firebase-migration/scripts/check-canonical-preflight.mjs "$PROJECT_ID"
           canonical_origin="https://auroranexus.com.br"
           technical_origin="https://${PROJECT_ID}.web.app"
-          technical_shell="$(curl --fail --silent --show-error --max-time 30 "${technical_origin}/")"
-          grep -Fq 'https://auroranexus.com.br/portal' <<<"$technical_shell"
-          if grep -Fq "Centro de gestão WMGJ" <<<"$technical_shell"; then
+          technical_headers="$(mktemp "${RUNNER_TEMP}/aurora-technical-headers.XXXXXX")"
+          technical_shell="$(mktemp "${RUNNER_TEMP}/aurora-technical-shell.XXXXXX")"
+          negative_response="$(mktemp "${RUNNER_TEMP}/aurora-negative-smoke.XXXXXX.json")"
+          trap 'rm -f "$technical_headers" "$technical_shell" "$negative_response"' EXIT
+          technical_status="$(curl --silent --show-error --max-time 30 \
+            --dump-header "$technical_headers" \
+            --output "$technical_shell" \
+            --write-out '%{http_code}' \
+            "${technical_origin}/")"
+          if [ "$technical_status" = "308" ]; then
+            technical_location="$(awk 'BEGIN { IGNORECASE=1 } /^location:/ { sub(/\r$/, ""); sub(/^[^:]*:[[:space:]]*/, ""); print; exit }' "$technical_headers")"
+            test "$technical_location" = "${canonical_origin}/portal"
+          elif [ "$technical_status" = "200" ]; then
+            grep -Fq 'location.replace("https://auroranexus.com.br/portal' "$technical_shell"
+          else
+            echo "::error title=Unexpected technical root response::HTTP ${technical_status}; expected 200 browser guard or 308 canonical redirect." >&2
+            exit 90
+          fi
+          if grep -Fq "Centro de gestão WMGJ" "$technical_shell"; then
             echo "Technical Firebase host exposed the private shell" >&2
             exit 90
           fi
-          negative_response="$(mktemp "${RUNNER_TEMP}/aurora-negative-smoke.XXXXXX.json")"
-          trap 'rm -f "$negative_response"' EXIT
+          assert_auth_required() {
+            local endpoint="$1" status="$2" response="$3" code
+            if [ "$status" = "401" ] && jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$response" >/dev/null 2>&1; then
+              return
+            fi
+            code="$(jq -r '.code // "NON_JSON"' "$response" 2>/dev/null || printf 'NON_JSON')"
+            echo "::error title=Anonymous smoke contract mismatch::${endpoint} returned HTTP ${status} with code ${code}." >&2
+            exit 91
+          }
           bootstrap_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
             "${technical_origin}/api/bootstrap")"
-          test "$bootstrap_status" = "401"
-          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+          assert_auth_required "bootstrap" "$bootstrap_status" "$negative_response"
           native_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
             "${technical_origin}/api/native-insight?intent=EXECUTIVE")"
-          test "$native_status" = "401"
-          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+          assert_auth_required "native-insight" "$native_status" "$negative_response"
           master_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
             "${technical_origin}/api/master-engine")"
-          test "$master_status" = "401"
-          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+          assert_auth_required "master-engine" "$master_status" "$negative_response"
           organic_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
             "${technical_origin}/organic?format=json")"
-          test "$organic_status" = "401"
-          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+          assert_auth_required "organic" "$organic_status" "$negative_response"
           shareholder_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \
             --write-out '%{http_code}' \
             "${technical_origin}/reports/shareholders?format=json&competence=2026-10")"
-          test "$shareholder_status" = "401"
-          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+          assert_auth_required "shareholders" "$shareholder_status" "$negative_response"
           distribution_status="$(curl --silent --show-error --max-time 30 \
             -X POST \
             -H 'Content-Type: application/json' \
@@ -561,8 +579,7 @@ jobs:
             --output "$negative_response" \
             --write-out '%{http_code}' \
             "${technical_origin}/api/distribution-approval")"
-          test "$distribution_status" = "401"
-          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$negative_response" >/dev/null
+          assert_auth_required "distribution-approval" "$distribution_status" "$negative_response"
       - name: Verify user profile API rejects anonymous access
         env:
           PROJECT_ID: ${{ inputs.project_id }}
