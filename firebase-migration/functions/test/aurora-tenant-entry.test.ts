@@ -31,7 +31,7 @@ test("authenticated navigation converges to the canonical portal; anonymous and 
       ? { active: true, role: "viewer", permissions: [], allFacilities: false }
       : { active: true } }) };
   });
-  async function invoke(path: string, authenticated = true) {
+  async function invoke(path: string, authenticated = true, host = "auroranexus.com.br") {
     let status = 200, html = "", location = "";
     const res: any = {
       on: () => res, set: () => res, setHeader: () => res, type: () => res,
@@ -40,10 +40,12 @@ test("authenticated navigation converges to the canonical portal; anonymous and 
       redirect: (code: number, target: string) => { status = code; location = target; return res; }
     };
     await auroraNexusAuthGate({ method: "GET", path, get: (name: string) =>
-      name.toLowerCase() === "cookie" && authenticated ? "__session=synthetic" : undefined } as any, res);
+      name.toLowerCase() === "cookie" && authenticated ? "__session=synthetic" : name.toLowerCase() === "host" ? host : undefined } as any, res);
     return { status, html, location };
   }
   assert.deepEqual(await invoke("/"), { status: 303, html: "", location: "/portal" });
+  assert.deepEqual(await invoke("/", false, "wmgj-hml-jfn-20260927.web.app"), { status: 308, html: "", location: "https://auroranexus.com.br/portal" });
+  assert.deepEqual(await invoke("/downloads", false, "wmgj-hml-jfn-20260927.firebaseapp.com"), { status: 308, html: "", location: "https://auroranexus.com.br/downloads" });
   assert.deepEqual(await invoke("/wmgj"), { status: 303, html: "", location: "/portal" });
   const pilot = await invoke("/portal");
   assert.equal(pilot.status, 200);

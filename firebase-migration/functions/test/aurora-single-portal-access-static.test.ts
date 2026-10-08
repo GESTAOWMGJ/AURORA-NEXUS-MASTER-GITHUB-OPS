@@ -5,7 +5,7 @@ import path from "node:path";
 
 const root = path.resolve(import.meta.dirname, "../../..");
 const canonical = "https://auroranexus.com.br/portal";
-const fallback = "https://wmgj-hml-jfn-20260927.web.app/";
+const technical = "https://wmgj-hml-jfn-20260927.web.app/";
 
 function read(relativePath: string): string {
   return fs.readFileSync(path.join(root, relativePath), "utf8");
@@ -23,11 +23,15 @@ test("beta clients expose only the canonical Aurora portal as user-facing entry"
   assert.match(read("firebase-migration/functions/src/auroraDownloads.ts"), /const portal = 'https:\/\/auroranexus\.com\.br\/portal';/);
 });
 
-test("Firebase HML URL remains infrastructure fallback, not the distributed portal", () => {
+test("Firebase HML URL is infrastructure only and must redirect users to the canonical DNS", () => {
   const desired = JSON.parse(read("infra/domains/auroranexus.com.br/firebase-hosting.desired-state.json"));
   assert.equal(desired.interfacePolicy.canonicalPortalUrl, canonical);
-  assert.equal(desired.interfacePolicy.technicalFallbackUrl, fallback);
+  assert.equal(desired.interfacePolicy.technicalFallbackUrl, null);
+  assert.equal(desired.interfacePolicy.technicalHostBehavior, "REDIRECT_TO_CANONICAL_DNS");
   assert.equal(desired.interfacePolicy.distributeFallbackUrlToClients, false);
+  assert.equal(desired.firebase.currentFallbackUrl, technical);
+  assert.equal(desired.firebase.currentFallbackBehavior, "INFRASTRUCTURE_ONLY_REDIRECTS_USER_TRAFFIC");
   assert.equal(desired.deploymentGates.firebaseFallbackHiddenFromClientLinks, true);
-  assert.equal(desired.deploymentGates.customPortalBackedByHmlAuthGate, false);
+  assert.equal(desired.deploymentGates.customPortalBackedByHmlAuthGate, true);
+  assert.equal(desired.deploymentGates.singleUserFacingPortalEnforced, true);
 });
