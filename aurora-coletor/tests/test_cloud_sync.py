@@ -26,6 +26,26 @@ def response(payload, duplicate=False):
                 sourceIndependent=payload['sourceIndependent'])
 
 
+
+def processed_response(payload, duplicate=False, revision=1, org=ORG):
+    normalized = sync.validate_payload(payload)
+    source_hash = sync.digest(org + ':' + normalized['sourceSystem'] + ':' + normalized['externalDocumentId'])
+    receipt = response(normalized, duplicate)
+    receipt.update(sourceVersion=normalized['sourceVersion'],
+                   canonicalSnapshotHash=sync.canonical_snapshot_hash(normalized))
+    receipt['installation'] = {
+        'state': 'FIRST_INGESTION_VERIFIED', 'firstIngestionVerified': True,
+        'operationalComplete': True, 'documentId': source_hash[:48],
+        'sourceSystem': normalized['sourceSystem'], 'sourceVersion': normalized['sourceVersion'],
+        'revision': revision,
+        'versionId': sync.digest('v1:sourceDocument:' + normalized['sourceSystem'] + ':'
+                                 + source_hash[:32] + ':revision:' + str(revision))[:48],
+        'canonicalSnapshotHash': sync.canonical_snapshot_hash(normalized),
+        'verifiedAt': '2026-01-01T01:00:00.000Z',
+    }
+    return receipt
+
+
 class SyncTests(unittest.TestCase):
     def transport(self, payload, duplicate=False):
         return Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}),
@@ -95,6 +115,77 @@ class SyncTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(sync.SyncError):
                 sync.synchronize(dict(fixture(), **change), ORIGIN, ORG, 'synthetic-key', True, transport)
             transport.assert_not_called()
+
+
+
+    def test_canonical_snapshot_matches_backend_golden_vectors(self):
+        # Generated from canonicalIntegrationDocument in the real TypeScript backend.
+        cases = [
+            (fixture(), '493c13aebca51cb7f6b34c471d5c031fc4fc5b0d648fe82ff81ec103eef3e4c4'),
+            (dict(fixture(), amountCents=None, count=9007199254740991, documentType='PRODUCTION',
+                  slaDueAt='2026-02-01T03:00:00+03:00'),
+             '9d13dcdb2ede18be7627e337f6529056ffd8f60b14bb526b645ec66a9bf61e85'),
+            (dict(fixture(), amountCents=9007199254740991, count=0, sourceSystem='TASY', sourceVersion=13),
+             '37bda04eac8fc670d615d196c55c6c5f6a84a94d02d7c1aaa61bbfceeae76b8a'),
+        ]
+        for payload, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(sync.canonical_snapshot_hash(sync.validate_payload(payload)), expected)
+
+    def test_processing_proof_requires_exact_document_version_hash_and_ledger_identity(self):
+        payload = fixture()
+        valid = processed_response(payload, True)
+        for change in ({'documentId': 'a' * 48}, {'sourceSystem': 'MV'},
+                       {'sourceVersion': 2}, {'sourceVersion': True}, {'revision': 0},
+                       {'revision': True}, {'versionId': 'b' * 48},
+                       {'canonicalSnapshotHash': 'c' * 64}, {'verifiedAt': 'not-a-date'},
+                       {'firstIngestionVerified': False}, {'operationalComplete': False}):
+            invalid = copy.deepcopy(valid)
+            invalid['installation'].update(change)
+            network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (200, invalid)])
+            with self.subTest(change=change), self.assertRaisesRegex(sync.SyncError, 'PROCESSING_PROOF'):
+                sync.synchronize(payload, ORIGIN, ORG, 'synthetic-key', True, network)
+        network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (200, valid)])
+        receipt = sync.synchronize(payload, ORIGIN, ORG, 'synthetic-key', True, network)
+        self.assertTrue(receipt['processing']['firstIngestionVerified'])
+        self.assertEqual(receipt['processing']['revision'], 1)
+
+    def test_matching_document_from_another_tenant_cannot_prove_processing(self):
+        payload = fixture()
+        invalid = processed_response(payload, True, org='other-org')
+        network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (200, invalid)])
+        with self.assertRaisesRegex(sync.SyncError, 'PROCESSING_PROOF'):
+            sync.synchronize(payload, ORIGIN, ORG, 'synthetic-key', True, network)
+
+    def test_outer_receipt_provenance_and_missing_processing_evidence_fail_closed(self):
+        payload = fixture()
+        for change in ({'sourceVersion': 2}, {'canonicalSnapshotHash': 'a' * 64}):
+            invalid = dict(processed_response(payload), **change)
+            network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, invalid)])
+            with self.subTest(change=change), self.assertRaisesRegex(sync.SyncError, 'RECEIPT'):
+                sync.synchronize(payload, ORIGIN, ORG, 'synthetic-key', True, network)
+        for key in ('sourceVersion', 'canonicalSnapshotHash'):
+            invalid = processed_response(payload)
+            del invalid[key]
+            network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, invalid)])
+            with self.subTest(missing=key), self.assertRaisesRegex(sync.SyncError, 'PROCESSING_PROOF'):
+                sync.synchronize(payload, ORIGIN, ORG, 'synthetic-key', True, network)
+        legacy_proof = {key: value for key, value in processed_response(payload)['installation'].items()
+                        if key in ('state', 'firstIngestionVerified', 'documentId', 'sourceVersion', 'verifiedAt')}
+        for installation in (None, legacy_proof,
+                             {'state': 'PENDING_PROJECTION', 'firstIngestionVerified': False}):
+            pending = dict(response(payload), installation=installation)
+            network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}), (202, pending)])
+            receipt = sync.synchronize(payload, ORIGIN, ORG, 'synthetic-key', True, network)
+            self.assertTrue(receipt['cloudReceiptVerified'])
+            self.assertFalse(receipt['processing']['firstIngestionVerified'])
+
+    def test_ping_processing_flags_are_not_document_evidence(self):
+        payload = fixture()
+        ping = dict(ok=True, orgId=ORG, installation=processed_response(payload)['installation'])
+        network = Mock(side_effect=[(200, ping), (202, response(payload))])
+        receipt = sync.synchronize(payload, ORIGIN, ORG, 'synthetic-key', True, network)
+        self.assertFalse(receipt['processing']['firstIngestionVerified'])
 
     def test_invalid_origins_block_credentials(self):
         for origin in ('http://aurora.invalid', 'https://user:secret@aurora.invalid',
