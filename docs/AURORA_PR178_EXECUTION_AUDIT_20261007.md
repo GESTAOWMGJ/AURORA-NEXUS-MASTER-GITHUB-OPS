@@ -72,3 +72,10 @@ Commit candidato reversível: git revert do commit de auditoria. Sem migração,
 A branch #179 foi reconciliada novamente com a main bebb0a0b62baa47b2057dbf773c87b6ca8e7e3da. O merge local 40207871a10433f6fc04d5548f7a7ccf17fba29c tinha zero commits de atraso e sete arquivos no diff residual; as mudancas de portal, smoke e instaladores da main foram preservadas.
 
 No Xeon Windows, apos essa reconciliacao, passaram novamente os 14 testes Node do executor e 12 testes Python do transporte. Esses testes sinteticos continuam separados do aceite de handoff distribuido e efeitos persistidos. Os checks GitHub devem ser lidos no SHA final da branch, incluindo esta atualizacao documental.
+
+
+## 8. Reconciliação e verificação atual — 08/10/2026
+
+A candidata #179 foi reconciliada com main b99833414bf594f3d50922b6f10679dd8aa1ad41, incluindo #198, #199, #201 e os gates canônicos posteriores. O merge c4613f056b90ec81141464557819f8044c22b181 preserva o estado integrado; o diff residual continua restrito à execução local dos validadores e delimitação de evidência.
+
+No Windows Xeon físico, passaram novamente 14 testes Node com subprocessos e timeout e 18 testes Python do transporte atual. O coletor 1.0.1 já instalado em outro passo teve seus dois hashes conferidos e preservou 1.0.0/checkpoint. Esses são aceites distintos: o executor local não implementa nem comprova handoff cloud/Xeon. Nenhum efeito de ingestão real ou sessão produtiva é promovido por este patch. Checks completos devem concluir no SHA final antes de integrar.
