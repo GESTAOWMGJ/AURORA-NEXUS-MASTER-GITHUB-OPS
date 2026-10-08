@@ -3,7 +3,7 @@
  * Fonte única de planilha: getConfigWMGJ_().SPREADSHEET_ID em 00_CORE_WMGJ.gs.
  */
 
-var WMGJ_AUTOMACAO_APPSCRIPT_VERSAO = 'v1.0.9-robo-gmail-dashboard';
+var WMGJ_AUTOMACAO_APPSCRIPT_VERSAO = 'v1.1.0-canonical-document-first';
 var WMGJ_FUNCAO_AUTOMACAO_PRINCIPAL = 'executarAutomacaoOperacionalWMGJ';
 
 var WMGJ_GATILHOS_OPERACIONAIS_OBSOLETOS = {
@@ -13,15 +13,28 @@ var WMGJ_GATILHOS_OPERACIONAIS_OBSOLETOS = {
   jobRelatorioMensalWMGJ: true
 };
 
+// Reuse the existing document queue and shared writer lock. V3 memory alone is
+// not a cloud receipt and must not consume work before a required mirror.
+function processarFilaFonteCanonicaWMGJ_(limite) {
+  if (!Number.isSafeInteger(limite) || limite < 1 || limite > 20) throw new Error('AURORA_DOCUMENT_LIMIT_INVALID');
+  if (typeof comTravaIngestaoGmailWMGJ_ !== 'function') throw new Error('AURORA_DOCUMENT_LOCK_MISSING');
+  var required = String(PropertiesService.getScriptProperties().getProperty('AURORA_FIRESTORE_MIRROR_REQUIRED') || 'false').toLowerCase() === 'true';
+  return comTravaIngestaoGmailWMGJ_(function() {
+    if (required) {
+      if (typeof processarFilaComExtracaoRealWMGJ_V1 !== 'function') throw new Error('AURORA_DOCUMENT_EXTRACTOR_MISSING');
+      return processarFilaComExtracaoRealWMGJ_V1(limite);
+    }
+    if (typeof processarFilaWMGJ_V3 !== 'function') throw new Error('AURORA_DOCUMENT_V3_MISSING');
+    return processarFilaWMGJ_V3(limite);
+  });
+}
+
 function executarAutomacaoOperacionalWMGJ() {
   var inicio = new Date();
 
   try {
     if (typeof prepararPipelineConfiavelWMGJ_V3 !== 'function') {
       throw new Error('Função prepararPipelineConfiavelWMGJ_V3 não encontrada.');
-    }
-    if (typeof processarFilaWMGJ_V3 !== 'function') {
-      throw new Error('Função processarFilaWMGJ_V3 não encontrada.');
     }
 
     var resultado = {
@@ -31,7 +44,7 @@ function executarAutomacaoOperacionalWMGJ() {
       inicio: inicio.toISOString(),
       fim: null,
       preparo: prepararPipelineConfiavelWMGJ_V3(100),
-      processamento: processarFilaWMGJ_V3(20),
+      processamento: processarFilaFonteCanonicaWMGJ_(20),
       roboGmailDashboard: null
     };
 

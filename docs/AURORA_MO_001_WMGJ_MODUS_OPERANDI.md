@@ -77,8 +77,11 @@ armazenamento canônico. O registro nativo representa a capacidade como
 `aurora-coletor/aurora_deployment.py` retoma etapas usando um checkpoint local
 sanitizado no diretório da instalação existente. Credenciais nunca são gravadas.
 Destino ou conteúdo diferentes bloqueiam a retomada; timeout repete a mesma chave
-idempotente. Recibo já confirmado evita novo POST, mas exige novo ping autenticado
-e é apresentado como histórico local, não como leitura atual do Firestore.
+idempotente. Desde o componente 1.0.1, `--send` repete ping autenticado e POST
+com a mesma chave/payload mesmo após recibo cached, retomando a projeção existente.
+`--connect` permanece somente ping; recibo histórico não comprova uso atual.
+Primeira operação exige prova remota do mesmo documento/sistema/versão/hash e
+identidade imutável/revision. Projeção pending e prova ausente não são conclusão.
 
 O padrão abstrato serve a novos clientes sem transportar dados WMGJ. Provisionamento
 com MFA, IAM, publicação protegida, reconciliação real, empacotamento comercial e

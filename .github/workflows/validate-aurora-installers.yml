@@ -8,11 +8,10 @@ on:
       - 'aurora-coletor/tests/test_organic.py'
       - 'skills/aurora-nexus-organic/**'
       - 'AGENTS.md'
-      - 'firebase-migration/functions/src/auroraDownloads.ts'
-      - 'firebase-migration/functions/src/auroraAuthGate.ts'
-      - 'firebase-migration/functions/src/auroraIaMaster*.ts'
-      - 'firebase-migration/functions/src/auroraMasterEngine.ts'
-      - 'firebase-migration/functions/src/auroraNative*.ts'
+      - 'firebase-migration/functions/src/**'
+      - 'firebase-migration/functions/package*.json'
+      - 'firebase-migration/functions/tsconfig.json'
+      - 'firebase-migration/scripts/build-release-manifests.mjs'
       - 'docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md'
       - 'firebase-migration/functions/test/aurora-downloads.test.ts'
       - '.github/workflows/validate-aurora-installers.yml'
@@ -76,6 +75,25 @@ jobs:
         run: |
           set -euo pipefail
           node --experimental-strip-types --test firebase-migration/functions/test/aurora-downloads.test.ts 2>&1 | tee "${RUNNER_TEMP}/aurora-hml-installers/download-tests.txt"
+      - name: Verify source-bound server, web and satellite release manifests
+        run: |
+          set -euo pipefail
+          npm run build --prefix firebase-migration/functions
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, shutil
+          source = pathlib.Path(os.environ['RUNNER_TEMP']) / 'aurora-hml-installers'
+          destination = pathlib.Path('firebase-migration/functions/private-downloads')
+          manifest = json.loads((source / 'manifest.json').read_text())
+          destination.mkdir(parents=True, exist_ok=True)
+          for entry in manifest['files']:
+              name = entry['name']
+              assert pathlib.Path(name).name == name and pathlib.Path(name).suffix in ('.zip', '.exe')
+              data = (source / name).read_bytes()
+              assert len(data) == entry['size'] and hashlib.sha256(data).hexdigest() == entry['sha256']
+              shutil.copyfile(source / name, destination / name)
+          shutil.copyfile(source / 'manifest.json', destination / 'manifest.json')
+          PY
+          node firebase-migration/scripts/build-release-manifests.mjs
       - name: Capture exact source and toolchain for restricted review
         run: |
           set -euo pipefail

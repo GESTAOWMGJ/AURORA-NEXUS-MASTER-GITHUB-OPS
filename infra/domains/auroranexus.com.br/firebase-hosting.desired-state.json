@@ -15,15 +15,16 @@
     "failClosedWhenAccessListMissing": true,
     "canonicalPortalUrl": "https://auroranexus.com.br/portal",
     "singleUserFacingAccessPath": true,
-    "technicalFallbackUrl": "https://wmgj-hml-jfn-20260927.web.app/",
-    "distributeFallbackUrlToClients": false
+    "technicalFallbackUrl": null,
+    "distributeFallbackUrlToClients": false,
+    "technicalHostBehavior": "REDIRECT_TO_CANONICAL_DNS"
   },
   "firebase": {
     "currentFallbackProjectId": "wmgj-hml-jfn-20260927",
     "currentFallbackUrl": "https://wmgj-hml-jfn-20260927.web.app/",
     "productionProjectId": "wmgj-prod-jfn-20261005",
     "hostingConfigurationInFirebaseJson": "firebase-migration/firebase.json",
-    "customDomainStatus": "DOMAIN_APEX_ONLINE_BUT_PORTAL_BACKEND_INTERCONNECTION_PENDING",
+    "customDomainStatus": "CANONICAL_DNS_ONLINE_AND_BACKED_BY_HML_AUTH_GATE",
     "productionProvisioningStatus": "READY_FOR_PROVISIONING",
     "productionGuardrails": {
       "deploymentStage": "COLD_PRODUCTION",
@@ -42,7 +43,8 @@
         "reason": "Firestore team could not associate the candidate with an existing GCP project; CMEK access was not granted.",
         "operationalUseAllowed": false
       }
-    ]
+    ],
+    "currentFallbackBehavior": "INFRASTRUCTURE_ONLY_REDIRECTS_USER_TRAFFIC"
   },
   "domains": [
     {
@@ -50,28 +52,28 @@
       "role": "private-product-entry",
       "target": "Canonical user-facing portal /portal; must route to the same auth gate as Firebase HML",
       "initialTraffic": "LOGIN_REQUIRED_NO_PUBLIC_DEMO",
-      "status": "APEX_ONLINE_INTERCONNECTION_REQUIRED"
+      "status": "ONLINE_CANONICAL_PRIVATE_PORTAL"
     },
     {
       "name": "www.auroranexus.com.br",
       "role": "redirect-or-private-entry-equivalent",
       "target": "Redirect to https://auroranexus.com.br/portal",
       "initialTraffic": "LOGIN_REQUIRED_NO_PUBLIC_DEMO",
-      "status": "REDIRECT_TO_CANONICAL_REQUIRED"
+      "status": "NOT_FUNCTIONAL_CANONICAL_REDIRECT_REQUIRED"
     },
     {
       "name": "app.auroranexus.com.br",
       "role": "authenticated-application",
       "target": "Redirect or provider-level alias to https://auroranexus.com.br/portal; no independent login surface",
       "initialTraffic": "LOGIN_REQUIRED_NO_PUBLIC_DEMO",
-      "status": "DISABLE_AS_SEPARATE_ENTRY_REQUIRED"
+      "status": "DISABLED_AS_SEPARATE_ENTRY"
     },
     {
       "name": "wmgj.auroranexus.com.br",
       "role": "pilot-tenant-wmgj",
       "target": "Redirect or tenant hint to https://auroranexus.com.br/portal; no independent login surface",
       "initialTraffic": "LOGIN_REQUIRED_WMGJ_PILOT_ONLY",
-      "status": "DISABLE_AS_SEPARATE_ENTRY_REQUIRED"
+      "status": "DISABLED_AS_SEPARATE_ENTRY"
     },
     {
       "name": "api.auroranexus.com.br",
@@ -114,29 +116,29 @@
     }
   ],
   "deploymentGates": {
-    "domainOwnershipConfirmed": false,
-    "customDomainsAddedInProviderConsole": false,
-    "dnsVerificationPublished": false,
-    "sslIssued": false,
+    "domainOwnershipConfirmed": true,
+    "customDomainsAddedInProviderConsole": true,
+    "dnsVerificationPublished": true,
+    "sslIssued": true,
     "firebaseAuthUsersCreated": false,
     "allowedEmailsSecretConfigured": false,
     "publicLandingDisabled": true,
     "publicDemoDisabled": true,
     "loginFirstEnforcedInFirebaseJson": true,
     "authSmokeTestPassed": false,
-    "unauthenticatedSmokeTestShowsOnlyLogin": false,
+    "unauthenticatedSmokeTestShowsOnlyLogin": true,
     "tenantIsolationSmokeTestPassed": false,
     "appCheckOrEquivalentPassed": false,
     "auditLogsValidated": false,
     "rollbackDocumented": true,
     "fallbackPreserved": true,
-    "singleUserFacingPortalEnforced": false,
+    "singleUserFacingPortalEnforced": true,
     "firebaseFallbackHiddenFromClientLinks": true,
-    "customPortalBackedByHmlAuthGate": false
+    "customPortalBackedByHmlAuthGate": true
   },
   "rollback": {
     "preserveFallbackUrl": "https://wmgj-hml-jfn-20260927.web.app/",
-    "doNotRemovePreviousHostingUntil": "canonical-portal-auth-smoke-test-passes",
-    "rollbackAction": "remove DNS records for custom domains or point users back to fallback URL"
+    "doNotRemovePreviousHostingUntil": "technical-host-redirect-to-canonical-verified",
+    "rollbackAction": "remove canonical redirect patch or point DNS back to last validated hosting provider"
   }
 }

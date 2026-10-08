@@ -19,7 +19,7 @@ import tempfile
 
 import aurora_cloud_sync as sync
 
-VERSION = '1.0.0'
+VERSION = '1.0.1'
 SCHEMA = 'aurora.install.integration.v1'
 STATE_NAME = 'integration-setup.json'
 ASSETS = ('aurora_cloud_sync.py', 'aurora_deployment.py')
@@ -89,7 +89,7 @@ def next_action(code):
         return 'VERIFY_PROTECTED_DEPLOY_AND_INTEGRATION_ROUTES'
     if code.startswith('RETRYABLE_'):
         return 'RETRY_SAME_SAMPLE_AFTER_CONNECTION_RECOVERY'
-    if code in ('CLOUD_RECEIPT_MISMATCH', 'AUTHENTICATED_ORGANIZATION_MISMATCH'):
+    if code in ('CLOUD_RECEIPT_MISMATCH', 'CLOUD_PROCESSING_PROOF_MISMATCH', 'AUTHENTICATED_ORGANIZATION_MISMATCH'):
         return 'RECONCILE_DESTINATION_AND_SERVER_RECEIPT'
     return 'REVIEW_BLOCKER_WITH_ADMINISTRATOR'
 
@@ -116,6 +116,14 @@ def run(raw, origin, org, state_dir, token=None, connect=False, send=False,
                             cloudReceiptVerified=True)
             if old_receipt != expected or expected['status'] not in ('ACCEPTED', 'DUPLICATE'):
                 raise sync.SyncError('CHECKPOINT_RECEIPT_CONFLICT')
+        old_processing = previous.get('processingProof') if previous else None
+        if old_processing is not None:
+            try:
+                proof = sync.processing_proof(sync.validate_payload(raw), org, old_processing)
+            except sync.SyncError:
+                raise sync.SyncError('CHECKPOINT_RECEIPT_CONFLICT') from None
+            if old_receipt is None or proof != old_processing:
+                raise sync.SyncError('CHECKPOINT_RECEIPT_CONFLICT')
         result = {
             'schemaVersion': SCHEMA, 'componentVersion': VERSION,
             'targetBinding': binding, 'sampleKey': preview['idempotencyKey'],
@@ -123,6 +131,7 @@ def run(raw, origin, org, state_dir, token=None, connect=False, send=False,
             'updatedAt': datetime.now(timezone.utc).isoformat(),
             'status': 'LOCAL_VALIDATED', 'nextAction': 'VERIFY_AUTHENTICATED_CONNECTION',
             'connectionVerified': False, 'receiptVerifiedThisRun': False,
+            'processingVerifiedThisRun': False, 'processingProof': old_processing,
             'previousReceiptCached': old_receipt is not None,
             'receipt': old_receipt, 'fullSynchronizationVerified': False,
             'productionReleased': False,
@@ -130,10 +139,17 @@ def run(raw, origin, org, state_dir, token=None, connect=False, send=False,
         # Never trust cached credentials/connections after a restart or rotation.
         if connect or send:
             try:
-                if send and old_receipt is None:
+                if send:
+                    # Replay the same canonical payload/key so the existing server can resume projection.
                     receipt = sync.synchronize(raw, origin, org, token, True, transport)
+                    proof = receipt.pop('processing')
                     result.update(connectionVerified=True, receiptVerifiedThisRun=True, receipt=receipt,
-                                  status='SAMPLE_RECEIPT_VERIFIED', nextAction='RECONCILE_SAMPLE_IN_CANONICAL_STORAGE')
+                                  processingProof=proof, processingVerifiedThisRun=proof['firstIngestionVerified'],
+                                  status='SAMPLE_RECEIPT_VERIFIED',
+                                  nextAction=('RETRY_SAME_SAMPLE_FOR_CANONICAL_PROCESSING'
+                                              if not proof['firstIngestionVerified'] else
+                                              'VERIFY_CONTINUITY_WITH_SUBSEQUENT_EVENTS'
+                                              if proof['operationalComplete'] else 'COMPLETE_AUTHENTICATED_SETUP'))
                 else:
                     sync.connect(origin, org, token, transport)
                     result.update(connectionVerified=True, status='CONNECTION_VERIFIED',
@@ -191,7 +207,7 @@ def main(argv=None):
     parser.add_argument('--state-dir', required=True, help='Existing private installation state directory')
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--connect', action='store_true', help='Authenticated ping only; no document POST')
-    mode.add_argument('--send', action='store_true', help='Explicitly send the authorized sample once')
+    mode.add_argument('--send', action='store_true', help='Send or replay the same explicitly authorized sample once')
     args = parser.parse_args(argv)
     try:
         result = run(read_json(args.input), args.origin, args.org, args.state_dir,

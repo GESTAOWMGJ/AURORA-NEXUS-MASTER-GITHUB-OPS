@@ -37,7 +37,7 @@ function fixture() {
     updateUser: async (uid,data) => { await call('updateUser',{uid,...data}); Object.assign(users.get(uid),data); },
     revokeRefreshTokens: async uid => { await call('revokeTokens',uid); }
   };
-  return { rows,users,calls,failures,engine:createProfileEngine(store,auth,()=>time), advance:()=>{time+=181_000;}, hook:(fn:typeof hook)=>{hook=fn;} };
+  return { rows,users,calls,failures,engine:createProfileEngine(store,auth,()=>time), advance:(ms=181_000)=>{time+=ms;}, hook:(fn:typeof hook)=>{hook=fn;} };
 }
 
 test('provisions within one company, with no password or automatic message; repeats do not duplicate',async()=>{
@@ -140,4 +140,127 @@ test('signed managed profile alone cannot bypass email verification, MFA, state,
   const member=f.rows.get(memberPath); assert.equal(managedProfileMatches(decoded,member,actor.orgId),true);
   for(const patch of [{email_verified:false},{firebase:{}},{auroraOrgId:'other-company'},{auroraProfileVersion:undefined},{auroraProfileOperation:'forged'},{email:'other@example.invalid'}]) assert.equal(managedProfileMatches({...decoded,...patch},member,actor.orgId),false);
   for(const patch of [{active:false},{profileState:'PENDING'},{profileState:'REVOKED'},{profileOperationId:'forged'}]) assert.equal(managedProfileMatches(decoded,{...member,...patch},actor.orgId),false);
+});
+
+const onboarding = { jobTitle:'Faturista', duties:['Conferir contas','Organizar prazos'], managerUid:actor.uid, welcomeDueHours:24 };
+const welcomedRequest = {...request,onboarding};
+const welcomedIdentity = profileIdentity(actor,normalizeProfileRequest(welcomedRequest));
+const welcomedMember = `${base}/members/${welcomedIdentity.uid}`;
+const welcomedOp = `${base}/apiIdempotency/${welcomedIdentity.operationId}`;
+const welcomeId = `welcome-${welcomedIdentity.operationId.slice(8)}`;
+const welcomeAction = `${base}/actionItems/${welcomeId}`;
+const welcomeInput = `${base}/managerInputs/${welcomeId}`;
+
+test('optional onboarding uses a closed bounded schema and canonical duties',()=>{
+  const normalized=normalizeProfileRequest({...request,onboarding:{...onboarding,jobTitle:'  Faturista  ',duties:['Organizar   prazos',' Conferir contas ']}});
+  assert.deepEqual(normalized.onboarding,onboarding);
+  assert.equal(profileIdentity(actor,normalized).fingerprint,welcomedIdentity.fingerprint);
+  for(const change of [null,[],{}, {...onboarding,role:'org_admin'}, {...onboarding,jobTitle:''}, {...onboarding,jobTitle:'<admin>'},
+    {...onboarding,jobTitle:'x'.repeat(81)}, {...onboarding,duties:[]}, {...onboarding,duties:['Conferir contas',' Conferir contas ']},
+    {...onboarding,duties:['x'.repeat(161)]}, {...onboarding,duties:Array.from({length:21},(_,i)=>`Atribuição ${i}`)},
+    {...onboarding,managerUid:'../other'}, {...onboarding,managerUid:''}, {...onboarding,welcomeDueHours:0},
+    {...onboarding,welcomeDueHours:721}, {...onboarding,welcomeDueHours:1.5}, {...onboarding,welcomeDueHours:'24'}]) {
+    assert.throws(()=>normalizeProfileRequest({...request,onboarding:change}),rejects('INVALID_ONBOARDING'));
+  }
+});
+
+test('legacy CREATE keeps its claims, response and collections unchanged',async()=>{
+  const f=fixture();const result=await f.engine.create(actor,request);
+  assert.equal('onboardingRequired' in result,false);assert.equal('onboarding' in f.rows.get(memberPath),false);
+  assert.equal('auroraOnboardingRequired' in f.users.get(identity.uid).customClaims,false);
+  assert.equal([...f.rows.keys()].some(path=>/\/(actionItems|managerInputs)\//.test(path)),false);
+});
+
+test('onboarding is INVITED from first PENDING membership, keeps explicit role and binds welcome SLA to manager',async()=>{
+  const f=fixture();let checked=0;
+  f.hook(async(method,data)=>{if(method==='createUser'||(method==='updateUser'&&!data.disabled)) {
+    const member=f.rows.get(welcomedMember);assert.equal(member.active,false);assert.equal(member.profileState,'PENDING');
+    assert.equal(member.onboardingRequired,true);assert.equal(member.onboardingState,'INVITED');checked++;
+  }});
+  const result=await f.engine.create(actor,welcomedRequest);
+  assert.equal(checked,2);assert.equal(result.onboardingState,'INVITED');assert.equal(result.activationState,'INVITATION_EMAIL_AND_MFA_REQUIRED');
+  assert.equal(f.rows.get(welcomedMember).active,true);assert.equal(f.rows.get(welcomedMember).role,'viewer');
+  assert.deepEqual(f.rows.get(welcomedMember).permissions,[]);assert.deepEqual(f.rows.get(welcomedMember).onboarding,onboarding);
+  assert.equal(f.users.get(welcomedIdentity.uid).customClaims.auroraOnboardingRequired,true);
+  const action=f.rows.get(welcomeAction);const input=f.rows.get(welcomeInput);
+  assert.equal(action.targetType,'managementInput');assert.equal(action.targetId,welcomeId);assert.equal(action.assignedToUid,actor.uid);
+  assert.equal(action.subjectUid,welcomedIdentity.uid);assert.equal(action.profileOperationId,welcomedIdentity.operationId);
+  assert.equal(action.status,'OPEN');assert.equal(action.revision,1);assert.equal(input.state,'OPEN');
+  assert.equal(Date.parse(action.dueAt)-Date.parse(f.rows.get(welcomedOp).createdAtUtc),24*3_600_000);
+  assert.equal(action.competence,f.rows.get(welcomedOp).createdAtUtc.slice(0,7));assert.equal(result.welcomeActionId,welcomeId);
+  assert.equal([...f.rows.keys()].filter(path=>path.includes('/auditEvents/')).length,1);
+});
+
+test('job title and duties never confer administrative privileges',async()=>{
+  const f=fixture();const changed={...request,onboarding:{...onboarding,jobTitle:'Master org_admin',duties:['Todos os acessos administrativos']}};
+  const id=profileIdentity(actor,normalizeProfileRequest(changed));await f.engine.create(actor,changed);
+  assert.equal(f.rows.get(`${base}/members/${id.uid}`).role,'viewer');assert.deepEqual(f.rows.get(`${base}/members/${id.uid}`).permissions,[]);
+  assert.equal('role' in f.users.get(id.uid).customClaims,false);
+});
+
+for(const scenario of ['missing','inactive','other organization','invited']) test(`manager ${scenario} rejects before Auth changes`,async()=>{
+  const f=fixture();const managerUid='legacy-manager-uid';const changed={...request,onboarding:{...onboarding,managerUid}};
+  if(scenario==='inactive') f.rows.set(`${base}/members/${managerUid}`,{active:false});
+  if(scenario==='other organization') f.rows.set(`organizations/other-company/members/${managerUid}`,{active:true});
+  if(scenario==='invited') f.rows.set(`${base}/members/${managerUid}`,{active:true,onboardingRequired:true,onboardingState:'INVITED'});
+  await assert.rejects(f.engine.create(actor,changed),rejects('PROFILE_MANAGER_NOT_ACTIVE'));assert.equal(f.calls.length,0);
+  assert.equal([...f.rows.keys()].some(path=>path.includes('/apiIdempotency/')||path.includes('/actionItems/')),false);
+});
+
+test('a live legacy manager UID is supported without assigning the manager role to the employee',async()=>{
+  const f=fixture();const managerUid='legacy-manager-uid';f.rows.set(`${base}/members/${managerUid}`,{active:true,role:'operator'});
+  const result=await f.engine.create(actor,{...request,onboarding:{...onboarding,managerUid}});
+  assert.equal(f.rows.get(`${base}/members/${result.uid}`).role,'viewer');
+  assert.equal(f.rows.get(`${base}/actionItems/${result.welcomeActionId}`).assignedToUid,managerUid);
+});
+
+test('welcome deadline and completed enrollment survive delayed CREATE replay without duplicate writes',async()=>{
+  const f=fixture();await f.engine.create(actor,welcomedRequest);
+  const dueAt=f.rows.get(welcomeAction).dueAt;const writes=f.calls.filter(call=>call.method!=='getUser').length;
+  Object.assign(f.rows.get(welcomeAction),{status:'RESOLVED',revision:3});f.rows.get(welcomedMember).onboardingState='COMPLETE';
+  f.advance(48*3_600_000);const result=await f.engine.create(actor,welcomedRequest);
+  assert.equal(result.idempotent,true);assert.equal(result.onboardingState,'COMPLETE');assert.equal(f.rows.get(welcomeAction).status,'RESOLVED');
+  assert.equal(f.rows.get(welcomeAction).revision,3);assert.equal(f.rows.get(welcomeAction).dueAt,dueAt);
+  assert.equal(f.calls.filter(call=>call.method!=='getUser').length,writes);
+  assert.equal([...f.rows.keys()].filter(path=>path.includes('/actionItems/')).length,1);
+});
+
+test('interrupted onboarding resumes INVITED with SLA measured from original request',async()=>{
+  const f=fixture();f.failures.set('claims',1);
+  await assert.rejects(f.engine.create(actor,welcomedRequest),rejects('PROFILE_PROVISIONING_INTERRUPTED'));
+  assert.equal(f.rows.get(welcomedMember).active,false);assert.equal(f.rows.get(welcomedMember).onboardingState,'INVITED');
+  assert.equal(f.rows.has(welcomeAction),false);const createdAt=f.rows.get(welcomedOp).createdAtUtc;f.advance(3*3_600_000);
+  await f.engine.create(actor,welcomedRequest);assert.equal(Date.parse(f.rows.get(welcomeAction).dueAt)-Date.parse(createdAt),24*3_600_000);
+  assert.equal(f.calls.filter(call=>call.method==='createUser').length,1);
+});
+
+test('manager revocation during Auth call leaves onboarding inactive without welcome task',async()=>{
+  const f=fixture();const managerUid='legacy-manager-uid';f.rows.set(`${base}/members/${managerUid}`,{active:true});
+  const changed={...request,onboarding:{...onboarding,managerUid}};const id=profileIdentity(actor,normalizeProfileRequest(changed));
+  f.hook(async(method,data)=>{if(method==='updateUser'&&!data.disabled) f.rows.get(`${base}/members/${managerUid}`).active=false;});
+  await assert.rejects(f.engine.create(actor,changed),rejects('PROFILE_MANAGER_NOT_ACTIVE'));
+  assert.equal(f.rows.get(`${base}/members/${id.uid}`).active,false);assert.equal(f.rows.get(`${base}/members/${id.uid}`).onboardingState,'INVITED');
+  assert.equal([...f.rows.keys()].some(path=>path.includes('/actionItems/')||path.includes('/auditEvents/')),false);
+});
+
+test('onboarding payload change, altered metadata or claim, and missing welcome task require review',async()=>{
+  const f=fixture();await f.engine.create(actor,welcomedRequest);
+  await assert.rejects(f.engine.create(actor,{...request,onboarding:{...onboarding,welcomeDueHours:48}}),rejects('PROFILE_REQUEST_CONFLICT'));
+  f.rows.get(welcomedMember).onboarding.jobTitle='Secretário';await assert.rejects(f.engine.create(actor,welcomedRequest),rejects('PROFILE_REQUIRES_REVIEW'));
+  f.rows.get(welcomedMember).onboarding.jobTitle=onboarding.jobTitle;delete f.users.get(welcomedIdentity.uid).customClaims.auroraOnboardingRequired;
+  await assert.rejects(f.engine.create(actor,welcomedRequest),rejects('PROFILE_REQUIRES_REVIEW'));
+  f.users.get(welcomedIdentity.uid).customClaims.auroraOnboardingRequired=true;f.rows.delete(welcomeAction);
+  await assert.rejects(f.engine.create(actor,welcomedRequest),rejects('PROFILE_WELCOME_TASK_CONFLICT'));
+});
+
+test('welcome identity collision is rejected rather than overwritten or repaired',async()=>{
+  const f=fixture();f.rows.set(welcomeAction,{orgId:'other-company',status:'OPEN',revision:1});
+  await assert.rejects(f.engine.create(actor,welcomedRequest),rejects('PROFILE_WELCOME_TASK_CONFLICT'));
+  assert.equal(f.rows.get(welcomeAction).orgId,'other-company');assert.equal(f.calls.length,0);assert.equal(f.rows.has(welcomedMember),false);
+});
+
+test('onboarding revocation remains closed on replay and retains welcome evidence',async()=>{
+  const f=fixture();await f.engine.create(actor,welcomedRequest);await f.engine.revoke(actor,welcomedIdentity.uid);
+  assert.equal(f.rows.get(welcomedMember).onboardingState,'REVOKED');assert.equal(f.rows.get(welcomedMember).active,false);
+  assert.equal(f.rows.has(welcomeAction),true);await assert.rejects(f.engine.create(actor,welcomedRequest),rejects('PROFILE_REVOKED'));
 });

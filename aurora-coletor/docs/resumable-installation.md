@@ -1,10 +1,12 @@
-# Instalação canônica retomável — componente 1.0.0
+# Instalação canônica retomável — componente 1.0.1
 
 Baseline: `68ee776b5ce24520f8412448774efa468ab1ca35`. Produto permanece na
 linhagem atual; versão deste componente não altera a versão registral.
 
 Os instaladores Python do coletor e do cliente Windows incluem o transporte
-aprovado e `aurora_deployment.py` em `integration/1.0.0`, com manifesto SHA-256.
+aprovado e `aurora_deployment.py` em `integration/1.0.1`, com manifesto SHA-256.
+O patch de retomada deriva da main `d5f502eaeb89d66c50024ecb4240ed021e76b676`;
+o componente anterior e o schema de checkpoint v1 permanecem compatíveis.
 O checkpoint fica em `integration/state/integration-setup.json`. Não há banco,
 serviço, scheduler, varredura de documentos, alteração de IAM ou segredo novo.
 O builder de executáveis Go e o aplicativo Mac original ainda não incorporam
@@ -38,11 +40,22 @@ em argumento, arquivo de amostra, checkpoint, comentário ou log.
   transporte ou recibo. O instalador não tenta corrigir IAM sozinho.
 - Timeout sem recibo preserva a chave idempotente; após retomada, recibo remoto
   `DUPLICATE` confirma que o servidor já havia aceitado a operação.
-- Com recibo prévio, um novo ping é obrigatório, e nenhum novo POST é feito.
-  `PREVIOUS_RECEIPT_CACHED` não comprova existência atual no banco; por isso
-  `receiptVerifiedThisRun=false`. A reconciliação server-side permanece pendente.
-- `SAMPLE_RECEIPT_VERIFIED` comprova somente o recibo da amostra enviada nesta
-  execução. `fullSynchronizationVerified` e `productionReleased` permanecem false.
+- `--send` sempre revalida o tenant por ping e repete o POST do mesmo payload
+  normalizado e chave, inclusive com recibo cached. Isso permite ao pipeline
+  existente retomar uma projeção pendente sem duplicar a ingestão.
+- `--connect` continua somente ping. `PREVIOUS_RECEIPT_CACHED` e proof histórico
+  não comprovam processamento atual; `receiptVerifiedThisRun` e
+  `processingVerifiedThisRun` permanecem false nessa execução.
+- `SAMPLE_RECEIPT_VERIFIED` comprova o recibo atual. A conclusão da primeira
+  operação exige proof do POST para o mesmo documento, sistema, sourceVersion,
+  hash canônico e versão imutável/revision; o ping não fornece essa prova.
+  Proof válido com `operationalComplete=false` confirma a primeira ingestão e
+  preserva recibo/campos de versão; exige `COMPLETE_AUTHENTICATED_SETUP` no fluxo
+  autenticado existente. Só `operationalComplete=true` libera a próxima ação de
+  verificar continuidade, sem declarar sincronização completa. Resposta antiga
+  ou projeção pendente mantém processamento pendente. Proof divergente bloqueia
+  e preserva o recibo anterior. `fullSynchronizationVerified`
+  e `productionReleased` permanecem false mesmo com primeira ingestão confirmada.
 - Mudança de destino/amostra, arquivo adulterado, schema incompatível, link ou
   lock concorrente bloqueia e preserva o estado. Lock após encerramento abrupto
   requer verificar ausência de processo em andamento e revisão local; não é
@@ -53,8 +66,11 @@ em argumento, arquivo de amostra, checkpoint, comentário ou log.
 ## Rollback e limites
 
 O preparo é idempotente quando hashes coincidem. Conteúdo diferente na mesma
-versão é conflito: não sobrescrever. Suspender invocações restaura o comportamento
-anterior, preservando checkpoint e fontes. Não remover dados do gateway.
+versão é conflito: não sobrescrever. A versão 1.0.1 preserva `integration/1.0.0`
+e guarda a prova de processamento separada do recibo v1, permitindo retornar ao
+componente anterior sem alterar a identidade da amostra. Suspender invocações ou
+selecionar o componente anterior preserva checkpoint e fontes; não remove dados
+do gateway. O rollback não confirma processamento pendente.
 
 O Release Cockpit e o registro nativo apresentam a capacidade como implementada,
 aguardando validação real. Testes cobrem Linux/Windows no CI; execução nesta
