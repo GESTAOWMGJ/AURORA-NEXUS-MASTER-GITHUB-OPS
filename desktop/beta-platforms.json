@@ -28,14 +28,16 @@
     "deployedFrontendSha": "bebb0a0b62baa47b2057dbf773c87b6ca8e7e3da",
     "deploymentEvidence": "https://github.com/GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS/actions/runs/37711572514",
     "canonicalPortal": "https://auroranexus.com.br/portal",
-    "technicalFallbackUrl": "https://wmgj-hml-jfn-20260927.web.app/",
-    "singleAccessPath": true
+    "technicalFallbackUrl": null,
+    "singleAccessPath": true,
+    "technicalHostBehavior": "REDIRECT_TO_CANONICAL_DNS"
   },
   "fullLocalCloudSync": "BLOCKED_INTEGRATION_RUNTIME_AND_DEVICE_AUTH",
   "productionReleased": false,
   "singleAccessPolicy": {
     "userFacingEntry": "https://auroranexus.com.br/portal",
     "fallbackUrlIsInfrastructureOnly": true,
-    "hideFirebaseWebAppFromClientLinks": true
+    "hideFirebaseWebAppFromClientLinks": true,
+    "technicalHostsRedirectToCanonical": true
   }
 }
