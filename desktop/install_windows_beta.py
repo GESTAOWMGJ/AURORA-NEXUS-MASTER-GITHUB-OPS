@@ -29,6 +29,7 @@ from aurora_deployment import install_assets as install_integration_assets, read
 VERSION = "0.2.0-beta.4"
 BASE = "https://auroranexus.com.br/portal"
 TECHNICAL_SMOKE_BASE = BASE
+LEGACY_TECHNICAL_PORTAL = "https://wmgj-hml-jfn-20260927.web.app"
 SOURCE_SHA = "203670bc562bbb48694b08e55af363a07d90a8f5"
 AUTH_PROJECT = "wmgj-hml-jfn-20260927"
 MAX_BYTES = 262144
@@ -228,20 +229,29 @@ def current_script_hashes():
     return {fingerprint(value), fingerprint(value.replace(b"\n", b"\r\n"))}
 
 
+def current_identity_matches(previous, expected):
+    for key, value in expected.items():
+        if key == "technicalSmokeBase" and previous.get(key) == LEGACY_TECHNICAL_PORTAL:
+            continue
+        if previous.get(key) != value:
+            return False
+    return True
+
+
 def known_identity(previous, expected):
     if not isinstance(previous, dict) or previous.get("offlineBusinessApp") is not False:
         raise ValueError("INSTALLATION_IDENTITY_CONFLICT")
     for key in ("gatewayDatabaseChanged", "cloudDeploymentPerformed", "productionReleased", "macUpdated", "iosNativeAppBuilt"):
         if previous.get(key) is not False:
             raise ValueError("INSTALLATION_IDENTITY_CONFLICT")
-    legacy = {"clientVersion": VERSION, "portal": TECHNICAL_SMOKE_BASE,
+    legacy = {"clientVersion": VERSION, "portal": LEGACY_TECHNICAL_PORTAL,
               "frontendPolicy": "PRESERVE_DEPLOYED_MAIN", "reviewedMainSha": LEGACY_SOURCE_SHA,
               "environment": "HML", "offlineBusinessApp": False}
     if (all(previous.get(key) == value for key, value in legacy.items())
             and "technicalSmokeBase" not in previous
             and previous.get("sourceScriptSha256") in LEGACY_SCRIPT_HASHES):
         return "LEGACY_APPROVED_BETA4"
-    if (all(previous.get(key) == value for key, value in expected.items())
+    if (current_identity_matches(previous, expected)
             and previous.get("sourceScriptSha256") in CANONICAL_SCRIPT_HASHES | current_script_hashes()):
         return "CURRENT_BETA4"
     raise ValueError("INSTALLATION_IDENTITY_CONFLICT")
