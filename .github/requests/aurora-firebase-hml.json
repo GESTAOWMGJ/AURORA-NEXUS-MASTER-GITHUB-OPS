@@ -3,10 +3,10 @@
   "confirmation": "DEPLOY_HOMOLOGATION",
   "projectId": "wmgj-hml-jfn-20260927",
   "authorizedScope": "PR115_HML_AUTH_CONTRACT_FIX",
-  "expectedSourceSha": "cce30d2b8f5c87a0fe2664426df5e0c550ba1400",
+  "expectedSourceSha": "d5e0038ccd513ad95d2a13e5aefe4d53d1b17203",
   "sourceMutation": false,
   "productionMutation": false,
   "clinicalSensitiveEnabled": false,
   "requestedAt": "2026-10-07",
-  "requestReason": "OWNER_AUTHORIZED_HML_AUTH_MESSAGES_AFTER_PR180"
+  "requestReason": "OWNER_AUTHORIZED_HML_AUTH_MESSAGES_AFTER_PR180_SHADOW_UPDATE"
 }
