@@ -99,6 +99,32 @@ class WorkflowStructureTests(unittest.TestCase):
         with self.assertRaises(yaml.constructor.ConstructorError):
             yaml.load("jobs:\n  smoke: {}\n  smoke: {}\n", Loader=UniqueKeyLoader)
 
+    def test_canonical_preflight_precedes_cloud_auth_and_smokes_keep_canonical_origin(self):
+        gate = "Require canonical HTTPS and HML routing before cloud authentication"
+        for filename, (job_id, name) in TARGETS.items():
+            workflow = load_workflow(WORKFLOWS / filename)
+            steps = workflow["jobs"][job_id]["steps"]
+            gates = [index for index, step in enumerate(steps) if step.get("name") == gate]
+            self.assertEqual(len(gates), 1)
+            auth = next(index for index, step in enumerate(steps)
+                        if step.get("uses", "").startswith("google-github-actions/auth@"))
+            self.assertLess(gates[0], auth)
+            self.assertIn('node firebase-migration/scripts/check-canonical-preflight.mjs "$PROJECT_ID"',
+                          steps[gates[0]]["run"])
+            smoke = next(step["run"] for step in steps if step.get("name") == name)
+            self.assertIn('="https://auroranexus.com.br"', smoke)
+            self.assertNotIn('.web.app', smoke)
+            self.assertNotIn('--location', smoke)
+            self.assertNotRegex(smoke, r'curl[^\n]*\s-L\b')
+        deploy = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")["jobs"]["deploy"]["steps"]
+        negative = next(step["run"] for step in deploy if step.get("name") == "Smoke test private shell and deployed functions")
+        self.assertNotIn('.web.app', negative)
+        self.assertIn('"${base_url}/portal"', negative)
+        self.assertIn('-H "Origin: ${base_url}"', negative)
+        user_profiles = next(step["run"] for step in deploy if step.get("name") == "Verify user profile API rejects anonymous access")
+        self.assertIn('-H "Origin: ${base_url}"', user_profiles)
+        self.assertNotIn('.web.app', user_profiles)
+
     def test_critical_deploy_steps_are_unique_and_gates_remain(self):
         workflow = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")
         self.assertEqual(set(workflow["on"]), {"workflow_dispatch"})
