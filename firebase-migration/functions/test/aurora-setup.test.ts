@@ -24,7 +24,7 @@ test('setup is a reserved application route, never a tenant selector',()=>{asser
 test('wizard starts readback automatically and only completes for a fresh tenant proof',async()=>{
  const html=setupPage({orgId:'synthetic',mfaVerified:true});
  assert.ok(html.includes('id="complete" type="button" disabled'));
- const script=html.match(/<script>([\s\S]*?)<\/script>/)![1];
+ const script=html.match(/<script>([\s\S]*?)<\/script>/i)![1];
  const run=async(data:any,status=200)=>{
   const nodes:any=Object.fromEntries(['check','connection','complete','ingestion'].map(id=>[id,{disabled:true,textContent:'',addEventListener(){}}]));
   let fetches=0;
