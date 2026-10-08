@@ -5,11 +5,12 @@ import {test} from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {
   CANONICAL_ORIGIN, MAX_RESPONSE_BYTES, CanonicalPreflightError,
-  checkCanonicalPreflight, hasUsableLoginForm, requestCanonical,
+  checkCanonicalPreflight, hasCanonicalPortalShell, hasUsableLoginForm, requestCanonical,
 } from '../../firebase-migration/scripts/check-canonical-preflight.mjs';
 
 const project = 'wmgj-hml-jfn-20260927';
 const form = '<form id="login-form"><input name="email" type="email"><input name="password" type="password"><button id="submit" type="submit">Entrar</button></form>';
+const nextPortal = '<!DOCTYPE html><html lang="pt-BR"><head><link rel="stylesheet" href="/_next/static/css/app.css"></head><body><main id="aurora-root"></main><script src="/_next/static/chunks/app.js"></script></body></html>';
 const htmlHeaders = {'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, no-store',
   'x-frame-options': 'DENY', 'x-content-type-options': 'nosniff'};
 const json = (status, value) => ({status, headers: {'content-type': 'application/json'}, body: JSON.stringify(value)});
@@ -17,7 +18,7 @@ const json = (status, value) => ({status, headers: {'content-type': 'application
 function fixture(overrides = {}, resolveHost = async () => [{address: '192.0.2.1', family: 4}]) {
   const calls = [];
   const responses = {
-    '/portal': {status: 200, headers: htmlHeaders, body: form},
+    '/portal': {status: 200, headers: htmlHeaders, body: nextPortal},
     '/api/bootstrap': json(401, {ok: false, code: 'AUTH_REQUIRED'}),
     '/__/firebase/init.json': json(200, {projectId: project, apiKey: 'SYNTHETIC_CONFIG_MARKER'}),
     ...overrides,
@@ -32,15 +33,24 @@ function fixture(overrides = {}, resolveHost = async () => [{address: '192.0.2.1
   };
 }
 
-test('canonical portal, anonymous denial and Firebase project must all agree', async () => {
+test('canonical portal shell, anonymous denial and Firebase project must all agree', async () => {
   const f = fixture();
   const proof = await checkCanonicalPreflight(project, f.options);
   assert.equal(proof.code, 'CANONICAL_ROUTE_READY');
   assert.equal(proof.origin, CANONICAL_ORIGIN);
   assert.equal(proof.expectedProject, project);
   assert.equal(proof.authenticated, false);
+  assert.equal(proof.portalShellVerified, true);
   assert.deepEqual(f.calls, ['/portal', '/api/bootstrap', '/__/firebase/init.json']);
   assert.equal(JSON.stringify(proof).includes('SYNTHETIC_CONFIG_MARKER'), false);
+});
+
+test('canonical portal shell accepts the Aurora Next runtime but rejects private shells', () => {
+  assert.equal(hasCanonicalPortalShell(nextPortal), true);
+  assert.equal(hasCanonicalPortalShell('<!DOCTYPE html><html><body><script>self.__next_f=[]</script></body></html>'), true);
+  assert.equal(hasCanonicalPortalShell('<html><body><main></main></body></html>'), false);
+  assert.equal(hasCanonicalPortalShell(nextPortal + '<h1>Centro de gestão WMGJ</h1>'), false);
+  assert.equal(hasCanonicalPortalShell(nextPortal.replace('id="aurora-root"', 'id="session-identity"')), false);
 });
 
 test('actual AuthGate login controls satisfy the anonymous preflight', () => {
@@ -73,15 +83,16 @@ test('self redirect, cross-origin redirect and login redirect are rejected witho
   }
 });
 
-test('HTTP error, non-HTML response, static placeholder and disabled login are rejected', async () => {
+test('HTTP error, non-HTML response, static placeholder and legacy login-only pages are rejected', async () => {
   for (const portal of [
-    {status: 404, headers: htmlHeaders, body: form},
-    {status: 200, headers: {'content-type': 'application/json'}, body: form},
+    {status: 404, headers: htmlHeaders, body: nextPortal},
+    {status: 200, headers: {'content-type': 'application/json'}, body: nextPortal},
     {status: 200, headers: htmlHeaders, body: '<h1>Ambiente privado</h1>'},
+    {status: 200, headers: htmlHeaders, body: form},
     {status: 200, headers: htmlHeaders, body: form.replace('<form ', '<form hidden ')},
     {status: 200, headers: htmlHeaders, body: form.replace('name="password"', 'disabled name="password"')},
     {status: 200, headers: htmlHeaders, body: form.replace('type="submit"', 'type="button"')},
-    {status: 200, headers: htmlHeaders, body: form + '<h1>Centro de gestão WMGJ</h1>'},
+    {status: 200, headers: htmlHeaders, body: nextPortal + '<h1>Centro de gestão WMGJ</h1>'},
   ]) {
     const f = fixture({'/portal': portal});
     await assert.rejects(checkCanonicalPreflight(project, f.options), CanonicalPreflightError);
@@ -154,7 +165,7 @@ test('portal security headers are required', async () => {
   for (const header of ['cache-control', 'x-frame-options', 'x-content-type-options']) {
     const headers = {...htmlHeaders};
     delete headers[header];
-    const f = fixture({'/portal': {status: 200, headers, body: form}});
+    const f = fixture({'/portal': {status: 200, headers, body: nextPortal}});
     await assert.rejects(checkCanonicalPreflight(project, f.options), {code: 'CANONICAL_PORTAL_HEADERS_REQUIRED'});
   }
 });
