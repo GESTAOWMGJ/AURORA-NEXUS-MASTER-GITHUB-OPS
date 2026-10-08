@@ -58,3 +58,12 @@ Toda solicitação relevante deve:
 4. validar atualização do app Mac instalado;
 5. hardening comercial, domínio, distribuição e documentação;
 6. promover RC aprovada para `1.0.0` GA.
+
+## Interrupção e retomada — ensaio físico HML de 07/10/2026
+
+Deduplicação HMAC observada no Xeon/cloud: uma entidade, uma idempotência e uma
+ auditoria por chave após corte antes do recibo, retomada e corrida concorrente.
+Backend publicado `ingestwmgjevent-00001-viz` sem revisão/versão imutável:
+`currentIngestionContractVerified=false`. Exclusão de executores por lease/fencing
+ e failover cloud/Xeon continuam sem comprovação; `fullDistributedAcceptance=false`.
+[Ensaio, recibo, escopo e próximo gate](AURORA_HML_INTERRUPTION_RESUME_20261007.md).

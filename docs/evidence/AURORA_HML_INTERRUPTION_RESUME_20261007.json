@@ -1,0 +1,62 @@
+{
+  "backend": {
+    "configuredSecretVersion": "3",
+    "functionRevision": "ingestwmgjevent-00001-viz",
+    "functionUpdateTime": "2026-10-03T15:09:42.124157770Z"
+  },
+  "canonicalEntityUnchangedByRetries": true,
+  "cloudXeonFailoverExecuted": false,
+  "concurrentFirstAttemptResponses": [
+    202,
+    200
+  ],
+  "concurrentIngestionCase": {
+    "counts": {
+      "businessAuditEvents": 1,
+      "canonicalEntities": 1,
+      "idempotencyRecords": 1,
+      "immutableVersions": 0
+    },
+    "currentIngestionContractVerified": false,
+    "entityId": "867f209c9ff29cd4b1755d21af14140fd015695b4917ac6d",
+    "entityReceiptSha256": "18c29be2340187b6559a9e7430cdab61fc83aac2d92a248601e81ea54c76c152",
+    "entityUpdateTime": "2026-10-08T00:11:06.334845Z",
+    "idempotencySha256": "e8cf04daaff2f914d1c4274e59bad44347fd33b18e1e345b989db360b5203e33",
+    "revision": null
+  },
+  "currentIngestionContractVerified": false,
+  "distributedExecutorLeaseFencingVerified": false,
+  "fullDistributedAcceptance": false,
+  "interruptionCase": {
+    "counts": {
+      "businessAuditEvents": 1,
+      "canonicalEntities": 1,
+      "idempotencyRecords": 1,
+      "immutableVersions": 0
+    },
+    "currentIngestionContractVerified": false,
+    "entityId": "4ca3c6345431f77162a044f834245235e60d6bf3456363cf",
+    "entityReceiptSha256": "796c1ff18f3b86c6ed9585863968dca1c0140d4b724b6f81ffba246eba837cf1",
+    "entityUpdateTime": "2026-10-08T00:11:03.019496Z",
+    "idempotencySha256": "27fe095116a8231a0ece0d5f9a20eb14a1f8e6b8e5707b01ba1acd2ab190de89",
+    "revision": null
+  },
+  "persistedBusinessEffectsPerKey": 1,
+  "postCommitWorkerKilledWithoutReadingAck": true,
+  "preSendKillNoEffect": true,
+  "productionVerified": false,
+  "projectId": "wmgj-hml-jfn-20260927",
+  "restartResponses": [
+    200,
+    200
+  ],
+  "sameIdempotencyKeyOnResume": true,
+  "schemaVersion": "aurora.hml.interruption-resume.v1",
+  "scope": "HMAC_V2_INGESTION_ON_EXISTING_HML_BACKEND",
+  "secretPersistedOrPrinted": false,
+  "sourceInspectionSha": "cce30d2b8f5c87a0fe2664426df5e0c550ba1400",
+  "state": "HML_INGESTION_DEDUP_OBSERVED_LEGACY_BACKEND",
+  "syntheticCases": 2,
+  "testScriptSha256": "7c2ca55aabb2c73e9592e03c9c06053c0d87899921ed322a18d6bff90b6966a5",
+  "verifiedAt": "2026-10-08T00:09:48.444072+00:00"
+}

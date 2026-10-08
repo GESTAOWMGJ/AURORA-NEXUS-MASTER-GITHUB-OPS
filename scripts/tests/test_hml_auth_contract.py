@@ -250,5 +250,14 @@ test "$local_id" = "$SMOKE_UID"
                     self.assertEqual(result.returncode, 73)
 
 
+def load_tests(loader, suite, pattern):
+    # Run receipt regression through the existing HML CI entry point.
+    # Broad discovery loads its own module once instead of duplicating it here.
+    if pattern in (None, "test_hml_auth_contract.py"):
+        from test_hml_interruption_resume import ReceiptTests
+        suite.addTests(loader.loadTestsFromTestCase(ReceiptTests))
+    return suite
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
