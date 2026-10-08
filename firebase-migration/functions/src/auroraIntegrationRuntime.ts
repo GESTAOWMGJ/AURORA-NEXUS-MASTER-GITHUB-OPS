@@ -20,6 +20,7 @@ import {
 } from "./auroraIntegrationCredential.js";
 import { auroraDb } from "./firebase.js";
 import { canonicalIntegrationDocument, parseIntegrationDocumentPayload } from "./auroraIntegrationDocument.js";
+import { loadInstallationReadiness, refreshProjection } from "./auroraRuntime.js";
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -257,6 +258,7 @@ export const auroraNexusIntegrationPing = onRequest({cors:false}, async (req,res
     orgId:principal.orgId,
     keyId:principal.keyId,
     connector:principal.name,
+    installation:await loadInstallationReadiness(principal.orgId),
     time:new Date().toISOString()
   });
 });
@@ -396,6 +398,13 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
     res.status(status).json({ok:false,code:result.code});
     return;
   }
+  // Resume the same native pipeline after a duplicate or an uncertain previous response.
+  // A projection failure cannot turn an already committed document into a failed ingestion.
+  try {
+    await refreshProjection(principal.orgId, {uid:`integration:${principal.keyId}`, role:'integration', source:'INTEGRATION'});
+  } catch {
+    logger.warn('First ingestion projection pending', {orgId:principal.orgId, code:'PROJECTION_PENDING', sanitized:true});
+  }
   res.status(result.kind === "DUPLICATE" ? 200 : 202).json({
     ok:true,
     accepted:result.kind === "ACCEPTED",
@@ -403,6 +412,7 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
     documentId:result.documentId,
     sourceSystem:payload.sourceSystem,
     sourceIndependent:payload.sourceIndependent,
-    nativeReady:payload.nativeReady
+    nativeReady:payload.nativeReady,
+    installation:await loadInstallationReadiness(principal.orgId)
   });
 });
