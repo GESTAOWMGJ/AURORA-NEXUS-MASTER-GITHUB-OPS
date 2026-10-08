@@ -21,8 +21,8 @@ sys.path.insert(0, str(COLLECTOR_SOURCE))
 from aurora_deployment import install_assets as install_integration_assets
 
 VERSION = "0.2.0-beta.4"
-BASE = "https://wmgj-hml-jfn-20260927.web.app"
-SOURCE_SHA = "354f611f642ce6b62c489d6b06f254587aaef84b"
+BASE = "https://auroranexus.com.br/portal"
+SOURCE_SHA = "203670bc562bbb48694b08e55af363a07d90a8f5"
 MAX_BYTES = 262144
 
 
@@ -107,7 +107,7 @@ def install():
         shortcuts.append(desktop / "AURORA NEXUS.lnk")
     manifest_file = target / "installation.json"
     existed = manifest_file.exists()
-    expected = {"clientVersion": VERSION, "portal": BASE, "frontendPolicy": "PRESERVE_DEPLOYED_MAIN",
+    expected = {"clientVersion": VERSION, "portal": BASE, "technicalFallback": "https://wmgj-hml-jfn-20260927.web.app/", "frontendPolicy": "CANONICAL_PORTAL_SINGLE_ENTRY",
                 "reviewedMainSha": SOURCE_SHA, "environment": "HML", "offlineBusinessApp": False}
     if existed:
         previous = json.loads(manifest_file.read_text(encoding="utf-8"))
@@ -124,7 +124,7 @@ def install():
             except (OSError, ValueError):
                 continue
             if (prior.get("portal") == BASE and prior.get("environment") == "HML"
-                    and prior.get("frontendPolicy") == "PRESERVE_DEPLOYED_MAIN"
+                    and prior.get("frontendPolicy") in {"PRESERVE_DEPLOYED_MAIN", "CANONICAL_PORTAL_SINGLE_ENTRY"}
                     and isinstance(prior.get("clientVersion"), str)):
                 compatible = True
                 break
