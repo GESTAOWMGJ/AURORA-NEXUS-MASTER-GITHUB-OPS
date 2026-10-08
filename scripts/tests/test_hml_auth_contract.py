@@ -125,11 +125,16 @@ class WorkflowStructureTests(unittest.TestCase):
         negative = next(step["run"] for step in deploy if step.get("name") == "Smoke test private shell and deployed functions")
         self.assertEqual(negative.count('.web.app'), 1)
         self.assertIn('technical_origin="https://${PROJECT_ID}.web.app"', negative)
-        self.assertIn('CANONICAL_PREFLIGHT_SCOPE=technical-api', negative)
+        public_gate = 'CANONICAL_PREFLIGHT_SCOPE=routing-only'
+        technical_gate = 'CANONICAL_PREFLIGHT_SCOPE=technical-api'
+        self.assertEqual(negative.count(public_gate), 1)
+        self.assertEqual(negative.count(technical_gate), 1)
+        self.assertLess(negative.index(public_gate), negative.index(technical_gate))
         self.assertIn('technical_shell="$(curl --fail --silent --show-error --max-time 30 "${technical_origin}/")"', negative)
         self.assertIn('location.replace("https://auroranexus.com.br/portal', negative)
         self.assertIn('Technical Firebase host exposed the private shell', negative)
-        self.assertIn('"${canonical_origin}/portal"', negative)
+        self.assertNotIn('shell="$(curl --fail --silent --show-error --max-time 30 "${canonical_origin}/portal")"', negative)
+        self.assertNotIn('grep -Fq "Ambiente privado"', negative)
         self.assertIn('-H "Origin: ${canonical_origin}"', negative)
         self.assertIn('"${technical_origin}/api/bootstrap"', negative)
         self.assertNotIn('"${canonical_origin}/api/bootstrap"', negative)

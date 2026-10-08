@@ -504,16 +504,12 @@ jobs:
             [$functions[] | (.id // .name // "") | split("/")[-1]] as $deployed |
             all($expected[]; . as $name | $deployed | index($name) != null)
           ' <<<"$functions" >/dev/null
+          CANONICAL_PREFLIGHT_SCOPE=routing-only \
+            node firebase-migration/scripts/check-canonical-preflight.mjs "$PROJECT_ID"
           CANONICAL_PREFLIGHT_SCOPE=technical-api \
             node firebase-migration/scripts/check-canonical-preflight.mjs "$PROJECT_ID"
           canonical_origin="https://auroranexus.com.br"
           technical_origin="https://${PROJECT_ID}.web.app"
-          shell="$(curl --fail --silent --show-error --max-time 30 "${canonical_origin}/portal")"
-          grep -Fq "Ambiente privado" <<<"$shell"
-          if grep -Fq "Centro de gestão WMGJ" <<<"$shell"; then
-            echo "Protected shell was exposed without login" >&2
-            exit 90
-          fi
           technical_shell="$(curl --fail --silent --show-error --max-time 30 "${technical_origin}/")"
           grep -Fq 'location.replace("https://auroranexus.com.br/portal' <<<"$technical_shell"
           if grep -Fq "Centro de gestão WMGJ" <<<"$technical_shell"; then
