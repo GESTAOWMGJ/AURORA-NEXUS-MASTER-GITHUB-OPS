@@ -17,6 +17,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import aurora_onboarding as onboarding
 import install as installer
+from aurora_deployment import VERSION as INTEGRATION_VERSION
 
 
 class OnboardingTests(unittest.TestCase):
@@ -252,7 +253,7 @@ class OnboardingTests(unittest.TestCase):
             plist = plistlib.loads((target / name).read_bytes())
             self.assertEqual(plist['ProgramArguments'][0], sys.executable)
         self.assertEqual(document.stat().st_mtime_ns, before)
-        self.assertTrue((target / 'integration' / '1.0.0' / 'aurora_deployment.py').is_file())
+        self.assertTrue((target / 'integration' / INTEGRATION_VERSION / 'aurora_deployment.py').is_file())
         self.assertEqual(json.loads((target / 'collector-config.json').read_text())['allowedExtensions'], ['.csv', '.json', '.jsonl'])
 
     def test_installer_authorization_enables_only_bounded_metadata_mode(self):

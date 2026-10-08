@@ -18,7 +18,12 @@ sincronização bidirecional, extrator de PDFs ou serviço automático.
 - Idempotência vincula destino, organização e conteúdo normalizado. Retentativa
   manual repete a mesma chave, inclusive após timeout ou rotação da credencial.
 - Recibo confere ID canônico esperado, estado aceito/duplicado e flags documentais.
-  O hash no recibo é calculado localmente; não é uma releitura independente do Firestore.
+  `payloadSha256` é calculado localmente, não uma releitura independente do Firestore.
+  Se presente, a prova de processamento do POST deve corresponder ao documento,
+  sistema, sourceVersion, canonicalSnapshotHash e identidade imutável/revision;
+  seu hash é comparado ao mesmo contrato canônico do backend. Proof ausente ou
+  pending não confirma processamento, e proof divergente bloqueia. Flags de
+  instalação no ping não substituem prova do documento enviado.
 - Conflito, versão regressiva, credencial recusada ou recibo divergente nunca são sucesso.
 - Não altera fonte, flags do gateway, SQLite, tarefas agendadas ou executores legados.
 

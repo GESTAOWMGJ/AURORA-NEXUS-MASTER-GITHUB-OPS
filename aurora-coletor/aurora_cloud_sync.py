@@ -83,6 +83,65 @@ def validate_payload(raw):
     return p
 
 
+
+def canonical_snapshot_hash(payload):
+    # Preserve the field order of canonicalIntegrationDocument, not payload key order.
+    facts = {
+        'category': payload['documentType'].lower(), 'competence': payload['competence'],
+        'nativeReady': payload['nativeReady'], 'sourceIndependent': payload['sourceIndependent'],
+        'externalFetchRequired': not payload['sourceIndependent'], 'externalAiUsed': False,
+        'documentFragility': payload['documentFragility'],
+        'missingFieldsCount': payload['missingFieldsCount'], 'flowStage': 'FIREBASE_CANONICALIZED',
+        'canonicalSnapshotVersion': 1, 'originSystem': payload['sourceSystem'],
+        'originConnector': 'AURORA_INTEGRATION_API', 'sanitized': True,
+    }
+    for key in ('amountCents', 'count', 'slaDueAt'):
+        if payload[key] is not None:
+            facts[key] = payload[key]
+    return digest(json.dumps(facts, separators=(',', ':'), ensure_ascii=True, allow_nan=False))
+
+
+def processing_proof(payload, org, installation):
+    pending_states = {'PENDING_REMOTE_PROOF', 'PENDING_SOURCE', 'PENDING_CANONICAL_DATA', 'PENDING_PROJECTION'}
+    if installation is None:
+        return {'state': 'PENDING_REMOTE_PROOF', 'firstIngestionVerified': False}
+    if not isinstance(installation, dict):
+        raise SyncError('CLOUD_PROCESSING_PROOF_MISMATCH')
+    state = installation.get('state')
+    ledger_fields = ('revision', 'versionId', 'canonicalSnapshotHash', 'sourceSystem', 'operationalComplete')
+    # Older servers only attest readiness of a tenant's latest document, not this immutable version.
+    if (state == 'FIRST_INGESTION_VERIFIED' and installation.get('firstIngestionVerified') is True
+            and not any(key in installation for key in ledger_fields)):
+        return {'state': 'PENDING_REMOTE_PROOF', 'firstIngestionVerified': False}
+    if (isinstance(state, str) and state in pending_states
+            and installation.get('firstIngestionVerified') is False
+            and installation.get('operationalComplete') is not True):
+        return {'state': state, 'firstIngestionVerified': False}
+    source_hash = digest(org + ':' + payload['sourceSystem'] + ':' + payload['externalDocumentId'])
+    revision = installation.get('revision')
+    expected_version_id = (digest('v1:sourceDocument:' + payload['sourceSystem'] + ':'
+                                + source_hash[:32] + ':revision:' + str(revision))[:48])
+    if (state != 'FIRST_INGESTION_VERIFIED' or installation.get('firstIngestionVerified') is not True
+            or installation.get('operationalComplete') is not True
+            or installation.get('documentId') != source_hash[:48]
+            or installation.get('sourceSystem') != payload['sourceSystem']
+            or type(installation.get('sourceVersion')) is not int
+            or installation['sourceVersion'] != payload['sourceVersion']
+            or type(revision) is not int or not 1 <= revision <= 9007199254740991
+            or installation.get('versionId') != expected_version_id
+            or installation.get('canonicalSnapshotHash') != canonical_snapshot_hash(payload)):
+        raise SyncError('CLOUD_PROCESSING_PROOF_MISMATCH')
+    try:
+        verified_at = timestamp(installation.get('verifiedAt'))
+    except SyncError:
+        raise SyncError('CLOUD_PROCESSING_PROOF_MISMATCH') from None
+    return {'state': state, 'firstIngestionVerified': True, 'operationalComplete': True,
+            'documentId': source_hash[:48], 'sourceSystem': payload['sourceSystem'],
+            'sourceVersion': payload['sourceVersion'], 'revision': revision,
+            'versionId': expected_version_id, 'canonicalSnapshotHash': canonical_snapshot_hash(payload),
+            'verifiedAt': verified_at}
+
+
 def origin_url(value):
     parsed = urllib.parse.urlsplit(value)
     if (parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password
@@ -153,7 +212,15 @@ def synchronize(raw, origin, org, token=None, send=False, transport=request_json
             or not ((status == 202 and result.get('accepted') is True and result.get('duplicate') is False)
                     or (status == 200 and result.get('duplicate') is True and result.get('accepted') is False))):
         raise SyncError('CLOUD_RECEIPT_MISMATCH')
-    receipt.update(status='DUPLICATE' if result['duplicate'] else 'ACCEPTED', cloudReceiptVerified=True)
+    for key, expected in (('sourceVersion', payload['sourceVersion']),
+                          ('canonicalSnapshotHash', canonical_snapshot_hash(payload))):
+        if key in result and (type(result[key]) is not type(expected) or result[key] != expected):
+            raise SyncError('CLOUD_RECEIPT_MISMATCH')
+    proof = processing_proof(payload, org, result.get('installation'))
+    if proof['firstIngestionVerified'] and ('sourceVersion' not in result or 'canonicalSnapshotHash' not in result):
+        raise SyncError('CLOUD_PROCESSING_PROOF_MISMATCH')
+    receipt.update(status='DUPLICATE' if result['duplicate'] else 'ACCEPTED', cloudReceiptVerified=True,
+                   processing=proof)
     return receipt
 
 
