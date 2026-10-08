@@ -1,5 +1,5 @@
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { defineSecret } from "firebase-functions/params";
+import { defineSecret, defineString, projectID } from "firebase-functions/params";
 import { setGlobalOptions } from "firebase-functions/v2";
 import { onRequest } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -17,6 +17,8 @@ import {
 } from "./security.js";
 import { validateEvent } from "./validation.js";
 import { auroraDb as db } from "./firebase.js";
+import { HML_RUNTIME_PROJECT_ID, HML_RUNTIME_SERVICE_ACCOUNT, ingestOrganizationRejection } from "./auroraRuntimeEnvironment.js";
+export { ingestOrganizationRejection } from "./auroraRuntimeEnvironment.js";
 import { stableValue, persistedDocumentHash, mergedDocumentForAudit, immutableEntityVersionId,
   canonicalEntityRevision, nextCanonicalEntityRevision } from "./auroraCanonicalVersions.js";
 export { persistedDocumentHash, mergedDocumentForAudit, immutableEntityVersionId,
@@ -24,11 +26,24 @@ export { persistedDocumentHash, mergedDocumentForAudit, immutableEntityVersionId
 
 const stableJson = (value: unknown): string => JSON.stringify(stableValue(value));
 
+// Firebase resolves this StringParam at deploy time, not during test/import.
+// Only the existing HML project receives its documented default identity.
+// Other projects require the protected pipeline's explicit runtime account.
+const AURORA_RUNTIME_SERVICE_ACCOUNT = defineString("AURORA_RUNTIME_SERVICE_ACCOUNT", {
+  default: projectID.equals(HML_RUNTIME_PROJECT_ID).thenElse(HML_RUNTIME_SERVICE_ACCOUNT, ""),
+  input: { text: {
+    nonEmpty: true,
+    validationRegex: /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.gserviceaccount\.com$/,
+    validationErrorMessage: "Supply the reviewed runtime service account for the selected project."
+  } }
+});
+
 setGlobalOptions({
   region: "southamerica-east1",
   maxInstances: 10,
   timeoutSeconds: 60,
-  memory: "512MiB"
+  memory: "512MiB",
+  serviceAccount: AURORA_RUNTIME_SERVICE_ACCOUNT
 });
 
 const HMAC_KEYRING = defineSecret("WMGJ_INGEST_HMAC_KEYRING");
@@ -42,36 +57,6 @@ class IngestDomainError extends Error {
     super(code);
     this.name = "IngestDomainError";
   }
-}
-
-
-type IngestOrganizationRejection =
-  | "ORGANIZATION_NOT_BOOTSTRAPPED"
-  | "ORGANIZATION_GUARDRAILS_INVALID";
-
-/**
- * A ingestão é permitida somente no tenant explicitamente preparado para
- * homologação não clínica. Comparações estritas mantêm o gate fechado para
- * campos ausentes, nulos ou serializados com o tipo incorreto.
- */
-export function ingestOrganizationRejection(
-  exists: boolean,
-  organization: Record<string, unknown> | undefined
-): IngestOrganizationRejection | null {
-  if (!exists || !organization) return "ORGANIZATION_NOT_BOOTSTRAPPED";
-
-  if (
-    organization.active !== true
-    || organization.environment !== "HOMOLOGATION"
-    || organization.projectionMode !== "SHADOW"
-    || organization.sourceMutation !== false
-    || organization.productionMutation !== false
-    || organization.clinicalSensitiveEnabled !== false
-  ) {
-    return "ORGANIZATION_GUARDRAILS_INVALID";
-  }
-
-  return null;
 }
 
 

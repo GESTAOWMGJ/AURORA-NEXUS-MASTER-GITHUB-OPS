@@ -24,6 +24,7 @@ import { auroraDb } from "./firebase.js";
 import { readRuntimeActiveRelease } from "./auroraActiveReleaseRuntime.js";
 import { readInstallationReadiness } from "./auroraInstallationReadiness.js";
 import { immutableEntityVersionId } from "./auroraCanonicalVersions.js";
+import { authenticatedOrganizationEnvironment } from "./auroraRuntimeEnvironment.js";
 
 export async function loadInstallationReadiness(orgId: string, documentId?: string) {
   return auroraDb.runTransaction(async tx => {
@@ -307,7 +308,7 @@ export const auroraNexusBootstrap = onRequest(
     res.status(200).json({
       ok: true,
       installation: await loadInstallationReadiness(member.orgId),
-      environment: "HOMOLOGATION",
+      environment: authenticatedOrganizationEnvironment(org.exists ? org.data() : undefined),
       mode: "SHADOW",
       organization: { id: member.orgId, name: String(org.data()?.name ?? "WMGJ") },
       member: { email: member.email, role: member.role, mfaVerified: member.mfaVerified },
@@ -340,7 +341,10 @@ export const auroraNexusNativeInsight = onRequest(
     const intent = parseNativeInsightIntent(String(req.query.intent ?? "EXECUTIVE"));
     if (!intent) { res.status(400).json({ ok: false, code: "INVALID_NATIVE_INTENT" }); return; }
 
-    const snapshot = await auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get();
+    const [snapshot, organization] = await Promise.all([
+      auroraDb.doc(`organizations/${member.orgId}/dashboardSnapshots/current`).get(),
+      auroraDb.doc(`organizations/${member.orgId}`).get()
+    ]);
     if (!snapshot.exists) {
       res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_SNAPSHOT_REQUIRED" });
       return;
@@ -368,7 +372,7 @@ export const auroraNexusNativeInsight = onRequest(
     const projection = visibleProjection(rawProjection, member);
     res.status(200).json({
       ok: true,
-      environment: "HOMOLOGATION",
+      environment: authenticatedOrganizationEnvironment(organization.exists ? organization.data() : undefined),
       mode: "FIREBASE_NATIVE",
       sourceAccessDuringInference: false,
       externalAiUsed: false,
@@ -422,7 +426,7 @@ export const auroraNexusMasterEngine = onRequest(
     const release = { ...buildReleaseStatus(org.data() ?? {}), canonicalVersion };
     res.status(200).json({
       ok: true,
-      environment: "HOMOLOGATION",
+      environment: authenticatedOrganizationEnvironment(org.exists ? org.data() : undefined),
       mode: "AURORA_MASTER_NATIVE",
       sourceAccessDuringInference: false,
       externalAiUsed: false,
