@@ -41,8 +41,17 @@ test('canonical portal shell, anonymous denial and Firebase project must all agr
   assert.equal(proof.expectedProject, project);
   assert.equal(proof.authenticated, false);
   assert.equal(proof.portalShellVerified, true);
-  assert.deepEqual(f.calls, ['/portal', '/api/bootstrap', '/__/firebase/init.json']);
+  assert.deepEqual(f.calls, ['/portal', '/__/firebase/init.json', '/api/bootstrap']);
   assert.equal(JSON.stringify(proof).includes('SYNTHETIC_CONFIG_MARKER'), false);
+});
+
+test('routing-only preflight stops before deployed APIs while preserving DNS and project checks', async () => {
+  const f = fixture({'/api/bootstrap': json(404, {ok: false, code: 'NOT_DEPLOYED'})});
+  const proof = await checkCanonicalPreflight(project, {...f.options, scope: 'routing-only'});
+  assert.equal(proof.code, 'CANONICAL_ROUTE_READY');
+  assert.equal(proof.anonymousDenied, false);
+  assert.equal(proof.firebaseProjectMatched, true);
+  assert.deepEqual(f.calls, ['/portal', '/__/firebase/init.json']);
 });
 
 test('canonical portal shell accepts the Aurora Next runtime but rejects private shells', () => {
@@ -177,7 +186,7 @@ test('anonymous bootstrap must be the actual AUTH_REQUIRED JSON contract', async
     {status: 401, headers: {'content-type': 'application/json'}, body: 'invalid'}]) {
     const f = fixture({'/api/bootstrap': response});
     await assert.rejects(checkCanonicalPreflight(project, f.options), {code: 'CANONICAL_ANONYMOUS_DENIAL_REQUIRED'});
-    assert.deepEqual(f.calls, ['/portal', '/api/bootstrap']);
+    assert.deepEqual(f.calls, ['/portal', '/__/firebase/init.json', '/api/bootstrap']);
   }
 });
 
