@@ -1,0 +1,62 @@
+name: Validate Aurora CMEK HML
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/aurora-cmek-hml.yml"
+      - ".github/workflows/validate-aurora-cmek-hml.yml"
+      - ".github/requests/aurora-cmek-hml.json"
+      - "firebase-migration/policy/cmek-hml-baseline-v1.json"
+      - "firebase-migration/scripts/aurora-cmek-hml.sh"
+      - "firebase-migration/scripts/validate-cmek-hml-baseline.mjs"
+      - "firebase-migration/functions/test/aurora-cmek-hml-static.test.ts"
+      - "firebase-migration/docs/35-firestore-cmek-hml-spec.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate CMEK HML without cloud mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned 2026-10-01
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: firebase-migration/functions/package-lock.json
+
+      - name: Install locked Functions dependencies
+        run: npm --prefix firebase-migration/functions ci
+
+      - name: Validate policy and shell
+        run: |
+          set -euo pipefail
+          node firebase-migration/scripts/validate-cmek-hml-baseline.mjs
+          bash -n firebase-migration/scripts/aurora-cmek-hml.sh
+          node -e 'JSON.parse(require("fs").readFileSync(".github/requests/aurora-cmek-hml.json","utf8"))'
+          ! grep -Eq 'firestore databases delete|databases delete|kms versions destroy|kms keys delete|projects delete|billing projects unlink' firebase-migration/scripts/aurora-cmek-hml.sh
+
+      - name: Run CMEK static regression tests
+        working-directory: firebase-migration/functions
+        run: node --import tsx --test test/aurora-cmek-hml-static.test.ts
+
+      - name: Confirm initial request is plan-only
+        run: |
+          set -euo pipefail
+          jq -e '
+            .requestVersion==1 and
+            .mode=="plan" and
+            .confirmation=="" and
+            .cmekAccessConfirmed==false and
+            .projectId=="wmgj-hml-jfn-20260927" and
+            .databaseId=="aurora-hml-cmek" and
+            .productionMutation==false and
+            .clinicalSensitiveEnabled==false and
+            .realDataAllowed==false
+          ' .github/requests/aurora-cmek-hml.json >/dev/null
+          echo "AURORA_CMEK_HML_VALIDATION_ONLY_OK"

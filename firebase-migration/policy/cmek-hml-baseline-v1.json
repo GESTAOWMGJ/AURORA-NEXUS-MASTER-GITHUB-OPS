@@ -1,6 +1,6 @@
 {
   "id": "AURORA-SEC-002-CMEK-HML",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "status": "PREPARED_NOT_APPLIED",
   "projectId": "wmgj-hml-jfn-20260927",
   "databaseId": "aurora-hml-cmek",
@@ -32,8 +32,9 @@
   },
   "applyConfirmation": "APPLY_AURORA_CMEK_HML",
   "restoreConfirmation": "RESTORE_AURORA_CMEK_HML",
-  "firestoreCmekFeatureAccessRequired": false,
-  "firestoreCmekFeatureAccessState": "RUNTIME_VERIFIED_BY_DATABASE_CREATE_OR_EXISTING_CMEK_DATABASE",
+  "firestoreCmekFeatureAccessRequired": true,
+  "firestoreCmekFeatureAccessState": "REQUIRES_PROVIDER_ACCESS_REQUEST_AND_RUNTIME_VERIFICATION",
   "sameLocationKmsRequired": true,
-  "serviceAgentRole": "roles/cloudkms.cryptoKeyEncrypterDecrypter"
+  "serviceAgentRole": "roles/cloudkms.cryptoKeyEncrypterDecrypter",
+  "keyFailureConfirmation": "TEST_AURORA_CMEK_KEY_FAILURE_HML"
 }
