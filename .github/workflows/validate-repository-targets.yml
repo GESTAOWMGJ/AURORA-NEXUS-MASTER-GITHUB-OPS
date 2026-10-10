@@ -1,0 +1,38 @@
+name: Validate Repository Targets
+
+on:
+  pull_request:
+    paths:
+      - 'tools/windows/RENEW_CLASPRC_HML.*'
+      - 'tools/windows/BOOTSTRAP_AURORA_PROD_WIF.ps1'
+      - 'scripts/configurar_credenciais_appscript.sh'
+      - 'scripts/tests/repository-targets.test.mjs'
+      - 'src/99_DEPLOY_SYNC_WMGJ.gs'
+      - '.github/workflows/validate-repository-targets.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tools/windows/RENEW_CLASPRC_HML.*'
+      - 'tools/windows/BOOTSTRAP_AURORA_PROD_WIF.ps1'
+      - 'scripts/configurar_credenciais_appscript.sh'
+      - 'scripts/tests/repository-targets.test.mjs'
+      - 'src/99_DEPLOY_SYNC_WMGJ.gs'
+      - '.github/workflows/validate-repository-targets.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  targets:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Offline repository, CLASP and WIF regression (no credentials)
+        run: node --test scripts/tests/repository-targets.test.mjs

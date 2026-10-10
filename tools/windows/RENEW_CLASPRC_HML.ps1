@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 $ProjectId = "wmgj-hml-jfn-20260927"
 $ProjectNumber = "299889357292"
 $ScriptId = "1_fQPqaq0EjaugyIF6jyuENDhJ2c2oTFm1kC-wdjmfaDqyRzy_uqwtiSW"
-$Repo = "GESTAOWMGJ/automacao-gestao-wmgj"
+$Repo = "GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS"
 $Root = Join-Path $env:TEMP ("aurora-clasp-renew-" + [guid]::NewGuid().ToString("N"))
 $Backup = $null
 
@@ -110,7 +110,7 @@ if (-not ($client.installed.redirect_uris | Where-Object { $_ -match '^http://lo
 
 New-Item -ItemType Directory -Force -Path $Root | Out-Null
 try {
-  Invoke-WebRequest -Uri "https://raw.githubusercontent.com/GESTAOWMGJ/automacao-gestao-wmgj/main/appsscript.json" -OutFile (Join-Path $Root "appsscript.json") -UseBasicParsing
+  Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$Repo/main/appsscript.json" -OutFile (Join-Path $Root "appsscript.json") -UseBasicParsing
 
   @{
     scriptId = $ScriptId
