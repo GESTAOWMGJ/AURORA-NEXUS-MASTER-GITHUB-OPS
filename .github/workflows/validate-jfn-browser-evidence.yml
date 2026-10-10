@@ -1,0 +1,156 @@
+name: JFN browser and public-evidence validation
+on:
+  push:
+    branches: [feat/jfn-next-firebase-20260909]
+    paths: ['.github/workflows/validate-jfn-browser-evidence.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      JFN_INTEGRATION_MODE: disabled
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install and test isolated application
+        working-directory: portal-auditoria
+        run: |
+          npm install --ignore-scripts --no-audit --fund=false
+          npm test
+          npm run typecheck
+          npm run build
+          npm audit --omit=dev --audit-level=high
+      - name: Install browser testing dependencies
+        run: |
+          python -m pip install 'playwright==1.55.0'
+          python -m playwright install --with-deps chromium
+      - name: Browser checks on synthetic and protected pages
+        run: |
+          mkdir -p evidence/browser
+          (cd portal-auditoria && npm start > ../evidence/browser/server.log 2>&1) &
+          python - <<'PY'
+          import json,time,urllib.request
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          root=Path('evidence/browser')
+          for _ in range(40):
+              try:
+                  urllib.request.urlopen('http://127.0.0.1:3000/',timeout=2)
+                  break
+              except Exception: time.sleep(1)
+          checks=[]
+          with sync_playwright() as p:
+              browser=p.chromium.launch()
+              context=browser.new_context(locale='pt-BR',timezone_id='America/Sao_Paulo')
+              page=context.new_page()
+              errors=[]
+              page.on('pageerror',lambda err: errors.append(str(err)))
+              for width,height,device in [(1440,1000,'desktop'),(390,844,'mobile')]:
+                  page.set_viewport_size({'width':width,'height':height})
+                  for path,name,text in [('/','home','Uma visão integrada.'),('/demo','demo','Todos os valores e registros abaixo são fictícios.'),('/auditoria/wmgj','protected','Área institucional protegida')]:
+                      res=page.goto('http://127.0.0.1:3000'+path,wait_until='networkidle')
+                      assert res and res.status==200,(path,res.status if res else None)
+                      assert page.get_by_text(text,exact=False).count()>0,path
+                      overflow=page.evaluate('document.documentElement.scrollWidth > innerWidth + 1')
+                      assert not overflow,('horizontal overflow',device,path)
+                      if name=='protected':
+                          assert page.get_by_role('button',name='Entrar com Google e consultar').is_disabled()
+                      page.screenshot(path=str(root/f'{device}-{name}.png'),full_page=True)
+                      checks.append({'viewport':device,'path':path,'http':res.status,'horizontalOverflow':overflow})
+              res=context.request.get('http://127.0.0.1:3000/api/dashboard?orgId=wmgj&competence=2026-09')
+              assert res.status==503,res.status
+              assert res.json()['code']=='INTEGRATION_DISABLED',res.text()
+              checks.append({'api':'disabled-no-auth','http':res.status,'code':res.json()['code']})
+              assert not errors,errors
+              browser.close()
+          (root/'results.json').write_text(json.dumps({'checks':checks,'pageErrors':errors,'realFirebaseLoginTested':False,'realTenantIsolationTested':False,'deploymentPerformed':False},indent=2),encoding='utf8')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jfn-browser-validation
+          path: |
+            evidence/browser
+            portal-auditoria/package-lock.json
+          retention-days: 7
+  public-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Collect explicitly public transparency documents without credentials
+        run: |
+          python -m pip install 'beautifulsoup4==4.13.5' 'pymupdf==1.26.4'
+          mkdir -p evidence/public
+          python - <<'PY'
+          import json,hashlib,urllib.request,urllib.parse,datetime,time
+          from pathlib import Path
+          from bs4 import BeautifulSoup
+          import pymupdf
+          root=Path('evidence/public'); manifest=[]; links=[]
+          hosts={'hospitalsaorafael.org.br','www.saude.pr.gov.br','www.documentador.pr.gov.br'}
+          class BoundedRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,req,fp,code,msg,headers,newurl):
+                  if urllib.parse.urlparse(newurl).hostname not in hosts: raise ValueError('redirect outside approved public hosts')
+                  return super().redirect_request(req,fp,code,msg,headers,newurl)
+          opener=urllib.request.build_opener(BoundedRedirect())
+          def retrieve(url,index,label):
+              entry={'sourceUrl':url,'label':label,'retrievedAt':datetime.datetime.now(datetime.UTC).isoformat()}
+              try:
+                  if urllib.parse.urlparse(url).hostname not in hosts: raise ValueError('host not allowed')
+                  req=urllib.request.Request(url,headers={'User-Agent':'JFN-Public-Evidence-Research/1.0 (read-only)'})
+                  with opener.open(req,timeout=25) as res:
+                      body=res.read(30_000_001)
+                      if len(body)>30_000_000: raise ValueError('source exceeds 30MB limit')
+                      entry.update(httpStatus=res.status,finalUrl=res.url,contentType=res.headers.get('Content-Type',''))
+                  suffix='.pdf' if body.startswith(b'%PDF') else '.html'
+                  file=root/f'{index:02d}{suffix}';file.write_bytes(body)
+                  entry.update(file=file.name,sha256=hashlib.sha256(body).hexdigest(),bytes=len(body))
+                  if suffix=='.pdf':
+                      with pymupdf.open(file) as doc:
+                          text='\n'.join(f'\nPAGE {i+1}\n'+page.get_text() for i,page in enumerate(doc))
+                          (root/f'{index:02d}.txt').write_text(text,encoding='utf8')
+                          entry['pages']=len(doc)
+                          if len(text.strip()) < len(doc)*150:
+                              for i,page in enumerate(doc):
+                                  if i>=35: break
+                                  page.get_pixmap(matrix=pymupdf.Matrix(1.5,1.5)).save(root/f'{index:02d}-p{i+1}.png')
+                  manifest.append(entry)
+                  return body
+              except Exception as e:
+                  entry['error']=str(e);manifest.append(entry);return None
+          seed='https://hospitalsaorafael.org.br/transparencia/'
+          body=retrieve(seed,0,'Hospital public transparency index')
+          if body:
+              soup=BeautifulSoup(body,'html.parser')
+              for a in soup.select('a[href]'):
+                  url=urllib.parse.urljoin(seed,a['href'])
+                  if urllib.parse.urlparse(url).hostname=='hospitalsaorafael.org.br' and '.pdf' in url.lower():
+                      label=a.get_text(' ',strip=True)
+                      if url not in [x['url'] for x in links]: links.append({'url':url,'label':label})
+          for i,item in enumerate(links[:18],1):
+              retrieve(item['url'],i,item['label']);time.sleep(.4)
+          (root/'links.json').write_text(json.dumps(links,ensure_ascii=False,indent=2),encoding='utf8')
+          (root/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf8')
+          print('Collection finished:',sum('error' not in item for item in manifest),'retrieved;',sum('error' in item for item in manifest),'unavailable. No authentication, submissions or financial actions.')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jfn-public-source-evidence
+          path: evidence/public
+          retention-days: 7

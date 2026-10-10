@@ -1,0 +1,16 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { cents, difference, compareReply, proposeClosing } from '../lib/reconciliation.mjs';
+test('diferença exata em centavos', () => assert.deepEqual(difference(100000, 85000), { state: 'DIVERGENCE', deltaCents: 15000 }));
+test('valor zero é valor conhecido', () => assert.deepEqual(difference(0, 0), { state: 'MATCH', deltaCents: 0 }));
+test('dado ausente permanece desconhecido', () => assert.deepEqual(difference(null, 85000), { state: 'MISSING', deltaCents: null }));
+test('centavos fracionários são rejeitados', () => assert.throws(() => cents(0.1)));
+test('overflow monetário é rejeitado', () => assert.throws(() => difference(Number.MAX_SAFE_INTEGER, -1)));
+test('resposta sem evidência não reduz o achado', () => assert.equal(compareReply(15000, 5000, false).residualCents, 15000));
+test('resposta parcial preserva saldo não explicado', () => assert.equal(compareReply(15000, 5000, true).residualCents, 10000));
+test('explicação integral ainda exige validação humana final', () => assert.equal(compareReply(15000, 15000, true).state, 'READY_FOR_HUMAN_VALIDATION'));
+test('explicação acima do questionado é rejeitada', () => assert.throws(() => compareReply(15000, 16000, true)));
+test('divergência não bloqueia automaticamente fechamento gerencial', () => { const r = proposeClosing({ independentBlockers: [], openFindings: 2, evidenceComplete: false, humanApproved: true }); assert.equal(r.status, 'MANAGERIAL_WITH_RESERVATIONS'); assert.equal(r.openFindings, 2); assert.equal(r.paymentsAuthorized, false); assert.equal(r.findingsAutomaticallyClosed, false); });
+test('bloqueio independente permanece impeditivo', () => assert.equal(proposeClosing({ independentBlockers: ['CONTROL_REQUIRED'], openFindings: 2, evidenceComplete: true, humanApproved: true }).status, 'BLOCKED'));
+test('não fechar sem aprovação humana', () => assert.equal(proposeClosing({ independentBlockers: [], openFindings: 0, evidenceComplete: true, humanApproved: false }).status, 'AWAITING_HUMAN_REVIEW'));
+test('entrada de fechamento inválida não recebe aprovação por truthiness', () => assert.throws(() => proposeClosing({ independentBlockers: [], openFindings: 0, evidenceComplete: true, humanApproved: 'false' })));

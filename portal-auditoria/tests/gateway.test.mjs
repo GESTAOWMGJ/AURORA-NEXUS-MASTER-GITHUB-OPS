@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { dashboardGateway } from '../lib/gateway.mjs';
+import { demoDashboard } from '../lib/demo.mjs';
+const env = { JFN_INTEGRATION_MODE: 'homologation', JFN_ALLOWED_ORGS: 'hospital-demo', WMGJ_CONTROL_PLANE_ORIGIN: 'https://synthetic-service.run.app' };
+const headers = { Authorization: 'Bearer synthetic-token-not-a-real-credential', 'X-Firebase-AppCheck': 'synthetic-appcheck-not-a-real-credential' };
+const req = (query = 'orgId=hospital-demo&competence=2026-08', h = headers, method = 'GET') => new Request(`https://portal.example/api/dashboard?${query}`, { headers: h, method });
+const success = async () => Response.json(demoDashboard());
+const noCall = async () => { assert.fail('O upstream não deveria ser chamado'); };
+test('integração desligada não chama backend', async () => assert.equal((await dashboardGateway(req(), {}, noCall)).status, 503));
+test('modo production é rejeitado', async () => assert.equal((await dashboardGateway(req(), { ...env, JFN_INTEGRATION_MODE: 'production' }, noCall)).status, 503));
+test('escrita não é permitida', async () => assert.equal((await dashboardGateway(req(undefined, headers, 'POST'), env, noCall)).status, 405));
+test('instituição fora da allowlist é rejeitada', async () => assert.equal((await dashboardGateway(req('orgId=outra-org&competence=2026-08'), env, noCall)).status, 403));
+test('tenant traversal é rejeitado', async () => assert.equal((await dashboardGateway(req('orgId=..%2Fwmgj&competence=2026-08'), env, noCall)).status, 400));
+test('competência inválida é rejeitada', async () => assert.equal((await dashboardGateway(req('orgId=hospital-demo&competence=2026-13'), env, noCall)).status, 400));
+test('parâmetros duplicados são rejeitados', async () => assert.equal((await dashboardGateway(req('orgId=hospital-demo&orgId=outra&competence=2026-08'), env, noCall)).status, 400));
+test('destino externo não pode vir da requisição', async () => assert.equal((await dashboardGateway(req('orgId=hospital-demo&competence=2026-08&url=https://other.example'), env, noCall)).status, 400));
+test('sem credenciais não consulta backend', async () => assert.equal((await dashboardGateway(req(undefined, {}), env, noCall)).status, 401));
+test('App Check obrigatório', async () => assert.equal((await dashboardGateway(req(undefined, { Authorization: headers.Authorization }), env, noCall)).status, 401));
+test('URL upstream com credencial é rejeitada', async () => assert.equal((await dashboardGateway(req(), { ...env, WMGJ_CONTROL_PLANE_ORIGIN: 'https://user:pass@synthetic-service.run.app' }, noCall)).status, 503));
+test('upstream HTTP ou endereço local é rejeitado', async () => { for (const url of ['http://service.example', 'https://127.0.0.1', 'https://service.internal']) assert.equal((await dashboardGateway(req(), { ...env, WMGJ_CONTROL_PLANE_ORIGIN: url }, noCall)).status, 503); });
+test('GET encaminha apenas escopo permitido e credenciais originais', async () => {
+  let calls = 0;
+  const r = await dashboardGateway(req(), env, async (url, options) => {
+    calls++; assert.equal(String(url), 'https://synthetic-service.run.app/v1/organizations/hospital-demo/dashboards/operational?competence=2026-08');
+    assert.equal(options.headers.Authorization, headers.Authorization); assert.equal(options.redirect, 'manual'); assert.equal(options.cache, 'no-store'); return success();
+  });
+  assert.equal(calls, 1); assert.equal(r.status, 200); assert.match(r.headers.get('cache-control'), /no-store/); assert.equal((await r.json()).snapshot.financial.pendingAmount, 150);
+});
+test('negativa RBAC do backend permanece negativa sem vazamento', async () => { const r = await dashboardGateway(req(), env, async () => Response.json({ sensitive: 'never-return' }, { status: 403 })); assert.equal(r.status, 403); assert.deepEqual(await r.json(), { code: 'SCOPE_DENIED' }); });
+test('token recusado no backend nunca vira sucesso', async () => assert.equal((await dashboardGateway(req(), env, async () => Response.json({}, { status: 401 }))).status, 401));
+test('snapshot inexistente não vira zero', async () => assert.equal((await dashboardGateway(req(), env, async () => Response.json({}, { status: 404 }))).status, 404));
+test('resposta de outra instituição é bloqueada', async () => { const d = demoDashboard(); d.snapshot.orgId = 'outra'; assert.equal((await dashboardGateway(req(), env, async () => Response.json(d))).status, 502); });
+test('redirect upstream não é seguido', async () => assert.equal((await dashboardGateway(req(), env, async () => new Response(null, { status: 302, headers: { Location: 'https://other.example' } }))).status, 502));
+test('HTML de erro não é repassado', async () => assert.equal((await dashboardGateway(req(), env, async () => new Response('<html>private</html>', { headers: { 'content-type': 'text/html' } }))).status, 502));
+test('resposta excedente é bloqueada mesmo sem Content-Length', async () => assert.equal((await dashboardGateway(req(), env, async () => Response.json({ x: 'x'.repeat(300000) }))).status, 502));
+test('falha de rede não é mascarada por demo', async () => assert.equal((await dashboardGateway(req(), env, async () => { throw new Error('connection-secret'); })).status, 502));
