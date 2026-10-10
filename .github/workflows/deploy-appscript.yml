@@ -8,6 +8,7 @@ on:
       - 'src/**/*.gs'
       - 'tools/**/*.js'
       - 'tools/**/*.sh'
+      - 'tools/**/*.cjs'
       - 'appsscript.json'
       - '.github/workflows/deploy-appscript.yml'
   workflow_dispatch:
@@ -45,6 +46,17 @@ jobs:
           cat > ~/.clasprc.json <<'EOF'
           ${{ secrets.CLASPRC_JSON }}
           EOF
+
+      - name: Diagnose clasp OAuth identity safely
+        run: |
+          set -euo pipefail
+          node tools/inspect-clasprc-safe.cjs "$HOME/.clasprc.json" > "$RUNNER_TEMP/clasp-oauth.json"
+          jq -e '.ok==true and .refreshTokenConfigured==true' "$RUNNER_TEMP/clasp-oauth.json" >/dev/null
+          jq '{credentialFormat,clientType,oauthProjectNumber,refreshTokenConfigured}' "$RUNNER_TEMP/clasp-oauth.json"
+          if jq -e '.clientType=="GOOGLE_PROVIDED_CLASP"' "$RUNNER_TEMP/clasp-oauth.json" >/dev/null; then
+            echo "::error title=Apps Script OAuth client mismatch::CLASPRC_JSON uses the Google-provided clasp OAuth client. scripts.run requires a user OAuth client from the same standard Google Cloud project linked to this Apps Script project."
+            exit 74
+          fi
 
       - name: Prepare Apps Script project files
         run: |
