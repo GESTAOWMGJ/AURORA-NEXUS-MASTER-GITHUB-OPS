@@ -1,0 +1,45 @@
+name: Aurora Autonomous HML Evidence Robot
+
+on:
+  pull_request:
+    paths:
+      - 'firebase-migration/scripts/aurora_autohml_robot.py'
+      - 'scripts/tests/test_aurora_autohml_robot.py'
+      - '.github/workflows/aurora-autohml-robot.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '17 9 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-autohml-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Robot unit regression
+        run: python -m unittest discover -s scripts/tests -p test_aurora_autohml_robot.py -v
+      - name: Gather offline evidence (no secrets or provisioning)
+        run: python firebase-migration/scripts/aurora_autohml_robot.py --output "$RUNNER_TEMP/aurora-hml-evidence.json"
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: aurora-hml-offline-evidence
+          path: ${{ runner.temp }}/aurora-hml-evidence.json
+          if-no-files-found: ignore
+          retention-days: 14
