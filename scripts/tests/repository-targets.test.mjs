@@ -88,7 +88,7 @@ test('explicit WIF repository override remains supported without adding a legacy
   assert.equal(condition.includes(canonical), false);
   assert.equal(condition.includes(legacy), false);
   assert.match(wif, /"repos\/\$Repository\/environments\/\$Environment"/);
-  assert.equal((wif.match(/--repo \$Repository/g) || []).length, 3);
+  assert.equal((wif.match(/--repo \$Repository/g) || []).length, 4);
 });
 
 test('historical Apps Script provenance keeps its original marker and public response contract', () => {
