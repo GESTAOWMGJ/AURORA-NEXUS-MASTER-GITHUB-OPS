@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "id": "AURORA-IMAC-REMOTE-BASE-001",
+  "status": "REGISTERED_BASE_NATIVE_VALIDATION_PENDING",
+  "role": "PRIMARY_REMOTE_OPERATIONAL_NODE",
+  "target": {
+    "hostname": "iMac-de-Joao.local",
+    "platform": "macOS",
+    "osVersion": "10.13.6",
+    "architecture": "x86_64"
+  },
+  "controlPlane": {
+    "provider": "TRIGGERcmd",
+    "mode": "allowlisted-commands-only",
+    "arbitraryShell": false,
+    "autostart": "LaunchAgent",
+    "launchAgentLabel": "com.jfn.triggercmd.imac"
+  },
+  "auroraMirror": {
+    "repository": "GESTAOWMGJ/automacao-gestao-wmgj",
+    "branch": "main",
+    "updatePolicy": "fast-forward-only",
+    "localMutationAllowed": false,
+    "deployAllowed": false,
+    "firebaseWriteAllowed": false
+  },
+  "authorizedCommands": [
+    "JFN Status Mac",
+    "JFN Diagnostico",
+    "JFN Rede",
+    "JFN Reiniciar Agente",
+    "AURORA NEXUS Status",
+    "AURORA NEXUS Sincronizar"
+  ],
+  "guardrails": [
+    "no-sudo",
+    "no-sip-disable",
+    "no-gatekeeper-disable",
+    "no-arbitrary-shell",
+    "no-production-deploy",
+    "no-firebase-write-from-sync",
+    "no-destructive-git-reset",
+    "no-secret-output"
+  ],
+  "promotionGate": {
+    "requiresHumanReview": true,
+    "requiresHighSierraNativeTest": true,
+    "requiresRemoteRoundTripEvidence": true,
+    "requiresRollbackEvidence": true
+  },
+  "runtimeEvidence": {
+    "observedAt": "2026-10-03T15:27:42Z",
+    "commandInventoryPublished": true,
+    "requiredCommandsPresent": [
+      "JFN Status Mac",
+      "AURORA NEXUS Status",
+      "AURORA NEXUS Sincronizar",
+      "JFN Reiniciar Agente"
+    ],
+    "triggerDispatchVerified": true,
+    "restartSurvivalVerified": null,
+    "inventoryObservedAfterRestartDispatch": true,
+    "nativePreflightVerified": true,
+    "nativePreflightEvidence": {
+      "commitSha": "8b9846ee412da1ae3d495da790db8c2ce96a6b58",
+      "observedAt": "2026-10-03T00:05:58-03:00",
+      "source": "USER_PROVIDED_NATIVE_TERMINAL",
+      "exitCode": 0,
+      "scope": "PREREQUISITES_ONLY_AT_RECORDED_COMMIT"
+    },
+    "commandOutputRoundTripVerified": true,
+    "commandOutputRoundTripEvidence": {
+      "command": "JFN Status Mac",
+      "source": "TRIGGERCMD_RUN_COMMAND_RESULT",
+      "dispatchStartedAt": "2026-10-03T15:27:32.654Z",
+      "resultTimestamp": "2026-10-03T15:27:42Z",
+      "responseReceivedAt": "2026-10-03T15:27:44.135Z",
+      "helperValidatedCommitSha": "552962885a89192c9ff053834493deeecb8d1df9",
+      "helperSha256": "2b297b67682fae05e8128e5051a18ac52c5217d116357d0ae387d72ee73d6b5f",
+      "helperReplacementCommitSha": "2bb66721969faa61a1231a0b402e72e020fed072",
+      "configurationAdjustment": "voiceReply={{result}}; local backup; no restart",
+      "processState": "PROCESS_PRESENT",
+      "managedPid": 1337,
+      "nativeExitCodeObserved": false,
+      "scope": "ONE_STATUS_COMMAND_TEXT_RESULT"
+    },
+    "note": "Recorded evidence is scoped to its command, timestamp and commit. Status text returned automatically after the local voiceReply adjustment; it is not raw stdout/stderr or a native exit code. Inventory after an earlier restart dispatch does not prove completed restart. Full bootstrap, native rollback, continuous availability, app runtime and HML authentication remain unverified."
+  }
+}
