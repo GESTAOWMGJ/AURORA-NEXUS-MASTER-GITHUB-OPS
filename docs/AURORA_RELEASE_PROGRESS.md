@@ -73,3 +73,11 @@ Toda solicitação relevante deve:
 4. validar atualização do app Mac instalado;
 5. hardening comercial, domínio, distribuição e documentação;
 6. promover RC aprovada para `1.0.0` GA.
+
+## RC1.1 — validação do payload completo após PR #110
+
+- Baseline `403e20317e073de6da88d569dc18e66f99447cae`: a main removeu os campos fora de contrato da amostra pelo PR #110. Preservar esse produtor; este incremento adiciona somente teste e evidência, sem mudar request ou contrato.
+- Teste executa ambos os builders Apps Script com fontes sintéticas e submete os eventos completos ao validador real do backend. Campos antigos e conteúdo clínico permanecem rejeitados. Não inferir aceitação runtime a partir do teste.
+- Deploy Apps Script `37134188577` aprovado nesse SHA. Tentativa 5 de `37093409122`, job `111235471017`, ainda em restore na última consulta; amostra/reconciliação não comprovadas.
+- CMEK: saída titular no SHA `6295e9b61c7510905eebfc25cbfcf3c5524ae98e` confirma AURORA_CMEK_HML_APPLIED e backup diário 14d; consulta posterior retornou nenhum backup de aurora-hml-cmek. Estado PENDING_HML_VERIFICATION mantido até backup READY, restore e recuperação da chave.
+- Rollback: reverter somente este incremento de teste/documentação. Sem merge/deploy/rerun automático.
