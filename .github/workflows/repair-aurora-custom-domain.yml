@@ -254,29 +254,115 @@ jobs:
             cat "${RUNNER_TEMP}/aurora-custom-domain-dns-schema.json"
           fi
 
-          # Preserve only DNS record names/types/counts and SHA-256 digests of record values.
-          # Raw ownership challenge values are never emitted.
+          # Preserve record metadata plus SHA-256 of each rdata; never emit raw DNS values.
           if [ -n "$domain_json" ]; then
-            dns_summary="$(
-              jq -c '
-                def summarize:
-                  if type == "array" then
-                    map({
-                      domainName: (.domainName // ""),
-                      type: (.type // ""),
-                      valueCount: ((.rdata // []) | length),
-                      valueHashes: ((.rdata // []) | map(@base64) )
-                    })
-                  else [] end;
-                {
-                  desired: (.requiredDnsUpdates.desired | summarize),
-                  discovered: (.requiredDnsUpdates.discovered | summarize)
-                }' <<<"$domain_json"
+            printf '%s' "$domain_json" \
+              | python3 -c 'import hashlib,json,sys;x=json.load(sys.stdin);r=x.get("requiredDnsUpdates",{});print(json.dumps({s:[{"domainName":(rec.get("domainName") or g.get("domainName") or ""),"type":(rec.get("type") or ""),"requiredAction":rec.get("requiredAction"),"rdataPresent":bool(rec.get("rdata")),"rdataSha256":hashlib.sha256(str(rec.get("rdata") or "").encode()).hexdigest()} for g in (r.get(s) or []) for rec in (g.get("records") or [])] for s in ("desired","discovered")},separators=(",",":")))' \
+              | jq -c --arg project "$PROJECT_ID" --arg site "$SITE_ID" --arg domain "$DOMAIN" \
+                  '{schemaVersion:1,projectId:$project,siteId:$site,domain:$domain,
+                    stage:"REQUIRED_DNS_RECORD_HASHES",requiredDnsRecords:.,
+                    rawDnsValuesIncluded:false,secretsIncluded:false,iamChanged:false,dnsChanged:false}' \
+              > "${RUNNER_TEMP}/aurora-custom-domain-dns-record-hashes.json"
+            cat "${RUNNER_TEMP}/aurora-custom-domain-dns-record-hashes.json"
+          fi
+
+          ownership_before="$(jq -r '.ownershipState // "UNKNOWN"' <<<"$domain_json")"
+          check_time_before="$(jq -r '.requiredDnsUpdates.checkTime // empty' <<<"$domain_json")"
+          refresh_applied=false
+          original_annotations='{}'
+
+          wait_operation() {
+            local operation_file="$1" stage="$2"
+            local operation_name
+            operation_name="$(jq -r '.name // empty' "$operation_file")"
+            if [ -z "$operation_name" ]; then diagnostic "$stage"_CONTRACT "200" "$operation_file"; return 1; fi
+            local operation_state
+            operation_state="$(mktemp "${RUNNER_TEMP}/aurora-operation.XXXXXX.json")"
+            for op_attempt in $(seq 1 30); do
+              local op_code
+              op_code="$(curl --silent --show-error --max-time 30 -o "$operation_state" -w '%{http_code}' "${auth[@]}" "$BASE/$operation_name" || true)"
+              if [ "$op_code" != "200" ]; then diagnostic "$stage"_GET "$op_code" "$operation_state"; rm -f "$operation_state"; return 1; fi
+              if [ "$(jq -r '.done // false' "$operation_state")" = "true" ]; then
+                if jq -e '.error? != null' "$operation_state" >/dev/null; then
+                  diagnostic "$stage"_ERROR "200" "$operation_state"; rm -f "$operation_state"; return 1
+                fi
+                rm -f "$operation_state"
+                return 0
+              fi
+              sleep 2
+            done
+            rm -f "$operation_state"
+            return 1
+          }
+
+          restore_refresh_annotations() {
+            if [ "$refresh_applied" != "true" ]; then return 0; fi
+            local latest_file restore_file restore_body restore_code latest_etag
+            latest_file="$(mktemp "${RUNNER_TEMP}/aurora-domain-restore-latest.XXXXXX.json")"
+            restore_file="$(mktemp "${RUNNER_TEMP}/aurora-domain-restore.XXXXXX.json")"
+            if curl --fail --silent --show-error --max-time 30 -o "$latest_file" "${auth[@]}" "$BASE/$resource"; then
+              latest_etag="$(jq -r '.etag // empty' "$latest_file")"
+              if [ -n "$latest_etag" ]; then
+                restore_body="$(jq -nc --arg name "$resource" --arg etag "$latest_etag" --argjson annotations "$original_annotations" '{name:$name,etag:$etag,annotations:$annotations}')"
+                restore_code="$(curl --silent --show-error --max-time 30 -o "$restore_file" -w '%{http_code}' -X PATCH "${auth[@]}" -H 'Content-Type: application/json' --data "$restore_body" "$BASE/$resource?updateMask=annotations" || true)"
+                if [ "$restore_code" = "200" ] && wait_operation "$restore_file" "OWNERSHIP_REFRESH_RESTORE"; then
+                  refresh_applied=false
+                fi
+              fi
+            fi
+            rm -f "$latest_file" "$restore_file"
+          }
+
+          if [ "$REPAIR_CONFIRMATION" = "REPAIR_HML_DOMAIN" ] && [ "$ownership_before" = "OWNERSHIP_MISMATCH" ]; then
+            host_before="$(jq -r '.hostState // "UNKNOWN"' <<<"$domain_json")"
+            cert_before="$(jq -r '.cert.state // "UNKNOWN"' <<<"$domain_json")"
+            issues_before="$(jq -r '(.issues // []) | length' <<<"$domain_json")"
+            desired_known="$(
+              python3 -c 'import json,sys;x=json.load(sys.stdin);r=x.get("requiredDnsUpdates",{}).get("desired") or [];rows=[rec for g in r for rec in (g.get("records") or [])];a=any(z.get("type")=="A" and z.get("rdata")=="199.36.158.100" for z in rows);t=any(z.get("type")=="TXT" and z.get("rdata")==("hosting-site="+sys.argv[1]) for z in rows);print("true" if a and t else "false")' "$SITE_ID" <<<"$domain_json"
             )"
-            dns_summary_hashed="$(python3 -c 'import base64,hashlib,json,sys;x=json.loads(sys.argv[1]);[(row.__setitem__("valueHashes",[hashlib.sha256(base64.b64decode(v)).hexdigest() for v in row.get("valueHashes",[])])) for side in ("desired","discovered") for row in x.get(side,[])];print(json.dumps(x,separators=(",",":")))' "$dns_summary")"
-            jq -nc --argjson updates "$dns_summary_hashed"               --arg project "$PROJECT_ID" --arg site "$SITE_ID" --arg domain "$DOMAIN"               '{schemaVersion:1,projectId:$project,siteId:$site,domain:$domain,stage:"REQUIRED_DNS_UPDATES_HASHED",
-                requiredDnsUpdates:$updates,secretsIncluded:false,rawDnsValuesIncluded:false,iamChanged:false,dnsChanged:false}'               > "${RUNNER_TEMP}/aurora-custom-domain-dns-summary.json"
-            cat "${RUNNER_TEMP}/aurora-custom-domain-dns-summary.json"
+            if [ "$host_before" = "HOST_ACTIVE" ] && [ "$cert_before" = "CERT_ACTIVE" ] && [ "$issues_before" = "0" ] && [ "$desired_known" = "true" ]; then
+              current_etag="$(jq -r '.etag // empty' <<<"$domain_json")"
+              test -n "$current_etag"
+              original_annotations="$(jq -c '.annotations // {}' <<<"$domain_json")"
+              marker="run-$GITHUB_RUN_ID"
+              refresh_annotations="$(jq -nc --argjson original "$original_annotations" --arg marker "$marker" '$original + {aurora_ownership_refresh:$marker}')"
+              refresh_body="$(jq -nc --arg name "$resource" --arg etag "$current_etag" --argjson annotations "$refresh_annotations" '{name:$name,etag:$etag,annotations:$annotations}')"
+              validate_refresh_file="$(mktemp "${RUNNER_TEMP}/aurora-ownership-refresh-validate.XXXXXX.json")"
+              refresh_file="$(mktemp "${RUNNER_TEMP}/aurora-ownership-refresh.XXXXXX.json")"
+
+              validate_refresh_code="$(curl --silent --show-error --max-time 30 -o "$validate_refresh_file" -w '%{http_code}' -X PATCH "${auth[@]}" -H 'Content-Type: application/json' --data "$refresh_body" "$BASE/$resource?updateMask=annotations&validateOnly=true" || true)"
+              if [ "$validate_refresh_code" != "200" ]; then diagnostic "OWNERSHIP_REFRESH_VALIDATE" "$validate_refresh_code" "$validate_refresh_file"; exit 79; fi
+              if ! jq -e '.name | type == "string" and length > 0' "$validate_refresh_file" >/dev/null; then
+                diagnostic "OWNERSHIP_REFRESH_VALIDATE_CONTRACT" "200" "$validate_refresh_file"; exit 80
+              fi
+
+              refresh_code="$(curl --silent --show-error --max-time 30 -o "$refresh_file" -w '%{http_code}' -X PATCH "${auth[@]}" -H 'Content-Type: application/json' --data "$refresh_body" "$BASE/$resource?updateMask=annotations" || true)"
+              if [ "$refresh_code" != "200" ]; then diagnostic "OWNERSHIP_REFRESH_PATCH" "$refresh_code" "$refresh_file"; exit 81; fi
+              refresh_applied=true
+              if ! wait_operation "$refresh_file" "OWNERSHIP_REFRESH_PATCH"; then restore_refresh_annotations; exit 82; fi
+
+              advanced=false
+              for refresh_attempt in $(seq 1 30); do
+                refresh_state="$(curl --fail --silent --show-error --max-time 30 "${auth[@]}" "$BASE/$resource")"
+                refresh_check_time="$(jq -r '.requiredDnsUpdates.checkTime // empty' <<<"$refresh_state")"
+                refresh_owner="$(jq -r '.ownershipState // "UNKNOWN"' <<<"$refresh_state")"
+                if [ "$refresh_owner" != "$ownership_before" ] || { [ -n "$refresh_check_time" ] && [ "$refresh_check_time" != "$check_time_before" ]; }; then
+                  advanced=true
+                  break
+                fi
+                sleep 5
+              done
+              restore_refresh_annotations
+              if [ "$refresh_applied" = "true" ]; then
+                echo '{"schemaVersion":1,"stage":"OWNERSHIP_REFRESH_ROLLBACK_NOT_CONFIRMED","mutationPerformed":true,"dnsChanged":false,"iamChanged":false}'
+                exit 83
+              fi
+              jq -nc --argjson advanced "$advanced" --arg before "$ownership_before" --arg after "${refresh_owner:-UNKNOWN}" \
+                '{schemaVersion:1,stage:"OWNERSHIP_REFRESH_PULSE",metadataOnly:true,rollbackVerified:true,
+                  dnsChanged:false,iamChanged:false,checkAdvanced:$advanced,ownershipBefore:$before,ownershipAfter:$after}' \
+                > "${RUNNER_TEMP}/aurora-custom-domain-ownership-refresh.json"
+              cat "${RUNNER_TEMP}/aurora-custom-domain-ownership-refresh.json"
+            fi
           fi
 
           current='{}'
