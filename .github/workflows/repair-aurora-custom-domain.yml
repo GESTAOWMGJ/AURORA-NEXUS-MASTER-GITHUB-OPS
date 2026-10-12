@@ -236,6 +236,24 @@ jobs:
             fi
           fi
 
+          # Preserve only schema paths/types for requiredDnsUpdates; never emit DNS values.
+          if [ -n "$domain_json" ]; then
+            jq -c '
+              .requiredDnsUpdates as $r
+              | [
+                  $r
+                  | paths(scalars) as $p
+                  | {
+                      path: ($p | map(tostring) | join(".")),
+                      scalarType: ($r | getpath($p) | type)
+                    }
+                ]
+            ' <<<"$domain_json"               | jq -c --arg project "$PROJECT_ID" --arg site "$SITE_ID" --arg domain "$DOMAIN"                   '{schemaVersion:1,projectId:$project,siteId:$site,domain:$domain,
+                    stage:"REQUIRED_DNS_SCHEMA_ONLY",paths:.,rawDnsValuesIncluded:false,
+                    secretsIncluded:false,iamChanged:false,dnsChanged:false}'               > "${RUNNER_TEMP}/aurora-custom-domain-dns-schema.json"
+            cat "${RUNNER_TEMP}/aurora-custom-domain-dns-schema.json"
+          fi
+
           # Preserve only DNS record names/types/counts and SHA-256 digests of record values.
           # Raw ownership challenge values are never emitted.
           if [ -n "$domain_json" ]; then
