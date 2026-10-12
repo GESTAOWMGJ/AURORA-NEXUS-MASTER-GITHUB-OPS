@@ -1,7 +1,7 @@
 {
   "id": "AURORA-AI-LEARNING-001",
   "name": "Aurora Nexus Intrinsic and Cloud AI Operational Learning Policy",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "date": "2026-10-07",
   "status": "ACTIVE_POLICY",
   "objective": "Make the intrinsic local AI engine and cloud AI control plane learn reusable resolutive skills for platform administration, audit-based problem solving, governance and autonomous operation with minimal manager burden.",
@@ -98,5 +98,38 @@
     "mustHavePrivateTenantIsolation": true,
     "mustHaveEvidenceLinkedLessons": true,
     "mustHaveRollbackForOperationalChanges": true
+  },
+  "enterpriseIntelligence": {
+    "id": "AURORA-TENANT-INTELLIGENCE-001",
+    "motherEngine": "AURORA_NEXUS",
+    "instanceScope": "PER_AUTHENTICATED_ORG",
+    "legalEntityBinding": "EXPLICIT_VALIDATED_ORG_TO_CNPJ_MAPPING",
+    "differentCnpjRequiresSeparateTenant": true,
+    "privateStatePath": "organizations/{orgId}/runtimeCheckpoints/aurora-organic-v1",
+    "privateData": [
+      "documents",
+      "facts",
+      "amounts",
+      "contracts",
+      "local_rules",
+      "observations",
+      "outcomes",
+      "proposals",
+      "approvals",
+      "checkpoints",
+      "embeddings",
+      "model_adaptations"
+    ],
+    "inheritance": "ONLY_VERSIONED_VALIDATED_TENANT_AGNOSTIC_CAPABILITIES",
+    "customization": "CURRENT_TENANT_EVIDENCE_ONLY",
+    "sharedCustomerData": false,
+    "sharedCustomerRules": false,
+    "automaticCrossTenantPromotion": false,
+    "newTenantStartsWithPrivateMemoryEmpty": true,
+    "derivedIdsIncludeOrg": true,
+    "corpusAndCacheScope": "AUTHENTICATED_ORG_AND_VERSION",
+    "unknownOrMismatch": "DENY_WITHOUT_RELABELING_OR_FALLBACK",
+    "legalEntityBindingState": "REQUIRES_ONBOARDING_EVIDENCE",
+    "runtimeProof": "ORG_AND_MEMORY_PROJECTION_GUARD; CNPJ_MAPPING_AND_ALL_MODEL_CACHES_REQUIRE_SEPARATE_VERIFICATION"
   }
 }
