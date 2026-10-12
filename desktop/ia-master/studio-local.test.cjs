@@ -145,7 +145,11 @@ test('model partial context is visibly disclosed and untrusted output is text on
 });
 test('isolated integration assets preserve identity, cookie handoff and self-only scripts', () => {
   const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8'), app = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8'), js = fs.readFileSync(path.join(__dirname, 'studio-local.js'), 'utf8');
-  assert.match(html, /AURORA NEXUS · IA Master/); assert.match(html, /src="\/studio-local.js" defer/); assert.doesNotMatch(html, /<script>|onclick=|style=/);
+  assert.match(html, /AURORA NEXUS · IA Master/); assert.match(html, /src="\/studio-local.js" defer/); assert.doesNotMatch(html, /<script>|\bonclick=|\bstyle=/gi);
+  // Controlled fixture assertion, not an HTML sanitizer or a runtime security boundary.
+  for (const markup of ['<SCRIPT>alert(1)</SCRIPT>', '<button ONCLICK="alert(1)">', '<div STYLE="color:red">']) {
+    assert.match(markup, /<script>|\bonclick=|\bstyle=/gi);
+  }
   assert.match(app, /aurora:local-session-ready/); assert.match(app, /aurora:local-session-ended/);
   assert.doesNotMatch(js, /localStorage|sessionStorage|document\.cookie|mfaVerified\s*:\s*true|org_admin|eval\(|new Function\(/);
 });

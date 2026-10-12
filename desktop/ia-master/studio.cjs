@@ -361,11 +361,6 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
     const publication = publisher.readPublication(task);
     return publication ? { ...task, publication } : task;
   }
-  const publisherOperations = {
-    'publish-draft': input => publisher.publishDraft(input),
-    'reconcile-publication': input => publisher.reconcile(input),
-    'read-ci': input => publisher.readCi(input)
-  };
   async function route(method, url, body = {}) {
     const prefix = '/api/studio/'; if (!url.startsWith(prefix)) return null;
     const pathname = url.slice(prefix.length);
@@ -423,8 +418,13 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
         const task = read('tasks', id); expected(task, body.expectedVersion);
         demand(task.state === 'VERSION_PREPARED' && DIGEST.test(body.proposalFingerprint) &&
           body.proposalFingerprint === task.proposalFingerprint, 'STUDIO_STATE_CONFLICT', 409);
-        const publication = await publisherOperations[operation]({ taskId: id,
-          expectedVersion: body.expectedVersion, proposalFingerprint: body.proposalFingerprint });
+        const input = { taskId: id, expectedVersion: body.expectedVersion,
+          proposalFingerprint: body.proposalFingerprint };
+        let publication;
+        if (operation === 'publish-draft') publication = await publisher.publishDraft(input);
+        else if (operation === 'reconcile-publication') publication = await publisher.reconcile(input);
+        else if (operation === 'read-ci') publication = await publisher.readCi(input);
+        else throw new StudioError('STUDIO_NOT_FOUND', 404);
         const current = read('tasks', id); expected(current, body.expectedVersion);
         return { status: 200, value: { task: taskView(current), publication } };
       });
