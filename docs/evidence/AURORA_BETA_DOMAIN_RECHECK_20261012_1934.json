@@ -1,0 +1,14 @@
+{
+  "observedAt": "2026-10-12T19:34:10Z",
+  "currentCandidateSha": "fce1ab84252a1f09b1e5e79541a2c912ae9e819c",
+  "inspectionRun": 38298287900,
+  "inspectionSucceeded": true,
+  "inspectionMode": "VALIDATE_ONLY",
+  "domainOwnership": "OWNERSHIP_MISMATCH",
+  "host": "HOST_ACTIVE",
+  "certificate": "CERT_ACTIVE",
+  "canonicalBootstrapHttp": 404,
+  "fullOperationalBetaVerified": false,
+  "dnsChanged": false,
+  "rule": "Await provider recognition without further DNS changes. Old deploy SHA is superseded; revalidate current main before protected publication. Successful inspection is not successful repair."
+}
