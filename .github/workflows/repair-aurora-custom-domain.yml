@@ -101,25 +101,53 @@ jobs:
           umask 077
           evidence="${RUNNER_TEMP}/aurora-custom-domain-evidence.json"
 
-          site_json="$(curl --fail --silent --show-error --max-time 30 "${auth[@]}"             "$BASE/projects/$PROJECT_ID/sites/$SITE_ID")"
-          jq -e --arg expected "projects/$PROJECT_ID/sites/$SITE_ID" --arg url "https://$SITE_ID.web.app"             '.name == $expected and .defaultUrl == $url' <<<"$site_json" >/dev/null
+          diagnostic() {
+            local stage="$1" http="$2" body_file="$3"
+            local api_status="NOT_AVAILABLE" api_code="NOT_AVAILABLE"
+            if [ -s "$body_file" ]; then
+              api_status="$(jq -r '.error.status // "NOT_AVAILABLE"' "$body_file" 2>/dev/null || printf 'NOT_AVAILABLE')"
+              api_code="$(jq -r '.error.code // "NOT_AVAILABLE"' "$body_file" 2>/dev/null || printf 'NOT_AVAILABLE')"
+            fi
+            jq -nc --arg project "$PROJECT_ID" --arg site "$SITE_ID" --arg domain "$DOMAIN" \
+              --arg stage "$stage" --arg http "$http" --arg apiStatus "$api_status" --arg apiCode "$api_code" \
+              '{schemaVersion:1,projectId:$project,siteId:$site,domain:$domain,stage:$stage,httpStatus:$http,
+                apiStatus:$apiStatus,apiCode:$apiCode,secretsIncluded:false,iamChanged:false,dnsChanged:false}' > "$evidence"
+          }
 
-          list_json="$(curl --fail --silent --show-error --max-time 30 "${auth[@]}"             "$BASE/projects/$PROJECT_ID/sites/$SITE_ID/customDomains?pageSize=100&showDeleted=true")"
-          resource="projects/$PROJECT_ID/sites/$SITE_ID/customDomains/$DOMAIN"
+          site_file="$(mktemp "${RUNNER_TEMP}/aurora-site.XXXXXX.json")"
+          list_file="$(mktemp "${RUNNER_TEMP}/aurora-domain-list.XXXXXX.json")"
+          trap 'rm -f "$site_file" "$list_file"' EXIT
+          site_code="$(curl --silent --show-error --max-time 30 -o "$site_file" -w '%{http_code}' "${auth[@]}" \
+            "$BASE/projects/$PROJECT_ID/sites/$SITE_ID" || true)"
+          if [ "$site_code" != "200" ]; then diagnostic "SITE_GET" "$site_code" "$site_file"; exit 61; fi
+          site_name="$(jq -r '.name // empty' "$site_file")"
+          default_url="$(jq -r '.defaultUrl // empty' "$site_file")"
+          test -n "$site_name"
+          test "${site_name##*/}" = "$SITE_ID"
+          case "$default_url" in
+            "https://$SITE_ID.web.app"|"https://$SITE_ID.web.app/") ;;
+            *) diagnostic "SITE_CONTRACT" "200" "$site_file"; exit 62 ;;
+          esac
+
+          list_code="$(curl --silent --show-error --max-time 30 -o "$list_file" -w '%{http_code}' "${auth[@]}" \
+            "$BASE/$site_name/customDomains?pageSize=100&showDeleted=true" || true)"
+          if [ "$list_code" != "200" ]; then diagnostic "CUSTOM_DOMAIN_LIST" "$list_code" "$list_file"; exit 63; fi
+          list_json="$(cat "$list_file")"
+          resource="$site_name/customDomains/$DOMAIN"
           domain_json="$(jq -c --arg name "$resource" '[.customDomains[]? | select(.name == $name)] | first // empty' <<<"$list_json")"
           action="NONE"
 
           if [ -z "$domain_json" ]; then
             validate_file="$(mktemp "${RUNNER_TEMP}/aurora-custom-domain-validate.XXXXXX.json")"
             trap 'rm -f "$validate_file"' EXIT
-            validate_code="$(curl --silent --show-error --max-time 30 -o "$validate_file" -w '%{http_code}'               -X POST "${auth[@]}" -H 'Content-Type: application/json' --data '{}'               "$BASE/projects/$PROJECT_ID/sites/$SITE_ID/customDomains?customDomainId=$DOMAIN&validateOnly=true")"
+            validate_code="$(curl --silent --show-error --max-time 30 -o "$validate_file" -w '%{http_code}'               -X POST "${auth[@]}" -H 'Content-Type: application/json' --data '{}'               "$BASE/$site_name/customDomains?customDomainId=$DOMAIN&validateOnly=true")"
             test "$validate_code" = "200"
             jq -e '.name | type == "string"' "$validate_file" >/dev/null
             action="CREATE_REQUIRED"
             if [ "$REPAIR_CONFIRMATION" = "REPAIR_HML_DOMAIN" ]; then
               mutation_file="$(mktemp "${RUNNER_TEMP}/aurora-custom-domain-create.XXXXXX.json")"
               trap 'rm -f "$validate_file" "$mutation_file"' EXIT
-              mutation_code="$(curl --silent --show-error --max-time 30 -o "$mutation_file" -w '%{http_code}'                 -X POST "${auth[@]}" -H 'Content-Type: application/json' --data '{}'                 "$BASE/projects/$PROJECT_ID/sites/$SITE_ID/customDomains?customDomainId=$DOMAIN")"
+              mutation_code="$(curl --silent --show-error --max-time 30 -o "$mutation_file" -w '%{http_code}'                 -X POST "${auth[@]}" -H 'Content-Type: application/json' --data '{}'                 "$BASE/$site_name/customDomains?customDomainId=$DOMAIN")"
               test "$mutation_code" = "200"
               jq -e '.name | type == "string"' "$mutation_file" >/dev/null
               action="CREATE_REQUESTED"
