@@ -53,8 +53,23 @@ jobs:
         run: |
           set -euo pipefail
           npm ci --prefix firebase-migration/functions
+          python3 -m unittest discover -s desktop/ia-master -p test_build.py -v
           python3 desktop/ia-master/build.py --output "${RUNNER_TEMP}/aurora-ia-master"
-          AURORA_TEST_BUILD="${RUNNER_TEMP}/aurora-ia-master" node --test desktop/ia-master/server.test.cjs
+          python3 - "${RUNNER_TEMP}/aurora-ia-master/manifest.json" "$(git rev-parse HEAD)" <<'PY'
+          import hashlib, json, pathlib, sys
+          manifest_path = pathlib.Path(sys.argv[1])
+          manifest = json.loads(manifest_path.read_text())
+          assert manifest['dirty'] is False, 'Dirty local Master package cannot be retained for installation'
+          assert manifest['sourceRevision'] == sys.argv[2], 'Local Master source does not match the checked-out SHA'
+          assert manifest['files']['knowledge-registry.cjs'] == 'dc6c99e407faa11adb46e68d798bd49374e54ada820c0f755520fcfec32abbb8'
+          for name, expected in manifest['files'].items():
+              target = manifest_path.parent / name
+              assert target.is_file() and not target.is_symlink()
+              assert hashlib.sha256(target.read_bytes()).hexdigest() == expected
+          print('LOCAL_MASTER_CLEAN_EXACT_SOURCE_AND_FILES_VERIFIED')
+          PY
+          AURORA_TEST_BUILD="${RUNNER_TEMP}/aurora-ia-master" AURORA_STUDIO_TEST_GIT="$(command -v git)" \
+            node --test desktop/ia-master/server.test.cjs desktop/ia-master/studio.test.cjs desktop/ia-master/knowledge-registry.test.cjs desktop/ia-master/update.test.cjs desktop/ia-master/safe-read.test.cjs desktop/ia-master/studio-local.test.cjs desktop/ia-master/publisher.test.cjs
       - name: Retain local IA Master candidate with exact source manifest
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -74,7 +89,7 @@ jobs:
       - name: Private download authorization and integrity tests
         run: |
           set -euo pipefail
-          node --experimental-strip-types --test firebase-migration/functions/test/aurora-downloads.test.ts 2>&1 | tee "${RUNNER_TEMP}/aurora-hml-installers/download-tests.txt"
+          node --import ./firebase-migration/functions/node_modules/tsx/dist/loader.mjs --test firebase-migration/functions/test/aurora-downloads.test.ts 2>&1 | tee "${RUNNER_TEMP}/aurora-hml-installers/download-tests.txt"
       - name: Verify source-bound server, web and satellite release manifests
         run: |
           set -euo pipefail

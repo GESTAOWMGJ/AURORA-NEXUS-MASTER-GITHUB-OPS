@@ -6,7 +6,8 @@ const path = require('node:path');
 const http = require('node:http');
 const crypto = require('node:crypto');
 const vm = require('node:vm');
-const { createMaster } = require(path.join(process.env.AURORA_TEST_BUILD, 'server.cjs'));
+const { syntheticPublisher } = require('./publisher-fixture.cjs');
+const { createMaster, localChat, startupConfiguration } = require(path.join(process.env.AURORA_TEST_BUILD, 'server.cjs'));
 const token = 'x'.repeat(43);
 async function fixture(t, infer = async () => ({ text: 'Proposta sintética de revisão.', outputTokens: 8 }), options = {}) {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-master-test-'));
@@ -30,6 +31,87 @@ test('private routes require authentication and reject foreign origins / DNS reb
   assert.equal((await a.request('/api/improve', task, { 'Content-Type': 'text/plain' })).status, 415);
   assert.equal(a.metrics.localModelCalls, 0);
 });
+
+test('local Studio assets and fonts use closed routes and self-only CSP without private authentication', async t => {
+  const a = await fixture(t);
+  for (const [route, type] of [['/studio-local.js', 'text/javascript'], ['/studio-local.css', 'text/css'],
+    ['/assets/fonts/source-serif-4-regular.woff2', 'font/woff2'],
+    ['/assets/fonts/source-serif-4-semibold.woff2', 'font/woff2'],
+    ['/assets/fonts/atkinson-hyperlegible-next.woff2', 'font/woff2']]) {
+    const response = await a.request(route, null, { Authorization: '' });
+    assert.equal(response.status, 200); assert.ok(response.headers.get('content-type').startsWith(type));
+    assert.match(response.headers.get('content-security-policy'), /font-src 'self'/);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'),
+      crypto.createHash('sha256').update(fs.readFileSync(path.join(process.env.AURORA_TEST_BUILD, route.slice(1)))).digest('hex'));
+  }
+  assert.equal((await a.request('/assets/fonts/unknown.woff2', null, { Authorization: '' })).status, 401);
+  assert.equal((await a.request('/server.cjs', null, { Authorization: '' })).status, 401);
+  assert.equal((await a.request('/studio-local.js?source=private', null, { Authorization: '' })).status, 401);
+});
+
+test('HTTP Publisher routes preserve session gates, exact CAS, receipts and unverified CI', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-master-publisher-http-'));
+  t.after(() => { const resolved = fs.realpathSync(directory), temporaryRoot = fs.realpathSync(os.tmpdir());
+    assert.ok(resolved.startsWith(temporaryRoot + path.sep)); assert.match(path.basename(resolved), /^aurora-master-publisher-http-/);
+    fs.rmSync(resolved, { recursive: true, force: true }); });
+  const root = path.join(directory, 'repo'); fs.mkdirSync(root);
+  const gitExecutable = process.env.AURORA_STUDIO_TEST_GIT;
+  const git = args => require('node:child_process').execFileSync(gitExecutable,
+    ['-c', 'core.fsmonitor=false', ...args], { cwd: root, windowsHide: true, encoding: 'utf8', stdio: 'pipe' }).trim();
+  git(['init', '-b', 'main']); git(['config', 'user.name', 'Synthetic Publisher HTTP']);
+  git(['config', 'user.email', 'publisher-test@aurora.invalid']);
+  fs.writeFileSync(path.join(root, 'app.cjs'), 'module.exports = 1;\n');
+  git(['add', 'app.cjs']); git(['commit', '-m', 'Synthetic base']);
+  let commit = null;
+  const transport = syntheticPublisher({ directory, orgId: 'tenant-test', gitExecutable,
+    baseRevision: git(['rev-parse', 'HEAD']), preparedCommit: () => commit });
+  const a = await fixture(t, undefined, { studioRepository: { root, gitExecutable, allowedPaths: ['app.cjs'], projectId: 'synthetic-project' },
+    publisherConfig: transport.config, publisherRunner: transport.runner });
+  const capabilities = await (await a.request('/api/studio/capabilities')).json();
+  assert.equal(capabilities.operations.publish, 'DRAFT_PR_ONLY');
+  assert.equal(transport.remote.calls.length, 0);
+  const context = (await (await a.request('/api/studio/context', { paths: ['app.cjs'], classification: 'INTERNAL' })).json()).context;
+  let value = (await (await a.request('/api/studio/tasks', { contextId: context.id,
+    prompt: 'Synthetic engineering request never included in PR metadata.', classification: 'INTERNAL' })).json()).task;
+  const route = '/api/studio/tasks/' + value.id;
+  value = (await (await a.request(route + '/proposal', { expectedVersion: value.version,
+    proposal: { summary: 'Synthetic improvement', files: [{ path: 'app.cjs', beforeSha256: context.files[0].beforeSha256,
+      content: 'module.exports = 2;\n' }] } })).json()).task;
+  for (const operation of ['validate', 'stage', 'verify', 'prepare']) {
+    const body = { expectedVersion: value.version, ...(operation === 'verify' ? { recipeId: 'SYNTAX_AND_DIFF_V1' } : {}) };
+    const response = await a.request(route + '/' + operation, body); assert.equal(response.status, 200);
+    value = (await response.json()).task;
+  }
+  commit = value.preparedVersion.commit;
+  const input = { expectedVersion: value.version, proposalFingerprint: value.proposalFingerprint };
+  assert.equal((await a.request(route + '/publish-draft', input, { Authorization: '' })).status, 401);
+  assert.equal((await a.request(route + '/publish-draft', input, { 'X-Aurora-Local': '' })).status, 403);
+  assert.equal((await a.request(route + '/publish-draft', input, { Origin: 'https://evil.invalid' })).status, 403);
+  assert.equal((await a.request(route + '/publish-draft', { ...input, expectedVersion: value.version - 1 })).status, 409);
+  assert.equal((await a.request(route + '/publish-draft', { ...input, repository: 'OTHER/REPO' })).status, 400);
+  assert.equal(transport.remote.pushes, 0);
+  transport.remote.account = 'unapproved';
+  const denied = await a.request(route + '/publish-draft', input);
+  assert.equal(denied.status, 403); assert.equal((await denied.json()).code, 'PUBLISH_AUTHORIZATION_UNCONFIRMED');
+  transport.remote.account = 'GESTAOWMGJ';
+  const publishedResponse = await a.request(route + '/publish-draft', input); assert.equal(publishedResponse.status, 200);
+  const published = await publishedResponse.json();
+  assert.equal(published.task.version, value.version); assert.equal(published.publication.state, 'DRAFT_CONFIRMED');
+  assert.equal(published.publication.orgId, 'tenant-test'); assert.equal(published.publication.headSha, commit);
+  const ci = await (await a.request(route + '/read-ci', input)).json();
+  assert.equal(ci.publication.ci.state, 'REMOTE_CHECKS_PASSED');
+  assert.equal(ci.publication.ci.actualCheckout, 'NOT_OBSERVED'); assert.equal(ci.publication.ci.ciVerified, false);
+  assert.equal(transport.remote.pushes, 1); assert.equal(transport.remote.creates, 1);
+  const readback = await (await a.request(route)).json();
+  assert.equal(readback.task.publication.receiptSha256, ci.task.publication.receiptSha256);
+  const status = await (await a.request('/api/status')).json();
+  assert.equal(status.bridge.authority, 'PAIRED_LOCAL_OWNER_NO_CLOUD_MFA_CLAIM');
+  const journal = path.join(a.stateDir, 'studio', 'publications', value.id + '.json');
+  fs.writeFileSync(journal, '{corrupt');
+  const corrupt = await a.request(route); assert.equal(corrupt.status, 422);
+  assert.equal((await corrupt.json()).code, 'PUBLISH_RECORD_INVALID');
+});
 test('single-use pairing, expiry and logout revoke browser sessions', async t => {
   let time = Date.now(); const a = await fixture(t, undefined, { now: () => time });
   const ticket = (await (await a.request('/api/pair-ticket', {})).json()).ticket;
@@ -45,6 +127,38 @@ test('single-use pairing, expiry and logout revoke browser sessions', async t =>
   time += 61000;
   assert.equal((await a.request('/api/session', { ticket: expired }, { Authorization: '' })).status, 401);
 });
+test('pairing expiry is checked when a delayed request body finishes', async t => {
+  for (const origin of [undefined, 'https://auroranexus.com.br']) {
+    let time = Date.now(), observe = false, observed;
+    const bodyStarted = new Promise(resolve => { observed = resolve; });
+    const a = await fixture(t, undefined, { portalOrigins: origin ? [origin] : [], now: () => {
+      if (observe) { observe = false; observed(); }
+      return time;
+    } });
+    const ticket = (await (await a.request('/api/pair-ticket', {})).json()).ticket;
+    observe = true;
+    let request;
+    const result = new Promise((resolve, reject) => {
+      request = http.request(a.base + '/api/session', { method: 'POST', headers: {
+        'Content-Type': 'application/json', 'X-Aurora-Local': '1', ...(origin ? { Origin: origin } : {})
+      } }, response => {
+        let text = ''; response.on('data', chunk => { text += chunk; });
+        response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, text }));
+      });
+      request.on('error', reject);
+      request.write('{"ticket":');
+    });
+    await bodyStarted;
+    time += 60001;
+    request.end(JSON.stringify(ticket) + '}');
+    const response = await result;
+    assert.equal(response.status, 401);
+    assert.equal(response.headers['set-cookie'], undefined);
+    assert.deepEqual(JSON.parse(response.text), { code: 'PAIRING_REQUIRED' });
+    assert.equal((await a.request('/api/session', { ticket }, { Authorization: '', ...(origin ? { Origin: origin } : {}) })).status, 401);
+  }
+});
+
 test('rejects clinical/restricted data, raw secret patterns and arbitrary commands', async t => {
   const a = await fixture(t);
   for (const classification of ['CLINICAL_SENSITIVE', 'RESTRICTED', undefined]) assert.equal((await a.request('/api/improve', { ...task, classification })).status, 403);
@@ -90,8 +204,168 @@ test('only one local generation runs at a time', async t => {
   finish({ text: 'Proposta final.' }); assert.equal((await first).status, 200);
 });
 
+test('structured local inference reserves input bytes and refuses length-truncated JSON', async t => {
+  let calls = 0, submitted;
+  t.mock.method(global, 'fetch', async (url, options) => {
+    calls++; assert.equal(url, 'http://127.0.0.1:11435/api/chat'); submitted = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ done: true, done_reason: 'length', message: { content: '{"summary":"synthetic valid JSON"}' } }) };
+  });
+  await assert.rejects(localChat('Synthetic structured edit request.', 'Internal sanitized method. '.repeat(2000), true), { code: 'STUDIO_MODEL_OUTPUT_TRUNCATED' });
+  assert.equal(calls, 1); assert.equal(submitted.options.num_ctx, 8192); assert.equal(submitted.options.num_predict, 2048);
+  assert.equal(submitted.format, 'json'); assert.equal(submitted.think, false);
+  assert.ok(submitted.messages.reduce((size, message) => size + Buffer.byteLength(message.content), 0) + 256 + 2048 <= 8192);
+  await assert.rejects(localChat('x'.repeat(7000), '', true), { code: 'STUDIO_MODEL_CONTEXT_LIMIT' }); assert.equal(calls, 1);
+});
+
+test('optional exact portal bridge uses org-bound single-use ticket and origin-bound session token', async t => {
+  let time = Date.now(); const portal = 'https://auroranexus.com.br', hml = 'https://wmgj-hml-jfn-20260927.web.app';
+  const a = await fixture(t, undefined, { now: () => time, portalOrigins: [portal, hml, 'https://evil.invalid'] });
+  const preflight = await fetch(a.base + '/api/session', { method: 'OPTIONS', headers: { Origin: portal,
+    'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization,content-type,x-aurora-local', 'Access-Control-Request-Private-Network': 'true' } });
+  assert.equal(preflight.status, 204); assert.equal(preflight.headers.get('access-control-allow-origin'), portal);
+  assert.equal(preflight.headers.get('access-control-allow-private-network'), 'true'); assert.equal(preflight.headers.get('access-control-allow-credentials'), null);
+  assert.equal((await fetch(a.base + '/api/session', { method: 'OPTIONS', headers: { Origin: portal, 'Access-Control-Request-Method': 'DELETE' } })).status, 403);
+  assert.equal((await a.request('/api/status', null, { Origin: 'https://evil.invalid' })).status, 403);
+  // The long-lived control credential is intentionally unusable from a portal origin.
+  assert.equal((await a.request('/api/status', null, { Origin: portal })).status, 401);
+  const ticket = (await (await a.request('/api/pair-ticket', {})).json()).ticket;
+  assert.equal((await a.request('/api/session', { ticket, orgId: 'forged-tenant' }, { Authorization: '', Origin: portal })).status, 400);
+  const paired = await a.request('/api/session', { ticket }, { Authorization: '', Origin: portal, 'Sec-Fetch-Site': 'cross-site' });
+  assert.equal(paired.status, 200); assert.equal(paired.headers.get('set-cookie'), null);
+  const value = await paired.json(); assert.equal(value.orgId, 'tenant-test'); assert.match(value.sessionToken, /^[\w-]{43}$/);
+  const headers = { Authorization: 'Bearer ' + value.sessionToken, Origin: portal, 'Sec-Fetch-Site': 'cross-site' };
+  assert.equal((await a.request('/api/session', { ticket }, { Authorization: '', Origin: portal })).status, 401);
+  const status = await (await a.request('/api/status', null, headers)).json(); assert.equal(status.bridge.orgId, 'tenant-test'); assert.equal(status.bridge.enabled, true);
+  assert.equal((await a.request('/api/status', null, { ...headers, Origin: hml })).status, 401);
+  assert.equal((await a.request('/api/status', null, { Authorization: headers.Authorization })).status, 401);
+  assert.equal((await a.request('/api/pair-ticket', {}, headers)).status, 403);
+  const capabilities = await (await a.request('/api/studio/capabilities', null, headers)).json();
+  assert.equal(capabilities.repository.state, 'NOT_CONFIGURED'); assert.equal(capabilities.authenticatedOrgId, 'tenant-test');
+  assert.equal((await a.request('/api/studio/context', { paths: ['app.cjs'], classification: 'INTERNAL' }, headers)).status, 503);
+  const log = fs.readFileSync(path.join(a.stateDir, 'audit.jsonl'), 'utf8'); assert.ok(!log.includes(ticket)); assert.ok(!log.includes(value.sessionToken));
+  assert.equal((await a.request('/api/logout', {}, headers)).status, 200); assert.equal((await a.request('/api/status', null, headers)).status, 401);
+  const next = (await (await a.request('/api/pair-ticket', {})).json()).ticket;
+  const expiry = await (await a.request('/api/session', { ticket: next }, { Authorization: '', Origin: portal })).json();
+  time += 8 * 3600 * 1000 + 1; assert.equal((await a.request('/api/status', null, { ...headers, Authorization: 'Bearer ' + expiry.sessionToken })).status, 401);
+});
+test('portal bridge is disabled by default and rejects unrecognized preflight headers', async t => {
+  const origin = 'https://auroranexus.com.br', a = await fixture(t);
+  const response = await a.request('/api/status', null, { Origin: origin }); assert.equal(response.status, 403);
+  assert.equal(response.headers.get('access-control-allow-origin'), null);
+  const b = await fixture(t, undefined, { portalOrigins: [origin] });
+  assert.equal((await fetch(b.base + '/api/session', { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'x-unrestricted' } })).status, 403);
+});
+
+test('persistent local configuration is organization-bound and invalid configuration disables the bridge', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-master-config-test-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'studio-configuration.json'), repository = { root: 'synthetic' }, origin = 'https://auroranexus.com.br';
+  assert.deepEqual(startupConfiguration(directory, 'tenant-test', {}), { studioRepository: null, portalOrigins: [], publisherConfig: null });
+  fs.writeFileSync(file, JSON.stringify({ schemaVersion: 'aurora.master.local-config.v1', orgId: 'tenant-test', repository, portalOrigins: [origin] }));
+  assert.deepEqual(startupConfiguration(directory, 'tenant-test', { AURORA_MASTER_PORTAL_ORIGINS: '[]' }), { studioRepository: repository, portalOrigins: [origin], publisherConfig: null });
+  assert.deepEqual(startupConfiguration(directory, 'other-tenant', {}), { studioRepository: { invalid: true }, portalOrigins: [], publisherConfig: null });
+  fs.writeFileSync(file, JSON.stringify({ schemaVersion: 'aurora.master.local-config.v1', orgId: 'tenant-test', repository, portalOrigins: [origin], command: 'whoami' }));
+  assert.deepEqual(startupConfiguration(directory, 'tenant-test', {}), { studioRepository: { invalid: true }, portalOrigins: [], publisherConfig: null });
+});
+
+test('publisher opt-in is persisted, closed, organization-bound and never inherited from environment', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-master-publisher-config-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'studio-configuration.json'), repository = { root: 'synthetic' };
+  const publisher = { enabled: true, authorizedOrgId: 'tenant-test', ghExecutable: '/synthetic/gh',
+    ghSha256: 'a'.repeat(64), gitSha256: 'b'.repeat(64) };
+  assert.equal(startupConfiguration(directory, 'tenant-test', { AURORA_PUBLISHER_CONFIG: JSON.stringify(publisher) }).publisherConfig, null);
+  const configuration = { schemaVersion: 'aurora.master.local-config.v1', orgId: 'tenant-test',
+    repository, portalOrigins: [], publisher };
+  fs.writeFileSync(file, JSON.stringify(configuration));
+  assert.deepEqual(startupConfiguration(directory, 'tenant-test', {}).publisherConfig, publisher);
+  for (const bad of [{ ...publisher, command: 'arbitrary' }, { ...publisher, authorizedOrgId: 'another-org' },
+    { ...publisher, enabled: 'true' }, []]) {
+    fs.writeFileSync(file, JSON.stringify({ ...configuration, publisher: bad }));
+    assert.deepEqual(startupConfiguration(directory, 'tenant-test', {}), { studioRepository: { invalid: true }, portalOrigins: [], publisherConfig: null });
+  }
+  fs.writeFileSync(file, JSON.stringify(configuration) + ' '.repeat(65536));
+  assert.deepEqual(startupConfiguration(directory, 'tenant-test', {}), { studioRepository: { invalid: true }, portalOrigins: [], publisherConfig: null });
+});
+
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
-const release = { component: 'AURORA_IA_MASTER', version: '1.0.0', sourceRevision: 'a'.repeat(40), dirty: false, externalAiEnabled: false };
+function syntheticRegistry(t, records, extra = {}) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-master-knowledge-synthetic-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const registryPath = path.join(directory, 'synthetic-registry.json');
+  const value = { schemaVersion: '1.0.0', version: 'synthetic-v1', classification: 'INTERNAL_SANITIZED_METHODS', records, ...extra };
+  fs.writeFileSync(registryPath, JSON.stringify(value));
+  return { directory, registryPath, value };
+}
+const syntheticMethod = { id: 'SYN-001', version: '1.0.0', title: 'Idempotent synthetic methods',
+  knowledgeState: 'REGISTERED', technicalState: 'IMPLEMENTED', prompt: { text: 'SYNTHETIC_METHOD_CONTENT_NOT_FOR_AUDIT' } };
+test('installed knowledge contract retains status, query selection, receipts, cache invalidation and sanitized audit', async t => {
+  const corpus = syntheticRegistry(t, [syntheticMethod, { ...syntheticMethod, id: 'SYN-REVOKED', revoked: true }]);
+  const contexts = []; const a = await fixture(t, async (_, context) => { contexts.push(context); return { text: 'Synthetic engineering result.' }; }, { registryPath: corpus.registryPath });
+  const status = await (await a.request('/api/status')).json();
+  assert.deepEqual(status.knowledge, { status: 'LOADED', corpusVersion: 'synthetic-v1', corpusHash: digest(fs.readFileSync(corpus.registryPath)),
+    loadedCount: 1, rejectedCount: 1, completeHistoricalAbsorption: false });
+  assert.ok(!JSON.stringify(status).includes(syntheticMethod.prompt.text));
+  const first = await (await a.request('/api/improve', task)).json();
+  assert.equal(first.knowledge.status, 'LOADED'); assert.deepEqual(first.knowledge.recordIds, ['SYN-001']);
+  assert.equal(first.knowledge.selectionState, 'SELECTED'); assert.equal(first.knowledge.maxContextBytes, 11000);
+  assert.equal(first.knowledge.selectedContextBytes, Buffer.byteLength(contexts[0]));
+  const cached = await (await a.request('/api/improve', task)).json(); assert.equal(cached.proposalId, first.proposalId); assert.equal(contexts.length, 1);
+  fs.writeFileSync(corpus.registryPath, JSON.stringify({ ...corpus.value, version: 'synthetic-v2' }));
+  const changed = await (await a.request('/api/improve', task)).json(); assert.notEqual(changed.proposalId, first.proposalId); assert.equal(contexts.length, 2);
+  fs.writeFileSync(corpus.registryPath, JSON.stringify(corpus.value));
+  await a.request('/api/improve', task); assert.equal(contexts.length, 3);
+  const log = fs.readFileSync(path.join(a.stateDir, 'audit.jsonl'), 'utf8');
+  assert.ok(log.includes(first.knowledge.corpusHash)); assert.match(log, /knowledgeRecordIds/);
+  for (const privateText of [syntheticMethod.prompt.text, task.prompt, 'Synthetic engineering result.', token, corpus.registryPath]) assert.ok(!log.includes(privateText));
+  assert.equal(first.applied, false); assert.equal(first.externalAiCalls, 0); assert.equal(a.metrics.externalAiCalls, 0);
+});
+test('configured unavailable or oversized corpus never falls back silently or exceeds its method budget', async t => {
+  const corpus = syntheticRegistry(t, [syntheticMethod]);
+  const contexts = []; const a = await fixture(t, async (_, context) => { contexts.push(context); return { text: 'Synthetic proposal.' }; },
+    { registryPath: corpus.registryPath, knowledge: 'LEGACY_METHOD_MUST_NOT_REPLACE_CONFIGURED_CORPUS' });
+  fs.writeFileSync(corpus.registryPath, '{invalid');
+  const unavailable = await (await a.request('/api/improve', task)).json();
+  assert.equal(unavailable.knowledge.status, 'INVALID_OR_UNAVAILABLE'); assert.equal(unavailable.knowledge.selectionState, 'CORPUS_UNAVAILABLE');
+  assert.equal(contexts[0], ''); assert.deepEqual(unavailable.knowledge.recordIds, []);
+  fs.writeFileSync(corpus.registryPath, JSON.stringify({ ...corpus.value, coverage: 'x'.repeat(12000) }));
+  const limited = await (await a.request('/api/improve', task)).json();
+  assert.equal(limited.knowledge.status, 'LOADED'); assert.equal(limited.knowledge.selectionState, 'CONTEXT_LIMIT');
+  assert.equal(limited.knowledge.selectedContextBytes, 0); assert.deepEqual(limited.knowledge.recordIds, []); assert.equal(contexts[1], '');
+});
+test('Studio preserves complete selected method receipts while keeping fixed model and source budgets', async t => {
+  const corpus = syntheticRegistry(t, [syntheticMethod]);
+  const root = path.join(corpus.directory, 'repo'); fs.mkdirSync(root);
+  const gitExecutable = process.env.AURORA_STUDIO_TEST_GIT;
+  assert.ok(gitExecutable && path.isAbsolute(gitExecutable), 'Set AURORA_STUDIO_TEST_GIT to the existing Git executable.');
+  const git = args => require('node:child_process').execFileSync(gitExecutable, ['-c', 'core.fsmonitor=false', ...args], { cwd: root, windowsHide: true, stdio: 'pipe' });
+  git(['init', '-b', 'main']); git(['config', 'user.name', 'Synthetic knowledge test']); git(['config', 'user.email', 'test@example.invalid']);
+  const original = 'module.exports = 1;\n'; fs.writeFileSync(path.join(root, 'app.cjs'), original); git(['add', 'app.cjs']); git(['commit', '-m', 'Synthetic baseline']);
+  const submitted = [], a = await fixture(t, async (prompt, method, structured) => {
+    submitted.push({ prompt, method, structured }); return { text: JSON.stringify({ summary: 'Improve the synthetic module.',
+      files: [{ path: 'app.cjs', beforeSha256: digest(original), edits: [{ before: '1', after: '2' }] }] }) };
+  }, { registryPath: corpus.registryPath, studioRepository: { root, gitExecutable, allowedPaths: ['app.cjs'], projectId: 'synthetic-project' } });
+  const ctx = await (await a.request('/api/studio/context', { paths: ['app.cjs'], classification: 'INTERNAL' })).json();
+  const created = await (await a.request('/api/studio/tasks', { contextId: ctx.context.id, prompt: 'Improve idempotent synthetic module.', classification: 'INTERNAL' })).json();
+  const response = await a.request('/api/studio/tasks/' + created.task.id + '/propose', { expectedVersion: created.task.version });
+  assert.equal(response.status, 200); const proposed = (await response.json()).task;
+  assert.equal(submitted[0].structured, true); assert.ok(Buffer.byteLength(submitted[0].prompt) <= 4096);
+  assert.ok(Buffer.byteLength(submitted[0].method) <= 600); assert.equal(proposed.knowledge.maxContextBytes, 600);
+  assert.equal(proposed.knowledge.selectedContextBytes, Buffer.byteLength(submitted[0].method));
+  assert.deepEqual(proposed.knowledge.recordIds, submitted[0].method.split('\n').slice(1).map(line => JSON.parse(line).id));
+  assert.deepEqual(proposed.knowledge.recordIds, ['SYN-001']); assert.equal(proposed.knowledge.selectionState, 'SELECTED');
+  const readback = await (await a.request('/api/studio/tasks/' + proposed.id)).json(); assert.deepEqual(readback.task.knowledge, proposed.knowledge);
+  assert.equal(proposed.history.at(-1).knowledgeHash, digest(JSON.stringify(proposed.knowledge)));
+  const log = fs.readFileSync(path.join(a.stateDir, 'audit.jsonl'), 'utf8');
+  assert.match(log, /STUDIO_ENGINEERING_KNOWLEDGE/); assert.ok(log.includes(proposed.knowledge.corpusHash));
+  assert.ok(!log.includes(syntheticMethod.prompt.text)); assert.ok(!log.includes(original));
+  assert.equal(fs.readFileSync(path.join(root, 'app.cjs'), 'utf8'), original);
+  fs.writeFileSync(corpus.registryPath, JSON.stringify({ ...corpus.value, records: [{ ...syntheticMethod, prompt: { text: 'x'.repeat(1000) } }] }));
+  const oversized = (await (await a.request('/api/studio/tasks/' + proposed.id + '/propose', { expectedVersion: proposed.version })).json()).task;
+  assert.deepEqual(oversized.knowledge.recordIds, []); assert.equal(oversized.knowledge.selectionState, 'NO_RECORD_FITS');
+  assert.ok(Buffer.byteLength(submitted[1].method) <= 600);
+});
+const release = { component: 'AURORA_IA_MASTER', version: '1.1.0', sourceRevision: 'a'.repeat(40), dirty: false, externalAiEnabled: false };
 test('health and private status retain the process manifest and start time after disk replacement', async t => {
   let bytes = Buffer.from(JSON.stringify({ ...release, privateConfiguration: 'NEVER_RETURN_THIS' })), reads = 0, time = Date.parse('2026-10-08T00:00:00.000Z');
   const expectedDigest = digest(bytes);
@@ -132,7 +406,7 @@ function managerFixture({ masterPresent = true, modelPresent = true, healthOverr
   const directory = path.join(process.env.AURORA_TEST_BUILD, 'synthetic-installed-component');
   const fakeNode = path.join(directory, 'node.exe');
   const localRoot = path.join(directory, 'local', 'AuroraNexus');
-  const files = { 'server.cjs': Buffer.from('synthetic server'), 'manage.cjs': Buffer.from('synthetic manager'), 'kernel/auroraMasterEngine.js': Buffer.from('synthetic kernel') };
+  const files = { 'server.cjs': Buffer.from('synthetic server'), 'studio.cjs': Buffer.from('synthetic studio'), 'manage.cjs': Buffer.from('synthetic manager'), 'kernel/auroraMasterEngine.js': Buffer.from('synthetic kernel') };
   const manifest = { ...release, files: Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, digest(bytes)])) };
   const manifestBytes = Buffer.from(JSON.stringify(manifest));
   const expected = { ...manifest, manifestSha256: digest(manifestBytes) };
@@ -144,6 +418,7 @@ function managerFixture({ masterPresent = true, modelPresent = true, healthOverr
     readFileSync(file) {
       if (file === path.join(directory, 'manifest.json')) return manifestBytes;
       if (file === path.join(localRoot, 'integration', 'state', 'ia-master', 'organization.txt')) return 'tenant-test';
+      if (file === path.join(localRoot, 'integration', 'state', 'ia-master', 'control.key')) return token;
       const relative = path.relative(directory, file).split(path.sep).join('/');
       if (files[relative]) return files[relative];
       throw Error('UNEXPECTED_FILE_READ');
@@ -153,6 +428,7 @@ function managerFixture({ masterPresent = true, modelPresent = true, healthOverr
   };
   const mockChildProcess = {
     execFileSync(executable, args) {
+      if (executable === 'clip.exe') { writes.push('MANUAL_CLIPBOARD_TICKET'); return ''; }
       assert.equal(executable, 'powershell.exe'); const port = Number(args.at(-1).match(/-LocalPort (\d+)/)[1]);
       if (!(port === 38765 ? masterPresent : modelPresent)) return '[]';
       return JSON.stringify([{ address: '127.0.0.1', pid: 100 + port,
@@ -170,7 +446,7 @@ function managerFixture({ masterPresent = true, modelPresent = true, healthOverr
     console: { log: text => messages.push(text), error: text => messages.push(text) },
     fetch: async (url, options) => {
       probes.push({ url, options }); if (fetchFailure) throw Error('UNAVAILABLE');
-      return { ok: responseStatus === 200, text: async () => responseText ?? JSON.stringify(observed) };
+      return { ok: responseStatus === 200, text: async () => responseText ?? JSON.stringify(observed), json: async () => ({ ticket: 't'.repeat(43) }) };
     }
   });
   return { ...module.exports, spawned, killed, writes, probes, messages, expected, health };
@@ -187,6 +463,7 @@ test('start rejects source, manifest or version conflicts before starting a miss
     h => ({ ...h, processManifest: { ...h.processManifest, sourceRevision: 'b'.repeat(40) } }),
     h => ({ ...h, processManifest: { ...h.processManifest, manifestSha256: 'c'.repeat(64) } }),
     h => ({ ...h, version: '0.9.0' }),
+    h => ({ ...h, version: '1.0.1', processManifest: { ...h.processManifest, version: '1.0.1' } }),
     h => ({ ...h, processManifest: { ...h.processManifest, version: '0.9.0' } })
   ]) {
     const a = managerFixture({ modelPresent: false, healthOverride: change });
@@ -222,4 +499,13 @@ test('start only launches missing components with local environment and preserve
       assert.equal(child.options.env.AURORA_ORG_ID, 'tenant-test');
     }
   }
+});
+
+test('manual portal pairing places only an ephemeral ticket in clipboard and never logs or opens its URL', async () => {
+  const a = managerFixture(); await a.pair(true);
+  assert.deepEqual(a.writes, ['MANUAL_CLIPBOARD_TICKET']); assert.equal(a.spawned.length, 0); assert.equal(a.killed.length, 0);
+  assert.equal(a.probes[0].url, 'http://127.0.0.1:38765/api/pair-ticket');
+  assert.equal(a.probes[0].options.redirect, 'error'); assert.equal(a.probes[0].options.headers.Authorization, 'Bearer ' + token);
+  assert.ok(!a.messages.join('\n').includes(token)); assert.ok(!a.messages.join('\n').includes('t'.repeat(43)));
+  assert.match(a.messages.join('\n'), /COPIED_VALID_60_SECONDS/);
 });

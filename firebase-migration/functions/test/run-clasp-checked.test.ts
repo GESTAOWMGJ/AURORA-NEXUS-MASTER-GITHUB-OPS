@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const runner = fileURLToPath(new URL("../../../tools/run-clasp-checked.sh", import.meta.url));
+const runnerSource = readFileSync(runner, "utf8").replace(/\r\n/g, "\n");
 const functionName = "auroraRc11ConfigurarEndpointExistente";
 const generic = "UNEXPECTED_APPS_SCRIPT_EXECUTION_ERROR";
 const canaries = [
@@ -18,6 +19,12 @@ const canaries = [
   "RC11_SYNTHETIC_SECRET_SHOULD_NEVER_BE_PRINTED",
 ];
 const secretText = canaries.join("\r\n");
+
+function shellPath(path: string): string {
+  return process.platform === "win32"
+    ? path.replace(/^([A-Za-z]):[\\/]/, (_, drive: string) => `/${drive.toLowerCase()}/`).replace(/\\/g, "/")
+    : path;
+}
 
 function execute(stdout: string, stderr = "", exitCode = 0, withParams = false) {
   const dir = mkdtempSync(join(tmpdir(), "rc11-clasp-test-"));
@@ -33,19 +40,31 @@ cat "$CLASP_TEST_DIR/fixture-err" >&2
 exit "$CLASP_TEST_EXIT"
 `, { mode: 0o700 });
     const params = withParams ? [JSON.stringify(["https://example.invalid/ingestWmgjEvent", secretText])] : [];
-    const result = spawnSync("bash", [runner, functionName, out, ...params], {
+    const env = { ...process.env };
+    const pathKeys = Object.keys(env).filter((key) => key.toLowerCase() === "path");
+    const inheritedPath = pathKeys.map((key) => env[key]).find(Boolean) ?? "";
+    for (const key of pathKeys) delete env[key];
+    env.PATH = dir + delimiter + inheritedPath;
+    env.TMPDIR = shellPath(dir);
+    env.CLASP_TEST_DIR = shellPath(dir);
+    env.CLASP_TEST_EXIT = String(exitCode);
+    const result = spawnSync("bash", ["--noprofile", "--norc", "-s", "--", functionName, shellPath(out), ...params], {
       encoding: "utf8",
-      env: {
-        ...process.env,
-        PATH: dir + ":" + process.env.PATH,
-        TMPDIR: dir,
-        CLASP_TEST_DIR: dir,
-        CLASP_TEST_EXIT: String(exitCode),
-      },
+      input: runnerSource,
+      env,
     });
     assert.ifError(result.error);
     const output = existsSync(out) ? readFileSync(out, "utf8") : null;
-    const mode = existsSync(out) ? statSync(out).mode & 0o777 : null;
+    let mode = existsSync(out) ? statSync(out).mode & 0o777 : null;
+    if (output !== null && process.platform === "win32") {
+      // Observe the creating Bash runtime; do not fabricate Unix mode bits on NTFS.
+      // The unchanged 0600 assertion requires a genuine Linux CI result.
+      const permissions = spawnSync("bash", ["--noprofile", "--norc", "-c", 'stat -c "%a" "$1"', "private-result", shellPath(out)], { encoding: "utf8", env });
+      assert.ifError(permissions.error);
+      assert.equal(permissions.status, 0, permissions.stderr);
+      assert.match(permissions.stdout, /^[0-7]{3}\r?\n$/);
+      mode = Number.parseInt(permissions.stdout, 8);
+    }
     const expectedFiles = ["args.json", "clasp", "fixture-err", "fixture-out", ...(output === null ? [] : ["result.json"])];
     assert.deepEqual(readdirSync(dir).sort(), expectedFiles.sort(), "temporary response files must be removed");
     return { ...result, output, mode, args: readFileSync(args, "utf8").trimEnd().split("\n") };

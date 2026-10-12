@@ -1,15 +1,16 @@
 import { webUpdateClient } from "./auroraWebUpdateClient.js";
 import { userFacingEntryPath } from "./auroraTenantEntry.js";
+import { passwordRecoveryClient } from "./auroraPasswordRecovery.js";
 // Browser-only security setup. No password, verification link or TOTP secret is sent to application APIs.
 export function loginClient(orgId: string | null): string {
   const entryPath = userFacingEntryPath(orgId);
   return `
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js';
 import { getAuth, setPersistence, inMemoryPersistence, signInWithEmailAndPassword, sendPasswordResetEmail,
-  sendEmailVerification, reload, getIdTokenResult, signOut, multiFactor, getMultiFactorResolver,
+  sendEmailVerification, reload, getIdTokenResult, signOut, multiFactor, getMultiFactorResolver, verifyPasswordResetCode, confirmPasswordReset,
   TotpMultiFactorGenerator } from 'https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js';
 const orgId = ${JSON.stringify(orgId)};
-const entryPath = location.pathname === '/setup' ? '/setup' : ${JSON.stringify(entryPath)};
+const entryPath = ['/setup','/account-security'].includes(location.pathname) ? location.pathname : ${JSON.stringify(entryPath)};
 const element = id => document.getElementById(id);
 const form = element('login-form'), status = element('status'), submit = element('submit');
 let auth, resolver = null, setupUser = null, totpSecret = null;
@@ -120,14 +121,7 @@ element('onboarding-submit')?.addEventListener('click', async () => {
       : 'Não foi possível confirmar sua sessão. Toque em Concluir cadastro novamente ou entre novamente para retomar o acesso.'; }
   finally { button.disabled = false; }
 });
-element('reset-password').addEventListener('click', async () => {
-  const email = element('email').value.trim();
-  if (!email || !email.includes('@')) { status.textContent = 'Informe o e-mail autorizado.'; return; }
-  if (!auth) return;
-  const button = element('reset-password'); button.disabled = true;
-  try { await sendPasswordResetEmail(auth, email); } catch { /* No account enumeration. */ }
-  finally { status.textContent = 'Se o e-mail estiver autorizado, as instruções de redefinição serão enviadas.'; button.disabled = false; }
-});
+${passwordRecoveryClient()}
 element('verify-email').addEventListener('click', async () => {
   const button = element('verify-email'); button.disabled = true;
   try { if (!setupUser) throw new Error('SIGN_IN_REQUIRED'); await sendEmailVerification(setupUser); element('activation-status').textContent = 'Confira seu e-mail e confirme o endereço antes de continuar.'; }

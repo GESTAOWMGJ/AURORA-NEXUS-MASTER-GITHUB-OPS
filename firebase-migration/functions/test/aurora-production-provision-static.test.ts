@@ -2,13 +2,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-const workflow=fs.readFileSync("../../.github/workflows/aurora-firebase-production.yml","utf8");
-const request=JSON.parse(fs.readFileSync("../../.github/requests/aurora-firebase-production.json","utf8"));
-const windowsBootstrap=fs.readFileSync("../../tools/windows/BOOTSTRAP_AURORA_PROD_WIF.ps1","utf8");
-const workspaceWorkflow=fs.readFileSync("../../.github/workflows/provision-google-workspace.yml","utf8");
-const workspaceProvisioner=fs.readFileSync("../../tools/google-workspace/provision.mjs","utf8");
-const apiLock=fs.readFileSync("../api/uv.lock","utf8");
-const ruleTestLock=fs.readFileSync("../tests/package-lock.json","utf8");
+const readText=(path: string)=>fs.readFileSync(path,"utf8").replace(/\r\n/g,"\n");
+
+const workflow=readText("../../.github/workflows/aurora-firebase-production.yml");
+const request=JSON.parse(readText("../../.github/requests/aurora-firebase-production.json"));
+const windowsBootstrap=readText("../../tools/windows/BOOTSTRAP_AURORA_PROD_WIF.ps1");
+const workspaceWorkflow=readText("../../.github/workflows/provision-google-workspace.yml");
+const workspaceProvisioner=readText("../../tools/google-workspace/provision.mjs");
+const apiLock=readText("../api/uv.lock");
+const ruleTestLock=readText("../tests/package-lock.json");
 
 test("production provisioning is isolated and cold by default",()=>{
   assert.equal(request.requestVersion,2);

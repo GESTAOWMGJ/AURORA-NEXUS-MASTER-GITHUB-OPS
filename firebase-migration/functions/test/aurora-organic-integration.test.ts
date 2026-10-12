@@ -25,7 +25,7 @@ function commandFor(s:State,type:'EXECUTE'|'ROLLBACK'):Command{const p=s.memory!
 
 test('Python/TypeScript parity for baseline, replay and revocation',()=>{
  const script="import sys,json;sys.path.insert(0,'../../aurora-coletor');import aurora_organic as a;s=json.load(sys.stdin);x=a.reconcile('wmgj',None,s,allowed_sectors=frozenset({'AUDIT'}),verify=lambda e:True);y=a.reconcile('wmgj',x,s,allowed_sectors=frozenset({'AUDIT'}),verify=lambda e:True);z=a.reconcile('wmgj',y,[],allowed_sectors=frozenset({'AUDIT'}),verify=lambda e:e['id']!=s[0]['id']);print(json.dumps([x,y,z]))";
- const r=spawnSync('python3',['-c',script],{input:JSON.stringify(signals),encoding:'utf8'});assert.equal(r.status,0,r.stderr);
+ const r=spawnSync(process.platform==='win32'?'python':'python3',['-c',script],{input:JSON.stringify(signals),encoding:'utf8'});assert.equal(r.status,0,r.stderr);
  const a=reconcile('wmgj',null,signals,sectors,()=>true),b=reconcile('wmgj',a,signals,sectors,()=>true),c=reconcile('wmgj',b,[],sectors,e=>e.id!==signals[0]!.id);assert.deepEqual([a,b,c],JSON.parse(r.stdout));
 });
 test('duplicate cases do not produce a proposal',()=>{const es=signals.map(e=>({...e,caseRef:signals[0]!.caseRef}));assert.equal(reconcile('wmgj',null,es,sectors,()=>true).proposals.length,0);});

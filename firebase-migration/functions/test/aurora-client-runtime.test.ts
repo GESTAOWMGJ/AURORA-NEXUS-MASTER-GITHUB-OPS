@@ -3,56 +3,47 @@ import { Script, createContext } from 'node:vm';
 import { setImmediate } from 'node:timers/promises';
 import test from 'node:test';
 import { auroraProtectedShell } from '../src/auroraFrontend.ts';
+import { BrowserElement as Element, fixtureDom, addHandler, type Handler } from './aurora-browser-dom.fixture.ts';
 
 const member = { uid: 'synthetic-u1', email: 'synthetic@example.test', orgId: 'wmgj', role: 'auditor' as const, permissions: ['distribution.approve'], facilityIds: [], allFacilities: true, mfaVerified: true };
-const html = auroraProtectedShell(member, { action: 'synthetic-action', refresh: 'synthetic-refresh', integrationKey: 'synthetic-integration', distributionApproval: 'synthetic-distribution', logout: 'synthetic-logout' });
+function renderedShell(ready?: string) {
+  const previous = process.env.AURORA_CANONICAL_PORTAL_READY;
+  if (ready === undefined) delete process.env.AURORA_CANONICAL_PORTAL_READY; else process.env.AURORA_CANONICAL_PORTAL_READY = ready;
+  try { return auroraProtectedShell(member, { action: 'synthetic-action', refresh: 'synthetic-refresh', integrationKey: 'synthetic-integration', distributionApproval: 'synthetic-distribution', logout: 'synthetic-logout' }); }
+  finally { if (previous === undefined) delete process.env.AURORA_CANONICAL_PORTAL_READY; else process.env.AURORA_CANONICAL_PORTAL_READY = previous; }
+}
+const html = renderedShell();
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
 const snapshot = { projection: { competence: '2026-08', generatedAt: '2026-09-28T11:00:00Z', financialCents: { invoicedCents: 12345, receivedCents: 0, glossCents: null }, operations: { overdueActions: 0, openActions: 0 }, coverage: { evidencePercent: null, reconciliationPercent: 0 }, modules: [] }, actions: [] };
 
-type Handler = (event?: any) => unknown;
-class Element {
-  textContent = ''; className = ''; hidden = false; disabled = false; value = ''; colSpan = 0;
-  children: Element[] = []; handlers = new Map<string, Handler>(); parentForm: Element | null = null;
-  classList = { remove: (_name: string) => {} }; button: Element | null = null;
-  id: string;
-  constructor(id = '') { this.id = id; }
-  addEventListener(name: string, callback: Handler) { this.handlers.set(name, callback); }
-  appendChild(child: Element) { this.children.push(child); return child; }
-  append(...children: Element[]) { this.children.push(...children); }
-  replaceChildren() { this.children = []; this.textContent = ''; }
-  querySelector(selector: string) { assert.equal(selector, 'button'); return this.button ??= new Element(); }
-  reset() { this.value = ''; }
-  closest(selector: string) { assert.equal(selector, 'form'); return this.parentForm; }
-  scrollIntoView(_options?: unknown) {}
-}
 const response = (status = 200, body: unknown = snapshot) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
-async function fixture(first = response()) {
-  const elements = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(match => [match[1], new Element(match[1])]));
+async function fixture(first = response(), hash = '') {
+  const { elements, document, handlers: docHandlers } = fixtureDom(html);
   elements.get('content')!.hidden = true;
-  const docHandlers = new Map<string, Handler>(); const winHandlers = new Map<string, Handler>();
-  const document = { visibilityState: 'visible', activeElement: null as Element | null, getElementById(id: string) { const element = elements.get(id); assert.ok(element, 'Known DOM id: ' + id); return element; }, createElement: (_tag: string) => new Element(), addEventListener: (name: string, callback: Handler) => docHandlers.set(name, callback) };
+  const winHandlers = new Map<string, Handler>();
   const calls: { url: string; options: any }[] = []; const redirects: string[] = []; const intervals: { fn: Handler; ms: number }[] = []; const timeouts = new Map<number, Handler>(); let timerId = 0;
   let fetcher = async (_url: string, _options: any): Promise<any> => first;
-  const context = createContext({ document, window: { addEventListener: (name: string, callback: Handler) => winHandlers.set(name, callback) }, navigator: { onLine: true }, location: { hostname: 'auroranexus.com.br', search: '', hash: '', replace: (url: string) => redirects.push(url) }, Intl, Date, AbortController, crypto: { randomUUID: () => 'synthetic-idempotency-key' }, setInterval: (fn: Handler, ms: number) => intervals.push({ fn, ms }), setTimeout: (fn: Handler) => { const id = ++timerId; timeouts.set(id, fn); return id; }, clearTimeout: (id: number) => timeouts.delete(id), fetch: (url: string, options: any) => { calls.push({ url, options }); return fetcher(url, options); } });
+  const location = { origin: 'https://auroranexus.com.br', hostname: 'auroranexus.com.br', search: '', hash, replace: (url: string) => redirects.push(url) };
+  const context = createContext({ document, window: { addEventListener: (name: string, callback: Handler) => addHandler(winHandlers, name, callback), dispatchEvent: (event: Event) => { winHandlers.get(event.type)?.(event); return true; } }, navigator: { onLine: true }, location, history: { pushState: (_state: unknown, _unused: string, value: string) => { location.hash = value; } }, matchMedia: () => ({ matches: false }), Event, Intl, Date, AbortController, crypto: { randomUUID: () => 'synthetic-idempotency-key' }, setInterval: (fn: Handler, ms: number) => intervals.push({ fn, ms }), setTimeout: (fn: Handler) => { const id = ++timerId; timeouts.set(id, fn); return id; }, clearTimeout: (id: number) => timeouts.delete(id), fetch: (url: string, options: any) => { calls.push({ url, options }); return fetcher(url, options); } });
   scripts.forEach(script => new Script(script).runInContext(context));
   await setImmediate();
   return { elements, document, calls, redirects, intervals, timeouts, docHandlers, winHandlers, context, fetchWith(fn: typeof fetcher) { fetcher = fn; }, run(code: string) { return new Script(code).runInContext(context); }, async click(id: string) { const element = elements.get(id)!; await element.handlers.get('click')!({ currentTarget: element }); }, async submit(id: string) { const element = elements.get(id)!; await element.handlers.get('submit')!({ currentTarget: element, preventDefault() {} }); } };
 }
 
 test('the actual emitted browser script parses; missing regex delimiters fail this gate', () => {
-  assert.equal(scripts.length, 2);
+  assert.equal(scripts.length, 1);
   scripts.forEach(script => assert.doesNotThrow(() => new Script(script)));
   const appScript = scripts.find(script => script.includes('value=>!/^[A-Za-z0-9._:-]'));
   assert.ok(appScript, 'The actual operational script must retain evidence validation');
   assert.throws(() => new Script(appScript.replace('value=>!/^[A-Za-z0-9._:-]', 'value=>!^[A-Za-z0-9._:-]')), SyntaxError);
 });
 
-test('all navigation links target existing sections, not placeholder pages', () => {
-  const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
-  const targets = [...html.matchAll(/href="#([^"]+)"/g)].map(match => match[1]);
-  assert.equal(targets.length, 12);
-  assert.ok(targets.includes('ia-master'));
-  targets.forEach(id => assert.ok(ids.has(id), id));
+test('the six organization navigation groups target real views and do not expose the Master view', () => {
+  const { document } = fixtureDom(html);
+  const links = document.getElementById('portal-navigation')!.querySelectorAll('a[href^="#"]');
+  assert.equal(links.length, 6);
+  for (const link of links) assert.ok(document.getElementById(link.getAttribute('href')!.slice(1))!.closest('[data-page]'));
+  assert.equal(document.getElementById('ia-master'), null);
 });
 
 test('bootstrap renders only returned values and distinguishes absent data from zero', async () => {
@@ -79,7 +70,7 @@ test('polling pauses when hidden, offline, editing, resolving or mutating', asyn
   const f = await fixture();
   f.document.visibilityState = 'hidden'; await f.intervals[0].fn();
   f.document.visibilityState = 'visible'; f.run('navigator.onLine=false'); await f.intervals[0].fn();
-  f.run('navigator.onLine=true'); const field = new Element(); field.parentForm = new Element('form'); f.document.activeElement = field; await f.intervals[0].fn();
+  f.run('navigator.onLine=true'); const field = new Element('', 'input'); new Element('', 'form').appendChild(field); f.document.activeElement = field; await f.intervals[0].fn();
   f.document.activeElement = null; f.run('selectedResolution={id:"synthetic"}'); await f.intervals[0].fn();
   f.run('selectedResolution=null;mutationsInFlight=1'); await f.intervals[0].fn();
   assert.equal(f.calls.length, 1);
@@ -239,7 +230,8 @@ test('manager distribution approval posts a decision only and never a payment co
 
 
 test('canonical redirect guard preserves route context only for the known HML hosts', () => {
-  const guards = scripts.filter(script => script.includes('location.hostname'));
+  const guardedScripts = [...renderedShell('true').matchAll(/<script>([\s\S]*?)<\/script>/gi)].map(match => match[1]);
+  const guards = guardedScripts.filter(script => script.includes('location.hostname'));
   assert.equal(guards.length, 1);
   for (const hostname of ['wmgj-hml-jfn-20260927.web.app', 'WMGJ-HML-JFN-20260927.FIREBASEAPP.COM', 'auroranexus.com.br', 'unrelated.invalid']) {
     const redirects: string[] = [];
@@ -248,4 +240,34 @@ test('canonical redirect guard preserves route context only for the known HML ho
     const isHml = hostname.toLowerCase().startsWith('wmgj-hml-jfn-20260927.');
     assert.deepEqual(redirects, isHml ? ['https://auroranexus.com.br/portal?returnTo=%2Fsetup#pending'] : []);
   }
+});
+
+test('deep anchors select one parent view and move focus without dropping financial or action context', async () => {
+  const f = await fixture(response(), '#monthly-closing-summary');
+  const visible = () => f.document.querySelectorAll('[data-page]').filter(node => !node.hidden).map(node => node.dataset.page);
+  assert.deepEqual(visible(), ['finance']);
+  assert.equal(f.elements.get('invoiced')!.textContent.includes('123,45'), true);
+  f.run("revealAuroraSection('#create-review-card', true)");
+  assert.deepEqual(visible(), ['actions']);
+  const card = f.elements.get('create-review-card')!;
+  assert.equal(card.closest('details')!.getAttribute('open'), '');
+  assert.equal(f.document.activeElement, card.querySelector('h2'));
+  assert.equal(f.document.activeElement!.tabIndex, -1);
+  assert.equal((f.document.activeElement!.lastFocus as { preventScroll: boolean }).preventScroll, true);
+  f.run("revealAuroraSection('#unrecognized', true)");
+  assert.deepEqual(visible(), ['overview']);
+  assert.equal(f.calls.length, 1);
+});
+
+test('mobile menu closes on navigation and Escape restores focus to the menu button', async () => {
+  const f = await fixture(); const menu = f.elements.get('portal-navigation')!, button = f.elements.get('menu-toggle')!;
+  await f.click('menu-toggle'); assert.equal(button.getAttribute('aria-expanded'), 'true');
+  const link = menu.querySelectorAll('a[href^="#"]')[1]; let prevented = false;
+  f.docHandlers.get('click')!({ target: link.children[0], preventDefault() { prevented = true; } });
+  assert.equal(prevented, true); assert.equal(button.getAttribute('aria-expanded'), 'false');
+  assert.equal(menu.classList.contains('menu-open'), false);
+  assert.equal(f.run('location.hash'), '#monthly-closing-summary');
+  assert.equal(menu.querySelectorAll('a[href^="#"]').filter(item => item.getAttribute('aria-current') === 'page').length, 1);
+  await f.click('menu-toggle'); f.docHandlers.get('keydown')!({ key: 'Escape' });
+  assert.equal(button.getAttribute('aria-expanded'), 'false'); assert.equal(f.document.activeElement, button);
 });

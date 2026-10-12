@@ -32,6 +32,7 @@ export const AURORA_NATIVE_ROUTINES: readonly NativeRoutine[] = Object.freeze([
   { id: "AURORA-DAILY-UPDATES-001", module: "M10", name: "Manutenção de cliente, web e mobile", cadence: "DAILY", trigger: "EXISTING_HOSTED_MAINTENANCE", state: "LEGACY_MIRRORED", tenantScope: "PLATFORM", humanGate: true, sourceMutation: false },
   { id: "AURORA-INSTALL-INTEGRATION-001", module: "M08", name: "Instalação e conexão canônica retomável", cadence: "ON_DEMAND", trigger: "INSTALLER_EXPLICIT_CONNECTION_OR_SAMPLE", state: "NATIVE_GOVERNED", tenantScope: "PER_ORG", humanGate: true, sourceMutation: false },
   { id: "AURORA-TECH-AUDIT-WEEKLY", module: "M10", name: "Auditoria técnica semanal", cadence: "WEEKLY_ORG_CONFIG", trigger: "SCHEDULE_OR_MANUAL", state: "NATIVE_GOVERNED", tenantScope: "PLATFORM", humanGate: true, sourceMutation: false },
+  { id: "AURORA-DEV-AUTONOMY-FAILSAFE-001", module: "M10", name: "Autonomia resolutiva de desenvolvimento com auditoria e recuperação", cadence: "ON_DEMAND", trigger: "OWNER_STANDING_AUTHORIZATION_AND_VERIFIED_ENGINEERING_GATES", state: "NATIVE_GOVERNED", tenantScope: "PLATFORM", humanGate: true, sourceMutation: false },
   { id: "WMGJ-LEGACY-CYCLE-AUTONOMOUS", module: "M08", name: "Perfil legado autônomo Gmail/fiscal/financeiro (alternativo)", cadence: "DAILY_07_15_12_15_18_30_LOCAL", trigger: "APPS_SCRIPT_PROFILE", state: "LEGACY_MIRRORED", tenantScope: "PER_ORG", humanGate: false, sourceMutation: false },
   { id: "WMGJ-LEGACY-CYCLE-SAFE", module: "M08", name: "Perfil legado seguro Gmail/fiscal/financeiro (alternativo)", cadence: "DAILY_08_00_LOCAL", trigger: "APPS_SCRIPT_PROFILE", state: "LEGACY_MIRRORED", tenantScope: "PER_ORG", humanGate: false, sourceMutation: false },
   { id: "WMGJ-LEGACY-CYCLE-PRODUCTION", module: "M08", name: "Perfil legado produção Gmail/fiscal/financeiro (alternativo)", cadence: "DAILY_07_30_18_30_LOCAL", trigger: "APPS_SCRIPT_PROFILE", state: "LEGACY_MIRRORED", tenantScope: "PER_ORG", humanGate: false, sourceMutation: false },
@@ -48,7 +49,7 @@ export function nativeRoutineSummary(): Record<string, unknown> {
     return acc;
   }, { NATIVE_ACTIVE: 0, NATIVE_EVENT: 0, NATIVE_GOVERNED: 0, LEGACY_MIRRORED: 0 });
   return {
-    registryVersion: 2,
+    registryVersion: 3,
     source: "AURORA-MO-001",
     referenceTenant: "WMGJ",
     organism: {
@@ -65,6 +66,34 @@ export function nativeRoutineSummary(): Record<string, unknown> {
     },
     routines: AURORA_NATIVE_ROUTINES,
     counts,
+    engineeringAutonomyPolicy: {
+      id: "AURORA-DEV-AUTONOMY-FAILSAFE-001",
+      version: "2026-10-08",
+      source: "AURORA-MO-001_PERMANENT_OWNER_ADDENDUM",
+      authorizationOrigin: "HUMAN_OWNER_SESSION_20261008",
+      authorizationDuration: "STANDING_UNTIL_REVOKED",
+      scope: ["REVERSIBLE_ENGINEERING_DELIVERY", "VALIDATED_CODE_INTEGRATION", "AUTHORIZED_HOMOLOGATION"],
+      productionScope: "EXISTING_EXPLICIT_AUTHORIZATION_AND_EXECUTABLE_GATES",
+      registrationOnly: true,
+      executorState: "SPECIFIED",
+      recoveryCoverage: "PARTIAL",
+      windowsClientPartialFailureRecovery: "IMPLEMENTED",
+      cloudAutomaticRollback: "SPECIFIED_NOT_IMPLEMENTED",
+      permissionsGranted: false,
+      permissionAuthority: "AUTHENTICATED_LIVE_MEMBERSHIP",
+      repeatedOwnerPromptRequired: false,
+      executableSecurityGatesRequired: true,
+      authenticationAndMfaBypassAllowed: false,
+      fabricatedHumanReviewReceiptAllowed: false,
+      arbitraryCodeExecutionAllowed: false,
+      sourceMutationAllowed: false,
+      tenantRawDataTransferAllowed: false,
+      validatedOutcomeRequiredForLearning: true,
+      modelWeightsTrained: false,
+      evidenceRequired: ["EXACT_SHA_AND_ARTIFACT_HASH", "RELEVANT_TESTS_AND_CI", "VERIFIED_PREDECESSOR_AND_BACKUP", "SMOKE_AND_READBACK", "FAILURE_AND_RECOVERY_RESULT"],
+      policyReferences: ["autonomous-bugfix-realtime-audit-v1.json", "intrinsic-cloud-ai-operational-learning-v1.json"],
+      documentation: "docs/AURORA_AUTONOMY_FAILSAFE_20261008.md"
+    },
     ingestionRecoveryPolicy: {
       version: 2,
       source: "AURORA-MO-001",

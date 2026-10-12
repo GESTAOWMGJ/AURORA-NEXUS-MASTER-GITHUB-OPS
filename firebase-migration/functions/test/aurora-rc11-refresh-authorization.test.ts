@@ -7,9 +7,9 @@ import type { DecodedIdToken } from "firebase-admin/auth";
 import { can, resolveMember, type AuroraMember } from "../src/auroraAccess.js";
 import { auroraDb } from "../src/firebase.js";
 
-const runtime = readFileSync(new URL("../src/auroraRuntime.ts", import.meta.url), "utf8");
+const runtime = readFileSync(new URL("../src/auroraRuntime.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const workflowPath = fileURLToPath(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url));
-const workflow = readFileSync(workflowPath, "utf8");
+const workflow = readFileSync(workflowPath, "utf8").replace(/\r\n/g, "\n");
 const refresh = runtime.slice(runtime.indexOf("export const auroraNexusRefresh"), runtime.indexOf("export const auroraNexusAction"));
 const refreshRoles = ["platform_admin", "org_admin", "director", "auditor"];
 
@@ -115,7 +115,11 @@ test("post-ingest smoke uses the authenticated read path, not a privileged refre
 });
 
 test("post-ingest YAML, every run shell and critical step uniqueness are validated", () => {
-  const parsed = spawnSync("ruby", ["-rjson", "-ryaml", "-e", "puts JSON.generate(YAML.load_file(ARGV.fetch(0)))", workflowPath], { encoding: "utf8" });
+  const yamlPython = process.env.AURORA_TEST_PYTHON;
+  const parsed = yamlPython
+    ? spawnSync(yamlPython, ["-c", "import json,sys,yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1],encoding='utf-8'))))", workflowPath], { encoding: "utf8" })
+    : spawnSync("ruby", ["-rjson", "-ryaml", "-e", "puts JSON.generate(YAML.load_file(ARGV.fetch(0)))", workflowPath], { encoding: "utf8" });
+  assert.ifError(parsed.error);
   assert.equal(parsed.status, 0, parsed.stderr);
   const document = JSON.parse(parsed.stdout) as { jobs: Record<string, { steps: Array<{ name?: string; run?: string }> }> };
   const steps = document.jobs.finalize?.steps;

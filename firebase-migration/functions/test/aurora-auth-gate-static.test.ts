@@ -4,6 +4,7 @@ import test from "node:test";
 
 const source = fs.readFileSync(new URL("../src/auroraLoginClient.ts", import.meta.url), "utf8");
 const gate = fs.readFileSync(new URL("../src/auroraAuthGate.ts", import.meta.url), "utf8");
+const recovery = fs.readFileSync(new URL("../src/auroraPasswordRecovery.ts", import.meta.url), "utf8");
 
 test("setup receives a session-bound refresh CSRF token only after membership checks", () => {
   const start = gate.indexOf('if (req.path === "/setup")');
@@ -17,12 +18,23 @@ test("setup receives a session-bound refresh CSRF token only after membership ch
 });
 
 test("private login exposes reset without account enumeration", () => {
-  assert.match(source, /sendPasswordResetEmail\(auth, email\)/);
-  assert.match(source, /Se o e-mail estiver autorizado, as instruções de redefinição serão enviadas\./);
-  assert.doesNotMatch(source, /Usuário não existe|Conta não encontrada|E-mail não cadastrado/);
+  assert.match(recovery, /sendPasswordResetEmail\(auth, email\)/);
+  assert.match(recovery, /Se o e-mail estiver autorizado, as instruções de redefinição serão enviadas\./);
+  assert.doesNotMatch(recovery, /Usuário não existe|Conta não encontrada|E-mail não cadastrado/);
+  assert.match(source, /passwordRecoveryClient\(\)/);
 });
 
 test("reset action requires a syntactically plausible email before Firebase call", () => {
-  assert.match(source, /!email \|\| !email\.includes\('@'\)/);
-  assert.match(source, /Informe o e-mail autorizado\./);
+  assert.match(recovery, /!email \|\| !email\.includes\('@'\)/);
+  assert.match(recovery, /Informe o e-mail autorizado\./);
+});
+
+test("account security is rendered only after current membership and gets a session-bound logout token", () => {
+  const start = gate.indexOf('if (req.path === "/account-security")');
+  const end = gate.indexOf('if (req.path === "/setup")', start);
+  assert.ok(start > gate.indexOf("await resolveMember(decoded)"));
+  assert.ok(start > gate.indexOf("companyEntryAllowsMember(entry?.orgId, member.orgId)"));
+  assert.match(gate.slice(start, end), /CSRF_PURPOSES.logout/);
+  assert.match(gate.slice(start, end), /if \(!logoutCsrf\)/);
+  assert.match(gate.slice(start, end), /accountSecurityPage\(member, logoutCsrf\)/);
 });

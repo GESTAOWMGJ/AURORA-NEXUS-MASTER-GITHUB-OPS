@@ -1,0 +1,6 @@
+# Keep the installed knowledge adapter byte-compatible on Windows checkouts.
+desktop/ia-master/knowledge-registry.cjs text eol=lf
+# Preserve the upstream license bytes, including its original trailing space.
+firebase-migration/hosting/aurora-nexus/assets/fonts/*.txt text eol=lf
+firebase-migration/hosting/aurora-nexus/assets/fonts/provenance.json text eol=lf
+firebase-migration/hosting/aurora-nexus/assets/fonts/Atkinson-Hyperlegible-Next-OFL.txt -whitespace

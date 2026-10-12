@@ -531,8 +531,36 @@ jobs:
           technical_origin="https://${PROJECT_ID}.web.app"
           technical_headers="$(mktemp "${RUNNER_TEMP}/aurora-technical-headers.XXXXXX")"
           technical_shell="$(mktemp "${RUNNER_TEMP}/aurora-technical-shell.XXXXXX")"
+          canonical_headers="$(mktemp "${RUNNER_TEMP}/aurora-canonical-login-headers.XXXXXX")"
+          canonical_shell="$(mktemp "${RUNNER_TEMP}/aurora-canonical-login-shell.XXXXXX")"
           negative_response="$(mktemp "${RUNNER_TEMP}/aurora-negative-smoke.XXXXXX.json")"
-          trap 'rm -f "$technical_headers" "$technical_shell" "$negative_response"' EXIT
+          trap 'rm -f "$technical_headers" "$technical_shell" "$canonical_headers" "$canonical_shell" "$negative_response"' EXIT
+          assert_private_login() {
+            node --input-type=module - "$1" "$2" "${3:-technical}" <<'NODE'
+          import fs from 'node:fs';
+          import {hasUsableLoginForm} from './firebase-migration/scripts/check-canonical-preflight.mjs';
+          const html = fs.readFileSync(process.argv[2], 'utf8');
+          const headers = fs.readFileSync(process.argv[3], 'utf8');
+          if (/Centro de gestão WMGJ|id\s*=\s*["'](?:session-identity|logout)["']/i.test(html)) {
+            console.error('Technical Firebase host exposed the private shell');
+            process.exit(90);
+          }
+          let guardCheckedHtml = html;
+          if (process.argv[4] === 'canonical') {
+            // The exact candidate guard is dormant on the canonical hostname.
+            // Permit only those known bytes, never an arbitrary remote script.
+            const source = fs.readFileSync('./firebase-migration/functions/src/auroraAuthGate.ts', 'utf8');
+            const knownGuard = source.match(/function technicalHostBrowserRedirect\(\): string \{[\s\S]*?return `([^`]+)`;/)?.[1];
+            if (knownGuard) guardCheckedHtml = html.replace(knownGuard, '');
+          }
+          const browserGuard = /\blocation\s*\.\s*(?:replace|assign)\s*\(\s*["']https?:\/\//i.test(guardCheckedHtml)
+            || /<meta\b[^>]*http-equiv\s*=\s*["']?refresh\b/i.test(guardCheckedHtml);
+          if (!/^content-type:\s*text\/html\b/im.test(headers) || browserGuard || !hasUsableLoginForm(html)) {
+            console.error('::error title=Private login required::Expected a usable login form without a browser redirect or public landing.');
+            process.exit(91);
+          }
+          NODE
+          }
           technical_status="$(curl --silent --show-error --max-time 30 \
             --dump-header "$technical_headers" \
             --output "$technical_shell" \
@@ -541,10 +569,17 @@ jobs:
           if [ "$technical_status" = "308" ]; then
             technical_location="$(awk 'tolower($0) ~ /^location:/ { sub(/\r$/, ""); sub(/^[^:]*:[[:space:]]*/, ""); print; exit }' "$technical_headers")"
             test "$technical_location" = "${canonical_origin}/portal"
+            canonical_login_status="$(curl --silent --show-error --max-time 30 \
+              --dump-header "$canonical_headers" \
+              --output "$canonical_shell" \
+              --write-out '%{http_code}' \
+              "${canonical_origin}/portal")"
+            test "$canonical_login_status" = "200"
+            assert_private_login "$canonical_shell" "$canonical_headers" canonical
           elif [ "$technical_status" = "200" ]; then
-            grep -Fq 'location.replace("https://auroranexus.com.br/portal' "$technical_shell"
+            assert_private_login "$technical_shell" "$technical_headers"
           else
-            echo "::error title=Unexpected technical root response::HTTP ${technical_status}; expected 200 browser guard or 308 canonical redirect." >&2
+            echo "::error title=Unexpected technical root response::HTTP ${technical_status}; expected 200 private login or 308 to a verified canonical login." >&2
             exit 90
           fi
           if grep -Fq "Centro de gestão WMGJ" "$technical_shell"; then
@@ -560,6 +595,14 @@ jobs:
             echo "::error title=Anonymous smoke contract mismatch::${endpoint} returned HTTP ${status} with code ${code}." >&2
             exit 91
           }
+          if [ "$technical_status" = "308" ]; then
+            canonical_bootstrap_status="$(curl --silent --show-error --max-time 30 \
+              -H 'Accept: application/json' \
+              --output "$negative_response" \
+              --write-out '%{http_code}' \
+              "${canonical_origin}/api/bootstrap")"
+            assert_auth_required "canonical-bootstrap" "$canonical_bootstrap_status" "$negative_response"
+          fi
           bootstrap_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --output "$negative_response" \

@@ -13,9 +13,11 @@ test('IA Master does not convert connected chat plugins or local presence into a
   assert.ok(result.integrations.every(i => i.localState !== 'CONNECTED'));
   assert.equal(AURORA_NATIVE_ROUTINES.find(r => r.id === result.policy.id)?.state, 'NATIVE_GOVERNED');
 });
-test('private shell opens the local authenticated surface without sending cloud credentials', () => {
-  const html = iaMasterSection();
+test('private Master Studio is rendered only for the full-scope MFA administrator', () => {
+  assert.equal(iaMasterSection(), '');
+  const html = iaMasterSection({orgId:'synthetic-company',role:'org_admin',allFacilities:true,mfaVerified:true});
   assert.match(html, /IA Master/);
-  assert.match(html, /http:\/\/127\.0\.0\.1:38765/);
+  assert.match(html, /master-pair-ticket/);
+  assert.match(html, /master-task-form/);
   assert.doesNotMatch(html, /token=|Authorization|fetch\(|iframe|script/);
 });

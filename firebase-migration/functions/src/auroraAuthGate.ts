@@ -17,6 +17,9 @@ import { auroraAuth } from "./firebase.js";
 import { servePrivateDownloads } from "./auroraDownloads.js";
 import { setupPage } from "./auroraSetup.js";
 import { loginClient } from "./auroraLoginClient.js";
+import { passwordRecoveryMarkup } from "./auroraPasswordRecovery.js";
+import { accountSecurityPage } from "./auroraAccountSecurity.js";
+import { auroraDesignStyles } from "./auroraDesignSystem.js";
 import { CANONICAL_PORTAL_PATH, companyEntry, companyEntryAllowsMember, companyEntryPath, companyManifest, isCompanySlug, portalManifest, userFacingEntryPath } from "./auroraTenantEntry.js";
 
 const AURORA_NEXUS_ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
@@ -33,13 +36,28 @@ function requestedHost(req: { get(name: string): string | undefined }): string {
   return firstHost.trim().split(":")[0] ?? "";
 }
 
-function canonicalUserUrl(path: string): string {
+function canonicalUserUrl(path: string, originalUrl?: string): string {
+  // Preserve only syntactically valid reset material. Firebase verifies the code
+  // in the browser; continueUrl and other caller-selected redirects are discarded.
+  if (["/", "/login", "/portal", "/account-recovery"].includes(path) && originalUrl) {
+    try {
+      const action = new URL(originalUrl, CANONICAL_PORTAL_ORIGIN);
+      const modes = action.searchParams.getAll("mode"), codes = action.searchParams.getAll("oobCode");
+      if (action.origin === CANONICAL_PORTAL_ORIGIN && action.pathname === path
+        && modes.length === 1 && modes[0] === "resetPassword" && codes.length === 1
+        && /^[A-Za-z0-9_-]{1,2048}$/.test(codes[0] ?? "")) {
+        const query = new URLSearchParams({ mode: "resetPassword", oobCode: codes[0]! });
+        return `${CANONICAL_PORTAL_ORIGIN}/account-recovery?${query}`;
+      }
+    } catch { /* Malformed input cannot select a redirect destination. */ }
+  }
   if (!path || path === "/" || path === "/login") return CANONICAL_PORTAL_URL;
   return `${CANONICAL_PORTAL_ORIGIN}${path.startsWith("/") ? path : CANONICAL_PORTAL_PATH}`;
 }
 
 function technicalHostBrowserRedirect(): string {
-  return `<script>(()=>{const h=(location.hostname||"").toLowerCase();if(h==="wmgj-hml-jfn-20260927.web.app"||h==="wmgj-hml-jfn-20260927.firebaseapp.com"){location.replace("https://auroranexus.com.br/portal"+location.search+location.hash)}})();</script>`;
+  if (process.env.AURORA_CANONICAL_PORTAL_READY !== "true") return "";
+  return `<script>(()=>{const h=(location.hostname||"").toLowerCase();if(h==="wmgj-hml-jfn-20260927.web.app"||h==="wmgj-hml-jfn-20260927.firebaseapp.com"){const q=new URLSearchParams(location.search),m=q.getAll("mode"),c=q.getAll("oobCode");const reset=m.length===1&&m[0]==="resetPassword"&&c.length===1&&/^[A-Za-z0-9_-]{1,2048}$/.test(c[0]);const p=reset?"/account-recovery?"+new URLSearchParams({mode:"resetPassword",oobCode:c[0]}):"/portal";location.replace("https://auroranexus.com.br"+p)}})();</script>`;
 }
 
 function escapeHtml(value: unknown): string {
@@ -51,7 +69,7 @@ function escapeHtml(value: unknown): string {
     .replace(/'/g, "&#039;");
 }
 
-function setSecurityHeaders(res: { set(name: string, value: string): unknown }): void {
+function setSecurityHeaders(res: { set(name: string, value: string): unknown }, localMaster = false): void {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0");
   res.set("Pragma", "no-cache");
   res.set("Expires", "0");
@@ -69,7 +87,7 @@ function setSecurityHeaders(res: { set(name: string, value: string): unknown }):
       "img-src 'self' data:",
       "style-src 'self' 'unsafe-inline'",
       "script-src 'self' 'unsafe-inline' https://www.gstatic.com",
-      "connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com",
+      "connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com" + (localMaster ? " http://127.0.0.1:38765" : ""),
       "object-src 'none'"
     ].join("; ")
   );
@@ -91,21 +109,28 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado.", e
   <title>Aurora Nexus | Login</title>
   ${technicalHostBrowserRedirect()}
   <style>
-    :root { color-scheme: dark; --bg:#071f25; --panel:#0d2d34; --line:#1d4a53; --gold:#c6a45d; --text:#f7f1e7; --muted:#b9c7c6; }
+    ${auroraDesignStyles()}
     * { box-sizing: border-box; }
-    body { margin:0; min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at 20% 0%, #123b43 0, var(--bg) 38%, #041316 100%); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color:var(--text); }
-    main { width:min(440px, calc(100vw - 32px)); padding:32px; border:1px solid var(--line); border-radius:24px; background:linear-gradient(180deg, rgba(13,45,52,.96), rgba(7,31,37,.96)); box-shadow:0 30px 80px rgba(0,0,0,.35); }
-    .eyebrow { margin:0 0 10px; color:var(--gold); letter-spacing:.18em; text-transform:uppercase; font-size:12px; font-weight:700; }
-    h1 { margin:0 0 8px; font-size:30px; line-height:1.08; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:28px 0; background:radial-gradient(ellipse at top left,#e8eee5,transparent 55%),var(--bg); color:var(--text); }
+    main { width:min(460px, calc(100vw - 32px)); padding:36px; border:1px solid var(--line); border-top:4px solid #b89b58; border-radius:16px; background:var(--panel); box-shadow:0 20px 60px rgba(18,56,60,.08); }
+    .eyebrow { margin:0 0 10px; color:#81632e; letter-spacing:.18em; text-transform:uppercase; font-size:12px; font-weight:700; }
+    h1 { margin:0 0 12px; font-family:'Source Serif 4',Georgia,serif; font-size:36px; font-weight:400; line-height:1.12; letter-spacing:-.025em; }
+    h2 { font-family:'Source Serif 4',Georgia,serif; font-weight:600; font-size:21px; line-height:1.25; margin:0 0 12px; }
     p { margin:0 0 22px; color:var(--muted); line-height:1.55; }
-    label { display:block; margin:14px 0 6px; color:#e6eeee; font-size:13px; font-weight:650; }
-    input, select { width:100%; padding:14px 14px; border-radius:14px; border:1px solid #2e5f68; background:#061a1f; color:var(--text); outline:none; font-size:15px; }
+    label { display:block; margin:14px 0 6px; color:var(--text); font-size:13px; font-weight:650; }
+    input, select { width:100%; min-height:46px; padding:12px 14px; border-radius:8px; border:1px solid #b8c7c3; background:#fff; color:var(--text); font:inherit; font-size:16px; }
     input:focus { border-color:var(--gold); box-shadow:0 0 0 3px rgba(198,164,93,.18); }
-    button { width:100%; margin-top:18px; border:0; border-radius:14px; padding:14px 16px; background:var(--gold); color:#08191d; font-weight:800; cursor:pointer; font-size:15px; }
-    button.secondary { margin-top:10px; background:transparent; color:var(--text); border:1px solid #2e5f68; }
+    button { width:100%; min-height:46px; margin-top:18px; border:1px solid var(--ink); border-radius:8px; padding:13px 16px; background:var(--ink); color:#fffdf8; font-weight:750; cursor:pointer; font-size:15px; }
+    button.secondary { margin-top:10px; background:transparent; color:var(--text); border:1px solid #b8c7c3; }
+    button:hover:not(:disabled) { filter:brightness(1.08); }
+    button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible { outline:3px solid #1d5a61; outline-offset:3px; }
     button:disabled { opacity:.62; cursor:wait; }
-    .status { min-height:22px; margin-top:14px; color:#f0d99c; font-size:13px; }
-    .fineprint { margin-top:22px; font-size:12px; color:#91a7a6; }
+    .status { min-height:22px; margin-top:14px; color:#714f1d; font-size:13px; line-height:1.55; }
+    .fineprint { margin-top:22px; font-size:12px; color:var(--muted); line-height:1.6; }
+    section { padding-top:20px; border-top:1px solid var(--line); }
+    code { display:block; padding:12px; border:1px solid var(--line); border-radius:8px; background:#f0f3ec; color:var(--text); }
+    [hidden] { display:none!important; }
+    @media(max-width:480px) { main { padding:26px 22px; } h1 { font-size:31px; } }
   </style>
 </head>
 <body>
@@ -120,7 +145,8 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado.", e
       <input id="password" name="password" type="password" autocomplete="current-password" required>
       <label><input id="secure-setup" type="checkbox" style="width:auto"> Configurar segundo fator neste acesso</label>
       <button id="submit" type="submit">Entrar</button>
-      <button id="reset-password" class="secondary" type="button">Definir ou redefinir senha</button>
+      <button id="open-password-recovery" class="secondary" type="button">Esqueci minha senha</button>
+      <p class="fineprint"><a href="/account-security">Senha e autenticador da minha conta</a></p>
       <div id="status" class="status" aria-live="polite"></div>
     </form>
     <section id="mfa-panel" hidden>
@@ -130,6 +156,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado.", e
       <label for="mfa-code">Código temporário</label>
       <input id="mfa-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,8}" maxlength="8">
       <button id="mfa-submit" type="button">Confirmar segundo fator</button>
+      <button id="mfa-recovery-help" class="secondary" type="button">Perdi meu autenticador</button>
       <div id="mfa-status" class="status" aria-live="polite"></div>
     </section>
     <section id="activation-panel" hidden>
@@ -146,6 +173,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado.", e
       <button id="onboarding-submit" type="button">Concluir cadastro</button>
       <div id="onboarding-status" class="status" aria-live="polite"></div>
     </section>
+    ${passwordRecoveryMarkup()}
     <div class="fineprint">Sem demonstração pública. Acesso restrito a usuários previamente autorizados.</div>
   </main>
   <script type="module">${loginClient(entryOrg)}</script>
@@ -162,11 +190,18 @@ export const auroraNexusAuthGate = onRequest(
       return;
     }
 
-    if (TECHNICAL_FIREBASE_HOSTS.has(requestedHost(req))) {
-      res.redirect(308, canonicalUserUrl(req.path));
+    // Technical beta access stays usable until the canonical login AND private API
+    // have been verified. A public landing page is not proof of private readiness.
+    if (process.env.AURORA_CANONICAL_PORTAL_READY === "true" && TECHNICAL_FIREBASE_HOSTS.has(requestedHost(req))) {
+      res.redirect(308, canonicalUserUrl(req.path, req.originalUrl));
       return;
     }
 
+    // Password action handling is public even when the browser still has an old app session.
+    if (req.path === "/account-recovery") {
+      res.status(200).type("html").send(req.method === "HEAD" ? "" : loginPage("Recupere sua senha com o link enviado ao seu e-mail."));
+      return;
+    }
     const entry = companyEntry(req.path);
     if (req.path === "/manifest.webmanifest" || req.path === "/portal/manifest.webmanifest") {
       res.status(200).type("application/manifest+json").send(JSON.stringify(portalManifest()));
@@ -195,6 +230,15 @@ export const auroraNexusAuthGate = onRequest(
     }
     if (!companyEntryAllowsMember(entry?.orgId, member.orgId)) {
       res.status(403).type("html").send(loginPage("Esta conta não está autorizada para a empresa selecionada.", entry?.orgId));
+      return;
+    }
+    if (req.path === "/account-security") {
+      const logoutCsrf = csrfTokenForSession(req.get("cookie"), AURORA_NEXUS_CSRF_HMAC_KEY.value(), CSRF_PURPOSES.logout);
+      if (!logoutCsrf) {
+        res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança."));
+        return;
+      }
+      res.status(200).type("html").send(req.method === "HEAD" ? "" : accountSecurityPage(member, logoutCsrf));
       return;
     }
     if (req.path === "/setup") {
@@ -234,8 +278,9 @@ export const auroraNexusAuthGate = onRequest(
       return;
     }
     const runningRelease = await readRuntimeActiveRelease();
+    setSecurityHeaders(res, member.allFacilities && member.mfaVerified && ["platform_admin", "org_admin"].includes(member.role));
     let shell = auroraProtectedShell(member, csrfTokens as { action: string; refresh: string; integrationKey: string; userProfile: string; distributionApproval: string; logout: string }, entry?.path, runningRelease.runtimeBuildWeb);
-    shell = shell.replace("</nav>", '<a href="/setup">Instalação e conexões</a></nav>');
+    shell = shell.replace("</nav>", '<a href="/account-security">Senha e autenticador</a><a href="/setup">Instalação e conexões</a></nav>');
     if (["platform_admin", "org_admin", "director"].includes(member.role) || member.permissions.includes("downloads.hml.read")) {
       shell = shell.replace("</nav>", '<a href="/downloads">Instaladores Mac e Windows</a></nav>');
     }
