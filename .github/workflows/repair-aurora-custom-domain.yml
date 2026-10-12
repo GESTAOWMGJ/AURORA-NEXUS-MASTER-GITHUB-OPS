@@ -255,19 +255,7 @@ jobs:
                   discovered: (.requiredDnsUpdates.discovered | summarize)
                 }' <<<"$domain_json"
             )"
-            dns_summary_hashed="$(
-              python3 - "$dns_summary" <<'PY'
-import base64, hashlib, json, sys
-x=json.loads(sys.argv[1])
-for side in ("desired","discovered"):
-    for row in x.get(side,[]):
-        row["valueHashes"]=[
-            hashlib.sha256(base64.b64decode(v)).hexdigest()
-            for v in row.get("valueHashes",[])
-        ]
-print(json.dumps(x,separators=(",",":")))
-PY
-            )"
+            dns_summary_hashed="$(python3 -c 'import base64,hashlib,json,sys;x=json.loads(sys.argv[1]);[(row.__setitem__("valueHashes",[hashlib.sha256(base64.b64decode(v)).hexdigest() for v in row.get("valueHashes",[])])) for side in ("desired","discovered") for row in x.get(side,[])];print(json.dumps(x,separators=(",",":")))' "$dns_summary")"
             jq -nc --argjson updates "$dns_summary_hashed"               --arg project "$PROJECT_ID" --arg site "$SITE_ID" --arg domain "$DOMAIN"               '{schemaVersion:1,projectId:$project,siteId:$site,domain:$domain,stage:"REQUIRED_DNS_UPDATES_HASHED",
                 requiredDnsUpdates:$updates,secretsIncluded:false,rawDnsValuesIncluded:false,iamChanged:false,dnsChanged:false}'               > "${RUNNER_TEMP}/aurora-custom-domain-dns-summary.json"
             cat "${RUNNER_TEMP}/aurora-custom-domain-dns-summary.json"
