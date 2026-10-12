@@ -1,0 +1,10 @@
+{
+  "sourceSha": "00a9707f256e92ae636ae22dde929aef4b33c209",
+  "installedClientVersion": "0.2.0-beta.4",
+  "candidatePreparedOnWindows": true,
+  "probeResult": "CANONICAL_PORTAL_LOGIN_NOT_VERIFIED",
+  "updateApplied": false,
+  "existingClientPreserved": true,
+  "nextAction": "After canonical portal passes its probe, revalidate main and run existing install_windows_beta.py install with verified rollback; validate authenticated WMGJ operation separately.",
+  "dnsChanged": false
+}
