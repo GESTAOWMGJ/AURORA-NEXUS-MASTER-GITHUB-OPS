@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="GESTAOWMGJ/automacao-gestao-wmgj"
+REPO="GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS"
 
 printf "\nWMGJ - Configurador seguro de credenciais Apps Script\n"
 printf "Repositório: %s\n\n" "$REPO"

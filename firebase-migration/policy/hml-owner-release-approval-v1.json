@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "decisionId": "AURORA-HML-OWNER-20261008",
+  "approvalSource": "DIRECT_OWNER_CHAT",
+  "recordedOn": "2026-10-08",
+  "reaffirmations": [
+    {
+      "recordedOn": "2026-10-12",
+      "approvalSource": "DIRECT_OWNER_CHAT",
+      "statement": "Revisão humana APROVADA E REALIZADA !!! das quatro candidatas e do gateway, com decisão específica de R029.",
+      "originalScopeUnchanged": true,
+      "riskReviewDeadlineExtended": false,
+      "laterMainCodeReviewClaimed": false,
+      "independentGithubPullRequestReviewClaimed": false
+    }
+  ],
+  "scope": {
+    "repository": "GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS",
+    "projectId": "wmgj-hml-jfn-20260927",
+    "environment": "firebase-homologation",
+    "branch": "main",
+    "validUntilUtc": "2026-10-15T03:00:00.000Z"
+  },
+  "repositoryOwner": { "login": "GESTAOWMGJ", "id": 278915189 },
+  "reviewedPullRequests": [
+    { "number": 183, "headSha": "c76c22c47f2591c33fd9e4bb4216e6b5e593fe1f" },
+    { "number": 184, "headSha": "bf5bbc1146245bdf112cedfd9a9c6cc558e46106" },
+    { "number": 187, "headSha": "4ae55d9c23f3c5f0c660c7cc579bdf6e8acba017" },
+    { "number": 190, "headSha": "804d4a460972cdcc5924cb3cf46a65eddff08b8b" }
+  ],
+  "gateway": {
+    "sourceSha": "d94f2c93ca25b8961cec25cb032a636fa630fc64",
+    "patchSha256": "53531906693f6acc60e52084f10722c592c8aefbbf9885029f3bd2ddd2f6269f",
+    "archiveSha256": "62f9a9649e86ea8df51d67384421959055940675290c0352258e70f178a4e24c"
+  },
+  "subsequentTechnicalGatewayEvidence": {
+    "version": 5,
+    "sourceSha": "46fa11c7d4be68893a616530509872254ef809e6",
+    "deploymentId": "appgdep_6ac74c3ecd8081919043fc4bf3e2da37",
+    "deploymentCompletedAtUtc": "2026-10-08T07:54:57Z",
+    "isolatedScenariosPassed": 22,
+    "builtAnonymousGetScenariosPassed": 8,
+    "testsReportedAtUtcMinute": "2026-10-08T07:56Z",
+    "humanReviewOfEntireLaterSourceClaimed": false
+  },
+  "riskAcceptance": {
+    "register": "R029",
+    "proposal": "SEC-EXC-TEST-20261007",
+    "status": "ACCEPTED_BY_OWNER_HML_TEST_TOOLS_ONLY",
+    "scope": "firebase-migration/tests development tools only",
+    "reviewBy": "2026-10-14",
+    "timeZone": "America/Sao_Paulo",
+    "residual": { "critical": 0, "high": 7, "moderate": 4, "total": 11 }
+  },
+  "integrationAndHmlPublicationAuthorized": true,
+  "laterMainCodeReviewClaimed": false,
+  "productionAuthorized": false,
+  "clinicalSensitiveAuthorized": false,
+  "independentGithubPullRequestReviewClaimed": false
+}

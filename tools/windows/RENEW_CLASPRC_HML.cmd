@@ -4,7 +4,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "PROJECT_ID=wmgj-hml-jfn-20260927"
 set "PROJECT_NUMBER=299889357292"
 set "SCRIPT_ID=1_fQPqaq0EjaugyIF6jyuENDhJ2c2oTFm1kC-wdjmfaDqyRzy_uqwtiSW"
-set "REPO=GESTAOWMGJ/automacao-gestao-wmgj"
+set "REPO=GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS"
 set "WORK=%LOCALAPPDATA%\Temp\aurora-clasp-cmd"
 set "CLASP_HOME=%LOCALAPPDATA%\Temp\aurora-clasp-npm"
 
@@ -132,7 +132,7 @@ if errorlevel 1 (
 
 if exist "%WORK%" rmdir /s /q "%WORK%"
 mkdir "%WORK%"
-curl.exe -fL https://raw.githubusercontent.com/GESTAOWMGJ/automacao-gestao-wmgj/main/appsscript.json -o "%WORK%\appsscript.json"
+curl.exe -fL https://raw.githubusercontent.com/%REPO%/main/appsscript.json -o "%WORK%\appsscript.json"
 if errorlevel 1 exit /b 38
 
 > "%WORK%\.clasp.json" echo {
