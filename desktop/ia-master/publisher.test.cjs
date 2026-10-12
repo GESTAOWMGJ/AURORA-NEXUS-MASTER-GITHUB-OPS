@@ -133,6 +133,25 @@ test('fixed PR metadata is transferred through stdin without a mutable body file
   assert.equal(result.status, 0); assert.equal(result.stdout, 'SYNTHETIC_FIXED_ENGINEERING_METADATA\n');
 });
 
+test('source broker fixes replacement-object semantics and rejects URL rewriting in the worktree config scope before network', async t => {
+  const f = await fixture(t); if (!f) return;
+  assert.equal(environment({ GIT_NO_REPLACE_OBJECTS: '0', GH_TOKEN: 'DO_NOT_INHERIT' }).GIT_NO_REPLACE_OBJECTS, '1');
+  await assert.rejects(f.publisher.fetchSourceObjects('main'), code('PUBLISH_INPUT_INVALID'));
+  assert.equal(f.calls.length, 0);
+  f.g(['config', '--local', 'extensions.worktreeConfig', 'true']);
+  f.g(['config', '--worktree', 'url.https://evil.invalid/.insteadOf', 'https://github.com/']);
+  await assert.rejects(f.publisher.sourceHead(), code('PUBLISH_LOCAL_CONFIGURATION_UNSAFE'));
+  assert(f.calls.some(call => call.args.includes('--worktree'))); assert.equal(f.calls.filter(call => call.tool === 'gh').length, 0);
+  assert.equal(f.remote.pushes, 0); assert.equal(f.remote.creates, 0);
+});
+
+test('source broker refuses a populated controlled hooks directory before any credential or process call', async t => {
+  const f = await fixture(t); if (!f) return;
+  fs.writeFileSync(path.join(f.stateDir, 'studio', 'publications', 'empty-hooks', 'pre-push'), 'UNKNOWN_HOOK_BYTES\n');
+  await assert.rejects(f.publisher.sourceHead(), code('PUBLISH_LOCAL_CONFIGURATION_UNSAFE'));
+  assert.equal(f.calls.length, 0); assert.equal(f.remote.pushes, 0);
+});
+
 test('publication is unavailable without a reviewed explicit opt-in', async t => {
   const f = await fixture(t); if (!f) return;
   for (const config of [null, { ...f.config, enabled: false }, { ...f.config, authorizedOrgId: 'another-org' },

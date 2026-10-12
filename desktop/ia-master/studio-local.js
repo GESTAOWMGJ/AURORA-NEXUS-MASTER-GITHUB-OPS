@@ -7,6 +7,12 @@
 })(function () {
   const SCHEMA = 'aurora.master.studio.v1', ID = /^[a-f0-9]{32}$/, SHA = /^[a-f0-9]{40}$/, DIGEST = /^[a-f0-9]{64}$/;
   const REPOSITORY = 'GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS';
+  const sourceSha = value => typeof value === 'string' && SHA.test(value);
+  const sourceDigest = value => typeof value === 'string' && DIGEST.test(value);
+  const sourceStates = { ORIGINAL_SOURCE: 'Código original vinculado', SNAPSHOT_ACTIVE: 'Código do projeto atualizado',
+    REFRESH_BLOCKED: 'Atualização interrompida; conferência necessária', SOURCE_ACTIVATED: 'Código do projeto atualizado',
+    ALREADY_CURRENT: 'O código do projeto já está nesta versão', REMOTE_MOVED: 'A origem mudou durante a consulta; código local preservado',
+    SOURCE_RECOVERED: 'Tentativa recuperada; código e histórico preservados' };
   const publicationStates = { INTENT_RECORDED: 'Publicação registrada', BRANCH_PUSH_INTENT: 'Envio da branch registrado',
     BRANCH_CONFIRMED: 'Branch confirmada no GitHub', PR_CREATE_INTENT: 'Criação de proposta registrada',
     PR_UNCONFIRMED: 'Proposta ainda não confirmada', BRANCH_UNCONFIRMED: 'Branch ainda não confirmada',
@@ -32,8 +38,14 @@
     STUDIO_VERSION_CONFLICT: 'Esta tarefa mudou em outra janela. Atualize a tarefa e confira o resultado antes de continuar.',
     STUDIO_BASE_CHANGED: 'A versão de origem mudou. Inicie outro pedido com o código atual.',
     STUDIO_SOURCE_CHANGED: 'A fonte vinculada mudou. Inicie outro pedido com o código atual.',
+    STUDIO_SOURCE_REVISION_CONFLICT: 'A fonte local mudou em outra janela. Use “Atualizar acesso” para conferir a versão antes de atualizar o código.',
+    STUDIO_SOURCE_REFRESH_BLOCKED: 'A atualização anterior exige conferência. Preserve o comprovante e revise a configuração local.',
+    STUDIO_SOURCE_RECORD_INVALID: 'O comprovante da fonte precisa ser preservado e revisado.',
+    STUDIO_SOURCE_DIRTY: 'Há alterações locais na fonte. Preserve essas alterações antes de atualizar o código.',
+    STUDIO_REMOTE_SOURCE_CHANGED: 'A origem mudou durante a consulta. Confira a fonte local antes de tentar novamente.',
+    STUDIO_SOURCE_DIVERGED: 'A fonte local diverge da origem autorizada. Preserve o código e revise a configuração.',
     STUDIO_WORKSPACE_CHANGED: 'A cópia isolada mudou. Preserve a tarefa para revisão.',
-    STUDIO_LOCKED: 'Esta tarefa está em uso. Atualize a tarefa quando a operação terminar.',
+    STUDIO_LOCKED: 'A tentativa em andamento ou a trava sem prova de recuperação foi preservada. Use “Atualizar acesso” para conferir antes de continuar.',
     STUDIO_STATE_CONFLICT: 'Esta etapa não está disponível no estado atual. Atualize a tarefa para conferir.',
     STUDIO_PATH_REJECTED: 'Selecione somente arquivos autorizados do catálogo.',
     STUDIO_SENSITIVE_CONTENT: 'O conteúdo foi recusado por conter possível segredo ou dado protegido.',
@@ -85,16 +97,31 @@
       Object.hasOwn(states, value.state) && typeof value.summary === 'string' && value.summary.length <= 600 &&
       typeof value.prompt === 'string' && value.prompt.length <= 6000 && ['PUBLIC', 'INTERNAL'].includes(value.classification);
   }
-  function taskActions(task, reviewed, diffVersion) {
-    const current = task && reviewed && diffVersion === task.version;
+  function taskActions(task, reviewed, diffVersion, headRevision = task?.baseRevision) {
+    const sourceCurrent = !!task && sourceSha(headRevision) && task.baseRevision === headRevision;
+    const current = sourceCurrent && reviewed && diffVersion === task.version;
     return {
-      propose: !!task && !task.staged && ['CONTEXT_BOUND', 'PROPOSED', 'VALIDATED', 'CHECK_FAILED'].includes(task.state),
+      propose: sourceCurrent && !task.staged && ['CONTEXT_BOUND', 'PROPOSED', 'VALIDATED', 'CHECK_FAILED'].includes(task.state),
       diff: !!task?.proposal && !['CONTEXT_BOUND', 'STAGING', 'PREPARING_VERSION'].includes(task.state),
       validate: !!current && !task.staged && ['PROPOSED', 'VALIDATED'].includes(task.state),
       stage: !!current && task.state === 'VALIDATED',
       verify: !!current && ['PATCH_STAGED', 'CHECK_FAILED'].includes(task.state),
       prepare: !!current && task.state === 'STATIC_CHECKS_PASSED'
     };
+  }
+  function validSource(value, responseOnly = false, recovery = false) {
+    const keys = ['schemaVersion', 'state', 'sourceVersion', 'headRevision', 'originalRevision', 'receiptSha256',
+      'eventHash', 'snapshotVerified', 'originalCheckoutChanged', 'remoteCurrent', 'canMerge', 'canDeploy', 'canInstall', 'observedRevision', 'sourceLockSha256'];
+    return value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => keys.includes(key)) &&
+      value.schemaVersion === 'aurora.master.source.v1' && Object.hasOwn(sourceStates, value.state) &&
+      (!responseOnly || (recovery ? ['SOURCE_RECOVERED'] : ['SOURCE_ACTIVATED', 'ALREADY_CURRENT', 'REMOTE_MOVED']).includes(value.state)) &&
+      Number.isSafeInteger(value.sourceVersion) && value.sourceVersion >= 0 && sourceSha(value.headRevision) &&
+      sourceSha(value.originalRevision) && sourceDigest(value.receiptSha256) &&
+      (value.eventHash === null || sourceDigest(value.eventHash)) && typeof value.snapshotVerified === 'boolean' &&
+      value.originalCheckoutChanged === false && value.remoteCurrent === 'NOT_OBSERVED' &&
+      value.canMerge === false && value.canDeploy === false && value.canInstall === false &&
+      (!Object.hasOwn(value, 'observedRevision') || sourceSha(value.observedRevision)) &&
+      (!Object.hasOwn(value, 'sourceLockSha256') || value.state === 'REFRESH_BLOCKED' && sourceDigest(value.sourceLockSha256));
   }
   function validateCapabilities(value, orgId) {
     if (!value || value.schemaVersion !== SCHEMA || value.authenticatedOrgId !== orgId || value.externalAiEnabled !== false ||
@@ -107,6 +134,18 @@
       !Number.isSafeInteger(value.limits?.maxFiles) || value.limits.maxFiles < 1 || value.limits.maxFiles > 10 ||
       !Number.isSafeInteger(value.limits?.maxContextBytes) || value.limits.maxContextBytes < 1 || value.limits.maxContextBytes > 50000)
       throw Error('INVALID_RESPONSE');
+    if (Object.hasOwn(value.repository, 'headRevision') && !(sourceSha(value.repository.headRevision) ||
+      value.repository.headRevision === null && value.repository.state !== 'AVAILABLE')) throw Error('INVALID_RESPONSE');
+    if (Object.hasOwn(value.operations, 'sourceRefresh') &&
+      !['FIXED_MAIN_SNAPSHOT_ONLY', 'NOT_CONFIGURED'].includes(value.operations.sourceRefresh)) throw Error('INVALID_RESPONSE');
+    if (value.operations.sourceRefresh === 'FIXED_MAIN_SNAPSHOT_ONLY' &&
+      (value.repository.state !== 'AVAILABLE' || !sourceSha(value.repository.headRevision))) throw Error('INVALID_RESPONSE');
+    if (Object.hasOwn(value.operations, 'sourceRecovery') &&
+      !['PRESERVE_AND_RESET_BLOCKED_ATTEMPT', 'NOT_CONFIGURED'].includes(value.operations.sourceRecovery)) throw Error('INVALID_RESPONSE');
+    if (value.operations.sourceRecovery === 'PRESERVE_AND_RESET_BLOCKED_ATTEMPT' &&
+      (value.repository.state !== 'AVAILABLE' || !sourceSha(value.repository.headRevision))) throw Error('INVALID_RESPONSE');
+    if (Object.hasOwn(value, 'source') && !(value.source === null && value.repository.state !== 'AVAILABLE' ||
+      validSource(value.source) && value.source.headRevision === value.repository.headRevision)) throw Error('INVALID_RESPONSE');
     if (value.operations.publish === 'DRAFT_PR_ONLY' && (!value.publisher ||
       value.publisher.schemaVersion !== 'aurora.master.publisher.v1' || value.publisher.state !== 'CONFIGURED_AUTH_NOT_OBSERVED' ||
       value.publisher.repository !== REPOSITORY || value.publisher.baseBranch !== 'main' ||
@@ -174,39 +213,49 @@
   function mount(env) {
     const d = env.document, w = env.window, get = id => d.getElementById(id);
     if (!get('local-studio') || env.location.hostname !== '127.0.0.1' || env.location.protocol !== 'http:') return null;
-    let orgId = null, caps = null, task = null, context = null, busy = false, closed = true, epoch = 0, diffVersion = null, syncRequired = false;
+    let orgId = null, caps = null, task = null, context = null, busy = false, closed = true, epoch = 0, diffVersion = null, syncRequired = false, sourceSyncRequired = false;
     const controllers = new Set(), fileRows = new Map();
-    const buttonIds = ['studio-create', 'studio-propose', 'studio-import', 'studio-diff', 'studio-validate', 'studio-stage', 'studio-verify', 'studio-prepare', 'studio-refresh-task', 'studio-refresh-history', 'studio-publish', 'studio-reconcile-publication', 'studio-read-ci'];
+    const buttonIds = ['studio-create', 'studio-source-refresh', 'studio-source-recover', 'studio-propose', 'studio-import', 'studio-diff', 'studio-validate', 'studio-stage', 'studio-verify', 'studio-prepare', 'studio-refresh-task', 'studio-refresh-history', 'studio-publish', 'studio-reconcile-publication', 'studio-read-ci'];
     function say(text, error = false) { get('studio-notice').textContent = text; get('studio-notice').setAttribute('data-error', String(error)); }
+    function taskSourceRevision() {
+      return caps && !Object.hasOwn(caps.repository, 'headRevision') ? task?.baseRevision : caps?.repository.headRevision;
+    }
+    function taskIsCurrent() { return !!task && task.baseRevision === taskSourceRevision(); }
     function controlStates() {
-      const a = taskActions(task, get('studio-reviewed').checked, diffVersion), unavailable = closed || busy || syncRequired;
+      const a = taskActions(task, get('studio-reviewed').checked, diffVersion, taskSourceRevision()), unavailable = closed || busy || syncRequired || sourceSyncRequired;
       get('studio-create').disabled = unavailable || caps?.repository.state !== 'AVAILABLE';
+      get('studio-source-refresh').disabled = closed || busy || sourceSyncRequired ||
+        caps?.operations.sourceRefresh !== 'FIXED_MAIN_SNAPSHOT_ONLY' || !SHA.test(caps?.repository.headRevision || '') || caps?.source?.state === 'REFRESH_BLOCKED';
+      get('studio-source-recover').hidden = caps?.operations.sourceRecovery !== 'PRESERVE_AND_RESET_BLOCKED_ATTEMPT' ||
+        caps?.source?.state !== 'REFRESH_BLOCKED' || !validSource(caps?.source);
+      get('studio-source-recover').disabled = closed || busy || sourceSyncRequired || get('studio-source-recover').hidden;
       get('studio-propose').disabled = unavailable || !a.propose;
       get('studio-import').disabled = unavailable || !a.propose;
       for (const name of ['diff', 'validate', 'stage', 'verify', 'prepare']) get('studio-' + name).disabled = unavailable || !a[name];
       get('studio-refresh-task').disabled = closed || busy || !task;
       get('studio-refresh-history').disabled = closed || busy || !caps;
       get('studio-reconnect').disabled = busy;
-      get('studio-reviewed').disabled = unavailable || diffVersion !== task?.version;
+      get('studio-reviewed').disabled = unavailable || !taskIsCurrent() || diffVersion !== task?.version;
       const ready = !unavailable && task?.state === 'VERSION_PREPARED' && caps?.operations.publish === 'DRAFT_PR_ONLY';
       const publication = task?.publication;
-      get('studio-publish').disabled = !ready || !get('studio-reviewed').checked || diffVersion !== task?.version ||
+      get('studio-publish').disabled = !ready || !taskIsCurrent() || !get('studio-reviewed').checked || diffVersion !== task?.version ||
         Boolean(publication?.pullRequest || publication?.observedPullRequest) || Boolean(publication && !['INTENT_RECORDED', 'BRANCH_CONFIRMED', 'BRANCH_UNCONFIRMED', 'RETRY_READY'].includes(publication.state));
       get('studio-reconcile-publication').disabled = !ready || !publication;
       get('studio-read-ci').disabled = !ready || !(publication?.pullRequest || publication?.observedPullRequest);
       for (const row of fileRows.values()) { row.checkbox.disabled = unavailable || row.file.state !== 'EDITABLE'; row.focus.disabled = unavailable; row.start.disabled = unavailable; row.end.disabled = unavailable; }
     }
     function endSession() {
-      epoch++; closed = true; orgId = null; caps = null; task = null; context = null; diffVersion = null; syncRequired = false; busy = false;
+      epoch++; closed = true; orgId = null; caps = null; task = null; context = null; diffVersion = null; syncRequired = false; sourceSyncRequired = false; busy = false;
       for (const controller of controllers) controller.abort(); controllers.clear();
       get('studio-content').hidden = true; get('studio-request').value = ''; get('studio-json').value = '';
       get('studio-reviewed').checked = false;
-      for (const id of ['studio-diff-output', 'studio-context-receipt', 'studio-source-files', 'studio-task-receipt', 'studio-version-receipt', 'studio-model-context', 'studio-catalog', 'studio-history', 'studio-task-history', 'studio-publication-receipt', 'studio-publication-history']) get(id).replaceChildren();
+      for (const id of ['studio-diff-output', 'studio-context-receipt', 'studio-source-files', 'studio-source-receipt', 'studio-task-receipt', 'studio-knowledge-receipt', 'studio-version-receipt', 'studio-model-context', 'studio-catalog', 'studio-history', 'studio-task-history', 'studio-publication-receipt', 'studio-publication-history']) get(id).replaceChildren();
       get('studio-task-panel').hidden = true; get('studio-task-title').textContent = ''; get('studio-task-state').textContent = ''; get('studio-access-kind').textContent = ''; get('studio-repository').textContent = '';
+      get('studio-source-version').textContent = ''; get('studio-task-source-notice').textContent = '';
       fileRows.clear(); say(messages.LOCAL_AUTH_REQUIRED); controlStates();
     }
     async function request(route, body, timeout = 120000) {
-      if (!/^\/api\/(?:status|studio\/(?:capabilities|context|tasks(?:\/[a-f0-9]{32}(?:\/(?:propose|proposal|diff|validate|stage|verify|prepare|publish-draft|reconcile-publication|read-ci))?)?))$/.test(route)) throw Error('INPUT_INVALID');
+      if (!/^\/api\/(?:status|studio\/(?:capabilities|source-refresh|source-recover|context|tasks(?:\/[a-f0-9]{32}(?:\/(?:propose|proposal|diff|validate|stage|verify|prepare|publish-draft|reconcile-publication|read-ci))?)?))$/.test(route)) throw Error('INPUT_INVALID');
       const generation = epoch, controller = new AbortController(); controllers.add(controller);
       const timer = w.setTimeout(() => controller.abort(), timeout);
       try {
@@ -238,8 +287,24 @@
       if (changed && !keepReview) { diffVersion = null; get('studio-reviewed').checked = false; get('studio-diff-output').textContent = ''; }
       if (keepReview) diffVersion = value.version;
       get('studio-task-title').textContent = value.summary; get('studio-task-state').textContent = states[value.state];
+      get('studio-task-source-notice').textContent = taskIsCurrent() ? '' :
+        'Tarefa da fonte ' + value.baseRevision.slice(0, 12) + ' · somente leitura. Consulte alterações, histórico e testes registrados; registre outro pedido com o código atual para editar.';
       receipt('studio-task-receipt', [['Tarefa', value.id], ['Revisão da tarefa', value.version], ['Código de origem', value.baseRevision], ['Classificação', value.classification],
         ...(DIGEST.test(value.proposalFingerprint || '') ? [['Hash da proposta', value.proposalFingerprint]] : [])]);
+      get('studio-knowledge-receipt').replaceChildren();
+      const knowledge = value.knowledge;
+      if (knowledge && (knowledge.corpusVersion === null || typeof knowledge.corpusVersion === 'string' && knowledge.corpusVersion.length <= 100) &&
+        (knowledge.corpusHash === null || sourceDigest(knowledge.corpusHash)) && Array.isArray(knowledge.recordIds) && knowledge.recordIds.length <= 1000 &&
+        knowledge.recordIds.every(id => typeof id === 'string' && /^[A-Z0-9-]{3,64}$/.test(id)) &&
+        Number.isSafeInteger(knowledge.selectedContextBytes) && knowledge.selectedContextBytes >= 0 &&
+        knowledge.maxContextBytes === 600 && knowledge.selectedContextBytes <= knowledge.maxContextBytes &&
+        ['SELECTED', 'NO_RECORD_FITS', 'CORPUS_UNAVAILABLE', 'LEGACY_FALLBACK', 'CONTEXT_LIMIT'].includes(knowledge.selectionState) &&
+        typeof knowledge.completeHistoricalAbsorption === 'boolean') {
+        receipt('studio-knowledge-receipt', [['Memória consultada', knowledge.corpusVersion || 'Indisponível'],
+          ['Hash da memória', knowledge.corpusHash || 'Indisponível'], ['Métodos consultados', knowledge.recordIds.join(', ') || 'Nenhum'],
+          ['Contexto selecionado', knowledge.selectedContextBytes + '/' + knowledge.maxContextBytes + ' bytes'],
+          ['Estado da seleção', knowledge.selectionState], ['Cobertura histórica completa', knowledge.completeHistoricalAbsorption ? 'Informada no recibo' : 'Não']]);
+      }
       get('studio-model-context').replaceChildren();
       if (value.modelContext) {
         const p = d.createElement('p'); p.textContent = value.modelContext.complete === true ? 'O modelo recebeu os arquivos completos deste contexto.' : 'O modelo recebeu trechos limitados. Os arquivos completos continuam vinculados à tarefa para validação.';
@@ -300,6 +365,23 @@
       get('studio-publish-config').textContent = caps.operations.publish === 'DRAFT_PR_ONLY'
         ? 'Destino: repositório público do AURORA. A conta GitHub será conferida pelo serviço local antes do envio.'
         : 'Publicação não habilitada na configuração revisada deste PC. O preparo local continua disponível.';
+      renderSource(caps.source);
+    }
+    function renderSource(source) {
+      const revision = caps?.repository.headRevision;
+      get('studio-source-version').textContent = SHA.test(revision || '')
+        ? 'Código local · ' + (source ? 'versão ' + source.sourceVersion + ' · ' : '') + revision.slice(0, 12)
+        : 'Atualização do código indisponível na configuração local.';
+      get('studio-source-receipt').replaceChildren();
+      if (source) receipt('studio-source-receipt', [['Resultado', sourceStates[source.state]], ['Versão da fonte', source.sourceVersion],
+        ['Código ativo', source.headRevision], ['Código original', source.originalRevision],
+        ['Snapshot conferido', source.snapshotVerified ? 'Sim' : 'Não'], ['Checkout original', 'Preservado'],
+        ...(source.observedRevision ? [['Origem observada nesta tentativa', source.observedRevision]] : []),
+        ['Hash do comprovante', source.receiptSha256], ...(source.eventHash ? [['Hash do evento', source.eventHash]] : [])]);
+      if (source?.sourceLockSha256) {
+        const line = d.createElement('p'); line.textContent = 'Hash da trava recuperável: ' + source.sourceLockSha256;
+        get('studio-source-receipt').append(line);
+      }
     }
     async function loadHistory() {
       const value = await request('/api/studio/tasks', undefined, 30000);
@@ -319,20 +401,21 @@
       try {
         const status = await request('/api/status', undefined, 30000);
         if (typeof status.orgId !== 'string' || !/^[a-z0-9][a-z0-9-]{1,63}$/.test(status.orgId) || detail?.orgId && detail.orgId !== status.orgId) throw Error('INVALID_RESPONSE');
-        orgId = status.orgId; caps = validateCapabilities(await request('/api/studio/capabilities', undefined, 30000), orgId);
+        orgId = status.orgId; caps = validateCapabilities(await request('/api/studio/capabilities', undefined, 30000), orgId); sourceSyncRequired = false;
         closed = false; get('studio-content').hidden = false; get('studio-access-kind').textContent = 'Sessão do proprietário local · ' + orgId + ' · sem comprovação de login ou MFA no portal';
-        renderCatalog(); await loadHistory(); syncRequired = !!task;
+        renderCatalog(); if (task) renderTask(task); await loadHistory(); syncRequired = !!task;
         say(caps.repository.state === 'AVAILABLE' ? 'Pronto para desenvolver com o código autorizado deste PC.' : get('studio-repository').textContent);
       } catch (error) { if (error.message === 'LOCAL_AUTH_REQUIRED') endSession(); else { closed = true; get('studio-content').hidden = true; say(messages[error.message] || messages.INVALID_RESPONSE, true); } }
       finally { busy = false; controlStates(); }
     }
     async function run(operation, mutation = false) {
-      if (closed || busy || mutation && syncRequired) return;
+      if (closed || busy || mutation && (syncRequired || sourceSyncRequired)) return;
       busy = true; const generation = epoch; controlStates();
       try { await operation(); }
       catch (error) {
         if (generation !== epoch || closed) return;
         if (error.message === 'LOCAL_OFFLINE') { endSession(); if (typeof w.dispatchEvent === 'function') w.dispatchEvent(new w.Event('aurora:local-session-invalid')); say(messages.LOCAL_OFFLINE, true); return; }
+        if (error.message === 'STUDIO_LOCKED') sourceSyncRequired = true;
         if (mutation && task) syncRequired = true;
         say(messages[error.message] || messages.INVALID_RESPONSE, true);
       } finally { if (generation === epoch) { busy = false; controlStates(); } }
@@ -349,7 +432,7 @@
       return { paths: chosen.map(row => row.file.path), classification: 'INTERNAL', ...(focus.length ? { focus } : {}) };
     }
     async function mutate(action, extra = {}) {
-      const a = taskActions(task, get('studio-reviewed').checked, diffVersion);
+      const a = taskActions(task, get('studio-reviewed').checked, diffVersion, taskSourceRevision());
       if (syncRequired || !a[action === 'proposal' ? 'propose' : action]) throw Error(action === 'validate' || action === 'stage' || action === 'prepare' ? 'REVIEW_REQUIRED' : 'INPUT_INVALID');
       const pending = { propose: 'Gerando proposta no modelo deste PC…', proposal: 'Conferindo o patch estruturado…', validate: 'Conferindo fonte e hashes da proposta…', stage: 'Preparando uma cópia isolada…', verify: 'Executando as verificações estáticas…', prepare: 'Preparando commit e branch locais…' };
       say(pending[action]); const before = task;
@@ -361,6 +444,37 @@
       // Carry a reviewed, identical proposal only across our confirmed CAS transitions; refresh or a new proposal clears it.
       await loadHistory();
     }
+    async function reloadSource(result, recovery = false) {
+      if (!result || Object.keys(result).some(key => !['source', 'externalAiCalls'].includes(key)) ||
+        Object.hasOwn(result, 'externalAiCalls') && result.externalAiCalls !== 0 || !validSource(result.source, true, recovery)) throw Error('INVALID_RESPONSE');
+      const refreshed = validateCapabilities(await request('/api/studio/capabilities', undefined, 30000), orgId);
+      if (refreshed.repository.headRevision !== result.source.headRevision ||
+        refreshed.source && refreshed.source.sourceVersion !== result.source.sourceVersion) throw Error('INVALID_RESPONSE');
+      caps = refreshed; context = null; diffVersion = null; get('studio-reviewed').checked = false; get('studio-json').value = '';
+      get('studio-context-receipt').replaceChildren(); get('studio-source-files').replaceChildren();
+      renderCatalog(); renderSource(result.source); if (task) renderTask(task); await loadHistory(); sourceSyncRequired = false;
+    }
+    get('studio-source-refresh').addEventListener('click', () => run(async () => {
+      if (sourceSyncRequired || caps?.operations.sourceRefresh !== 'FIXED_MAIN_SNAPSHOT_ONLY' ||
+        caps?.source?.state === 'REFRESH_BLOCKED' || !sourceSha(caps?.repository.headRevision)) throw Error('INPUT_INVALID');
+      const expectedLocalSourceRevision = caps.repository.headRevision;
+      sourceSyncRequired = true; say('Conferindo uma nova versão do código do projeto…');
+      const result = await request('/api/studio/source-refresh', { expectedLocalSourceRevision }, 190000);
+      await reloadSource(result);
+      say(result.source.state === 'REMOTE_MOVED'
+        ? sourceStates.REMOTE_MOVED + '. Atualize novamente para consultar a nova versão.'
+        : sourceStates[result.source.state] + ' · ' + result.source.headRevision.slice(0, 12) + '.');
+    }));
+    get('studio-source-recover').addEventListener('click', () => run(async () => {
+      if (sourceSyncRequired || caps?.operations.sourceRecovery !== 'PRESERVE_AND_RESET_BLOCKED_ATTEMPT' ||
+        caps?.source?.state !== 'REFRESH_BLOCKED' || !validSource(caps.source)) throw Error('INPUT_INVALID');
+      const body = { expectedLocalSourceRevision: caps.repository.headRevision, expectedSourceReceiptSha256: caps.source.receiptSha256,
+        ...(caps.source.sourceLockSha256 ? { expectedSourceLockSha256: caps.source.sourceLockSha256 } : {}) };
+      sourceSyncRequired = true; say('Conferindo e recuperando a tentativa interrompida…');
+      const result = await request('/api/studio/source-recover', body, 190000);
+      await reloadSource(result, true);
+      say(sourceStates.SOURCE_RECOVERED + '. Use “Atualizar código do projeto” para iniciar outra consulta.');
+    }));
     get('studio-create').addEventListener('click', () => run(async () => {
       const prompt = get('studio-request').value;
       if (typeof prompt !== 'string' || prompt.trim().length < 8 || prompt.length > 6000 || prompt.includes('\0') || prompt.includes('\r')) throw Error('INPUT_INVALID');
@@ -391,13 +505,15 @@
       const result = await request('/api/studio/tasks/' + task.id + '/diff', undefined, 30000);
       if (result.taskId !== task.id || result.version !== task.version || typeof result.diff !== 'string' || result.diff.length > 700000 || result.validation?.proposalFingerprint !== task.proposalFingerprint) throw Error('STUDIO_VERSION_CONFLICT');
       get('studio-diff-output').textContent = result.diff; diffVersion = task.version; get('studio-reviewed').checked = false;
-      say('Alterações abertas. Confira os arquivos e marque a revisão para avançar.');
+      say(taskIsCurrent() ? 'Alterações abertas. Confira os arquivos e marque a revisão para avançar.' :
+        'Alterações da fonte anterior abertas para consulta. Esta tarefa permanece em somente leitura.');
     }));
     get('studio-reviewed').addEventListener('change', controlStates);
     for (const action of ['validate', 'stage', 'prepare']) get('studio-' + action).addEventListener('click', () => run(() => mutate(action), true));
     get('studio-verify').addEventListener('click', () => run(async () => { await mutate('verify', { recipeId: 'SYNTAX_AND_DIFF_V1' }); say('Verificações estáticas aprovadas. Os testes do projeto e o CI ainda precisam ser executados.'); }, true));
     async function publicationAction(operation) {
       if (!task || task.state !== 'VERSION_PREPARED' || caps.operations.publish !== 'DRAFT_PR_ONLY' ||
+        operation === 'publish-draft' && !taskIsCurrent() ||
         operation === 'publish-draft' && (!get('studio-reviewed').checked || diffVersion !== task.version)) throw Error('REVIEW_REQUIRED');
       const before = task;
       const result = await request('/api/studio/tasks/' + task.id + '/' + operation,
@@ -420,7 +536,7 @@
     w.addEventListener('aurora:local-session-ended', endSession);
     w.addEventListener('pagehide', endSession);
     if (get('workspace') && !get('workspace').hidden) connect(); else controlStates();
-    return { endSession, connect, taskActions, getState: () => ({ orgId, closed, task, context, syncRequired, busy, diffVersion }), renderTask };
+    return { endSession, connect, taskActions, getState: () => ({ orgId, closed, task, context, syncRequired, sourceSyncRequired, busy, diffVersion }), renderTask };
   }
-  return { mount, safePath, validTask, validateCapabilities, taskActions, validPublication };
+  return { mount, safePath, validTask, validateCapabilities, taskActions, validPublication, validSource };
 });

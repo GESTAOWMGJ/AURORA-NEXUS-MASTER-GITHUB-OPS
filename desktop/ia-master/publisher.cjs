@@ -71,7 +71,7 @@ function environment(source = process.env) {
     'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'LANG', 'DBUS_SESSION_BUS_ADDRESS']) {
     if (source[key]) result[key] = source[key];
   }
-  return { ...result, GIT_CONFIG_NOSYSTEM: '1',
+  return { ...result, GIT_CONFIG_NOSYSTEM: '1', GIT_NO_REPLACE_OBJECTS: '1',
     GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
     GIT_TERMINAL_PROMPT: '0', GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1',
     GH_NO_UPDATE_NOTIFIER: '1', GH_NO_EXTENSION_UPDATE_NOTIFIER: '1', NO_COLOR: '1' };
@@ -121,14 +121,15 @@ function createPublisher({ stateDir, orgId, config = null, repository, readPrepa
   function verifyExecutables() {
     available(); executable(options.ghExecutable, options.ghSha256, 'gh');
     executable(options.gitExecutable, options.gitSha256, 'git');
+    demand(fs.readdirSync(noLinks(path.join(home, 'empty-hooks'))).length === 0, 'PUBLISH_LOCAL_CONFIGURATION_UNSAFE', 409);
   }
-  async function run(tool, args, timeoutMs = 20000, input) {
+  async function run(tool, args, timeoutMs = 20000, input, cwd = options?.root) {
     verifyExecutables();
     demand(input === undefined || typeof input === 'string' && Buffer.byteLength(input) <= 16384,
       'PUBLISH_INPUT_INVALID');
     let result;
     try { result = await runner({ tool, executable: tool === 'gh' ? options.ghExecutable : options.gitExecutable,
-      args: [...args], cwd: options.root, env: environment(env), timeoutMs, maxBufferBytes: 1024 * 1024, input }); }
+      args: [...args], cwd, env: environment(env), timeoutMs, maxBufferBytes: 1024 * 1024, input }); }
     catch { throw new PublisherError(tool === 'gh' ? 'PUBLISH_REMOTE_UNAVAILABLE' : 'PUBLISH_LOCAL_CHECK_FAILED', 503); }
     demand(result && Number.isInteger(result.status) && typeof result.stdout === 'string' &&
       Buffer.byteLength(result.stdout) <= 1024 * 1024, tool === 'gh' ? 'PUBLISH_REMOTE_UNAVAILABLE' : 'PUBLISH_LOCAL_CHECK_FAILED', 503);
@@ -138,7 +139,7 @@ function createPublisher({ stateDir, orgId, config = null, repository, readPrepa
   const gitFlags = () => ['-c', 'core.hooksPath=' + path.join(home, 'empty-hooks'),
     '-c', 'core.fsmonitor=false', '-c', 'commit.gpgsign=false', '-c', 'core.sshCommand=false',
     '-c', 'core.askPass=',
-    '-c', 'protocol.file.allow=never', '-c', 'http.sslVerify=true', '-c', 'http.followRedirects=false'];
+    '-c', 'protocol.file.allow=never', '-c', 'protocol.ext.allow=never', '-c', 'http.sslVerify=true', '-c', 'http.followRedirects=false'];
   async function git(args) {
     const result = await run('git', [...gitFlags(), ...args]);
     demand(result.status === 0, 'PUBLISH_LOCAL_CHECK_FAILED', 503); return result.stdout;
@@ -321,13 +322,24 @@ function createPublisher({ stateDir, orgId, config = null, repository, readPrepa
       baseRevision: task.baseRevision, commit: p.commit, tree: p.tree,
       proposalFingerprint: task.proposalFingerprint, files };
   }
-  async function localProof(binding, checkActiveHead = true) {
+  async function safeConfiguration(cwd = options?.root) {
     // Local config must not rewrite the fixed URL, inject credentials, proxy it,
     // or include another configuration after our explicit command-line controls.
     // Query names only: credential/config VALUES are never requested or logged.
-    const configuration = await run('git', [...gitFlags(), 'config', '--local', '--no-includes',
-      '--name-only', '--get-regexp', '^(include\\.|includeif\\.|url\\.|credential\\.|http\\.|https\\.|core\\.(gitproxy|askpass)$)']);
-    demand(configuration.status === 1 && configuration.stdout.trim() === '', 'PUBLISH_LOCAL_CONFIGURATION_UNSAFE', 409);
+    const extension = await run('git', [...gitFlags(), 'config', '--local', '--no-includes', '--type=bool', '--get', 'extensions.worktreeConfig'], 20000, undefined, cwd);
+    demand(extension.status === 1 && extension.stdout.trim() === '' || extension.status === 0 && ['true', 'false'].includes(extension.stdout.trim()),
+      'PUBLISH_LOCAL_CONFIGURATION_UNSAFE', 409);
+    // --worktree is a fatal error for multiple worktrees while the extension is
+    // disabled. In that case Git uses local config; query its scope exactly.
+    const scopes = extension.stdout.trim() === 'true' ? ['--local', '--worktree'] : ['--local'];
+    for (const scope of scopes) {
+      const configuration = await run('git', [...gitFlags(), 'config', scope, '--no-includes',
+        '--name-only', '--get-regexp', '^(include\\.|includeif\\.|url\\.|credential\\.|http\\.|https\\.|core\\.(gitproxy|askpass)$)'], 20000, undefined, cwd);
+      demand(configuration.status === 1 && configuration.stdout.trim() === '', 'PUBLISH_LOCAL_CONFIGURATION_UNSAFE', 409);
+    }
+  }
+  async function localProof(binding, checkActiveHead = true) {
+    await safeConfiguration();
     const sha = async args => (await git(args)).trim();
     demand(await sha(['rev-parse', '--show-toplevel']) === options.root.replace(/\\/g, '/') ||
       fs.realpathSync(await sha(['rev-parse', '--show-toplevel'])) === options.root, 'PUBLISH_SOURCE_CHANGED', 409);
@@ -545,12 +557,34 @@ function createPublisher({ stateDir, orgId, config = null, repository, readPrepa
     available(); try { return await authorization(); }
     catch (error) { return { state: 'UNAVAILABLE', code: error instanceof PublisherError ? error.code : 'PUBLISH_REMOTE_UNAVAILABLE' }; }
   }
+  // Source updates use the same reviewed executables and existing credential
+  // broker. Neither callers nor model output can choose a repository or ref.
+  async function sourceHead() {
+    available(); await safeConfiguration(); await authorization();
+    return { repository: REPOSITORY, branch: BASE, revision: await baseSha() };
+  }
+  async function fetchSourceObjects(revision) {
+    available(); demand(SHA.test(revision), 'PUBLISH_INPUT_INVALID', 400);
+    const directory = noLinks(path.resolve(stateDir, 'studio', 'source-cache'));
+    demand(fs.realpathSync(directory) === directory && fs.statSync(directory).isDirectory(), 'PUBLISH_CONFIG_INVALID');
+    await safeConfiguration(); await safeConfiguration(directory);
+    const bare = await run('git', [...gitFlags(), 'rev-parse', '--is-bare-repository'], 20000, undefined, directory);
+    demand(bare.status === 0 && bare.stdout.trim() === 'true', 'PUBLISH_LOCAL_CHECK_FAILED');
+    const helper = '!"' + options.ghExecutable.replace(/\\/g, '/') + '" auth git-credential';
+    const fetched = await run('git', [...gitFlags(), '-c', 'credential.helper=', '-c', 'credential.helper=' + helper,
+      '-c', 'credential.useHttpPath=true', 'fetch', '--no-tags', '--no-write-fetch-head', '--no-recurse-submodules',
+      '--no-auto-maintenance', '--', REMOTE, revision], 60000, undefined, directory);
+    demand(fetched.status === 0 && !fetched.uncertain, 'PUBLISH_REMOTE_UNAVAILABLE', 503);
+    const object = await run('git', [...gitFlags(), 'cat-file', '-t', revision], 20000, undefined, directory);
+    demand(object.status === 0 && object.stdout.trim() === 'commit', 'PUBLISH_REMOTE_INVALID', 503);
+    return { revision, objectsFetched: true, tokenReadByApplication: false };
+  }
   function capabilities() {
     return { schemaVersion: SCHEMA, state: configState, repository: REPOSITORY, baseBranch: BASE,
       publish: options ? 'OPT_IN_DRAFT_ONLY_AUTH_NOT_OBSERVED' : 'NOT_CONFIGURED',
       ci: options ? 'REMOTE_METADATA_ONLY' : 'NOT_CONFIGURED', modelCanExecuteCommands: false,
       canMerge: false, canDeploy: false, canDispatch: false, credentialReadByApplication: false };
   }
-  return { capabilities, probe, publishDraft, reconcile, readCi, readPublication };
+  return { capabilities, probe, publishDraft, reconcile, readCi, readPublication, sourceHead, fetchSourceObjects };
 }
 module.exports = { createPublisher, PublisherError, environment, defaultRunner, REPOSITORY, SCHEMA };
