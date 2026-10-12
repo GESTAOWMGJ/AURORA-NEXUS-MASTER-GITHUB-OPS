@@ -53,7 +53,8 @@ async function fixture(t) {
       baseRevision: base, proposalFingerprint: fp(proposal), pushed: false, deployed: false } };
   const calls = [], audits = [], bodies = [];
   const remote = { base, head: null, pr: null, user: 'GESTAOWMGJ', pushes: 0, creates: 0,
-    checks: null, runs: null, pushMode: 'success', createMode: 'success', onCall: null };
+    checks: null, runs: null, pushMode: 'success', createMode: 'success', onCall: null,
+    listMaintainerMode: 'null', listOverride: undefined, detailOverride: undefined };
   let currentTime = Date.parse('2026-10-12T17:00:00Z');
   const makePull = () => ({ number: 123, html_url: 'https://github.com/' + REPOSITORY + '/pull/123',
     state: 'open', draft: true, maintainer_can_modify: false,
@@ -95,9 +96,15 @@ async function fixture(t) {
       object: { type: 'commit', sha: remote.head } }) : response({}, 404);
     if (endpoint.startsWith(prefix + '/pulls?')) {
       assert.equal(endpoint, prefix + '/pulls?state=all&head=GESTAOWMGJ%3Aaurora-studio%2F' + id + '&base=main&per_page=100');
-      return response(remote.pr ? (Array.isArray(remote.pr) ? remote.pr : [remote.pr]) : []);
+      const items = remote.pr ? (Array.isArray(remote.pr) ? remote.pr : [remote.pr]) : [];
+      return response(remote.listOverride === undefined ? items.map(item => {
+        const listed = structuredClone(item);
+        if (remote.listMaintainerMode === 'omitted') delete listed.maintainer_can_modify;
+        else listed.maintainer_can_modify = null;
+        return listed;
+      }) : remote.listOverride);
     }
-    if (endpoint === prefix + '/pulls/123') return response(remote.pr);
+    if (endpoint === prefix + '/pulls/123') return response(remote.detailOverride === undefined ? remote.pr : remote.detailOverride);
     if (endpoint === prefix + '/commits/' + commit + '/check-runs?per_page=100') return response(remote.checks || { total_count: 0, check_runs: [] });
     if (endpoint === prefix + '/actions/runs?head_sha=' + commit + '&event=pull_request&per_page=100') return response(remote.runs || { total_count: 0, workflow_runs: [] });
     assert.fail('Unexpected API endpoint: ' + endpoint);
@@ -273,6 +280,89 @@ test('unknown absent PR requires read-only observations before one bounded retry
   f.remote.createMode = 'success';
   assert.equal((await f.publisher.publishDraft(f.input)).state, 'DRAFT_CONFIRMED');
   assert.equal(f.remote.creates, 2); assert.equal(f.remote.pushes, 1);
+});
+
+test('a nullable or omitted list flag requires detailed false readback before draft confirmation', async t => {
+  for (const mode of ['null', 'omitted']) await t.test(mode, async t => {
+    const f = await fixture(t); if (!f) return;
+    f.remote.listMaintainerMode = mode;
+    const result = await f.publisher.publishDraft(f.input);
+    assert.equal(result.state, 'DRAFT_CONFIRMED'); assert.equal(result.pullRequest.number, 123);
+    const listIndex = f.calls.findLastIndex(call => call.args[0] === 'api' && call.args[1].includes('/pulls?'));
+    const detailIndex = f.calls.findLastIndex(call => call.args[0] === 'api' && call.args[1] === 'repos/' + REPOSITORY + '/pulls/123');
+    assert.ok(listIndex >= 0 && detailIndex > listIndex);
+    const detail = f.calls[detailIndex];
+    assert.ok(detail.args[detail.args.indexOf('--jq') + 1].includes('maintainer_can_modify'));
+    assert.equal(f.remote.pushes, 1); assert.equal(f.remote.creates, 1);
+    assert.equal(f.g(['rev-parse', 'HEAD']), f.base);
+  });
+});
+
+test('detailed readback fails closed on absent flags, invalid shapes and diverging PR identity', async t => {
+  const f = await fixture(t); if (!f) return;
+  f.remote.head = f.commit; f.remote.pr = f.makePull();
+  const omitted = f.makePull(); delete omitted.maintainer_can_modify;
+  for (const detail of [null, [], {}, omitted,
+    { ...f.makePull(), maintainer_can_modify: null },
+    { ...f.makePull(), maintainer_can_modify: true },
+    { ...f.makePull(), maintainer_can_modify: 'false' },
+    { ...f.makePull(), draft: false }, { ...f.makePull(), state: 'closed' },
+    { ...f.makePull(), number: 124, html_url: 'https://github.com/' + REPOSITORY + '/pull/124' },
+    { ...f.makePull(), number: '123' },
+    { ...f.makePull(), html_url: 'https://example.invalid/pull/123' },
+    { ...f.makePull(), head: { ...f.makePull().head, sha: OTHER } },
+    { ...f.makePull(), head: { ...f.makePull().head, ref: 'aurora-studio/' + 'b'.repeat(32) } },
+    { ...f.makePull(), head: { ...f.makePull().head, repo: { full_name: 'OTHER/REPO' } } },
+    { ...f.makePull(), base: { ...f.makePull().base, sha: OTHER } },
+    { ...f.makePull(), base: { ...f.makePull().base, ref: 'other' } },
+    { ...f.makePull(), base: { ...f.makePull().base, repo: { full_name: 'OTHER/REPO' } } }]) {
+    f.remote.detailOverride = detail;
+    await assert.rejects(f.publisher.publishDraft(f.input), code('PUBLISH_REMOTE_CONFLICT'));
+    assert.equal(JSON.parse(fs.readFileSync(f.receiptFile)).payload.state, 'INTENT_RECORDED');
+  }
+  assert.equal(f.remote.pushes, 0); assert.equal(f.remote.creates, 0);
+});
+
+test('invalid and ambiguous list locators cannot select a detail endpoint or mutate remotely', async t => {
+  const f = await fixture(t); if (!f) return;
+  f.remote.head = f.commit; f.remote.pr = f.makePull();
+  for (const listed of [null, {}, { ...f.makePull(), number: '../123' },
+    { ...f.makePull(), number: 0 }, { ...f.makePull(), number: 1.5 },
+    { ...f.makePull(), number: Number.MAX_SAFE_INTEGER + 1 },
+    { ...f.makePull(), html_url: 'https://example.invalid/pull/123' },
+    { ...f.makePull(), html_url: 'https://github.com/' + REPOSITORY + '/pull/124' }]) {
+    f.remote.listOverride = [listed];
+    const before = f.calls.length;
+    await assert.rejects(f.publisher.publishDraft(f.input), code('PUBLISH_REMOTE_CONFLICT'));
+    assert.equal(f.calls.slice(before).some(call => /\/pulls\/\d+$/.test(call.args[1] || '')), false);
+  }
+  f.remote.listOverride = [f.makePull(), { ...f.makePull(), number: 124 }];
+  const before = f.calls.length;
+  await assert.rejects(f.publisher.publishDraft(f.input), code('PUBLISH_REMOTE_CONFLICT'));
+  assert.equal(f.calls.slice(before).some(call => /\/pulls\/\d+$/.test(call.args[1] || '')), false);
+  assert.equal(f.remote.pushes, 0); assert.equal(f.remote.creates, 0);
+});
+
+test('reconciliation of a created PR with an unresolved detailed flag preserves intent and writes only once', async t => {
+  const f = await fixture(t); if (!f) return;
+  f.remote.onCall = request => {
+    if (request.args[0] === 'api' && request.args[1] === 'repos/' + REPOSITORY + '/pulls/123')
+      f.remote.detailOverride = { ...f.remote.pr, maintainer_can_modify: null };
+  };
+  await assert.rejects(f.publisher.publishDraft(f.input), code('PUBLISH_REMOTE_CONFLICT'));
+  const pending = JSON.parse(fs.readFileSync(f.receiptFile)).payload;
+  assert.equal(pending.state, 'PR_CREATE_INTENT'); assert.equal(pending.pullRequest, null);
+  assert.equal(f.remote.pushes, 1); assert.equal(f.remote.creates, 1);
+  f.remote.onCall = null; f.remote.detailOverride = undefined;
+  const before = f.calls.length, restored = createPublisher(f.options);
+  const result = await restored.reconcile(f.input);
+  assert.equal(result.state, 'DRAFT_CONFIRMED'); assert.equal(result.pullRequest.number, 123);
+  assert.deepEqual(result.history.slice(0, pending.history.length), pending.history);
+  assert.equal(result.history.at(-1).state, 'DRAFT_CONFIRMED');
+  assert.equal(f.calls.slice(before).every(call => !call.args.includes('push') && call.args[0] !== 'pr'), true);
+  assert.equal((await restored.publishDraft(f.input)).state, 'DRAFT_CONFIRMED');
+  assert.equal(f.remote.pushes, 1); assert.equal(f.remote.creates, 1);
+  assert.equal(f.g(['rev-parse', 'HEAD']), f.base);
 });
 
 test('PR readback rejects ready, editable, closed, redirected and wrong-head results', async t => {

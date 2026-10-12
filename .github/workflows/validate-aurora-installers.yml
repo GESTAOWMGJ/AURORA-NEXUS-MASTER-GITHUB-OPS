@@ -55,18 +55,98 @@ jobs:
           npm ci --prefix firebase-migration/functions
           python3 -m unittest discover -s desktop/ia-master -p test_build.py -v
           python3 desktop/ia-master/build.py --output "${RUNNER_TEMP}/aurora-ia-master"
-          python3 - "${RUNNER_TEMP}/aurora-ia-master/manifest.json" "$(git rev-parse HEAD)" <<'PY'
-          import hashlib, json, pathlib, sys
+          python3 - "${RUNNER_TEMP}/aurora-ia-master/manifest.json" "$(git rev-parse HEAD)" "${RUNNER_TEMP}/aurora-ia-master.zip" <<'PY'
+          import hashlib, json, os, pathlib, stat, sys, zipfile
           manifest_path = pathlib.Path(sys.argv[1])
-          manifest = json.loads(manifest_path.read_text())
+          package_path = pathlib.Path(sys.argv[3])
+          root = manifest_path.parent
+
+          def is_link(path):
+              return path.is_symlink() or getattr(path, 'is_junction', lambda: False)()
+
+          def safe_name(name):
+              assert isinstance(name, str) and name and '\\' not in name and ':' not in name and '\0' not in name, 'Unsafe package name'
+              assert not pathlib.PurePosixPath(name).is_absolute() and all(part not in ('', '.', '..') for part in name.split('/')), 'Unsafe package path'
+              return name.split('/')
+
+          def unique_object(pairs):
+              result = {}
+              for key, value in pairs:
+                  assert key not in result, 'Duplicate manifest key'
+                  result[key] = value
+              return result
+
+          def regular_file(path):
+              assert not is_link(path), 'Linked package file'
+              metadata = path.lstat()
+              assert stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1, 'Package file must be a single regular file'
+
+          assert root.is_dir() and not is_link(root), 'Linked package root'
+          resolved_root = root.resolve(strict=True)
+          assert manifest_path.name == 'manifest.json'
+          regular_file(manifest_path)
+          manifest_bytes = manifest_path.read_bytes()
+          manifest = json.loads(manifest_bytes, object_pairs_hook=unique_object)
           assert manifest['dirty'] is False, 'Dirty local Master package cannot be retained for installation'
           assert manifest['sourceRevision'] == sys.argv[2], 'Local Master source does not match the checked-out SHA'
-          assert manifest['files']['knowledge-registry.cjs'] == 'dc6c99e407faa11adb46e68d798bd49374e54ada820c0f755520fcfec32abbb8'
-          for name, expected in manifest['files'].items():
-              target = manifest_path.parent / name
-              assert target.is_file() and not target.is_symlink()
-              assert hashlib.sha256(target.read_bytes()).hexdigest() == expected
-          print('LOCAL_MASTER_CLEAN_EXACT_SOURCE_AND_FILES_VERIFIED')
+          assert manifest['files']['knowledge-registry.cjs'] == 'dc6c99e407faa11adb46e68d798bd49374e54ada820c0f755520fcfec32abbb8', 'Knowledge registry byte hash mismatch'
+          files = manifest['files']
+          assert isinstance(files, dict) and len(files) == 26 and 'manifest.json' not in files, 'Unexpected local Master file composition'
+          assert len({name.casefold() for name in files}) == len(files), 'Case-folded duplicate manifest name'
+          expected_names = set(files) | {'manifest.json'}
+          expected_directories = set()
+          expanded_bytes = {}
+          for name, expected in files.items():
+              parts = safe_name(name)
+              expected_directories.update('/'.join(parts[:index]) for index in range(1, len(parts)))
+              target = root
+              for part in parts:
+                  target = target / part
+                  assert not is_link(target), 'Linked package path component'
+              regular_file(target)
+              assert target.resolve(strict=True).is_relative_to(resolved_root), 'Package path escaped its root'
+              data = target.read_bytes()
+              assert len(data) <= 8 * 1024 * 1024, 'Oversized package file'
+              assert hashlib.sha256(data).hexdigest() == expected, 'Expanded package digest mismatch'
+              expanded_bytes[name] = data
+          actual_names = set()
+          for current, directories, filenames in os.walk(root, followlinks=False):
+              for name in directories:
+                  directory = pathlib.Path(current) / name
+                  assert directory.is_dir() and not is_link(directory), 'Linked package directory'
+                  relative = directory.relative_to(root).as_posix()
+                  safe_name(relative)
+                  assert relative in expected_directories, 'Unexpected package directory'
+              for name in filenames:
+                  target = pathlib.Path(current) / name
+                  regular_file(target)
+                  relative = target.relative_to(root).as_posix()
+                  safe_name(relative)
+                  actual_names.add(relative)
+          assert actual_names == expected_names, 'Expanded package has extra or missing files'
+          regular_file(package_path)
+          assert package_path.resolve(strict=True) == resolved_root.with_suffix('.zip'), 'Uploaded archive is not the source-bound package ZIP'
+          with zipfile.ZipFile(package_path) as package:
+              entries = package.infolist()
+              names = [entry.filename for entry in entries]
+              for name in names:
+                  safe_name(name)
+              assert len(set(names)) == len(names) and len({name.casefold() for name in names}) == len(names), 'Duplicate ZIP entry'
+              assert len(entries) == 27 and set(names) == expected_names, 'ZIP has extra or missing files'
+              assert sum(entry.file_size for entry in entries) <= 16 * 1024 * 1024, 'Oversized package ZIP'
+              for entry in entries:
+                  assert not entry.is_dir() and stat.S_IFMT(entry.external_attr >> 16) in (0, stat.S_IFREG), 'Linked or non-regular ZIP entry'
+                  assert not entry.flag_bits & 1, 'Encrypted ZIP entry'
+                  expected_data = manifest_bytes if entry.filename == 'manifest.json' else expanded_bytes[entry.filename]
+                  assert entry.file_size == len(expected_data) and entry.file_size <= 8 * 1024 * 1024, 'ZIP entry size mismatch'
+                  data = package.read(entry)
+                  assert data == expected_data, 'ZIP entry differs from the expanded package'
+                  expected_hash = hashlib.sha256(manifest_bytes).hexdigest() if entry.filename == 'manifest.json' else files[entry.filename]
+                  assert hashlib.sha256(data).hexdigest() == expected_hash, 'ZIP entry digest mismatch'
+          assert manifest_path.read_bytes() == manifest_bytes, 'Expanded manifest changed during verification'
+          for name, data in expanded_bytes.items():
+              assert (root / name).read_bytes() == data, 'Expanded package changed during verification'
+          print('LOCAL_MASTER_CLEAN_EXACT_SOURCE_FILES_AND_ZIP_VERIFIED')
           PY
           AURORA_TEST_BUILD="${RUNNER_TEMP}/aurora-ia-master" AURORA_STUDIO_TEST_GIT="$(command -v git)" \
             node --test desktop/ia-master/server.test.cjs desktop/ia-master/studio.test.cjs desktop/ia-master/knowledge-registry.test.cjs desktop/ia-master/update.test.cjs desktop/ia-master/safe-read.test.cjs desktop/ia-master/studio-local.test.cjs desktop/ia-master/publisher.test.cjs

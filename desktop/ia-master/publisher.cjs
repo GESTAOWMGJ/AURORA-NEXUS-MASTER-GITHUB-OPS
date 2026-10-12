@@ -177,6 +177,20 @@ function createPublisher({ stateDir, orgId, config = null, repository, readPrepa
     const items = await api(API + '/pulls?state=all&head=' + ACCOUNT + '%3Aaurora-studio%2F' + id + '&base=main&per_page=100', 'map(' + prSelector + ')');
     demand(Array.isArray(items) && items.length < 100, 'PUBLISH_REMOTE_INVALID', 503); return items;
   }
+  function pullNumber(pr) {
+    demand(pr && Number.isSafeInteger(pr.number) && pr.number > 0 &&
+      pr.html_url === 'https://github.com/' + REPOSITORY + '/pull/' + pr.number,
+    'PUBLISH_REMOTE_CONFLICT', 409);
+    return pr.number;
+  }
+  async function pullDetail(candidate) {
+    // The list endpoint may omit maintainer_can_modify. It only discovers a
+    // fixed-repository locator; confirmation requires the detailed GET response.
+    const number = pullNumber(candidate);
+    const pr = await api(API + '/pulls/' + number, prSelector);
+    demand(pullNumber(pr) === number, 'PUBLISH_REMOTE_CONFLICT', 409);
+    return pr;
+  }
   function confirmPull(pr, binding) {
     demand(pr && Number.isSafeInteger(pr.number) && pr.number > 0 &&
       pr.html_url === 'https://github.com/' + REPOSITORY + '/pull/' + pr.number &&
@@ -382,17 +396,18 @@ function createPublisher({ stateDir, orgId, config = null, repository, readPrepa
     if (head !== null && head !== value.binding.commit) {
       save(value, 'REMOTE_CONFLICT', { observedHeadSha: head }); throw new PublisherError('PUBLISH_REMOTE_CONFLICT', 409);
     }
-    const pulls = await matchingPulls(value.binding.taskId);
+    const pulls = await matchingPulls(value.binding.taskId); let pull = null;
     if (pulls.length > 1) { save(value, 'REMOTE_CONFLICT'); throw new PublisherError('PUBLISH_REMOTE_CONFLICT', 409); }
     if (pulls.length === 1) {
       demand(head === value.binding.commit, 'PUBLISH_REMOTE_CONFLICT', 409);
-      const pr = confirmPull(pulls[0], { ...value.binding, baseRevision: observedBaseSha });
+      pull = await pullDetail(pulls[0]);
+      const pr = confirmPull(pull, { ...value.binding, baseRevision: observedBaseSha });
       value.observedPullRequest = pr;
       if (observedBaseSha === value.binding.baseRevision) {
         value.pullRequest = pr; save(value, 'DRAFT_CONFIRMED');
       } else save(value, 'BASE_CHANGED', { observedBaseSha });
     } else demand(value.pullRequest === null, 'PUBLISH_REMOTE_CONFLICT', 409);
-    return { head, pull: pulls[0] || null };
+    return { head, pull };
   }
   async function publishDraft(input) {
     available();
@@ -478,7 +493,7 @@ function createPublisher({ stateDir, orgId, config = null, repository, readPrepa
       await localProof(binding, false); await authorization();
       const currentBaseSha = await baseSha(), currentHeadSha = await remoteHead(binding.taskId);
       const knownPull = value.pullRequest || value.observedPullRequest;
-      const pr = await api(API + '/pulls/' + knownPull.number, prSelector);
+      const pr = await pullDetail({ number: knownPull.number, html_url: knownPull.url });
       // A moving base is recorded as stale, not discarded; other identity mismatches fail closed.
       const expected = { ...binding, baseRevision: currentBaseSha };
       value.observedPullRequest = confirmPull(pr, expected);
