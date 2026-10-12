@@ -1,7 +1,7 @@
 'use strict';
 const el = id => document.getElementById(id);
 let proposal = null;
-function clearSession() { el('workspace').hidden = true; el('logout').hidden = true; el('result').textContent = ''; el('native-result').textContent = ''; el('prompt').value = ''; el('snapshot').value = ''; proposal = null; el('session').textContent = 'Abra “IA Master — Acesso local” na pasta AURORA deste Windows para iniciar uma sessão privada.'; }
+function clearSession() { window.dispatchEvent(new CustomEvent('aurora:local-session-ended')); el('workspace').hidden = true; el('logout').hidden = true; el('result').textContent = ''; el('native-result').textContent = ''; el('prompt').value = ''; el('snapshot').value = ''; proposal = null; el('session').textContent = 'Abra “IA Master — Acesso local” na pasta AURORA deste Windows para iniciar uma sessão privada.'; }
 async function request(route, body) {
   const response = await fetch(route, { method: body ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store', headers: body ? { 'Content-Type': 'application/json', 'X-Aurora-Local': '1' } : {}, body: body ? JSON.stringify(body) : undefined });
   if (response.status === 401) { clearSession(); throw Error('Acesso local necessário.'); }
@@ -15,6 +15,7 @@ async function status() {
   el('model').textContent = s.model; el('model-state').textContent = s.modelState === 'AVAILABLE' ? 'Disponível neste PC' : 'Modelo local ainda indisponível';
   el('tokens').textContent = String(s.metrics.externalTokens); el('hardware').textContent = s.hardware.logicalCpuCount + ' threads';
   el('memory').textContent = s.hardware.freeRamGiB + ' GB livres / ' + s.hardware.totalRamGiB + ' GB RAM';
+  window.dispatchEvent(new CustomEvent('aurora:local-session-ready', { detail: { orgId: s.orgId, version: s.version, accessKind: 'LOCAL_OWNER_SESSION' } }));
   el('sync').textContent = 'não confirmada'; el('integrations').replaceChildren();
   for (const i of s.integrations) { const div = document.createElement('div'); div.textContent = i.id + ' — ' + i.purpose + ' · integração local pendente de credencial e teste'; el('integrations').append(div); }
 }
@@ -29,5 +30,7 @@ el('native').addEventListener('click', async () => {
   catch (e) { el('native-result').textContent = e.message; } finally { el('native').disabled = false; }
 });
 el('download').addEventListener('click', () => { if (!proposal) return; const blob = new Blob([JSON.stringify(proposal, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'aurora-proposta-' + proposal.proposalId.slice(0, 12) + '.json'; a.click(); URL.revokeObjectURL(url); });
-el('logout').addEventListener('click', async () => { await request('/api/logout', {}); clearSession(); });
+el('logout').addEventListener('click', async () => { try { await request('/api/logout', {}); } finally { clearSession(); } });
 (async () => { const ticket = new URLSearchParams(location.hash.slice(1)).get('ticket'); history.replaceState(null, '', '/'); try { if (ticket) await request('/api/session', { ticket }); await status(); } catch { clearSession(); } })();
+
+window.addEventListener('aurora:local-session-invalid', clearSession);

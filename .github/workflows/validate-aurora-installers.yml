@@ -56,7 +56,7 @@ jobs:
           python3 -m unittest discover -s desktop/ia-master -p test_build.py -v
           python3 desktop/ia-master/build.py --output "${RUNNER_TEMP}/aurora-ia-master"
           AURORA_TEST_BUILD="${RUNNER_TEMP}/aurora-ia-master" AURORA_STUDIO_TEST_GIT="$(command -v git)" \
-            node --test desktop/ia-master/server.test.cjs desktop/ia-master/studio.test.cjs desktop/ia-master/knowledge-registry.test.cjs desktop/ia-master/update.test.cjs
+            node --test desktop/ia-master/server.test.cjs desktop/ia-master/studio.test.cjs desktop/ia-master/knowledge-registry.test.cjs desktop/ia-master/update.test.cjs desktop/ia-master/safe-read.test.cjs desktop/ia-master/studio-local.test.cjs desktop/ia-master/publisher.test.cjs
       - name: Retain local IA Master candidate with exact source manifest
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -76,7 +76,7 @@ jobs:
       - name: Private download authorization and integrity tests
         run: |
           set -euo pipefail
-          node --experimental-strip-types --test firebase-migration/functions/test/aurora-downloads.test.ts 2>&1 | tee "${RUNNER_TEMP}/aurora-hml-installers/download-tests.txt"
+          node --import ./firebase-migration/functions/node_modules/tsx/dist/loader.mjs --test firebase-migration/functions/test/aurora-downloads.test.ts 2>&1 | tee "${RUNNER_TEMP}/aurora-hml-installers/download-tests.txt"
       - name: Verify source-bound server, web and satellite release manifests
         run: |
           set -euo pipefail

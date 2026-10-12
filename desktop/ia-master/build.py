@@ -17,12 +17,23 @@ def build(output):
                     'src/auroraMasterEngine.ts', '--module', 'commonjs', '--target', 'ES2022',
                     '--outDir', str(output / 'kernel'), '--rootDir', 'src', '--strict',
                     '--esModuleInterop', '--skipLibCheck'], cwd=functions, check=True)
-    for name in ['server.cjs', 'studio.cjs', 'knowledge-registry.cjs', 'update.cjs', 'index.html', 'app.js', 'app.css', 'manage.cjs', 'README.md']:
+    for name in ['server.cjs', 'studio.cjs', 'knowledge-registry.cjs', 'update.cjs', 'safe-read.cjs', 'publisher.cjs', 'index.html', 'app.js', 'app.css', 'studio-local.js', 'studio-local.css', 'manage.cjs', 'README.md']:
         shutil.copyfile(Path(__file__).parent / name, output / name)
+    fonts = ROOT / 'firebase-migration/hosting/aurora-nexus/assets/fonts'
+    font_output = output / 'assets/fonts'
+    font_output.mkdir(parents=True)
+    for name in ['source-serif-4-regular.woff2', 'source-serif-4-semibold.woff2',
+                 'atkinson-hyperlegible-next.woff2', 'Source-Serif-OFL.txt',
+                 'Atkinson-Hyperlegible-Next-OFL.txt', 'provenance.json']:
+        source = fonts / name
+        if source.is_symlink() or not source.is_file():
+            raise ValueError('Font asset must be a regular source file')
+        shutil.copyfile(source, font_output / name)
     shutil.copyfile(ROOT / 'docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md', output / 'modus-operandi.md')
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     dirty = bool(subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=all', '--',
                  'desktop/ia-master', 'firebase-migration/functions/src',
+                 'firebase-migration/hosting/aurora-nexus/assets/fonts',
                  'docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md'], cwd=ROOT, text=True).strip())
     manifest = {'component': 'AURORA_IA_MASTER', 'version': '1.1.0', 'sourceRevision': revision,
                 'dirty': dirty, 'nodeMinimumMajor': 22, 'externalAiEnabled': False,

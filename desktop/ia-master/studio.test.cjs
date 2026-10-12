@@ -7,6 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { createStudio, StudioError } = require('./studio.cjs');
+const { syntheticPublisher } = require('./publisher-fixture.cjs');
 const gitExecutable = process.env.AURORA_STUDIO_TEST_GIT;
 assert.ok(gitExecutable && path.isAbsolute(gitExecutable), 'Set AURORA_STUDIO_TEST_GIT to the existing Git executable.');
 const fixture = t => {
@@ -61,6 +62,62 @@ test('complete local slice survives restart, prepares a local branch and preserv
   assert.deepEqual(readback, value); assert.equal((await restarted.route('GET', '/api/studio/tasks')).value.tasks[0].state, 'VERSION_PREPARED');
   assert.ok(readback.history.every(e => /^[a-f0-9]{64}$/.test(e.eventHash)));
   assert.ok(!JSON.stringify(a.audits).includes(initial.task.prompt)); assert.ok(!JSON.stringify(a.audits).includes('module.exports = 2'));
+});
+
+test('trusted Studio routes publish an immutable prepared draft and keep task and publication versions separate', async t => {
+  const a = fixture(t); let commit = null;
+  const transport = syntheticPublisher({ directory: path.dirname(a.root), orgId: 'tenant-test',
+    gitExecutable, baseRevision: a.base, preparedCommit: () => commit });
+  a.options.publisherConfig = transport.config; a.options.publisherRunner = transport.runner;
+  a.studio = createStudio(a.options);
+  const capabilities = (await a.studio.route('GET', '/api/studio/capabilities')).value;
+  assert.equal(capabilities.operations.publish, 'DRAFT_PR_ONLY'); assert.equal(capabilities.operations.ci, 'REMOTE_METADATA_ONLY');
+  assert.equal(capabilities.publisher.state, 'CONFIGURED_AUTH_NOT_OBSERVED');
+  assert.equal(transport.remote.calls.length, 0, 'capability discovery makes no implicit credential/network call');
+  const initial = await task(a); let value = await proposal(a, initial.task, initial.context);
+  for (const operation of ['validate', 'stage']) value = (await action(a, value, operation)).task;
+  value = (await action(a, value, 'verify', { recipeId: 'SYNTAX_AND_DIFF_V1' })).task;
+  value = (await action(a, value, 'prepare')).task; commit = value.preparedVersion.commit;
+  const input = { expectedVersion: value.version, proposalFingerprint: value.proposalFingerprint };
+  const route = '/api/studio/tasks/' + value.id;
+  await assert.rejects(a.studio.route('POST', route + '/publish-draft', { ...input, command: 'arbitrary' }), { code: 'STUDIO_INVALID_FIELDS' });
+  await assert.rejects(a.studio.route('POST', route + '/publish-draft', { ...input, expectedVersion: value.version - 1 }), { code: 'STUDIO_VERSION_CONFLICT' });
+  assert.equal(transport.remote.pushes, 0);
+  const published = (await a.studio.route('POST', route + '/publish-draft', input)).value;
+  assert.equal(published.task.version, value.version); assert.equal(published.task.state, 'VERSION_PREPARED');
+  assert.equal(published.publication.state, 'DRAFT_CONFIRMED'); assert.equal(published.publication.orgId, 'tenant-test');
+  assert.equal(published.publication.pullRequest.draft, true); assert.equal(published.publication.headSha, commit);
+  assert.equal(published.publication.receiptSha256, published.task.publication.receiptSha256);
+  assert.equal(published.publication.history.at(-1).state, 'DRAFT_CONFIRMED');
+  assert.equal(value.preparedVersion.pushed, false);
+  assert.equal(transport.remote.pushes, 1); assert.equal(transport.remote.creates, 1);
+  const observed = (await a.studio.route('POST', route + '/read-ci', input)).value;
+  assert.equal(observed.publication.ci.state, 'REMOTE_CHECKS_PASSED');
+  assert.equal(observed.publication.ci.actualCheckout, 'NOT_OBSERVED'); assert.equal(observed.publication.ci.ciVerified, false);
+  assert.equal(observed.task.version, value.version);
+  const restarted = createStudio(a.options), restored = (await restarted.route('GET', route)).value.task;
+  assert.equal(restored.publication.receiptSha256, observed.task.publication.receiptSha256);
+  assert.equal((await restarted.route('GET', '/api/studio/tasks')).value.tasks[0].publication.pullRequest.number, 456);
+  await restarted.route('POST', route + '/publish-draft', input);
+  assert.equal(transport.remote.pushes, 1); assert.equal(transport.remote.creates, 1);
+  assert.ok(!JSON.stringify(a.audits).includes(initial.task.prompt));
+  assert.ok(!transport.remote.bodies[0].includes(initial.task.prompt));
+  const recordFile = path.join(a.stateDir, 'studio', 'publications', value.id + '.json');
+  fs.writeFileSync(recordFile, '{corrupt');
+  await assert.rejects(restarted.route('GET', route), { code: 'PUBLISH_RECORD_INVALID' });
+});
+
+test('disabled publication remains explicit and a persisted preparation cannot grant its own publisher opt-in', async t => {
+  const a = fixture(t), initial = await task(a); let value = await proposal(a, initial.task, initial.context);
+  for (const operation of ['validate', 'stage']) value = (await action(a, value, operation)).task;
+  value = (await action(a, value, 'verify', { recipeId: 'SYNTAX_AND_DIFF_V1' })).task;
+  value = (await action(a, value, 'prepare')).task;
+  const caps = (await a.studio.route('GET', '/api/studio/capabilities')).value;
+  assert.equal(caps.operations.publish, 'NOT_CONFIGURED'); assert.equal(caps.publisher.canMerge, false);
+  await assert.rejects(a.studio.route('POST', '/api/studio/tasks/' + value.id + '/publish-draft',
+    { expectedVersion: value.version, proposalFingerprint: value.proposalFingerprint }), { code: 'PUBLISH_NOT_CONFIGURED' });
+  const readback = (await a.studio.route('GET', '/api/studio/tasks/' + value.id)).value.task;
+  assert.equal(readback.publication, undefined); assert.equal(readback.version, value.version);
 });
 test('repository is explicitly configured, unsupported fields/paths/classifications/secrets are rejected', async t => {
   const a = fixture(t), disabled = createStudio({ stateDir: a.stateDir, orgId: 'tenant-test' });

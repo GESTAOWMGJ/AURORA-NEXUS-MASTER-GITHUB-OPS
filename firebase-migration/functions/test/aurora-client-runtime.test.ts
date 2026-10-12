@@ -230,7 +230,7 @@ test('manager distribution approval posts a decision only and never a payment co
 
 
 test('canonical redirect guard preserves route context only for the known HML hosts', () => {
-  const guardedScripts = [...renderedShell('true').matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
+  const guardedScripts = [...renderedShell('true').matchAll(/<script>([\s\S]*?)<\/script>/gi)].map(match => match[1]);
   const guards = guardedScripts.filter(script => script.includes('location.hostname'));
   assert.equal(guards.length, 1);
   for (const hostname of ['wmgj-hml-jfn-20260927.web.app', 'WMGJ-HML-JFN-20260927.FIREBASEAPP.COM', 'auroranexus.com.br', 'unrelated.invalid']) {

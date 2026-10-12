@@ -82,7 +82,7 @@ test("authenticated navigation converges to the canonical portal; anonymous and 
     assert.doesNotMatch(recovery.html,/id="session-identity"/);
   }
   const fallback=await invoke("/login",false);
-  const fallbackCode=fallback.html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  const fallbackCode=fallback.html.match(/<script>([\s\S]*?)<\/script>/i)?.[1];
   assert.ok(fallbackCode);
   const redirects:string[]=[];
   new Script(fallbackCode).runInNewContext({URLSearchParams,location:{hostname:"wmgj-hml-jfn-20260927.web.app",pathname:"/portal",search:"?mode=resetPassword&oobCode=SYNTHETIC_CODE_42&continueUrl=https://evil.invalid",replace:(url:string)=>redirects.push(url)}});

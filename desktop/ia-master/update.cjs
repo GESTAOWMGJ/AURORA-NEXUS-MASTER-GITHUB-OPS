@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
+const { readRegularFile } = require('./safe-read.cjs');
 
 const BASELINE = '041920fe44e09e5d8c0b05f558a5ad5442af782d';
 const BASELINE_VERSION = '1.0.1', CANDIDATE_VERSION = '1.1.0';
@@ -36,9 +37,7 @@ function noLinks(filename, allowMissing = false) {
 }
 function read(filename, maximum = 5 * 1024 * 1024) {
   noLinks(filename);
-  const stat = fs.lstatSync(filename);
-  demand(stat.isFile() && stat.size <= maximum, 'FILE_TYPE_OR_SIZE_REQUIRES_REVIEW');
-  return fs.readFileSync(filename);
+  return readRegularFile(filename, maximum);
 }
 function optionalHash(filename) {
   try { return hash(read(filename)); } catch (error) { if (error.code === 'ENOENT') return null; throw error; }

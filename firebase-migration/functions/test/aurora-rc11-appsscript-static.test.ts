@@ -4,7 +4,14 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-const source = readFileSync(new URL("../../../src/34_AURORA_RC11_FIRESTORE_CONTROL.gs", import.meta.url), "utf8");
+function readText(path: URL): string {
+  return readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+}
+
+const yamlPython = process.env.AURORA_TEST_PYTHON;
+const pythonYamlCheck = "import sys,yaml; yaml.safe_load(open(sys.argv[1],encoding='utf-8')); print('YAML_OK')";
+
+const source = readText(new URL("../../../src/34_AURORA_RC11_FIRESTORE_CONTROL.gs", import.meta.url));
 
 test("RC1.1 is one-shot and restores dry-run", () => {
   assert.match(source, /AURORA_RC11_SAMPLE_COMPETENCE = '2026-05'/);
@@ -33,7 +40,7 @@ test("RC1.1 real payload excludes fields outside the positive nonclinical contra
 });
 
 test("RC1.1 workflow uses supported synchronous Firestore restore", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
   assert.match(workflow, /gcloud firestore databases restore/);
   assert.doesNotMatch(workflow, /databases restore[^\n]*--async/);
   assert.match(workflow, /restore-result\.json/);
@@ -47,7 +54,7 @@ test("RC1.1 workflow uses supported synchronous Firestore restore", () => {
 
 
 test("RC1.1 restore database is unique per workflow attempt", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
   assert.match(workflow, /restoreDatabasePrefix/);
   assert.match(workflow, /GITHUB_RUN_ID/);
   assert.match(workflow, /GITHUB_RUN_ATTEMPT/);
@@ -57,7 +64,7 @@ test("RC1.1 restore database is unique per workflow attempt", () => {
 
 
 test("RC1.1 cleanup tolerates Firestore post-restore finalization", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
   assert.match(workflow, /in the middle of restore/);
   assert.match(workflow, /cleanup_ready=false/);
   assert.match(workflow, /delete_done=false/);
@@ -70,7 +77,7 @@ test("RC1.1 cleanup tolerates Firestore post-restore finalization", () => {
 
 
 test("RC1.1 rotates canonical HML HMAC only behind explicit approval", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
   assert.match(workflow, /Build and validate existing HMAC contract/);
   assert.match(workflow, /auroraRc11InspecionarConfiguracao/);
   assert.match(workflow, /auroraRc11ConfigurarEndpointExistente/);
@@ -101,7 +108,7 @@ test("RC1.1 HMAC probe is authenticated, dry-run and non-mutating", () => {
   assert.match(source, /code === 401.*RC11_HMAC_INVALIDO/s);
   assert.match(source, /code === 503.*RC11_KEYRING_INVALIDO/s);
 
-  const backend = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
+  const backend = readText(new URL("../src/index.ts", import.meta.url));
   const authIndex = backend.indexOf("const verification = verifyHmacV2");
   const validationIndex = backend.indexOf("const validation = validateEvent");
   const txIndex = backend.indexOf("db.runTransaction");
@@ -109,8 +116,8 @@ test("RC1.1 HMAC probe is authenticated, dry-run and non-mutating", () => {
 });
 
 test("RC1.1 request explicitly authorizes canonical HML HMAC rotation", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
-  const request = JSON.parse(readFileSync(new URL("../../../.github/requests/aurora-rc11-run.json", import.meta.url), "utf8"));
+  const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
+  const request = JSON.parse(readText(new URL("../../../.github/requests/aurora-rc11-run.json", import.meta.url)));
   assert.equal(request.requestVersion, 7);
   assert.equal(request.hmacMode, "ROTATE_TO_CANONICAL_HML_KEYRING");
   assert.equal(request.secretManagerKeyringRotationApproved, true);
@@ -127,7 +134,7 @@ test("RC1.1 request explicitly authorizes canonical HML HMAC rotation", () => {
 });
 
 test("RC1.1 workflow cannot auto-run from implementation changes", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /paths:\s*\n\s*- "\.github\/requests\/aurora-rc11-run\.json"/);
   assert.doesNotMatch(workflow, /paths:[\s\S]*aurora-rc11-recovery-real-ingest\.yml/);
@@ -136,7 +143,7 @@ test("RC1.1 workflow cannot auto-run from implementation changes", () => {
 
 
 test("RC1.1 keeps baseline runtime non-secret and gates ingest redeploy behind approved keyring rotation", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
   assert.match(workflow, /Verify existing HML runtime and deploy non-secret surfaces/);
   assert.match(workflow, /firebase-tools@14\.17\.0 functions:list/);
   assert.match(workflow, /gcloud functions describe runtimeHealth/);
@@ -155,9 +162,9 @@ test("RC1.1 keeps baseline runtime non-secret and gates ingest redeploy behind a
 
 
 test("RC1.1 treats clasp execution as a fail-closed nondev gate", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
-  const runner = readFileSync(new URL("../../../tools/run-clasp-checked.sh", import.meta.url), "utf8");
-  const deployWorkflow = readFileSync(new URL("../../../.github/workflows/deploy-appscript.yml", import.meta.url), "utf8");
+  const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
+  const runner = readText(new URL("../../../tools/run-clasp-checked.sh", import.meta.url));
+  const deployWorkflow = readText(new URL("../../../.github/workflows/deploy-appscript.yml", import.meta.url));
   assert.doesNotMatch(workflow, /ensure-appscript-execution-deployment\.sh/);
   assert.doesNotMatch(workflow, /clasp push --force/);
   assert.match(workflow, /run-clasp-checked\.sh/);
@@ -175,13 +182,16 @@ test("RC1.1 treats clasp execution as a fail-closed nondev gate", () => {
 test("RC1.1 workflow parses as YAML", () => {
   const workflowPath = fileURLToPath(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
   const ruby = "require 'yaml'; begin; YAML.load_file(ARGV[0]); puts 'YAML_OK'; rescue => e; STDERR.puts('LINE=' + (e.respond_to?(:line) ? e.line.to_s : '0')); STDERR.puts('COLUMN=' + (e.respond_to?(:column) ? e.column.to_s : '0')); STDERR.puts(e.message); end";
-  const parsed = spawnSync("ruby", ["-e", ruby, workflowPath], { encoding: "utf8" });
+  const parsed = yamlPython
+    ? spawnSync(yamlPython, ["-c", pythonYamlCheck, workflowPath], { encoding: "utf8" })
+    : spawnSync("ruby", ["-e", ruby, workflowPath], { encoding: "utf8" });
+  assert.ifError(parsed.error);
   assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
   assert.equal(parsed.stdout.includes("YAML_OK"), true, parsed.stderr || parsed.stdout);
 });
 
 test("RC1.1 canonical bridge shell block has valid bash syntax", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
   const match = workflow.match(/      - name: Use canonical Apps Script deployment and configure bridge[\s\S]*?        run: \|\n([\s\S]*?)\n\n      - name: Send one real sample/);
   assert.ok(match?.[1]);
   const script = match[1].split("\n").map((line) => line.replace(/^          /, "")).join("\n");
@@ -190,7 +200,7 @@ test("RC1.1 canonical bridge shell block has valid bash syntax", () => {
 });
 
 test("RC1.1 reconciles the exact entity ids returned by real ingestion", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
   assert.match(workflow, /AURORA_RC11_INVOICE_ENTITY_ID/);
   assert.match(workflow, /AURORA_RC11_BANK_ENTITY_ID/);
   assert.match(workflow, /\.response\.invoiceEntityId/);
@@ -210,7 +220,7 @@ test("RC1.1 reconciles the exact entity ids returned by real ingestion", () => {
 });
 
 test("RC1.1 primary workflow repairs stale native routes before authenticated smoke", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
   const repairIndex = workflow.indexOf("Repair Hosting rewrite targets only if native routes are stale");
   const smokeIndex = workflow.indexOf("Test native intelligence against real HML data");
   assert.ok(repairIndex >= 0 && smokeIndex > repairIndex);
@@ -230,7 +240,7 @@ test("RC1.1 repair deploys install pinned function dependencies before Firebase 
     "../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml",
     "../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml",
   ]) {
-    const workflow = readFileSync(new URL(relative, import.meta.url), "utf8");
+    const workflow = readText(new URL(relative, import.meta.url));
     const repairIndex = workflow.indexOf("Repair Hosting rewrite targets only if native routes are stale");
     const installIndex = workflow.indexOf("npm --prefix functions ci --no-audit --no-fund", repairIndex);
     const deployIndex = workflow.indexOf("firebase-tools@14.17.0 deploy", repairIndex);
@@ -242,7 +252,7 @@ test("RC1.1 repair deploys install pinned function dependencies before Firebase 
 });
 
 test("RC1.1 post-ingest waits for canonical native projection without elevating smoke permissions", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url), "utf8");
+  const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url));
   assert.match(workflow, /Repair Hosting rewrite targets only if native routes are stale/);
   assert.match(workflow, /session_status.*__sessionLogin/);
   assert.match(workflow, /native_status.*api\/native-insight/);
@@ -273,7 +283,7 @@ test("RC1.1 post-ingest waits for canonical native projection without elevating 
 });
 
 test("Firebase predeploy installs locked Functions dependencies before build", () => {
-  const config = readFileSync(new URL("../../firebase.json", import.meta.url), "utf8");
+  const config = readText(new URL("../../firebase.json", import.meta.url));
   const installIndex = config.indexOf('npm --prefix \\"$RESOURCE_DIR\\" ci --ignore-scripts');
   const buildIndex = config.indexOf('npm --prefix \\"$RESOURCE_DIR\\" run build');
   assert.ok(installIndex >= 0, "locked Functions dependency install must be declared");
@@ -283,13 +293,16 @@ test("Firebase predeploy installs locked Functions dependencies before build", (
 test("RC1.1 post-ingest workflow parses as YAML", () => {
   const workflowPath = fileURLToPath(new URL("../../../.github/workflows/aurora-rc11-post-ingest-finalize.yml", import.meta.url));
   const ruby = "require 'yaml'; begin; YAML.load_file(ARGV[0]); puts 'YAML_OK'; rescue => e; STDERR.puts(e.message); exit 2; end";
-  const parsed = spawnSync("ruby", ["-e", ruby, workflowPath], { encoding: "utf8" });
+  const parsed = yamlPython
+    ? spawnSync(yamlPython, ["-c", pythonYamlCheck, workflowPath], { encoding: "utf8" })
+    : spawnSync("ruby", ["-e", ruby, workflowPath], { encoding: "utf8" });
+  assert.ifError(parsed.error);
   assert.equal(parsed.status, 0, parsed.stderr || parsed.stdout);
   assert.equal(parsed.stdout.includes("YAML_OK"), true, parsed.stderr || parsed.stdout);
 });
 
 test("Apps Script deploy validates execution but never runs operational cycles automatically", () => {
-  const workflow = readFileSync(new URL("../../../.github/workflows/deploy-appscript.yml", import.meta.url), "utf8");
+  const workflow = readText(new URL("../../../.github/workflows/deploy-appscript.yml", import.meta.url));
   assert.match(workflow, /actions\/checkout@v7/);
   assert.match(workflow, /actions\/setup-node@v7/);
   assert.match(workflow, /node-version: '22'/);
@@ -305,8 +318,8 @@ test("Apps Script deploy validates execution but never runs operational cycles a
 
 
 test("Apps Script CI pins clasp to the HML standard Cloud project", () => {
-  const deployWorkflow = readFileSync(new URL("../../../.github/workflows/deploy-appscript.yml", import.meta.url), "utf8");
-  const rc11Workflow = readFileSync(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url), "utf8");
+  const deployWorkflow = readText(new URL("../../../.github/workflows/deploy-appscript.yml", import.meta.url));
+  const rc11Workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
   assert.match(deployWorkflow, /APPS_SCRIPT_GCP_PROJECT_ID: wmgj-hml-jfn-20260927/);
   assert.match(deployWorkflow, /"projectId": "\$APPS_SCRIPT_GCP_PROJECT_ID"/);
   assert.match(rc11Workflow, /"projectId":"%s"/);
@@ -314,7 +327,7 @@ test("Apps Script CI pins clasp to the HML standard Cloud project", () => {
 });
 
 test("Windows clasp renewal keeps OAuth material local and updates GitHub Secret only after run validation", () => {
-  const helper = readFileSync(new URL("../../../tools/windows/RENEW_CLASPRC_HML.ps1", import.meta.url), "utf8");
+  const helper = readText(new URL("../../../tools/windows/RENEW_CLASPRC_HML.ps1", import.meta.url));
   assert.match(helper, /wmgj-hml-jfn-20260927/);
   assert.match(helper, /299889357292/);
   assert.match(helper, /clasp login --use-project-scopes --include-clasp-scopes --creds/);
@@ -329,7 +342,7 @@ test("Windows clasp renewal keeps OAuth material local and updates GitHub Secret
 });
 
 test("Windows CMD clasp renewal preserves control flow and portable Node discovery", () => {
-  const helper = readFileSync(new URL("../../../tools/windows/RENEW_CLASPRC_HML.cmd", import.meta.url), "utf8");
+  const helper = readText(new URL("../../../tools/windows/RENEW_CLASPRC_HML.cmd", import.meta.url));
   assert.match(helper, /LOCALAPPDATA%\\Programs\\node-v\*/);
   assert.match(helper, /call "!NPM!" --version/);
   assert.match(helper, /call gcloud services enable/);

@@ -8,10 +8,12 @@ const member = {orgId:'synthetic-company',role:'org_admin',allFacilities:true,mf
 const token = 'S'.repeat(43), ticket = 'T'.repeat(43), fingerprint='f'.repeat(64), taskId='c'.repeat(32);
 class Element {
   value=''; textContent=''; hidden=false; disabled=false; checked=false; className=''; type='';
+  href='';
   children:Element[]=[]; handlers=new Map<string,any>();
   addEventListener(name:string,handler:any){this.handlers.set(name,handler);}
   replaceChildren(){this.children=[];this.textContent='';}
   appendChild(child:Element){this.children.push(child);}
+  removeAttribute(name:string){if(name==='href')this.href='';}
   querySelectorAll(){const found:Element[]=[];const walk=(node:Element)=>{for(const child of node.children){if(child.type==='checkbox'&&child.checked&&!child.disabled)found.push(child);walk(child);}};walk(this);return found;}
 }
 
@@ -69,7 +71,7 @@ function fixture(origin='https://auroranexus.com.br') {
   return {el,calls,windowHandlers,click,submit,connect,createTask,reply,
     status:(patch:any)=>{status={...status,...patch};},capabilities:(value:any)=>{capabilities=value;},
     session:(value:any)=>{sessionResponse=value;},override:(route:string,value:any)=>{overrides.set(route,value);},
-    task:(value:any)=>{task={...task,...value};taskList=[{...task}];},tasks:(value:any[])=>{taskList=value;}};
+    task:(value:any)=>{task={...task,...value};taskList=[{...task}];},currentTask:()=>task,tasks:(value:any[])=>{taskList=value;}};
 }
 
 test('Master requires full-scope administrator MFA and never embeds a runtime credential',()=>{
@@ -228,4 +230,124 @@ test('partial Git preparation does not offer a retry mutation on a blocked task'
     assert.equal(f.el('master-stage').disabled,true);assert.equal(f.el('master-prepare').disabled,true);
     await f.click('master-stage');await f.click('master-prepare');assert.equal(f.calls.filter(c=>c.route.endsWith('/stage')||c.route.endsWith('/prepare')).length,0);
   }
+});
+
+const publisherRepo='GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS',preparedHead='a'.repeat(40),preparedBase='b'.repeat(40),preparedTree='d'.repeat(40);
+function publisherCapabilities(){
+  return {schemaVersion:'aurora.master.studio.v1',authenticatedOrgId:member.orgId,externalAiEnabled:false,repository:{state:'AVAILABLE',projectId:'synthetic-project'},operations:{
+    history:'IMPLEMENTED',context:'IMPLEMENTED',proposal:'LOCAL_MODEL_REQUIRED',manualProposal:'IMPLEMENTED',diff:'IMPLEMENTED',validate:'IMPLEMENTED',stage:'IMPLEMENTED',verify:'STATIC_SYNTAX_AND_DIFF_ONLY',prepare:'LOCAL_BRANCH_ONLY',publish:'DRAFT_PR_ONLY',ci:'REMOTE_METADATA_ONLY'},
+    publisher:{schemaVersion:'aurora.master.publisher.v1',state:'CONFIGURED_AUTH_NOT_OBSERVED',repository:publisherRepo,baseBranch:'main',publish:'OPT_IN_DRAFT_ONLY_AUTH_NOT_OBSERVED',ci:'REMOTE_METADATA_ONLY',modelCanExecuteCommands:false,canMerge:false,canDeploy:false,canDispatch:false,credentialReadByApplication:false}};
+}
+function publicationReceipt(overrides:any={}){
+  return {schemaVersion:'aurora.master.publisher.v1',state:'DRAFT_CONFIRMED',publicationVersion:1,orgId:member.orgId,taskId,taskVersion:9,repository:publisherRepo,
+    headSha:preparedHead,baseSha:preparedBase,proposalFingerprint:fingerprint,pullRequest:{number:345,url:'https://github.com/'+publisherRepo+'/pull/345',draft:true,headSha:preparedHead,baseSha:preparedBase},
+    ci:null,receiptSha256:'1'.repeat(64),history:[{at:'2026-10-12T12:00:00.000Z',version:1,state:'DRAFT_CONFIRMED',previousEventHash:null,eventHash:'2'.repeat(64)}],historyEventCount:1,deployed:false,merged:false,projectTestsRunLocally:false,...overrides};
+}
+async function preparedPublisherFixture(){
+  const f=fixture();f.capabilities(publisherCapabilities());f.task({schemaVersion:'aurora.master.studio.v1',state:'VERSION_PREPARED',version:9,baseRevision:preparedBase,proposalFingerprint:fingerprint,
+    verification:{state:'STATIC_CHECKS_PASSED',proposalFingerprint:fingerprint,arbitraryCodeExecuted:false},
+    preparedVersion:{state:'PREPARED_LOCAL_ONLY',commit:preparedHead,tree:preparedTree,baseRevision:preparedBase,proposalFingerprint:fingerprint,branch:'refs/heads/aurora-studio/'+taskId,pushed:false,deployed:false}});
+  await f.connect();await f.el('master-history-list').children[0].handlers.get('click')();return f;
+}
+async function publicationIntent(f:any){await f.click('master-diff');f.el('master-publish-confirm').checked=true;await f.el('master-publish-confirm').handlers.get('change')();}
+function publicationReply(f:any,value:any,taskPatch:any={}){return f.reply({task:{...f.currentTask(),...taskPatch,publication:value},publication:value});}
+function ciReceipt(overrides:any={}){
+  return {state:'NO_CHECKS_OBSERVED',observedAt:'2026-10-12T12:01:00.000Z',proposedHeadSha:preparedHead,apiHeadSha:preparedHead,currentHeadSha:preparedHead,preparedBaseSha:preparedBase,
+    currentBaseSha:preparedBase,baseCurrent:true,actualCheckout:'NOT_OBSERVED',ciVerified:false,requiredCoverage:'NOT_OBSERVED',completeRemoteListing:true,checks:[],runs:[],...overrides};
+}
+test('Publisher requires exact opt-in contracts, task proof, diff review and public draft intent',async()=>{
+  const missing=fixture();await missing.connect();assert.equal(missing.el('master-publish-draft').disabled,true);await missing.click('master-publish-draft');assert.equal(missing.calls.some(c=>c.route.endsWith('/publish-draft')),false);
+  for(const patch of [{canMerge:true},{canDeploy:true},{credentialReadByApplication:true},{repository:'other/repository'},{baseBranch:'other'},{state:'CONFIG_INVALID'}]){
+    const f=fixture(),caps=publisherCapabilities();caps.publisher={...caps.publisher,...patch};f.capabilities(caps);await f.connect();await f.click('master-publish-draft');assert.equal(f.calls.some(c=>c.route.endsWith('/publish-draft')),false);
+  }
+  const f=await preparedPublisherFixture();assert.equal(f.el('master-publish-draft').disabled,true);await f.click('master-publish-draft');assert.equal(f.calls.some(c=>c.route.endsWith('/publish-draft')),false);
+  await f.click('master-diff');assert.equal(f.el('master-publish-draft').disabled,true);f.el('master-publish-confirm').checked=true;await f.el('master-publish-confirm').handlers.get('change')();assert.equal(f.el('master-publish-draft').disabled,false);
+  assert.match(f.el('master-publisher-capability').textContent,/autorização GitHub ainda não observada/);
+  assert.match(iaMasterSection(member),/repositório público/);
+});
+test('valid draft receipt binds the exact prepared commit without incrementing task version or direct GitHub request',async()=>{
+  const f=await preparedPublisherFixture();await publicationIntent(f);const receipt=publicationReceipt();f.override('/api/studio/tasks/'+taskId+'/publish-draft',()=>publicationReply(f,receipt));
+  await f.click('master-publish-draft');const call=f.calls.find(c=>c.route.endsWith('/publish-draft'));assert.deepEqual(JSON.parse(call.options.body),{expectedVersion:9,proposalFingerprint:fingerprint});
+  assert.equal(f.el('master-publication-link').href,receipt.pullRequest.url);assert.equal(f.el('master-publication-link').hidden,false);assert.match(f.el('master-publication-status').textContent,/PR draft confirmado/);
+  assert.match(f.el('master-selected-status').textContent,/revisão 9/);assert.equal(f.el('master-publish-confirm').checked,false);assert.equal(f.el('master-publish-draft').disabled,true);
+  assert(f.calls.every(c=>c.url.startsWith('http://127.0.0.1:38765/')));assert.equal(f.calls.some(c=>/merge|deploy|dispatch/.test(c.route)),false);
+});
+test('forged publication URL, draft status, tenant, fingerprint or task version never become a clickable receipt',async()=>{
+  for(const changed of [
+    {pullRequest:{...publicationReceipt().pullRequest,url:'https://evil.invalid/pull/345'}},
+    {pullRequest:{...publicationReceipt().pullRequest,url:'https://github.com/'+publisherRepo+'/pull/345?token=unverified'}},
+    {pullRequest:{...publicationReceipt().pullRequest,draft:false}},
+    {orgId:'other-company'},{proposalFingerprint:'9'.repeat(64)},{headSha:'8'.repeat(40)},{taskVersion:10},
+  ]){
+    const f=await preparedPublisherFixture();await publicationIntent(f);const receipt=publicationReceipt(changed);f.override('/api/studio/tasks/'+taskId+'/publish-draft',()=>publicationReply(f,receipt));await f.click('master-publish-draft');
+    assert.equal(f.el('master-publication-link').hidden,true);assert.equal(f.el('master-publication-link').href,'');assert.match(f.el('master-studio-status').textContent,/recibo não corresponde/);assert.equal(f.el('master-publish-draft').disabled,true);
+  }
+});
+test('Publisher rejects an incremented task revision or changed prepared tree from the publication operation',async()=>{
+  for(const patch of [{version:10},{preparedVersion:{state:'PREPARED_LOCAL_ONLY',commit:preparedHead,tree:'e'.repeat(40)}}]){
+    const f=await preparedPublisherFixture();await publicationIntent(f);f.override('/api/studio/tasks/'+taskId+'/publish-draft',()=>publicationReply(f,publicationReceipt(),patch));await f.click('master-publish-draft');
+    assert.equal(f.el('master-publication-link').hidden,true);assert.match(f.el('master-selected-status').textContent,/revisão 9/);
+  }
+});
+test('CI exposes successful remote metadata with checkout unobserved and ciVerified false',async()=>{
+  const f=await preparedPublisherFixture();await publicationIntent(f);f.override('/api/studio/tasks/'+taskId+'/publish-draft',()=>publicationReply(f,publicationReceipt()));await f.click('master-publish-draft');
+  const ci=ciReceipt({state:'REMOTE_CHECKS_PASSED',checks:[{id:1,name:'Synthetic metadata check',apiHeadSha:preparedHead,status:'completed',conclusion:'success',actualCheckout:'NOT_OBSERVED'}]});
+  const observed=publicationReceipt({state:'CI_OBSERVED',ci,publicationVersion:2,receiptSha256:'3'.repeat(64),historyEventCount:2,history:[...publicationReceipt().history,{at:'2026-10-12T12:01:00.000Z',version:2,state:'CI_OBSERVED',previousEventHash:'2'.repeat(64),eventHash:'4'.repeat(64)}]});
+  f.override('/api/studio/tasks/'+taskId+'/read-ci',()=>publicationReply(f,observed));await f.click('master-read-ci');
+  assert.match(f.el('master-publication-output').textContent,/CI não verificada/);assert.match(f.el('master-publication-output').textContent,/"ciVerified": false/);assert.match(f.el('master-publication-output').textContent,/"actualCheckout": "NOT_OBSERVED"/);
+  assert.equal(f.calls.filter(c=>c.route.endsWith('/read-ci')).length,1);assert.match(f.el('master-selected-status').textContent,/revisão 9/);
+});
+test('empty remote CI is a single explicit observation and cannot become verified coverage',async()=>{
+  const f=await preparedPublisherFixture();await publicationIntent(f);f.override('/api/studio/tasks/'+taskId+'/publish-draft',()=>publicationReply(f,publicationReceipt()));await f.click('master-publish-draft');
+  const p=publicationReceipt({state:'CI_OBSERVED',ci:ciReceipt(),publicationVersion:2,receiptSha256:'3'.repeat(64),historyEventCount:2,history:[...publicationReceipt().history,{at:'2026-10-12T12:01:00.000Z',version:2,state:'CI_OBSERVED',previousEventHash:'2'.repeat(64),eventHash:'4'.repeat(64)}]});
+  f.override('/api/studio/tasks/'+taskId+'/read-ci',()=>publicationReply(f,p));await f.click('master-read-ci');
+  assert.match(f.el('master-publication-output').textContent,/NO_CHECKS_OBSERVED/);assert.match(f.el('master-publication-output').textContent,/"requiredCoverage": "NOT_OBSERVED"/);assert.equal(f.calls.filter(c=>c.route.endsWith('/read-ci')).length,1);
+});
+test('CI proposed SHA drift or forged checkout assurance is rejected; actual base drift remains visibly stale',async()=>{
+  for(const changed of [{proposedHeadSha:'8'.repeat(40)},{apiHeadSha:'8'.repeat(40)},{ciVerified:true},{actualCheckout:'VERIFIED'}]){
+    const f=await preparedPublisherFixture();await publicationIntent(f);f.override('/api/studio/tasks/'+taskId+'/publish-draft',()=>publicationReply(f,publicationReceipt()));await f.click('master-publish-draft');
+    f.override('/api/studio/tasks/'+taskId+'/read-ci',()=>publicationReply(f,publicationReceipt({ci:ciReceipt(changed)})));await f.click('master-read-ci');assert.equal(f.el('master-publication-link').hidden,true);assert.match(f.el('master-studio-status').textContent,/recibo não corresponde/);
+  }
+  const f=await preparedPublisherFixture();await publicationIntent(f);f.override('/api/studio/tasks/'+taskId+'/publish-draft',()=>publicationReply(f,publicationReceipt()));await f.click('master-publish-draft');
+  const ci=ciReceipt({state:'BASE_CHANGED',currentBaseSha:'8'.repeat(40),baseCurrent:false}),p=publicationReceipt({ci,receiptSha256:'3'.repeat(64),state:'CI_OBSERVED',publicationVersion:2,historyEventCount:2,history:[...publicationReceipt().history,{at:'2026-10-12T12:01:00.000Z',version:2,state:'CI_OBSERVED',previousEventHash:'2'.repeat(64),eventHash:'4'.repeat(64)}]});
+  f.override('/api/studio/tasks/'+taskId+'/read-ci',()=>publicationReply(f,p));await f.click('master-read-ci');assert.match(f.el('master-publication-status').textContent,/base principal mudou/);assert.equal(f.el('master-publish-draft').disabled,true);
+});
+test('publication uncertainty requires explicit reconciliation without pushing or polling automatically',async()=>{
+  const f=await preparedPublisherFixture();await publicationIntent(f);f.override('/api/studio/tasks/'+taskId+'/publish-draft',f.reply({code:'PUBLISH_RECOVERY_REQUIRED'},409));await f.click('master-publish-draft');
+  assert.equal(f.el('master-publish-draft').disabled,true);assert.equal(f.el('master-reconcile-publication').disabled,false);assert.equal(f.calls.filter(c=>c.route.endsWith('/publish-draft')).length,1);assert.equal(f.calls.some(c=>c.route.endsWith('/reconcile-publication')),false);
+  const p=publicationReceipt({state:'RETRY_OBSERVATION',pullRequest:null,history:[{at:'2026-10-12T12:00:00.000Z',version:1,state:'RETRY_OBSERVATION',previousEventHash:null,eventHash:'2'.repeat(64)}]});
+  f.override('/api/studio/tasks/'+taskId+'/reconcile-publication',()=>publicationReply(f,p));await f.click('master-reconcile-publication');assert.equal(f.el('master-publish-draft').disabled,true);assert.equal(f.calls.filter(c=>c.route.endsWith('/reconcile-publication')).length,1);assert.match(f.el('master-publication-status').textContent,/nova conferência ainda necessária/);
+});
+test('publisher task conflict clears selection and cannot replay stale version on reconciliation',async()=>{
+  const f=await preparedPublisherFixture();await publicationIntent(f);f.override('/api/studio/tasks/'+taskId+'/publish-draft',f.reply({code:'STUDIO_VERSION_CONFLICT'},409));await f.click('master-publish-draft');
+  assert.match(f.el('master-studio-status').textContent,/revisão da tarefa mudou/);assert.equal(f.el('master-reconcile-publication').disabled,true);assert.equal(f.el('master-publish-draft').disabled,true);
+  await f.click('master-reconcile-publication');assert.equal(f.calls.some(c=>c.route.endsWith('/reconcile-publication')),false);
+});
+test('publication timeout and session exit discard receipt, link and intent and never trigger automatic retry',async()=>{
+  const f=await preparedPublisherFixture();await publicationIntent(f);f.override('/api/studio/tasks/'+taskId+'/publish-draft',()=>{const e=Error('synthetic timeout');e.name='AbortError';throw e;});await f.click('master-publish-draft');
+  assert.equal(f.calls.filter(c=>c.route.endsWith('/publish-draft')).length,1);assert.equal(f.el('master-publication-link').hidden,true);assert.equal(f.el('master-publication-link').href,'');assert.equal(f.el('master-publish-confirm').checked,false);assert.equal(f.el('master-publish-draft').disabled,true);assert.equal(f.calls.some(c=>c.route.endsWith('/reconcile-publication')||c.route.endsWith('/read-ci')),false);
+  for(const event of ['pagehide','aurora:session-ended']){
+    const v=await preparedPublisherFixture();await publicationIntent(v);v.override('/api/studio/tasks/'+taskId+'/publish-draft',()=>publicationReply(v,publicationReceipt()));await v.click('master-publish-draft');v.windowHandlers.get(event)();
+    assert.equal(v.el('master-publication-link').href,'');assert.equal(v.el('master-publication-link').hidden,true);assert.equal(v.el('master-publication-output').textContent,'Nenhum recibo de publicação confirmado.');
+  }
+});
+test('draft observed after base changed is read-only recovery, with exact link and separate observed base',async()=>{
+  const f=await preparedPublisherFixture();await publicationIntent(f);const advancedBase='8'.repeat(40),observed={...publicationReceipt().pullRequest,baseSha:advancedBase};
+  const p=publicationReceipt({state:'BASE_CHANGED',pullRequest:null,observedPullRequest:observed,history:[{at:'2026-10-12T12:00:00.000Z',version:1,state:'BASE_CHANGED',previousEventHash:null,eventHash:'2'.repeat(64)}]});
+  f.override('/api/studio/tasks/'+taskId+'/publish-draft',()=>publicationReply(f,p));await f.click('master-publish-draft');
+  assert.match(f.el('master-publication-status').textContent,/Draft encontrado; a base principal mudou/);assert.equal(f.el('master-publication-link').href,observed.url);assert.equal(f.el('master-publish-draft').disabled,true);assert.equal(f.el('master-read-ci').disabled,false);assert.equal(f.el('master-reconcile-publication').disabled,false);
+  const ci=ciReceipt({state:'BASE_CHANGED',currentBaseSha:advancedBase,baseCurrent:false}),r={...p,state:'CI_OBSERVED',ci,publicationVersion:2,historyEventCount:2,receiptSha256:'3'.repeat(64),history:[...p.history,{at:'2026-10-12T12:01:00.000Z',version:2,state:'CI_OBSERVED',previousEventHash:'2'.repeat(64),eventHash:'4'.repeat(64)}]};
+  f.override('/api/studio/tasks/'+taskId+'/read-ci',()=>publicationReply(f,r));await f.click('master-read-ci');
+  assert.match(f.el('master-publication-output').textContent,/"baseObservadaSha": "8{40}"/);assert.match(f.el('master-publication-output').textContent,/"ciVerified": false/);assert.equal(f.el('master-publish-draft').disabled,true);assert.match(f.el('master-selected-status').textContent,/revisão 9/);
+});
+test('observed draft rejects forged URL, head, base hash or another PR identity',async()=>{
+  for(const change of [{url:'https://evil.invalid/pull/345'},{headSha:'8'.repeat(40)},{baseSha:'not-a-sha'},{draft:false},{number:346,url:'https://github.com/'+publisherRepo+'/pull/346'}]){
+    const f=await preparedPublisherFixture();await publicationIntent(f);const p=publicationReceipt({observedPullRequest:{...publicationReceipt().pullRequest,baseSha:'8'.repeat(40),...change}});
+    f.override('/api/studio/tasks/'+taskId+'/publish-draft',()=>publicationReply(f,p));await f.click('master-publish-draft');assert.equal(f.el('master-publication-link').href,'');assert.equal(f.el('master-publication-link').hidden,true);
+  }
+});
+test('scrolling context, diff and receipts are reachable by keyboard with a descriptive accessible name',()=>{
+  const html=iaMasterSection(member);
+  for(const id of ['master-context-output','master-diff-output','master-validation-output','master-publication-output'])assert.match(html,new RegExp('id="'+id+'" tabindex="0" aria-label="[^"]+"'));
+  assert.match(html,/#ia-master \.studio-diff:focus-visible/);
 });

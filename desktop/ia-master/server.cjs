@@ -8,6 +8,8 @@ const { buildMasterOperationalState } = require('./kernel/auroraMasterEngine.js'
 const { IA_MASTER_POLICY, IA_MASTER_INTEGRATIONS } = require('./kernel/auroraIaMaster.js');
 const { createStudio, StudioError, SECRET, LIMITS } = require('./studio.cjs');
 const { loadRegistry, selectKnowledge, DEFAULT_BUDGET } = require('./knowledge-registry.cjs');
+const { readRegularFile } = require('./safe-read.cjs');
+const { PublisherError } = require('./publisher.cjs');
 
 const VERSION = '1.1.0';
 const MODEL = 'qwen3:8b';
@@ -96,21 +98,26 @@ function startupConfiguration(stateDir, orgId, env = process.env) {
   const file = path.join(stateDir, 'studio-configuration.json');
   if (fs.existsSync(file)) {
     try {
-      if (fs.lstatSync(file).isSymbolicLink() || fs.statSync(file).size > 65536) throw Error('INVALID_CONFIGURATION');
-      const value = JSON.parse(fs.readFileSync(file, 'utf8'));
-      closed(value, ['schemaVersion', 'orgId', 'repository', 'portalOrigins']);
+      const value = JSON.parse(readRegularFile(file, 65536).toString('utf8'));
+      closed(value, ['schemaVersion', 'orgId', 'repository', 'portalOrigins', 'publisher']);
       if (value.schemaVersion !== 'aurora.master.local-config.v1' || value.orgId !== orgId || !Array.isArray(value.portalOrigins)) throw Error('INVALID_CONFIGURATION');
-      return { studioRepository: value.repository, portalOrigins: value.portalOrigins };
-    } catch { return { studioRepository: { invalid: true }, portalOrigins: [] }; }
+      if (value.publisher !== undefined) {
+        closed(value.publisher, ['enabled', 'authorizedOrgId', 'ghExecutable', 'ghSha256', 'gitSha256']);
+        if (typeof value.publisher.enabled !== 'boolean' || value.publisher.authorizedOrgId !== orgId) throw Error('INVALID_CONFIGURATION');
+      }
+      return { studioRepository: value.repository, portalOrigins: value.portalOrigins, publisherConfig: value.publisher ?? null };
+    } catch { return { studioRepository: { invalid: true }, portalOrigins: [], publisherConfig: null }; }
   }
   let studioRepository = null, portalOrigins = [];
   try { if (env.AURORA_STUDIO_CONFIG) studioRepository = JSON.parse(env.AURORA_STUDIO_CONFIG); } catch { studioRepository = { invalid: true }; }
   try { if (env.AURORA_MASTER_PORTAL_ORIGINS) { const value = JSON.parse(env.AURORA_MASTER_PORTAL_ORIGINS); if (Array.isArray(value)) portalOrigins = value; } } catch { /* Invalid bridge config stays disabled. */ }
-  return { studioRepository, portalOrigins };
+  // Publisher has no environment fallback: publication needs explicit persisted opt-in.
+  return { studioRepository, portalOrigins, publisherConfig: null };
 }
 
 function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = localChat, now = () => Date.now(), knowledge = '', registryPath = null, studioRepository = null, portalOrigins = [],
-  readManifest = () => fs.readFileSync(path.join(__dirname, 'manifest.json')), readModelState = localModelState }) {
+  publisherConfig = null, publisherRunner,
+  readManifest = () => readRegularFile(path.join(__dirname, 'manifest.json'), 65536), readModelState = localModelState }) {
   if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(orgId) || !/^[\w-]{40,100}$/.test(controlToken)) throw Error('LOCAL_IDENTITY_REQUIRED');
   fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   const sessions = new Map(), tickets = new Map(), cache = new Map();
@@ -135,7 +142,7 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
     return Buffer.byteLength(selected.context) <= budget ? selected
       : { ...selected, context: '', recordIds: [], selectionState: 'CONTEXT_LIMIT' };
   }
-  const studio = createStudio({ stateDir, orgId, repository: studioRepository, audit, now, infer: async prompt => {
+  const studio = createStudio({ stateDir, orgId, repository: studioRepository, audit, now, publisherConfig, publisherRunner, infer: async prompt => {
     if (busy) throw new StudioError('STUDIO_MODEL_BUSY', 429);
     busy = true;
     try {
@@ -150,7 +157,7 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
     const origin = 'http://127.0.0.1:' + server.address().port;
     const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
-      'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" };
+      'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" };
     const send = (status, value, type = 'application/json') => { res.writeHead(status, { ...headers, 'Content-Type': type + '; charset=utf-8' }); res.end(type === 'application/json' ? JSON.stringify(value) : value); };
     try {
       if (req.headers.host !== '127.0.0.1:' + server.address().port || !['127.0.0.1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)) return send(403, { code: 'LOCAL_HOST_REQUIRED' });
@@ -165,9 +172,17 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
         return send(204, '');
       }
       if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'AURORA_IA_MASTER', version: VERSION, startedAt, processManifest });
-      if (req.method === 'GET' && ['/', '/app.js', '/app.css'].includes(req.url)) {
-        const name = { '/': 'index.html', '/app.js': 'app.js', '/app.css': 'app.css' }[req.url];
-        return send(200, fs.readFileSync(path.join(__dirname, name), 'utf8'), { '/': 'text/html', '/app.js': 'text/javascript', '/app.css': 'text/css' }[req.url]);
+      const localAssets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'],
+        '/app.css': ['app.css', 'text/css'], '/studio-local.js': ['studio-local.js', 'text/javascript'],
+        '/studio-local.css': ['studio-local.css', 'text/css'] };
+      if (req.method === 'GET' && Object.hasOwn(localAssets, req.url)) {
+        const [name, type] = localAssets[req.url];
+        return send(200, readRegularFile(path.join(__dirname, name), 2 * 1024 * 1024).toString('utf8'), type);
+      }
+      const localFonts = ['/assets/fonts/source-serif-4-regular.woff2', '/assets/fonts/source-serif-4-semibold.woff2', '/assets/fonts/atkinson-hyperlegible-next.woff2'];
+      if (req.method === 'GET' && localFonts.includes(req.url)) {
+        const bytes = readRegularFile(path.join(__dirname, req.url.slice(1)), 256 * 1024);
+        res.writeHead(200, { ...headers, 'Content-Type': 'font/woff2' }); return res.end(bytes);
       }
       if (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site']) && !portalRequest) return send(403, { code: 'CROSS_SITE_REJECTED' });
       expire(sessions); expire(tickets);
@@ -216,7 +231,9 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
           knowledge: { status: registry.status, corpusVersion: registry.corpusVersion, corpusHash: registry.corpusHash,
             loadedCount: registry.records.length, rejectedCount: registry.rejectedCount,
             completeHistoricalAbsorption: registry.completeHistoricalAbsorption === true },
-          studio: { schemaVersion: 'aurora.master.studio.v1', repositoryState: studio.configState, publish: 'NOT_IMPLEMENTED' }, bridge: { sessionBoundToOrigin: true, orgId, enabled: portalRequest } });
+          studio: { schemaVersion: 'aurora.master.studio.v1', repositoryState: studio.configState,
+            publish: studio.publisherCapabilities().publish, publisher: studio.publisherCapabilities() },
+          bridge: { sessionBoundToOrigin: true, orgId, enabled: portalRequest, authority: 'PAIRED_LOCAL_OWNER_NO_CLOUD_MFA_CLAIM' } });
       }
       if (req.url.startsWith('/api/studio/')) {
         const result = await studio.route(req.method, req.url, req.method === 'POST' ? await bodyJson(req) : undefined);
@@ -255,7 +272,7 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
       audit('ENGINEERING_PROPOSAL', { inputHash: fingerprint, outputHash: hash(proposal.text), corpusHash: receipt.corpusHash, knowledgeRecordIds: receipt.recordIds });
       return send(200, { proposal, proposalId: fingerprint, knowledge: receipt, state: 'PROPOSAL_ONLY', promotionGates: IA_MASTER_POLICY.promotionGates, externalAiCalls: 0, applied: false });
     } catch (error) {
-      if (error instanceof StudioError) return send(error.status, { code: error.code, ...(['STUDIO_CONTENT_LIMIT', 'STUDIO_MODEL_CONTEXT_LIMIT'].includes(error.code) ? { limits: LIMITS } : {}), externalFallbackUsed: false });
+      if (error instanceof StudioError || error instanceof PublisherError) return send(error.status, { code: error.code, ...(['STUDIO_CONTENT_LIMIT', 'STUDIO_MODEL_CONTEXT_LIMIT'].includes(error.code) ? { limits: LIMITS } : {}), externalFallbackUsed: false });
       const validation = ['INVALID_FIELDS', 'BODY_LIMIT', 'PROMPT_LIMIT'].includes(error.message) || error instanceof SyntaxError;
       send(validation ? 400 : 503, { code: validation ? 'INVALID_REQUEST' : 'LOCAL_OPERATION_UNAVAILABLE', externalFallbackUsed: false });
     }
@@ -268,11 +285,11 @@ if (require.main === module) {
   const stateDir = process.env.AURORA_MASTER_STATE;
   if (!stateDir || !path.isAbsolute(stateDir)) throw Error('EXPLICIT_PRIVATE_STATE_DIRECTORY_REQUIRED');
   const tokenPath = path.join(stateDir, 'control.key');
-  const controlToken = fs.readFileSync(tokenPath, 'utf8').trim();
-  const knowledge = fs.readFileSync(path.join(__dirname, 'modus-operandi.md'), 'utf8');
+  const controlToken = readRegularFile(tokenPath, 4096).toString('utf8').trim();
+  const knowledge = readRegularFile(path.join(__dirname, 'modus-operandi.md'), 2 * 1024 * 1024).toString('utf8');
   const registryPath = path.join(stateDir, 'knowledge', 'knowledge_registry.v1.json');
-  const { studioRepository, portalOrigins } = startupConfiguration(stateDir, process.env.AURORA_ORG_ID);
-  const app = createMaster({ stateDir, orgId: process.env.AURORA_ORG_ID, controlToken, knowledge, registryPath, studioRepository, portalOrigins });
+  const { studioRepository, portalOrigins, publisherConfig } = startupConfiguration(stateDir, process.env.AURORA_ORG_ID);
+  const app = createMaster({ stateDir, orgId: process.env.AURORA_ORG_ID, controlToken, knowledge, registryPath, studioRepository, portalOrigins, publisherConfig });
   app.server.on('error', () => { console.error('AURORA_LOCAL_SERVER_START_FAILED'); process.exit(1); });
   app.listen().then(() => console.log(JSON.stringify({ service: 'AURORA_IA_MASTER', version: VERSION, address: '127.0.0.1:38765', externalAiEnabled: false })));
 }

@@ -76,13 +76,20 @@ export function fixtureDom(html: string) {
   root.ownerDocument = document;
   // This fixture parses the controlled emitted markup and preserves real parent
   // relationships. Script/style bodies are inert and never manufacture DOM ids.
-  const markup = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
-  const stack = [root]; let cursor = 0;
+  const markup = html;
+  const stack = [root]; let cursor = 0, inertBody: string | null = null;
   for (const tag of markup.matchAll(/<\/?([a-z][a-z0-9-]*)\b([^>]*)>/gi)) {
+    const name = tag[1].toLowerCase(), closing = tag[0].startsWith("</");
+    if (inertBody !== null) {
+      if (closing && name === inertBody) inertBody = null;
+      cursor = tag.index! + tag[0].length; continue;
+    }
+    if (!closing && (name === "script" || name === "style")) {
+      inertBody = name; cursor = tag.index! + tag[0].length; continue;
+    }
     stack.at(-1)!.appendText(decode(markup.slice(cursor, tag.index)));
     cursor = tag.index! + tag[0].length;
-    const name = tag[1].toLowerCase();
-    if (tag[0].startsWith("</")) { const position = stack.findLastIndex(node => node.tagName.toLowerCase() === name); if (position > 0) stack.length = position; continue; }
+    if (closing) { const position = stack.findLastIndex(node => node.tagName.toLowerCase() === name); if (position > 0) stack.length = position; continue; }
     const element = document.createElement(name);
     for (const attribute of tag[2].matchAll(/([a-z_:][a-z0-9_:-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/gi)) element.setAttribute(attribute[1].toLowerCase(), decode(attribute[2] ?? attribute[3] ?? attribute[4] ?? ""));
     if (element.id) { assert.ok(!elements.has(element.id), "Unique emitted DOM id: " + element.id); elements.set(element.id, element); }

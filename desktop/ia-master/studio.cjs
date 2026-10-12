@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
+const { readRegularFile } = require('./safe-read.cjs');
+const { createPublisher } = require('./publisher.cjs');
 const SCHEMA = 'aurora.master.studio.v1';
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const canonical = value => JSON.stringify(value);
@@ -73,7 +75,8 @@ function cleanEnv() {
   return { ...env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_TERMINAL_PROMPT: '0' };
 }
 
-function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, now = () => Date.now() }) {
+function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, now = () => Date.now(),
+  publisherConfig = null, publisherRunner }) {
   const home = path.join(stateDir, 'studio');
   for (const name of ['', 'contexts', 'tasks', 'workspaces', 'empty-hooks']) fs.mkdirSync(path.join(home, name), { recursive: true, mode: 0o700 });
   noSymlinks(home);
@@ -108,13 +111,12 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
   function recordPath(kind, id) { demand(ID.test(id), 'STUDIO_NOT_FOUND', 404); return path.join(home, kind, id + '.json'); }
   function read(kind, id) {
     const filename = recordPath(kind, id);
-    demand(fs.existsSync(filename), 'STUDIO_NOT_FOUND', 404);
     try {
-      demand(fs.statSync(filename).size <= 2 * 1024 * 1024 && !fs.lstatSync(filename).isSymbolicLink(), 'STUDIO_RECORD_INVALID');
-      const record = JSON.parse(fs.readFileSync(filename, 'utf8'));
+      const record = JSON.parse(readRegularFile(filename, 2 * 1024 * 1024).toString('utf8'));
       demand(record.sha256 === fingerprint(record.payload) && record.payload.id === id && record.payload.orgId === orgId && record.payload.schemaVersion === SCHEMA, 'STUDIO_RECORD_INVALID');
       return record.payload;
-    } catch (error) { if (error instanceof StudioError) throw error; throw new StudioError('STUDIO_RECORD_INVALID'); }
+    } catch (error) { if (error?.code === 'ENOENT') throw new StudioError('STUDIO_NOT_FOUND', 404);
+      if (error instanceof StudioError) throw error; throw new StudioError('STUDIO_RECORD_INVALID'); }
   }
   function write(kind, value) {
     const filename = recordPath(kind, value.id), temporary = filename + '.' + crypto.randomBytes(8).toString('hex') + '.tmp';
@@ -246,19 +248,23 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
     demand(ID.test(task.id), 'STUDIO_RECORD_INVALID');
     const directory = path.join(home, 'workspaces', task.id); noSymlinks(home, 'workspaces/' + task.id);
     demand(fs.existsSync(directory) && fs.realpathSync(directory) === directory, 'STUDIO_WORKSPACE_CHANGED', 409);
-    demand(hash(fs.readFileSync(path.join(directory, '.git'))) === task.workspaceMetadataSha256, 'STUDIO_WORKSPACE_CHANGED', 409);
+    demand(hash(workspaceBytes(path.join(directory, '.git'), 4096)) === task.workspaceMetadataSha256, 'STUDIO_WORKSPACE_CHANGED', 409);
     demand(git(['rev-parse', '--verify', 'HEAD'], directory).trim() === task.baseRevision, 'STUDIO_WORKSPACE_CHANGED', 409);
     demand(git(['write-tree'], directory).trim() === task.stagedTreeSha40, 'STUDIO_WORKSPACE_CHANGED', 409);
     const changed = git(['diff', '--cached', '--name-only', '--no-ext-diff', '--no-textconv'], directory).trim().split('\n').filter(Boolean).sort();
     demand(canonical(changed) === canonical(task.proposal.files.map(f => f.path).sort()), 'STUDIO_WORKSPACE_CHANGED', 409);
     for (const file of task.proposal.files) {
       const destination = noSymlinks(directory, file.path);
-      demand(fs.existsSync(destination) && fs.statSync(destination).isFile() && hash(fs.readFileSync(destination)) === file.afterSha256, 'STUDIO_WORKSPACE_CHANGED', 409);
+      demand(hash(workspaceBytes(destination, MAX_CONTENT)) === file.afterSha256, 'STUDIO_WORKSPACE_CHANGED', 409);
       const expectedBlob = git(['hash-object', '--no-filters', '--stdin'], directory, file.content).trim();
       const staged = git(['ls-files', '--stage', '--', file.path], directory).trim().split(/\s+/);
       demand(staged[1] === expectedBlob && staged[2] === '0', 'STUDIO_WORKSPACE_CHANGED', 409);
     }
     return directory;
+  }
+  function workspaceBytes(filename, limit) {
+    try { return readRegularFile(filename, limit); }
+    catch { throw new StudioError('STUDIO_WORKSPACE_CHANGED', 409); }
   }
   function diff(task) {
     const ctx = context(task); validate(task);
@@ -308,7 +314,7 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
     }
     demand(offset === batch.length, 'STUDIO_GIT_TREE_UNSUPPORTED');
     git(['worktree', 'add', '--detach', '--no-checkout', directory, task.baseRevision]);
-    task.workspaceMetadataSha256 = hash(fs.readFileSync(path.join(directory, '.git')));
+    task.workspaceMetadataSha256 = hash(workspaceBytes(path.join(directory, '.git'), 4096));
     git(['read-tree', task.baseRevision], directory);
     for (const blob of blobs) { const target = path.join(directory, ...blob.name.split('/')); fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 }); fs.writeFileSync(target, blob.bytes, { flag: 'wx', mode: 0o600 }); }
     for (const file of task.proposal.files) {
@@ -343,12 +349,31 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
   async function change(id, expectedVersion, action) {
     return locked(id, async () => { const task = read('tasks', id); expected(task, expectedVersion); return action(task); });
   }
+  const publisher = createPublisher({ stateDir, orgId, config: publisherConfig, repository: repo,
+    audit, now, ...(publisherRunner ? { runner: publisherRunner } : {}),
+    readPreparedTask: async id => {
+      const task = read('tasks', id);
+      demand(task.state === 'VERSION_PREPARED', 'STUDIO_STATE_CONFLICT', 409);
+      validate(task, false); workspace(task);
+      return task;
+    } });
+  function taskView(task) {
+    const publication = publisher.readPublication(task);
+    return publication ? { ...task, publication } : task;
+  }
+  const publisherOperations = {
+    'publish-draft': input => publisher.publishDraft(input),
+    'reconcile-publication': input => publisher.reconcile(input),
+    'read-ci': input => publisher.readCi(input)
+  };
   async function route(method, url, body = {}) {
     const prefix = '/api/studio/'; if (!url.startsWith(prefix)) return null;
     const pathname = url.slice(prefix.length);
     if (method === 'GET' && pathname === 'capabilities') return { status: 200, value: {
       schemaVersion: SCHEMA, repository: { state: configState, projectId: repo?.projectId || null, allowedPaths: repo?.allowedPaths || [], fileCatalog: catalog() }, limits: LIMITS,
-      operations: { history: 'IMPLEMENTED', context: repo ? 'IMPLEMENTED' : 'NOT_CONFIGURED', proposal: 'LOCAL_MODEL_REQUIRED', manualProposal: 'IMPLEMENTED', diff: 'IMPLEMENTED', validate: 'IMPLEMENTED', stage: repo ? 'IMPLEMENTED' : 'NOT_CONFIGURED', verify: 'STATIC_SYNTAX_AND_DIFF_ONLY', prepare: repo ? 'LOCAL_BRANCH_ONLY' : 'NOT_CONFIGURED', projectTestRunner: 'NOT_IMPLEMENTED', ci: 'NOT_CONFIGURED', publish: 'NOT_IMPLEMENTED' },
+      operations: { history: 'IMPLEMENTED', context: repo ? 'IMPLEMENTED' : 'NOT_CONFIGURED', proposal: 'LOCAL_MODEL_REQUIRED', manualProposal: 'IMPLEMENTED', diff: 'IMPLEMENTED', validate: 'IMPLEMENTED', stage: repo ? 'IMPLEMENTED' : 'NOT_CONFIGURED', verify: 'STATIC_SYNTAX_AND_DIFF_ONLY', prepare: repo ? 'LOCAL_BRANCH_ONLY' : 'NOT_CONFIGURED', projectTestRunner: 'NOT_IMPLEMENTED',
+        ci: publisher.capabilities().ci, publish: publisher.capabilities().publish === 'NOT_CONFIGURED' ? 'NOT_CONFIGURED' : 'DRAFT_PR_ONLY' },
+      publisher: publisher.capabilities(),
       externalAiEnabled: false, modelCanExecuteCommands: false, arbitraryCodeExecution: false, authenticatedOrgId: orgId
     } };
     if (method === 'GET' && pathname === 'tasks') {
@@ -356,7 +381,10 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
         .map(name => ({ name, changedAt: fs.statSync(path.join(home, 'tasks', name)).mtimeMs }))
         .sort((a, b) => b.changedAt - a.changedAt || a.name.localeCompare(b.name)).slice(0, 100)
         .map(({ name }) => read('tasks', name.slice(0, -5)))
-        .map(({ id, version, state, summary, createdAt, updatedAt }) => ({ id, version, state, summary, createdAt, updatedAt })).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        .map(task => { const { id, version, state, summary, createdAt, updatedAt } = task;
+          const publication = publisher.readPublication(task);
+          return { id, version, state, summary, createdAt, updatedAt, ...(publication ? { publication } : {}) };
+        }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       return { status: 200, value: { tasks, persistent: true, limit: 100 } };
     }
     if (method === 'POST' && pathname === 'context') {
@@ -386,9 +414,24 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
       const at = new Date(now()).toISOString(); const task = { schemaVersion: SCHEMA, id: crypto.randomBytes(16).toString('hex'), orgId, projectId: ctx.projectId, contextId: ctx.id, baseRevision: ctx.baseRevision, classification: body.classification, prompt: body.prompt, summary: body.prompt.slice(0, 120), version: 0, state: null, history: [], createdAt: at, updatedAt: at };
       transition(task, 'CONTEXT_BOUND'); return { status: 201, value: { task } };
     }
+    const publicationRoute = /^tasks\/([a-f0-9]{32})\/(publish-draft|reconcile-publication|read-ci)$/.exec(pathname);
+    if (publicationRoute) {
+      demand(method === 'POST', 'STUDIO_NOT_FOUND', 404);
+      closed(body, ['expectedVersion', 'proposalFingerprint']);
+      const [, id, operation] = publicationRoute;
+      return locked(id, async () => {
+        const task = read('tasks', id); expected(task, body.expectedVersion);
+        demand(task.state === 'VERSION_PREPARED' && DIGEST.test(body.proposalFingerprint) &&
+          body.proposalFingerprint === task.proposalFingerprint, 'STUDIO_STATE_CONFLICT', 409);
+        const publication = await publisherOperations[operation]({ taskId: id,
+          expectedVersion: body.expectedVersion, proposalFingerprint: body.proposalFingerprint });
+        const current = read('tasks', id); expected(current, body.expectedVersion);
+        return { status: 200, value: { task: taskView(current), publication } };
+      });
+    }
     const matched = /^tasks\/([a-f0-9]{32})(?:\/(propose|proposal|diff|validate|stage|verify|prepare))?$/.exec(pathname);
     demand(matched, 'STUDIO_NOT_FOUND', 404); const [, id, action] = matched;
-    if (method === 'GET' && !action) return { status: 200, value: { task: read('tasks', id) } };
+    if (method === 'GET' && !action) return { status: 200, value: { task: taskView(read('tasks', id)) } };
     if (method === 'GET' && action === 'diff') { const task = read('tasks', id); return { status: 200, value: { taskId: id, version: task.version, diff: diff(task), validation: validate(task) } }; }
     demand(method === 'POST' && action && action !== 'diff', 'STUDIO_NOT_FOUND', 404);
     closed(body, action === 'proposal' ? ['expectedVersion', 'proposal'] : action === 'verify' ? ['expectedVersion', 'recipeId'] : ['expectedVersion']);
@@ -440,6 +483,6 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
     });
     return { status: 200, value: result };
   }
-  return { route, configState };
+  return { route, configState, publisherCapabilities: () => publisher.capabilities() };
 }
 module.exports = { createStudio, StudioError, relativeFile, SECRET, LIMITS };

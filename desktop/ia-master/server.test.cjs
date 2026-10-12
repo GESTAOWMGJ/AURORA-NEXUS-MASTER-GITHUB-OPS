@@ -6,6 +6,7 @@ const path = require('node:path');
 const http = require('node:http');
 const crypto = require('node:crypto');
 const vm = require('node:vm');
+const { syntheticPublisher } = require('./publisher-fixture.cjs');
 const { createMaster, localChat, startupConfiguration } = require(path.join(process.env.AURORA_TEST_BUILD, 'server.cjs'));
 const token = 'x'.repeat(43);
 async function fixture(t, infer = async () => ({ text: 'Proposta sintética de revisão.', outputTokens: 8 }), options = {}) {
@@ -29,6 +30,87 @@ test('private routes require authentication and reject foreign origins / DNS reb
   assert.equal((await a.request('/api/improve', task, { 'X-Aurora-Local': '' })).status, 403);
   assert.equal((await a.request('/api/improve', task, { 'Content-Type': 'text/plain' })).status, 415);
   assert.equal(a.metrics.localModelCalls, 0);
+});
+
+test('local Studio assets and fonts use closed routes and self-only CSP without private authentication', async t => {
+  const a = await fixture(t);
+  for (const [route, type] of [['/studio-local.js', 'text/javascript'], ['/studio-local.css', 'text/css'],
+    ['/assets/fonts/source-serif-4-regular.woff2', 'font/woff2'],
+    ['/assets/fonts/source-serif-4-semibold.woff2', 'font/woff2'],
+    ['/assets/fonts/atkinson-hyperlegible-next.woff2', 'font/woff2']]) {
+    const response = await a.request(route, null, { Authorization: '' });
+    assert.equal(response.status, 200); assert.ok(response.headers.get('content-type').startsWith(type));
+    assert.match(response.headers.get('content-security-policy'), /font-src 'self'/);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'),
+      crypto.createHash('sha256').update(fs.readFileSync(path.join(process.env.AURORA_TEST_BUILD, route.slice(1)))).digest('hex'));
+  }
+  assert.equal((await a.request('/assets/fonts/unknown.woff2', null, { Authorization: '' })).status, 401);
+  assert.equal((await a.request('/server.cjs', null, { Authorization: '' })).status, 401);
+  assert.equal((await a.request('/studio-local.js?source=private', null, { Authorization: '' })).status, 401);
+});
+
+test('HTTP Publisher routes preserve session gates, exact CAS, receipts and unverified CI', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-master-publisher-http-'));
+  t.after(() => { const resolved = fs.realpathSync(directory), temporaryRoot = fs.realpathSync(os.tmpdir());
+    assert.ok(resolved.startsWith(temporaryRoot + path.sep)); assert.match(path.basename(resolved), /^aurora-master-publisher-http-/);
+    fs.rmSync(resolved, { recursive: true, force: true }); });
+  const root = path.join(directory, 'repo'); fs.mkdirSync(root);
+  const gitExecutable = process.env.AURORA_STUDIO_TEST_GIT;
+  const git = args => require('node:child_process').execFileSync(gitExecutable,
+    ['-c', 'core.fsmonitor=false', ...args], { cwd: root, windowsHide: true, encoding: 'utf8', stdio: 'pipe' }).trim();
+  git(['init', '-b', 'main']); git(['config', 'user.name', 'Synthetic Publisher HTTP']);
+  git(['config', 'user.email', 'publisher-test@aurora.invalid']);
+  fs.writeFileSync(path.join(root, 'app.cjs'), 'module.exports = 1;\n');
+  git(['add', 'app.cjs']); git(['commit', '-m', 'Synthetic base']);
+  let commit = null;
+  const transport = syntheticPublisher({ directory, orgId: 'tenant-test', gitExecutable,
+    baseRevision: git(['rev-parse', 'HEAD']), preparedCommit: () => commit });
+  const a = await fixture(t, undefined, { studioRepository: { root, gitExecutable, allowedPaths: ['app.cjs'], projectId: 'synthetic-project' },
+    publisherConfig: transport.config, publisherRunner: transport.runner });
+  const capabilities = await (await a.request('/api/studio/capabilities')).json();
+  assert.equal(capabilities.operations.publish, 'DRAFT_PR_ONLY');
+  assert.equal(transport.remote.calls.length, 0);
+  const context = (await (await a.request('/api/studio/context', { paths: ['app.cjs'], classification: 'INTERNAL' })).json()).context;
+  let value = (await (await a.request('/api/studio/tasks', { contextId: context.id,
+    prompt: 'Synthetic engineering request never included in PR metadata.', classification: 'INTERNAL' })).json()).task;
+  const route = '/api/studio/tasks/' + value.id;
+  value = (await (await a.request(route + '/proposal', { expectedVersion: value.version,
+    proposal: { summary: 'Synthetic improvement', files: [{ path: 'app.cjs', beforeSha256: context.files[0].beforeSha256,
+      content: 'module.exports = 2;\n' }] } })).json()).task;
+  for (const operation of ['validate', 'stage', 'verify', 'prepare']) {
+    const body = { expectedVersion: value.version, ...(operation === 'verify' ? { recipeId: 'SYNTAX_AND_DIFF_V1' } : {}) };
+    const response = await a.request(route + '/' + operation, body); assert.equal(response.status, 200);
+    value = (await response.json()).task;
+  }
+  commit = value.preparedVersion.commit;
+  const input = { expectedVersion: value.version, proposalFingerprint: value.proposalFingerprint };
+  assert.equal((await a.request(route + '/publish-draft', input, { Authorization: '' })).status, 401);
+  assert.equal((await a.request(route + '/publish-draft', input, { 'X-Aurora-Local': '' })).status, 403);
+  assert.equal((await a.request(route + '/publish-draft', input, { Origin: 'https://evil.invalid' })).status, 403);
+  assert.equal((await a.request(route + '/publish-draft', { ...input, expectedVersion: value.version - 1 })).status, 409);
+  assert.equal((await a.request(route + '/publish-draft', { ...input, repository: 'OTHER/REPO' })).status, 400);
+  assert.equal(transport.remote.pushes, 0);
+  transport.remote.account = 'unapproved';
+  const denied = await a.request(route + '/publish-draft', input);
+  assert.equal(denied.status, 403); assert.equal((await denied.json()).code, 'PUBLISH_AUTHORIZATION_UNCONFIRMED');
+  transport.remote.account = 'GESTAOWMGJ';
+  const publishedResponse = await a.request(route + '/publish-draft', input); assert.equal(publishedResponse.status, 200);
+  const published = await publishedResponse.json();
+  assert.equal(published.task.version, value.version); assert.equal(published.publication.state, 'DRAFT_CONFIRMED');
+  assert.equal(published.publication.orgId, 'tenant-test'); assert.equal(published.publication.headSha, commit);
+  const ci = await (await a.request(route + '/read-ci', input)).json();
+  assert.equal(ci.publication.ci.state, 'REMOTE_CHECKS_PASSED');
+  assert.equal(ci.publication.ci.actualCheckout, 'NOT_OBSERVED'); assert.equal(ci.publication.ci.ciVerified, false);
+  assert.equal(transport.remote.pushes, 1); assert.equal(transport.remote.creates, 1);
+  const readback = await (await a.request(route)).json();
+  assert.equal(readback.task.publication.receiptSha256, ci.task.publication.receiptSha256);
+  const status = await (await a.request('/api/status')).json();
+  assert.equal(status.bridge.authority, 'PAIRED_LOCAL_OWNER_NO_CLOUD_MFA_CLAIM');
+  const journal = path.join(a.stateDir, 'studio', 'publications', value.id + '.json');
+  fs.writeFileSync(journal, '{corrupt');
+  const corrupt = await a.request(route); assert.equal(corrupt.status, 422);
+  assert.equal((await corrupt.json()).code, 'PUBLISH_RECORD_INVALID');
 });
 test('single-use pairing, expiry and logout revoke browser sessions', async t => {
   let time = Date.now(); const a = await fixture(t, undefined, { now: () => time });
@@ -178,12 +260,32 @@ test('persistent local configuration is organization-bound and invalid configura
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-master-config-test-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const file = path.join(directory, 'studio-configuration.json'), repository = { root: 'synthetic' }, origin = 'https://auroranexus.com.br';
-  assert.deepEqual(startupConfiguration(directory, 'tenant-test', {}), { studioRepository: null, portalOrigins: [] });
+  assert.deepEqual(startupConfiguration(directory, 'tenant-test', {}), { studioRepository: null, portalOrigins: [], publisherConfig: null });
   fs.writeFileSync(file, JSON.stringify({ schemaVersion: 'aurora.master.local-config.v1', orgId: 'tenant-test', repository, portalOrigins: [origin] }));
-  assert.deepEqual(startupConfiguration(directory, 'tenant-test', { AURORA_MASTER_PORTAL_ORIGINS: '[]' }), { studioRepository: repository, portalOrigins: [origin] });
-  assert.deepEqual(startupConfiguration(directory, 'other-tenant', {}), { studioRepository: { invalid: true }, portalOrigins: [] });
+  assert.deepEqual(startupConfiguration(directory, 'tenant-test', { AURORA_MASTER_PORTAL_ORIGINS: '[]' }), { studioRepository: repository, portalOrigins: [origin], publisherConfig: null });
+  assert.deepEqual(startupConfiguration(directory, 'other-tenant', {}), { studioRepository: { invalid: true }, portalOrigins: [], publisherConfig: null });
   fs.writeFileSync(file, JSON.stringify({ schemaVersion: 'aurora.master.local-config.v1', orgId: 'tenant-test', repository, portalOrigins: [origin], command: 'whoami' }));
-  assert.deepEqual(startupConfiguration(directory, 'tenant-test', {}), { studioRepository: { invalid: true }, portalOrigins: [] });
+  assert.deepEqual(startupConfiguration(directory, 'tenant-test', {}), { studioRepository: { invalid: true }, portalOrigins: [], publisherConfig: null });
+});
+
+test('publisher opt-in is persisted, closed, organization-bound and never inherited from environment', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-master-publisher-config-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'studio-configuration.json'), repository = { root: 'synthetic' };
+  const publisher = { enabled: true, authorizedOrgId: 'tenant-test', ghExecutable: '/synthetic/gh',
+    ghSha256: 'a'.repeat(64), gitSha256: 'b'.repeat(64) };
+  assert.equal(startupConfiguration(directory, 'tenant-test', { AURORA_PUBLISHER_CONFIG: JSON.stringify(publisher) }).publisherConfig, null);
+  const configuration = { schemaVersion: 'aurora.master.local-config.v1', orgId: 'tenant-test',
+    repository, portalOrigins: [], publisher };
+  fs.writeFileSync(file, JSON.stringify(configuration));
+  assert.deepEqual(startupConfiguration(directory, 'tenant-test', {}).publisherConfig, publisher);
+  for (const bad of [{ ...publisher, command: 'arbitrary' }, { ...publisher, authorizedOrgId: 'another-org' },
+    { ...publisher, enabled: 'true' }, []]) {
+    fs.writeFileSync(file, JSON.stringify({ ...configuration, publisher: bad }));
+    assert.deepEqual(startupConfiguration(directory, 'tenant-test', {}), { studioRepository: { invalid: true }, portalOrigins: [], publisherConfig: null });
+  }
+  fs.writeFileSync(file, JSON.stringify(configuration) + ' '.repeat(65536));
+  assert.deepEqual(startupConfiguration(directory, 'tenant-test', {}), { studioRepository: { invalid: true }, portalOrigins: [], publisherConfig: null });
 });
 
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
