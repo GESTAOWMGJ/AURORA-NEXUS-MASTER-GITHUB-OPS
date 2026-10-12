@@ -35,9 +35,17 @@ on:
         required: false
         type: string
       active_release_review_pr:
-        description: "Merged PR with human approval at its final reviewed head"
+        description: "Merged PR whose merge commit equals the exact release SHA"
         required: false
         type: string
+      active_release_review_mode:
+        description: "PR review, or HML owner decision plus real approval of this protected deployment"
+        required: false
+        default: GITHUB_PULL_REQUEST_REVIEW
+        type: choice
+        options:
+          - GITHUB_PULL_REQUEST_REVIEW
+          - OWNER_DEPLOYMENT_APPROVAL
       active_release_previous_sha256:
         description: "Current certificate SHA256, or NONE for the first reviewed promotion"
         required: false
@@ -880,6 +888,8 @@ jobs:
           AURORA_ACTIVE_RELEASE_CI_RUN_ID: ${{ inputs.active_release_ci_run_id }}
           AURORA_ACTIVE_RELEASE_DEPLOY_RUN_ID: ${{ github.run_id }}
           AURORA_ACTIVE_RELEASE_REVIEW_PR: ${{ inputs.active_release_review_pr }}
+          AURORA_ACTIVE_RELEASE_REVIEW_MODE: ${{ inputs.active_release_review_mode }}
+          AURORA_ACTIVE_RELEASE_DEPLOYMENT_ENVIRONMENT: firebase-homologation
           AURORA_ACTIVE_RELEASE_PREVIOUS_SHA256: ${{ inputs.active_release_previous_sha256 }}
           AURORA_ACTIVE_RELEASE_SERVER_MANIFEST: firebase-migration/functions/runtime-release/server-manifest.json
           AURORA_ACTIVE_RELEASE_WEB_MANIFEST: firebase-migration/functions/runtime-release/web-manifest.json

@@ -1,0 +1,39 @@
+# Aprovação do titular para promoção HML
+
+Em 08/10/2026, o titular declarou ter realizado a revisão das quatro candidatas e do gateway, aceitou especificamente R029 no escopo e prazo existentes e autorizou integração, publicação e promoção HML. A decisão sanitizada e versionada está em [hml-owner-release-approval-v1.json](../policy/hml-owner-release-approval-v1.json).
+
+Em 12/10/2026, o titular reafirmou: “Revisão humana APROVADA E REALIZADA !!! das quatro candidatas e do gateway, com decisão específica de R029.” A reafirmação fica anexada à decisão original de 08/10, sem substituir sua identidade, ampliar as cabeças revisadas ou prorrogar R029. O vencimento permanece `2026-10-15T03:00:00.000Z`, ao encerrar 14/10 em `America/Sao_Paulo`.
+
+| Objeto revisado | Identidade exata |
+|---|---|
+| PR #183 | `c76c22c47f2591c33fd9e4bb4216e6b5e593fe1f` |
+| PR #184 | `bf5bbc1146245bdf112cedfd9a9c6cc558e46106` |
+| PR #187 | `4ae55d9c23f3c5f0c660c7cc579bdf6e8acba017` |
+| PR #190 | `804d4a460972cdcc5924cb3cf46a65eddff08b8b` |
+| Gateway local | `d94f2c93ca25b8961cec25cb032a636fa630fc64` |
+| Patch do gateway SHA-256 | `53531906693f6acc60e52084f10722c592c8aefbbf9885029f3bd2ddd2f6269f` |
+
+`DIRECT_OWNER_CHAT` registra essa decisão humana. A conta GitHub de execução do repositório é `GESTAOWMGJ`; esse identificador técnico não é prova de MFA pessoal nem substitui a proveniência da declaração do titular. Main posterior, este incremento e outros deltas não recebem uma alegação retroativa de revisão integral ou independente.
+
+O gateway v5 é um incremento técnico posterior, fonte `46fa11c7d4be68893a616530509872254ef809e6`, deploy `appgdep_6ac74c3ecd8081919043fc4bf3e2da37` concluído em 08/10/2026 às 07:54:57 UTC, com 22 cenários isolados e 8 GETs anônimos compilados aprovados conforme evidência técnica registrada pelo executor. Esse resultado não amplia retroativamente o escopo da revisão humana de `d94f2c93` nem comprova uma sessão pessoal/MFA.
+
+O caminho padrão `GITHUB_PULL_REQUEST_REVIEW` preserva a exigência de review humano aprovado, no head exato, por pessoa distinta do autor. O modo opcional `OWNER_DEPLOYMENT_APPROVAL` permite a governança pelo titular somente no projeto `wmgj-hml-jfn-20260927`, ambiente `firebase-homologation`, branch `main`, até a revisão de 14/10/2026 em São Paulo. Ele exige:
+
+- PR integrado cujo merge commit seja o SHA exato promovido, main atual e CI/checks exatos aprovados;
+- actor e triggering actor GitHub do titular, ambos do tipo User, e identidade do runner correspondente;
+- reviewer nominal ainda configurado no ambiente, política de deployment restrita somente à main e configuração que permita explicitamente o aceite pelo próprio titular;
+- aprovação real desse titular em `GET /actions/runs/{runId}/approvals`, no mesmo run do publisher e no ambiente HML exato; ausência, Bot, outro titular/ambiente ou qualquer rejeição registrada bloqueiam;
+- as quatro cabeças originalmente revisadas ainda identificadas nos PRs integrados;
+- deploy e todos os smokes existentes aprovados, bytes reais, assinatura Ed25519, predecessor explícito e CAS/histórico atômico, com main e prazo novamente conferidos em cada tentativa transacional.
+
+O actor, um booleano, uma opção de input ou a possibilidade de bypass administrativo não constituem aprovação. O publisher usa `github.token` com `actions: read` e `pull-requests: read`: seu código lê evidências e não cria approvals/reviews. O ambiente permite revisão pelo mesmo titular; portanto este modo não representa segregação de funções ou revisão independente. A main observada sem branch protection/ruleset não deve ser descrita como enforcement de checks por proteção de branch.
+
+Os endpoints de [environment](https://docs.github.com/en/rest/deployments/environments#get-an-environment), [branch policies](https://docs.github.com/en/rest/deployments/branch-policies#list-deployment-branch-policies) e [review history do run](https://docs.github.com/en/rest/actions/workflow-runs#get-the-review-history-for-a-workflow-run) exigem `Actions: read` e aceitam installation access tokens. A documentação de permissão não é prova de uma chamada já executada com o token desse job: resposta indisponível, 403/404, truncamento ou evidência divergente impedem a promoção, sem fallback para token privilegiado ou flag de aprovação.
+
+O certificado mantém o schema atual. O histórico protegido registra separadamente `approvalProvenance`, incluindo modo, SHA promovido, run/ambiente/titular, digest da decisão, cabeças originais, gateway e escopo de R029. Nenhum review GitHub é fabricado; nenhum pin é publicado pela existência desta documentação ou de testes. GitHub e Firestore continuam sistemas separados, sem transação distribuída.
+
+O booleano compatível `humanReviewApproved` representa a aprovação humana para promoção segundo o modo registrado no histórico. No modo do titular ele não significa review independente ou leitura integral da main posterior. A declaração de revisão original continua limitada às identidades acima.
+
+Na reconciliação local de 12/10, a baseline observada é `cd296dc46366429d5b09d7117f5ee66e757980b5`. O ambiente GitHub consultado conserva reviewer `GESTAOWMGJ` do tipo User, ID `278915189`, e uma única branch policy `main`. O run `38280466024` registra aprovação desse titular no ambiente `firebase-homologation`, ID `22941465860`, e validação bem-sucedida; seu deploy falhou no smoke autenticado e o publisher foi pulado. A aprovação real desse run não comprova deploy/smoke nem libera promoção. O guard `CANONICAL_RELEASE_PROMOTION_REQUIRED`, a verificação do par Ed25519 e os gates de fonte, smoke e CAS permanecem preservados após #211/#212. Esta reconciliação é código/teste local; nenhum pin foi publicado por ela.
+
+R029 mantém 7 agregações HIGH e 4 MODERATE, zero CRITICAL, apenas nas ferramentas de teste. As compensações, prazo e condições de suspensão estão no [registro de risco](32-security-risk-register.md). Produção e `CLINICAL_SENSITIVE` continuam fora desta autorização. Reverter este incremento restaura o modo exclusivamente baseado em review de PR, preservando o histórico já gravado.
