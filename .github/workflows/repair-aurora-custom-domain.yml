@@ -112,6 +112,7 @@ jobs:
               --arg stage "$stage" --arg http "$http" --arg apiStatus "$api_status" --arg apiCode "$api_code" \
               '{schemaVersion:1,projectId:$project,siteId:$site,domain:$domain,stage:$stage,httpStatus:$http,
                 apiStatus:$apiStatus,apiCode:$apiCode,secretsIncluded:false,iamChanged:false,dnsChanged:false}' > "$evidence"
+            cat "$evidence"
           }
 
           site_file="$(mktemp "${RUNNER_TEMP}/aurora-site.XXXXXX.json")"
@@ -233,6 +234,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aurora-hml-custom-domain-${{ github.sha }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/aurora-custom-domain.*.json
+          path: ${{ runner.temp }}/aurora-custom-domain*.json
           if-no-files-found: ignore
           retention-days: 14
