@@ -185,7 +185,7 @@ jobs:
         env:
           PROJECT_ID: ${{ inputs.project_id }}
           APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
-          CANONICAL_PREFLIGHT_SCOPE: routing-only
+          CANONICAL_PREFLIGHT_SCOPE: ${{ inputs.publish_active_release && 'full' || 'routing-only' }}
         run: |
           set -euo pipefail
           test "$PROJECT_ID" = "$APPROVED_PROJECT"
@@ -480,6 +480,17 @@ jobs:
           }
           NODE
           npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusUserProfiles,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
+      - name: Promote exact ready AuthGate traffic after full canonical preflight
+        if: ${{ inputs.publish_active_release }}
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          PUBLISH_ACTIVE_RELEASE: ${{ inputs.publish_active_release }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse refs/remotes/origin/main)" = "$GITHUB_SHA"
+          node firebase-migration/scripts/promote-hml-authgate-traffic.mjs promote
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -844,6 +855,12 @@ jobs:
           path: firebase-migration/functions/runtime-release/*-manifest.json
           if-no-files-found: error
           retention-days: 14
+      - name: Restore owned AuthGate traffic when deploy or smoke fails
+        if: ${{ always() && inputs.publish_active_release && (failure() || cancelled()) }}
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          PUBLISH_ACTIVE_RELEASE: ${{ inputs.publish_active_release }}
+        run: node firebase-migration/scripts/promote-hml-authgate-traffic.mjs rollback
 
   publish-active-release:
     name: Publish verified canonical active release
