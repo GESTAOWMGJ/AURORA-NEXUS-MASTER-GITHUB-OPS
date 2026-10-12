@@ -236,6 +236,31 @@ jobs:
             fi
           fi
 
+          # Preserve only DNS record names/types/counts and SHA-256 digests of record values.
+          # Raw ownership challenge values are never emitted.
+          if [ -n "$domain_json" ]; then
+            dns_summary="$(
+              jq -c '
+                def summarize:
+                  if type == "array" then
+                    map({
+                      domainName: (.domainName // ""),
+                      type: (.type // ""),
+                      valueCount: ((.rdata // []) | length),
+                      valueHashes: ((.rdata // []) | map(@base64) )
+                    })
+                  else [] end;
+                {
+                  desired: (.requiredDnsUpdates.desired | summarize),
+                  discovered: (.requiredDnsUpdates.discovered | summarize)
+                }' <<<"$domain_json"
+            )"
+            dns_summary_hashed="$(python3 -c 'import base64,hashlib,json,sys;x=json.loads(sys.argv[1]);[(row.__setitem__("valueHashes",[hashlib.sha256(base64.b64decode(v)).hexdigest() for v in row.get("valueHashes",[])])) for side in ("desired","discovered") for row in x.get(side,[])];print(json.dumps(x,separators=(",",":")))' "$dns_summary")"
+            jq -nc --argjson updates "$dns_summary_hashed"               --arg project "$PROJECT_ID" --arg site "$SITE_ID" --arg domain "$DOMAIN"               '{schemaVersion:1,projectId:$project,siteId:$site,domain:$domain,stage:"REQUIRED_DNS_UPDATES_HASHED",
+                requiredDnsUpdates:$updates,secretsIncluded:false,rawDnsValuesIncluded:false,iamChanged:false,dnsChanged:false}'               > "${RUNNER_TEMP}/aurora-custom-domain-dns-summary.json"
+            cat "${RUNNER_TEMP}/aurora-custom-domain-dns-summary.json"
+          fi
+
           current='{}'
           for attempt in $(seq 1 30); do
             code="$(curl --silent --show-error --max-time 30 -o "$evidence.current" -w '%{http_code}'               "${auth[@]}" "$BASE/$resource" || true)"
