@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-12T17:25:22Z",
+  "baselineSha": "cd296dc46366429d5b09d7117f5ee66e757980b5",
+  "status": "DEPLOYED_UNVERIFIED_CANONICAL_DOMAIN_PENDING",
+  "facts": {
+    "windowsRemoteOnline": true,
+    "githubAuthenticated": true,
+    "gcpUserAuthenticated": true,
+    "hmlDeployRun": 38280466024,
+    "validationJob": "success",
+    "deploymentStep": "success",
+    "authenticatedSmokeStep": "failure",
+    "activeReleasePublication": "skipped",
+    "canonicalAnonymousBootstrapHttp": 404,
+    "technicalSessionLoginHeadHttp": 405,
+    "authoritativeDnsTxtMatchesHml": true,
+    "authoritativeNameservers": [
+      "a.sec.dns.br",
+      "c.sec.dns.br"
+    ],
+    "providerOwnershipState": "OWNERSHIP_MISMATCH",
+    "providerLastDnsCheck": "2026-10-12T12:52:41.219767986Z",
+    "tlsCertificateState": "CERT_ACTIVE",
+    "domainUpdateOperation": "5603534e-59a2-4097-8d43-6775f68b6fc0",
+    "domainUpdateOperationDone": true,
+    "domainUpdateChangedCertPreference": false
+  },
+  "inference": "Provider domain ownership/routing reconciliation lags the authoritative TXT; successful domain update operation does not prove DNS ownership reconciliation or application access.",
+  "nextAction": "Wait for provider OWNERSHIP_ACTIVE and canonical APIs; then revalidate main SHA and resume authorized protected deployment/smoke/activeRelease publication using original inputs if SHA unchanged. Do not rerun restored ingestion/HMAC/reconciliation or weaken authentication.",
+  "rollback": "No domain deleted, no DNS changed, no IAM expanded, no certificate preference changed. Private before/operation snapshots on authorized Windows. Evidence stored off main to preserve exact candidate.",
+  "runtimeOrganicLearningPromoted": false,
+  "allClientsSynchronized": false,
+  "fullOperationalBetaVerified": false
+}
