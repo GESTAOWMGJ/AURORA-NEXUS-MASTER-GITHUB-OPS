@@ -103,7 +103,7 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}): 
       detail: "Instalação retomável e recibo por amostra; credencial, IAM, deploy e reconciliação real continuam sujeitos aos gates existentes."
     },
     engineeringReadinessPercent: Math.round((doneWeight / totalWeight) * 100),
-    metricNote: "Percentual ponderado dos gates de engenharia versionados; não representa avaliação comercial, regulatória ou financeira.",
+    metricNote: "Progresso dos requisitos de desenvolvimento. A validação comercial, regulatória e financeira exige evidências próprias.",
     gates,
     nextGate: gates.find((gate) => gate.status === "BLOCKED" || gate.status === "IN_PROGRESS" || gate.status === "PLANNED") ?? null
   };
