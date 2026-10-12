@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { mount, safePath, validateCapabilities, taskActions, validPublication } = require('./studio-local.js');
+const { mount, safePath, validateCapabilities, taskActions, validPublication, validSource } = require('./studio-local.js');
 const ID = 'a'.repeat(32), BASE = 'b'.repeat(40), HASH = 'c'.repeat(64), ORG = 'synthetic-org';
 class Element {
   constructor(tag = 'div') { this.tagName = tag; this.children = []; this.listeners = {}; this.attrs = {}; this.hidden = false; this.disabled = false; this.checked = false; this.value = ''; this._text = ''; }
@@ -17,8 +17,13 @@ class Element {
 }
 function capabilities() {
   return { schemaVersion: 'aurora.master.studio.v1', authenticatedOrgId: ORG, externalAiEnabled: false, modelCanExecuteCommands: false, arbitraryCodeExecution: false,
-    repository: { state: 'AVAILABLE', projectId: 'synthetic-project', allowedPaths: ['src/menu.js'], fileCatalog: [{ path: 'src/menu.js', exists: true, byteLength: 20, state: 'EDITABLE' }] },
-    limits: { maxFiles: 10, maxContextBytes: 50000 }, operations: { publish: 'NOT_IMPLEMENTED' } };
+    repository: { state: 'AVAILABLE', projectId: 'synthetic-project', headRevision: BASE, allowedPaths: ['src/menu.js'], fileCatalog: [{ path: 'src/menu.js', exists: true, byteLength: 20, state: 'EDITABLE' }] },
+    source: sourceReceipt(), limits: { maxFiles: 10, maxContextBytes: 50000 }, operations: { publish: 'NOT_IMPLEMENTED', sourceRefresh: 'FIXED_MAIN_SNAPSHOT_ONLY' } };
+}
+function sourceReceipt(state = 'ORIGINAL_SOURCE', headRevision = BASE, sourceVersion = 0) {
+  return { schemaVersion: 'aurora.master.source.v1', state, sourceVersion, headRevision, originalRevision: BASE,
+    receiptSha256: HASH, eventHash: null, snapshotVerified: false, originalCheckoutChanged: false,
+    remoteCurrent: 'NOT_OBSERVED', canMerge: false, canDeploy: false, canInstall: false };
 }
 function makeTask(state = 'CONTEXT_BOUND', version = 1) {
   return { schemaVersion: 'aurora.master.studio.v1', id: ID, orgId: ORG, projectId: 'synthetic-project', baseRevision: BASE, version, state, summary: 'Melhorar o menu', prompt: 'Melhorar o menu no celular', classification: 'INTERNAL', history: [] };
@@ -155,7 +160,7 @@ test('isolated integration assets preserve identity, cookie handoff and self-onl
 });
 
 function publicationCapabilities() {
-  return { ...capabilities(), operations: { publish: 'DRAFT_PR_ONLY', ci: 'REMOTE_METADATA_ONLY' },
+  return { ...capabilities(), operations: { ...capabilities().operations, publish: 'DRAFT_PR_ONLY', ci: 'REMOTE_METADATA_ONLY' },
     publisher: { schemaVersion: 'aurora.master.publisher.v1', state: 'CONFIGURED_AUTH_NOT_OBSERVED',
       repository: 'GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS', baseBranch: 'main',
       publish: 'OPT_IN_DRAFT_ONLY_AUTH_NOT_OBSERVED', ci: 'REMOTE_METADATA_ONLY',
@@ -258,4 +263,273 @@ test('observed draft with a changed base permits read-only CI while publication 
   assert.match(f.e('studio-publication-receipt').textContent, /draft encontrado; origem alterada/);
   const bad = structuredClone(publication); bad.observedPullRequest.headSha = '1'.repeat(40);
   assert.equal(validPublication(bad, before, ORG), false);
+});
+
+test('source capabilities and receipts reject forged revisions, extra fields and expanded authority', async () => {
+  for (const change of [{ schemaVersion: 'other' }, { state: 'INSTALLED' }, { sourceVersion: -1 },
+    { headRevision: [BASE] }, { originalRevision: 'bad' }, { receiptSha256: [HASH] }, { eventHash: [HASH] },
+    { observedRevision: [BASE] }, { snapshotVerified: 'true' }, { originalCheckoutChanged: true },
+    { remoteCurrent: 'CURRENT' }, { canMerge: true }, { canDeploy: true }, { canInstall: true }, { arbitraryCommand: 'git pull' }]) {
+    const source = { ...sourceReceipt(), ...change };
+    assert.equal(Boolean(validSource(source)), false, JSON.stringify(change));
+    const caps = capabilities(); caps.source = source;
+    assert.throws(() => validateCapabilities(caps, ORG), /INVALID_RESPONSE/);
+  }
+  for (const operation of ['git pull', true, ['FIXED_MAIN_SNAPSHOT_ONLY']]) {
+    const caps = capabilities(); caps.operations.sourceRefresh = operation;
+    assert.throws(() => validateCapabilities(caps, ORG), /INVALID_RESPONSE/);
+  }
+  const inconsistent = capabilities(); inconsistent.repository.headRevision = '1'.repeat(40);
+  assert.throws(() => validateCapabilities(inconsistent, ORG), /INVALID_RESPONSE/);
+  assert.equal(Boolean(validSource(sourceReceipt(), true)), false, 'original state is not a refresh result');
+  const legacy = capabilities(); delete legacy.source; delete legacy.repository.headRevision; delete legacy.operations.sourceRefresh;
+  assert.equal(validateCapabilities(legacy, ORG), legacy);
+  const f = fixture(); f.set('/api/studio/capabilities', legacy); await f.controller.connect();
+  assert.equal(f.e('studio-source-refresh').disabled, true);
+});
+
+test('source refresh posts only the local revision and rereads capabilities and catalogue without changing old task', async () => {
+  const f = fixture(); await f.create(); await f.e('studio-propose').emit('click');
+  const before = structuredClone(f.controller.getState().task), next = '1'.repeat(40);
+  const source = { ...sourceReceipt('SOURCE_ACTIVATED', next, 1), snapshotVerified: true, eventHash: '2'.repeat(64) };
+  const caps = capabilities(); caps.repository.headRevision = next; caps.source = { ...source, state: 'SNAPSHOT_ACTIVE' };
+  caps.repository.allowedPaths = ['src/current.js']; caps.repository.fileCatalog = [{ path: 'src/current.js', exists: true, byteLength: 30, state: 'EDITABLE' }];
+  f.set('/api/studio/source-refresh', { source }); f.set('/api/studio/capabilities', caps);
+  const start = f.calls.length; await f.e('studio-source-refresh').emit('click');
+  const calls = f.calls.slice(start), refresh = calls.find(call => call.route === '/api/studio/source-refresh');
+  assert.deepEqual(refresh.body, { expectedLocalSourceRevision: BASE });
+  assert.equal(refresh.method, 'POST'); assert.equal(refresh.headers['X-Aurora-Local'], '1');
+  assert(calls.findIndex(call => call.route === '/api/studio/capabilities') > calls.indexOf(refresh));
+  assert.deepEqual(f.controller.getState().task, before); assert.equal(f.controller.getState().context, null);
+  assert.match(f.e('studio-source-version').textContent, /versão 1 · 111111111111/);
+  assert.match(f.e('studio-source-receipt').textContent, /Checkout originalPreservado/);
+  assert.match(f.e('studio-catalog').textContent, /src\/current\.js/);
+  assert.doesNotMatch(f.e('studio-catalog').textContent, /src\/menu\.js/);
+  assert.match(f.e('studio-task-source-notice').textContent, /somente leitura/);
+  for (const action of ['propose', 'import', 'validate', 'stage', 'verify', 'prepare', 'publish']) assert.equal(f.e('studio-' + action).disabled, true, action);
+  assert.equal(f.e('studio-diff').disabled, false); assert.equal(f.e('studio-refresh-history').disabled, false);
+  const after = f.calls.length; await f.e('studio-propose').emit('click'); await f.e('studio-diff').emit('click');
+  assert.equal(f.calls.slice(after).filter(call => call.method === 'POST').length, 0);
+  assert.match(f.e('studio-diff-output').textContent, /-old/); assert.equal(f.e('studio-reviewed').disabled, true);
+});
+
+test('every old source task blocks code mutations while proposal differences remain readable', () => {
+  for (const state of ['CONTEXT_BOUND', 'PROPOSED', 'VALIDATED', 'PATCH_STAGED', 'CHECK_FAILED', 'STATIC_CHECKS_PASSED', 'VERSION_PREPARED']) {
+    const task = { ...makeTask(state), proposal: { files: [] } };
+    const actions = taskActions(task, true, task.version, '1'.repeat(40));
+    for (const action of ['propose', 'validate', 'stage', 'verify', 'prepare']) assert.equal(actions[action], false, state + ':' + action);
+    assert.equal(actions.diff, state !== 'CONTEXT_BOUND');
+  }
+});
+
+test('old published source permits draft reconciliation and CI observation while publish stays disabled', async () => {
+  const f = await preparedFixture(), before = f.controller.getState().task, publication = publicationFor(before);
+  const oldTask = { ...before, publication }; f.setTask(oldTask); await f.e('studio-refresh-task').emit('click');
+  const next = '1'.repeat(40), source = { ...sourceReceipt('SOURCE_ACTIVATED', next, 1), snapshotVerified: true };
+  const caps = publicationCapabilities(); caps.repository.headRevision = next; caps.source = { ...source, state: 'SNAPSHOT_ACTIVE' };
+  f.set('/api/studio/source-refresh', { source }); f.set('/api/studio/capabilities', caps);
+  await f.e('studio-source-refresh').emit('click');
+  assert.equal(f.e('studio-publish').disabled, true);
+  for (const [button, action] of [['studio-reconcile-publication', 'reconcile-publication'], ['studio-read-ci', 'read-ci']]) {
+    assert.equal(f.e(button).disabled, false);
+    f.set('/api/studio/tasks/' + ID + '/' + action, { task: oldTask, publication });
+    await f.e(button).emit('click');
+    assert.equal(f.controller.getState().task.version, before.version);
+  }
+  assert.equal(f.calls.some(call => call.route.endsWith('/publish-draft')), false);
+  assert.equal(f.calls.filter(call => call.route.endsWith('/read-ci')).length, 1);
+});
+
+test('unchanged source and moved remote produce bounded receipts without changing local revision', async () => {
+  for (const state of ['ALREADY_CURRENT', 'REMOTE_MOVED']) {
+    const f = fixture(); await f.controller.connect();
+    const source = { ...sourceReceipt(state), ...(state === 'REMOTE_MOVED' ? { observedRevision: '1'.repeat(40) } : {}) };
+    f.set('/api/studio/source-refresh', { source }); await f.e('studio-source-refresh').emit('click');
+    assert.equal(f.e('studio-source-refresh').disabled, false);
+    assert.match(f.e('studio-source-version').textContent, /bbbbbbbbbbbb/);
+    assert.match(f.e('studio-notice').textContent, state === 'REMOTE_MOVED' ? /origem mudou.*preservado/ : /já está nesta versão/);
+    assert.equal(f.calls.filter(call => call.route === '/api/studio/source-refresh').length, 1);
+  }
+});
+
+test('uncertain source refresh requires capabilities readback before another attempt and blocked source never retries', async () => {
+  const f = fixture(); await f.controller.connect();
+  f.handlers.set('/api/studio/source-refresh', () => { const error = Error('aborted'); error.name = 'AbortError'; throw error; });
+  await f.e('studio-source-refresh').emit('click');
+  assert.equal(f.controller.getState().sourceSyncRequired, true); assert.equal(f.e('studio-source-refresh').disabled, true);
+  assert.equal(f.e('studio-create').disabled, true); await f.e('studio-source-refresh').emit('click');
+  assert.equal(f.calls.filter(call => call.route === '/api/studio/source-refresh').length, 1);
+  const before = f.calls.length; await f.e('studio-reconnect').emit('click');
+  assert(f.calls.slice(before).some(call => call.route === '/api/studio/capabilities'));
+  assert.equal(f.controller.getState().sourceSyncRequired, false); assert.equal(f.e('studio-source-refresh').disabled, false);
+  const blocked = capabilities(); blocked.source.state = 'REFRESH_BLOCKED'; f.set('/api/studio/capabilities', blocked);
+  await f.e('studio-reconnect').emit('click'); assert.equal(f.e('studio-source-refresh').disabled, true);
+  await f.e('studio-source-refresh').emit('click');
+  assert.equal(f.calls.filter(call => call.route === '/api/studio/source-refresh').length, 1);
+});
+
+test('forged refresh result and late response cannot activate capabilities or revive a closed session', async () => {
+  const invalid = fixture(); await invalid.controller.connect();
+  invalid.set('/api/studio/source-refresh', { source: { ...sourceReceipt('SOURCE_ACTIVATED'), canInstall: true } });
+  const before = invalid.calls.length; await invalid.e('studio-source-refresh').emit('click');
+  assert.equal(invalid.controller.getState().sourceSyncRequired, true);
+  assert.equal(invalid.calls.slice(before).some(call => call.route === '/api/studio/capabilities'), false);
+  const f = fixture(); await f.controller.connect(); let resolve;
+  f.handlers.set('/api/studio/source-refresh', () => new Promise(done => { resolve = done; }));
+  const pending = f.e('studio-source-refresh').emit('click'); f.controller.endSession();
+  resolve({ status: 200, value: { source: sourceReceipt('ALREADY_CURRENT') } }); await pending;
+  assert.equal(f.controller.getState().closed, true); assert.equal(f.e('studio-content').hidden, true);
+  assert.equal(f.e('studio-source-version').textContent, ''); assert.equal(f.e('studio-source-receipt').textContent, '');
+  assert.equal(f.e('studio-source-refresh').disabled, true);
+});
+
+test('task audit exposes the existing bounded memory receipt with full method IDs and partial historical coverage', async () => {
+  const f = fixture(); await f.controller.connect();
+  const task = makeTask('PROPOSED', 2);
+  task.knowledge = { status: 'LOADED', corpusVersion: '1.0.2', corpusHash: '4'.repeat(64), recordIds: ['AUTO-MO-001'],
+    loadedCount: 1, rejectedCount: 0, selectedContextBytes: 588, maxContextBytes: 600,
+    selectionState: 'SELECTED', completeHistoricalAbsorption: false };
+  f.controller.renderTask(task);
+  const receipt = f.e('studio-knowledge-receipt').textContent;
+  for (const expected of ['Memória consultada1.0.2', 'Hash da memória' + '4'.repeat(64),
+    'Métodos consultadosAUTO-MO-001', 'Contexto selecionado588/600 bytes', 'Estado da seleçãoSELECTED', 'Cobertura histórica completaNão']) {
+    assert(receipt.includes(expected), expected);
+  }
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  assert.match(html, /<details class="studio-advanced"><summary>Evidências e histórico desta tarefa<\/summary>[^]*?id="studio-knowledge-receipt"[^]*?<\/details>/);
+  const untrusted = { ...task, knowledge: { ...task.knowledge, corpusVersion: '<img src=x onerror=evil()>' } };
+  f.controller.renderTask(untrusted);
+  assert.match(f.e('studio-knowledge-receipt').textContent, /<img src=x onerror=evil\(\)>/);
+  assert.equal(f.e('studio-knowledge-receipt').children[0].children[1].children.length, 0);
+  f.controller.renderTask({ ...task, knowledge: { ...task.knowledge, selectedContextBytes: 601 } });
+  assert.equal(f.e('studio-knowledge-receipt').textContent, '');
+  f.controller.renderTask(task); f.controller.endSession();
+  assert.equal(f.e('studio-knowledge-receipt').textContent, '');
+});
+
+test('recovery capability is closed and button appears only for a verified blocked source', async () => {
+  for (const operation of [true, 'RESET_ANY_SOURCE', ['PRESERVE_AND_RESET_BLOCKED_ATTEMPT']]) {
+    const caps = capabilities(); caps.operations.sourceRecovery = operation;
+    assert.throws(() => validateCapabilities(caps, ORG), /INVALID_RESPONSE/);
+  }
+  for (const [operation, state] of [[undefined, 'REFRESH_BLOCKED'], ['NOT_CONFIGURED', 'REFRESH_BLOCKED'],
+    ['PRESERVE_AND_RESET_BLOCKED_ATTEMPT', 'ORIGINAL_SOURCE']]) {
+    const f = fixture(), caps = capabilities(); caps.source.state = state;
+    if (operation !== undefined) caps.operations.sourceRecovery = operation;
+    f.set('/api/studio/capabilities', caps); await f.controller.connect();
+    assert.equal(f.e('studio-source-recover').hidden, true); assert.equal(f.e('studio-source-recover').disabled, true);
+    await f.e('studio-source-recover').emit('click');
+    assert.equal(f.calls.some(call => call.route === '/api/studio/source-recover'), false);
+  }
+});
+
+test('blocked source recovery uses receipt and revision CAS, preserves task and never starts another refresh', async () => {
+  const f = fixture(), blocked = capabilities(); blocked.source.state = 'REFRESH_BLOCKED';
+  blocked.operations.sourceRecovery = 'PRESERVE_AND_RESET_BLOCKED_ATTEMPT';
+  f.set('/api/studio/capabilities', blocked); await f.controller.connect();
+  const task = makeTask('PROPOSED', 2); task.history = [{ state: 'PROPOSED', version: 2, eventHash: HASH }]; f.controller.renderTask(task);
+  assert.equal(f.e('studio-source-refresh').disabled, true);
+  assert.equal(f.e('studio-source-recover').hidden, false); assert.equal(f.e('studio-source-recover').disabled, false);
+  const source = { ...sourceReceipt('SOURCE_RECOVERED', BASE, 1), receiptSha256: '2'.repeat(64), eventHash: '3'.repeat(64) };
+  const recovered = capabilities(); recovered.source = { ...source, state: 'ORIGINAL_SOURCE' };
+  recovered.operations.sourceRecovery = 'PRESERVE_AND_RESET_BLOCKED_ATTEMPT';
+  f.set('/api/studio/source-recover', { source, externalAiCalls: 0 }); f.set('/api/studio/capabilities', recovered);
+  const before = f.calls.length; await f.e('studio-source-recover').emit('click');
+  const calls = f.calls.slice(before), recovery = calls.find(call => call.route === '/api/studio/source-recover');
+  assert.deepEqual(recovery.body, { expectedLocalSourceRevision: BASE, expectedSourceReceiptSha256: HASH });
+  assert.equal(recovery.method, 'POST'); assert.equal(recovery.headers['X-Aurora-Local'], '1');
+  assert.deepEqual(f.controller.getState().task, task); assert.equal(f.controller.getState().sourceSyncRequired, false);
+  assert(calls.findIndex(call => call.route === '/api/studio/capabilities') > calls.indexOf(recovery));
+  assert(calls.some(call => call.route === '/api/studio/tasks'));
+  assert.equal(f.calls.some(call => call.route === '/api/studio/source-refresh'), false);
+  assert.equal(f.e('studio-source-refresh').disabled, false); assert.equal(f.e('studio-source-recover').hidden, true);
+  assert.match(f.e('studio-notice').textContent, /Tentativa recuperada.*histórico preservados/);
+  assert.match(f.e('studio-source-receipt').textContent, /Versão da fonte1/);
+  assert.match(f.e('studio-source-receipt').textContent, new RegExp('Hash do evento' + '3'.repeat(64)));
+  f.controller.endSession(); assert.equal(f.e('studio-source-recover').hidden, true); assert.equal(f.e('studio-source-recover').disabled, true);
+});
+
+test('source response accepts only zero external AI calls and the correct refresh or recovery result state', async () => {
+  const success = fixture(); await success.controller.connect();
+  success.set('/api/studio/source-refresh', { source: sourceReceipt('ALREADY_CURRENT'), externalAiCalls: 0 });
+  await success.e('studio-source-refresh').emit('click'); assert.equal(success.controller.getState().sourceSyncRequired, false);
+  for (const extra of [{ externalAiCalls: 1 }, { externalAiCalls: '0' }, { arbitraryCommand: 'git pull' }]) {
+    const f = fixture(); await f.controller.connect();
+    f.set('/api/studio/source-refresh', { source: sourceReceipt('ALREADY_CURRENT'), ...extra });
+    await f.e('studio-source-refresh').emit('click'); assert.equal(f.controller.getState().sourceSyncRequired, true);
+  }
+  const f = fixture(), blocked = capabilities(); blocked.source.state = 'REFRESH_BLOCKED';
+  blocked.operations.sourceRecovery = 'PRESERVE_AND_RESET_BLOCKED_ATTEMPT';
+  f.set('/api/studio/capabilities', blocked); await f.controller.connect();
+  f.set('/api/studio/source-recover', { source: sourceReceipt('SOURCE_ACTIVATED'), externalAiCalls: 0 });
+  await f.e('studio-source-recover').emit('click');
+  assert.equal(f.controller.getState().sourceSyncRequired, true); assert.equal(f.e('studio-source-recover').disabled, true);
+  assert.equal(Boolean(validSource(sourceReceipt('SOURCE_RECOVERED'), true)), false);
+  assert.equal(Boolean(validSource(sourceReceipt('SOURCE_RECOVERED'), true, true)), true);
+});
+
+test('source lock receipt accepts only the final optional digest on a blocked source', () => {
+  const source = { ...sourceReceipt('REFRESH_BLOCKED'), sourceLockSha256: '5'.repeat(64) };
+  assert.equal(Boolean(validSource(source)), true);
+  const caps = capabilities(); caps.source = source;
+  assert.equal(validateCapabilities(caps, ORG), caps);
+  for (const change of [{ sourceLockSha256: null }, { sourceLockSha256: '' }, { sourceLockSha256: ['5'.repeat(64)] },
+    { state: 'ORIGINAL_SOURCE' }, { sourceLockPid: 123 }, { sourceLockState: 'DEAD' }]) {
+    const forged = { ...source, ...change }; assert.equal(Boolean(validSource(forged)), false, JSON.stringify(change));
+    const bad = capabilities(); bad.source = forged; assert.throws(() => validateCapabilities(bad, ORG), /INVALID_RESPONSE/);
+  }
+});
+
+test('verified dead global lock recovers with all three CAS fields even without a source operation', async () => {
+  const f = fixture(), blocked = capabilities(), lockHash = '5'.repeat(64);
+  blocked.source = { ...sourceReceipt('REFRESH_BLOCKED'), sourceLockSha256: lockHash };
+  blocked.operations.sourceRecovery = 'PRESERVE_AND_RESET_BLOCKED_ATTEMPT';
+  assert.equal(Object.hasOwn(blocked.source, 'operation'), false);
+  f.set('/api/studio/capabilities', blocked); await f.controller.connect();
+  const task = { ...makeTask('PROPOSED', 2), baseRevision: '0'.repeat(40), proposal: { files: [] }, proposalFingerprint: HASH,
+    history: [{ version: 2, state: 'PROPOSED', eventHash: HASH }] };
+  f.controller.renderTask(task);
+  assert.equal(f.e('studio-source-recover').hidden, false); assert.equal(f.e('studio-source-recover').disabled, false);
+  assert.match(f.e('studio-source-receipt').textContent, new RegExp('Hash da trava recuperável: ' + lockHash));
+  const source = { ...sourceReceipt('SOURCE_RECOVERED', BASE, 1), receiptSha256: '2'.repeat(64), eventHash: '3'.repeat(64) };
+  const recovered = capabilities(); recovered.source = { ...source, state: 'ORIGINAL_SOURCE' };
+  recovered.operations.sourceRecovery = 'PRESERVE_AND_RESET_BLOCKED_ATTEMPT';
+  f.set('/api/studio/source-recover', { source, externalAiCalls: 0 }); f.set('/api/studio/capabilities', recovered);
+  await f.e('studio-source-recover').emit('click');
+  const call = f.calls.find(item => item.route === '/api/studio/source-recover');
+  assert.deepEqual(call.body, { expectedLocalSourceRevision: BASE, expectedSourceReceiptSha256: HASH, expectedSourceLockSha256: lockHash });
+  assert.deepEqual(f.controller.getState().task, task);
+  assert.equal(f.calls.some(item => item.route === '/api/studio/source-refresh'), false);
+  assert.equal(f.e('studio-source-recover').hidden, true); assert.equal(f.e('studio-source-refresh').disabled, false);
+  assert.equal(f.e('studio-propose').disabled, true); assert.equal(f.e('studio-diff').disabled, false);
+});
+
+test('live or unverified lock has no recovery proof and a locked operation stays preserved without automatic retry', async () => {
+  const f = fixture(); await f.controller.connect();
+  assert.equal(f.e('studio-source-recover').hidden, true); assert.equal(f.e('studio-source-recover').disabled, true);
+  f.e('studio-request').value = 'Melhorar o menu no celular'; f.e('studio-catalog').children[0].children[0].children[0].checked = true;
+  f.set('/api/studio/context', { code: 'STUDIO_LOCKED' }, 409); await f.e('studio-create').emit('click');
+  assert.equal(f.controller.getState().sourceSyncRequired, true); assert.equal(f.e('studio-create').disabled, true);
+  assert.equal(f.e('studio-source-recover').hidden, true);
+  assert.match(f.e('studio-notice').textContent, /trava sem prova.*preservada/);
+  await f.e('studio-create').emit('click'); await f.e('studio-source-recover').emit('click');
+  assert.equal(f.calls.filter(item => item.route === '/api/studio/context').length, 1);
+  assert.equal(f.calls.some(item => item.route === '/api/studio/source-recover'), false);
+  assert.equal(f.calls.some(item => item.route === '/api/studio/source-refresh'), false);
+});
+
+test('recovery lock conflict requires rereading capabilities and never manufactures another lock hash', async () => {
+  const f = fixture(), blocked = capabilities();
+  blocked.source = { ...sourceReceipt('REFRESH_BLOCKED'), sourceLockSha256: '5'.repeat(64) };
+  blocked.operations.sourceRecovery = 'PRESERVE_AND_RESET_BLOCKED_ATTEMPT';
+  f.set('/api/studio/capabilities', blocked); await f.controller.connect();
+  f.set('/api/studio/source-recover', { code: 'STUDIO_LOCKED' }, 409);
+  await f.e('studio-source-recover').emit('click'); assert.equal(f.controller.getState().sourceSyncRequired, true);
+  assert.equal(f.e('studio-source-recover').disabled, true); await f.e('studio-source-recover').emit('click');
+  assert.equal(f.calls.filter(item => item.route === '/api/studio/source-recover').length, 1);
+  assert.equal(f.calls.some(item => item.route === '/api/studio/source-refresh'), false);
+  f.set('/api/studio/capabilities', capabilities()); const before = f.calls.length; await f.e('studio-reconnect').emit('click');
+  assert(f.calls.slice(before).some(item => item.route === '/api/studio/capabilities'));
+  assert.equal(f.e('studio-source-recover').hidden, true);
+  assert.equal(f.calls.filter(item => item.route === '/api/studio/source-recover').length, 1);
 });

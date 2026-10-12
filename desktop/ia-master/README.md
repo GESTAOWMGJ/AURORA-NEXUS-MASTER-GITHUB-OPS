@@ -4,7 +4,7 @@ Incremento AURORA-IA-MASTER-001 no mesmo AURORA NEXUS. Reutiliza o núcleo TypeS
 
 O fluxo implementado é `contexto autorizado → tarefa persistida → proposta → diff → validação → worktree isolada → checks fixos → branch/commit LOCAL`, com **envio opt-in para PR draft, reconciliação e consulta de metadados CI** como etapas separadas. Está disponível na interface local e no portal pareado, sem ChatGPT. O checkout ativo e o cliente instalado são preservados. Preparo não executa push; o Publisher explícito faz somente o envio de engenharia descrito abaixo. Deploy, instalação, testes gerais locais e comandos escolhidos pelo modelo não são operações do Studio.
 
-O código candidato declara **1.1.0**; a instalação/runtime observados permanecem **1.0.1**, preservados. Testes sintéticos e disponibilidade do código não comprovam atualização instalada, modelo real, CI do SHA final, PR remoto novo ou sincronização.
+O componente declara **1.1.0**. A versão instalada deve ser conferida pelo manifesto e pelo processo em execução; o nome da pasta física pode conservar a baseline **1.0.1**. Testes sintéticos e disponibilidade do código não comprovam atualização instalada, modelo real, CI do SHA final, PR remoto novo ou sincronização.
 
 ## Contexto, propostas e limites reais
 
@@ -52,6 +52,18 @@ A ponte permanece desligada por padrão. Só aceita as origens exatas explicitam
 A página local `http://127.0.0.1:38765/`, aberta por `node manage.cjs pair`, reutiliza a sessão cookie existente. `studio-local.js` oferece catálogo de arquivos, pedido, proposta local ou manual JSON, diff/revisão, cópia isolada, checks estáticos, versão local, envio para revisão e histórico. Código completo e recibos permanecem disponíveis para conferência. O pacote contém CSS e fontes locais; não depende de ChatGPT para esse fluxo.
 
 O portal oferece o mesmo ciclo de engenharia após pareamento explícito. A view Master exige administrador com MFA e escopo de toda a organização no portal; a sessão loopback usa seu próprio vínculo de origem/organização. Isso não fornece MFA ao serviço local ou ao GitHub. Os controles habilitam somente capacidades confirmadas, descartam respostas tardias após saída e suspendem mutações quando o resultado precisa de releitura.
+
+### Atualizar o código pelo próprio Master
+
+Na interface local, **Atualizar código do projeto** consulta somente o `main` do repositório fixo do AURORA, usando o Publisher já configurado e a credencial existente. A operação recebe `expectedLocalSourceRevision`; o formulário e o modelo não escolhem repositório, branch, comando ou token.
+
+A atualização busca objetos Git em um cache separado, confere a ancestralidade e materializa uma cópia detached a partir dos blobs brutos. Confere nomes, tamanhos, hashes, árvore e arquivos antes de ativar o cursor persistido. O checkout original precisa permanecer íntegro, limpo e no SHA inicialmente registrado; não é atualizado nem descartado. Uma trava serializa a troca da fonte com as mutações de tarefas. Recibo e histórico registram os SHAs e eventos da tentativa.
+
+Depois da confirmação, o catálogo e os novos pedidos usam a fonte ativada. Pedidos da fonte anterior conservam diff, histórico e recibos, mas não podem gerar, alterar, validar, preparar ou publicar código. A reconciliação de uma publicação existente e a consulta de CI continuam disponíveis como observações de seu commit imutável. Para continuar uma alteração antiga, crie um novo pedido sobre a fonte atual e revise a nova proposta.
+
+Se `main` avançar durante a cópia, o snapshot completo fica preservado e a interface informa a mudança sem ativá-lo como atual. Falha parcial, concorrência, checkout sujo ou recibo inválido bloqueiam a tentativa; não há retry cego nem limpeza automática. **Recuperar tentativa**, quando disponível, recebe o SHA local e o hash do próprio recibo, confere a fonte ativa e o checkout original, registra a recuperação e permite uma nova ação explícita. Preserva snapshots, cache e histórico; não ativa uma cópia parcial. A operação não faz merge, deploy ou instalação. `remoteCurrent=NOT_OBSERVED` evita afirmar sincronização permanente após a observação pontual.
+
+Travas globais novas registram organização, vínculo da fonte, nonce e PID. Após interrupção do processo, a recuperação pode arquivar os bytes exatos de uma trava reconhecida, com hash e identidade conferidos e duas observações de PID inexistente. Processo vivo, PID reutilizado detectável, erro de permissão, formato desconhecido ou trava vazia legada impedem essa recuperação. Travas de tarefas interrompidas permanecem preservadas. Esses controles não constituem isolamento contra um usuário hostil da mesma conta ou garantia universal contra todas as corridas do sistema operacional.
 
 ## Publisher draft e consulta de CI
 
@@ -117,7 +129,7 @@ O resultado `UPDATED_FILES_VERIFIED_RUNTIME_NOT_VERIFIED` comprova somente os ar
 
 ## Conhecimento e interface
 
-O adaptador de conhecimento da instalação 1.0.1 foi preservado **byte a byte** no source/pacote candidato e testado com fixtures sintéticas. Continua usando `stateDir/knowledge/knowledge_registry.v1.json`; não copiou/leu o corpus real ou atualizou o runtime nesta engenharia. `/api/status` distingue registros carregados de absorção histórica declarada pelo corpus. `/api/improve` e propostas Studio registram recibo com hash, IDs selecionados e orçamento; não incluem o conteúdo dos registros na auditoria. O Studio conserva **600 bytes UTF-8**, incluindo o cabeçalho, e seleciona somente registros completos que caibam. `NO_RECORD_FITS`/`CONTEXT_LIMIT` não permitem truncar registros ou ampliar o orçamento. Registro carregado não significa que todos os registros entraram em cada pedido; seleção não é treinamento.
+O adaptador de conhecimento da instalação 1.0.1 foi preservado **byte a byte** no source/pacote e testado com fixtures sintéticas. Continua usando `stateDir/knowledge/knowledge_registry.v1.json`, separado do pacote; a atualização do componente não migra nem substitui esse corpus. `/api/status` distingue registros carregados de absorção histórica declarada pelo corpus. `/api/improve` e propostas Studio registram recibo com hash, IDs selecionados e orçamento; não incluem o conteúdo dos registros na auditoria. O Studio conserva **600 bytes UTF-8**, incluindo o cabeçalho, e seleciona somente registros completos que caibam. `NO_RECORD_FITS`/`CONTEXT_LIMIT` não permitem truncar registros ou ampliar o orçamento. Registro carregado não significa que todos os registros entraram em cada pedido; seleção não é treinamento. O detalhe de evidências da tarefa mostra a memória efetivamente consultada.
 
 O portal oferece foco opcional no formato `src/modulo.ts@20-60`, um intervalo por arquivo selecionado, e mostra os intervalos efetivamente recebidos pelo modelo. Arquivos completos continuam no contexto privado da tarefa; o recorte não modifica o patch por truncamento.
 

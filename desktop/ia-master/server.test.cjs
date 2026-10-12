@@ -32,6 +32,42 @@ test('private routes require authentication and reject foreign origins / DNS reb
   assert.equal(a.metrics.localModelCalls, 0);
 });
 
+test('source refresh uses the existing owner cookie, origin and CSRF gates and closed revision-only request', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-source-refresh-http-'));
+  t.after(() => { const target = fs.realpathSync(directory), base = fs.realpathSync(os.tmpdir());
+    assert.ok(target.startsWith(base + path.sep)); assert.match(path.basename(target), /^aurora-source-refresh-http-/);
+    fs.rmSync(target, { recursive: true, force: true }); });
+  const root = path.join(directory, 'repo'); fs.mkdirSync(root);
+  const gitExecutable = process.env.AURORA_STUDIO_TEST_GIT;
+  const git = args => require('node:child_process').execFileSync(gitExecutable,
+    ['-c', 'core.fsmonitor=false', ...args], { cwd: root, windowsHide: true, encoding: 'utf8', stdio: 'pipe' }).trim();
+  git(['init', '-b', 'main']); git(['config', 'user.name', 'Synthetic Source HTTP']); git(['config', 'user.email', 'source-test@aurora.invalid']);
+  fs.writeFileSync(path.join(root, 'app.cjs'), 'module.exports = 1;\n'); git(['add', 'app.cjs']); git(['commit', '-m', 'Synthetic base']);
+  const revision = git(['rev-parse', 'HEAD']), transport = syntheticPublisher({ directory, orgId: 'tenant-test', gitExecutable,
+    baseRevision: revision, preparedCommit: () => null });
+  const a = await fixture(t, undefined, { studioRepository: { root, gitExecutable, allowedPaths: ['app.cjs'], projectId: 'synthetic-project' },
+    publisherConfig: transport.config, publisherRunner: transport.runner });
+  const route = '/api/studio/source-refresh', body = { expectedLocalSourceRevision: revision };
+  assert.equal((await a.request(route, body, { Authorization: '' })).status, 401);
+  assert.equal((await a.request(route, body, { 'X-Aurora-Local': '' })).status, 403);
+  assert.equal((await a.request(route, body, { 'Content-Type': 'text/plain' })).status, 415);
+  assert.equal((await a.request(route, body, { Origin: 'https://evil.invalid' })).status, 403);
+  assert.equal((await a.request(route, body, { 'Sec-Fetch-Site': 'cross-site' })).status, 403);
+  assert.equal((await a.request(route, { ...body, orgId: 'another-org' })).status, 400);
+  assert.equal((await a.request(route, { ...body, command: 'arbitrary' })).status, 400);
+  assert.equal((await a.request(route, { expectedLocalSourceRevision: 'f'.repeat(40) })).status, 409);
+  assert.equal(transport.remote.calls.length, 0);
+  const ticket = (await (await a.request('/api/pair-ticket', {})).json()).ticket;
+  const session = await a.request('/api/session', { ticket }, { Authorization: '' });
+  assert.equal(session.status, 200); const cookie = session.headers.get('set-cookie').split(';')[0];
+  const response = await a.request(route, body, { Authorization: '', Cookie: cookie });
+  assert.equal(response.status, 200); const result = await response.json();
+  assert.equal(result.source.state, 'ALREADY_CURRENT'); assert.equal(result.source.headRevision, revision);
+  assert.equal(result.source.originalCheckoutChanged, false); assert.equal(result.source.canDeploy, false); assert.equal(result.externalAiCalls, 0);
+  assert.equal(transport.remote.pushes, 0); assert.equal(transport.remote.creates, 0);
+  assert.equal(git(['rev-parse', 'HEAD']), revision); assert.equal(git(['status', '--porcelain']), '');
+});
+
 test('local Studio assets and fonts use closed routes and self-only CSP without private authentication', async t => {
   const a = await fixture(t);
   for (const [route, type] of [['/studio-local.js', 'text/javascript'], ['/studio-local.css', 'text/css'],
@@ -93,7 +129,7 @@ test('HTTP Publisher routes preserve session gates, exact CAS, receipts and unve
   assert.equal(transport.remote.pushes, 0);
   transport.remote.account = 'unapproved';
   const denied = await a.request(route + '/publish-draft', input);
-  assert.equal(denied.status, 403); assert.equal((await denied.json()).code, 'PUBLISH_AUTHORIZATION_UNCONFIRMED');
+  const deniedBody = await denied.json(); assert.equal(denied.status, 403, JSON.stringify(deniedBody)); assert.equal(deniedBody.code, 'PUBLISH_AUTHORIZATION_UNCONFIRMED');
   transport.remote.account = 'GESTAOWMGJ';
   const publishedResponse = await a.request(route + '/publish-draft', input); assert.equal(publishedResponse.status, 200);
   const published = await publishedResponse.json();
