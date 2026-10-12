@@ -2,6 +2,39 @@
 
 Incremento de 04/10/2026: `AURORA-USER-PROFILES-001` incorpora criação/retomada/revogação de perfis por administrador com MFA, por organização e sem banco paralelo. `AURORA-DAILY-UPDATES-001` representa a manutenção diária autorizada de cliente, web e mobile, ainda executada pela rotina hospedada existente e marcada LEGACY_MIRRORED. Contrato, evidências, gates e rollback em [AURORA_USER_PROFILES_1_0_0.md](AURORA_USER_PROFILES_1_0_0.md). A autorização antecipada de futuras versões evita repetir consentimento no mesmo escopo; não equivale a validação técnica ou implantação comprovada.
 
+## Adendo permanente de autonomia resolutiva — robô e IA de desenvolvimento
+
+Por autoridade humana expressa nesta sessão de 08/10/2026, o titular determinou
+adotar a autonomia como adendo ao modus operandi resolutivo do robô e da IA
+intrínseca de desenvolvimento de sistema. A diretriz permanece vigente no escopo
+autorizado até revogação ou alteração expressa do titular.
+
+O titular autorizou otimizar e concluir autonomamente as entregas reversíveis do
+Aurora, mantendo trilha de auditoria e retorno após quebra de código, sem repetir
+pedidos de autorização no mesmo escopo. Integração validada e homologação usam
+essa autorização persistente; a orientação anterior de aguardar novo consentimento
+de merge/deploy não exige outra pergunta para esses incrementos autorizados.
+Produção continua limitada às autorizações produtivas registradas.
+
+Cada incremento liga baseline e candidato por SHA/hash, testes, PR/CI/deploy,
+predecessor e backup verificados, smoke/readback e eventual recuperação comprovada.
+Registrar falha e reversão sem apagar histórico ou sobrescrever mudança concorrente.
+A observação do titular não fabrica recibo de review, MFA ou validação técnica;
+autenticação, isolamento, idempotência e gates executáveis permanecem exigidos.
+Falta de prova mantém pendência explícita e não interrompe o trabalho independente.
+
+Contrato, mecanismos existentes e lacunas em
+[AURORA_AUTONOMY_FAILSAFE_20261008.md](AURORA_AUTONOMY_FAILSAFE_20261008.md).
+O rollback parcial automático do instalador Windows já existe; recuperação
+automática cloud ainda precisa de executor e comprovação. Este registro documental
+não ativa robô, não promove release nem declara GA. Somente desfecho sanitizado e
+verificado alimenta o aprendizado reutilizável do mesmo motor.
+
+A capacidade abstrata `AURORA-DEV-AUTONOMY-FAILSAFE-001` integra o registro nativo
+como `NATIVE_GOVERNED`, com estado do executor `SPECIFIED` e cobertura de recuperação
+`PARTIAL`. Sua política é legível pela projeção e pelo Motor Mestre; não concede
+permissões, não cria scheduler e não transforma representação em execução ativa.
+
 ## Diretriz permanente do titular — desafios alimentam o motor
 
 Decisão de 04/10/2026: aplicar este modus operandi a todo desafio e solução relacionados

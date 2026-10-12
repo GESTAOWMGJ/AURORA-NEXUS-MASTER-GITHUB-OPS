@@ -21,12 +21,17 @@ type Handler = (event?: any) => unknown;
 class Element {
   textContent = ""; className = ""; hidden = false; disabled = false; value = ""; checked = false; resets = 0;
   children: Element[] = []; handlers = new Map<string, Handler>(); button: Element | null = null;
+  dataset: Record<string,string> = {}; attributes = new Map<string,string>();
   classList = { remove: (_name: string) => {} };
   addEventListener(name: string, callback: Handler) { this.handlers.set(name, callback); }
   appendChild(child: Element) { this.children.push(child); return child; }
   append(...children: Element[]) { this.children.push(...children); }
   replaceChildren() { this.children = []; this.textContent = ""; }
   querySelector(selector: string) { assert.equal(selector, "button"); return this.button ??= new Element(); }
+  querySelectorAll() { return []; }
+  closest() { return null; }
+  setAttribute(name:string,value:string) { this.attributes.set(name,value); }
+  removeAttribute(name:string) { this.attributes.delete(name); }
   reset() { this.resets++; this.value = ""; }
   scrollIntoView() {}
 }
@@ -45,9 +50,9 @@ async function fixture(loaded: LoadedWebBuild | null = build, initial = snapshot
   const calls: { url: string; options: any }[] = [], redirects: string[] = [], intervals: { callback: Handler; ms: number }[] = [];
   const handlers = new Map<string, Handler>();
   let fetcher = async (_url: string, _options: any): Promise<any> => response(200, initial);
-  const document = { getElementById: el, createElement: () => new Element(), addEventListener() {}, visibilityState: "visible", activeElement: null as any };
+  const document = { getElementById: el, createElement: () => new Element(), querySelectorAll: () => [], addEventListener() {}, visibilityState: "visible", activeElement: null as any };
   const navigator = { onLine: true };
-  const context = createContext({ document, navigator, window: { addEventListener: (name: string, callback: Handler) => handlers.set(name, callback) },
+  const context = createContext({ document, navigator, Event, window: { addEventListener: (name: string, callback: Handler) => handlers.set(name, callback), dispatchEvent: (event:Event) => handlers.get(event.type)?.(event) },
     location: { replace: (url: string) => redirects.push(url), reload: () => { throw new Error("Automatic reload forbidden"); } },
     Intl, Date, AbortController, crypto: { randomUUID: () => "synthetic-request" },
     setInterval: (callback: Handler, ms: number) => intervals.push({ callback, ms }), setTimeout: () => 1, clearTimeout() {},

@@ -13,11 +13,11 @@ const sha = file => crypto.createHash('sha256').update(fs.readFileSync(file)).di
 function verified() {
   const bytes = fs.readFileSync(path.join(__dirname, 'manifest.json'));
   const manifest = JSON.parse(bytes.toString());
-  if (manifest.component !== 'AURORA_IA_MASTER' || manifest.version !== '1.0.0' || manifest.dirty !== false || !/^[a-f0-9]{40}$/.test(manifest.sourceRevision)) throw Error('REVIEWED_RELEASE_REQUIRED');
+  if (manifest.component !== 'AURORA_IA_MASTER' || manifest.version !== '1.1.0' || manifest.dirty !== false || !/^[a-f0-9]{40}$/.test(manifest.sourceRevision)) throw Error('REVIEWED_RELEASE_REQUIRED');
   for (const [name, digest] of Object.entries(manifest.files)) {
     if (name.includes('..') || path.isAbsolute(name) || name.includes(':') || sha(path.join(__dirname, name)) !== digest) throw Error('RELEASE_INTEGRITY_FAILED');
   }
-  for (const name of ['server.cjs', 'manage.cjs', 'kernel/auroraMasterEngine.js']) if (!manifest.files[name]) throw Error('INCOMPLETE_RELEASE');
+  for (const name of ['server.cjs', 'studio.cjs', 'manage.cjs', 'kernel/auroraMasterEngine.js']) if (!manifest.files[name]) throw Error('INCOMPLETE_RELEASE');
   return { ...manifest, manifestSha256: crypto.createHash('sha256').update(bytes).digest('hex') };
 }
 function listener(port) {
@@ -44,7 +44,7 @@ function install(org) {
   const target = path.join(root, 'components', 'ia-master', manifest.version);
   if (fs.existsSync(target) || fs.existsSync(state) || fs.existsSync(startup)) throw Error('EXISTING_INSTALLATION_REQUIRES_REVIEW');
   const manager = path.join(target, 'manage.cjs');
-  const start = commandFile(manager, 'start'), pair = commandFile(manager, 'pair');
+  const start = commandFile(manager, 'start'), pair = commandFile(manager, 'pair'), portal = commandFile(manager, 'pair-portal');
   fs.mkdirSync(state, { recursive: true });
   const identity = execFileSync('whoami.exe', [], { encoding: 'utf8', windowsHide: true }).trim();
   execFileSync('icacls.exe', [state, '/inheritance:r', '/grant:r', identity + ':(OI)(CI)F', '*S-1-5-18:(OI)(CI)F'], { windowsHide: true, stdio: 'pipe' });
@@ -53,6 +53,7 @@ function install(org) {
   fs.cpSync(__dirname, target, { recursive: true, errorOnExist: true, force: false });
   fs.writeFileSync(path.join(root, 'IA Master - Iniciar.cmd'), start, { flag: 'wx' });
   fs.writeFileSync(path.join(root, 'IA Master - Acesso local.cmd'), pair, { flag: 'wx' });
+  fs.writeFileSync(path.join(root, 'IA Master - Conectar portal.cmd'), portal, { flag: 'wx' });
   fs.writeFileSync(startup, start, { flag: 'wx' });
   fs.writeFileSync(path.join(state, 'installation.json'), JSON.stringify({ version: manifest.version, sourceRevision: manifest.sourceRevision, organization: org, installedAtUtc: new Date().toISOString(), binding: '127.0.0.1', externalAiEnabled: false, cloudSyncVerified: false, existingClientPreserved: true }, null, 2));
   console.log('AURORA_IA_MASTER_INSTALLED');
@@ -97,13 +98,19 @@ async function start() {
   }
   console.log('AURORA_IA_MASTER_START_REQUESTED');
 }
-async function pair() {
+async function pair(toPortal = false) {
   verified(); if (!owned(38765).length) throw Error('START_LOCAL_COMPONENT_FIRST');
   const token = fs.readFileSync(path.join(state, 'control.key'), 'utf8').trim();
   const response = await fetch('http://127.0.0.1:38765/api/pair-ticket', { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(5000), headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', 'X-Aurora-Local': '1' }, body: '{}' });
   if (!response.ok) throw Error('LOCAL_PAIRING_FAILED');
   const { ticket } = await response.json();
   if (!/^[\w-]{43}$/.test(ticket)) throw Error('INVALID_PAIRING_TICKET');
+  if (toPortal) {
+    // Manual handoff of a 60-second ticket; never emit the ticket or control key.
+    execFileSync('clip.exe', [], { input: ticket, encoding: 'utf8', windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    console.log('AURORA_PORTAL_PAIRING_TICKET_COPIED_VALID_60_SECONDS');
+    return;
+  }
   const browser = spawn('rundll32.exe', ['url.dll,FileProtocolHandler', 'http://127.0.0.1:38765/#ticket=' + ticket], { detached: true, windowsHide: true, stdio: 'ignore' });
   browser.unref();
 }
@@ -116,12 +123,13 @@ function stop(disableStartup) {
   }
   console.log('AURORA_IA_MASTER_STOPPED_DATA_PRESERVED');
 }
-module.exports = { assessRunningProcess, start };
+module.exports = { assessRunningProcess, start, pair };
 if (require.main === module) (async () => {
   switch (process.argv[2]) {
     case 'install': install(process.argv[3]); break;
     case 'start': await start(); break;
     case 'pair': await pair(); break;
+    case 'pair-portal': await pair(true); break;
     case 'stop': stop(process.argv[3] === '--disable-startup'); break;
     default: throw Error('EXPLICIT_OPERATION_REQUIRED');
   }

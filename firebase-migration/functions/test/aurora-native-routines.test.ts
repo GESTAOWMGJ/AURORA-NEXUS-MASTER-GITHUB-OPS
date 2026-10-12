@@ -52,6 +52,30 @@ test("instalação canônica é governada e está presente na projeção, sem no
   assert.ok(projection.nativeRoutines.routines.some((item: any) => item.id === routine?.id));
 });
 
+test("autonomia permanente chega ao motor como política abstrata sem conceder acesso ou fingir executor ativo", () => {
+  const routine = AURORA_NATIVE_ROUTINES.find((item) => item.id === "AURORA-DEV-AUTONOMY-FAILSAFE-001");
+  assert.equal(routine?.state, "NATIVE_GOVERNED");
+  assert.equal(routine?.cadence, "ON_DEMAND");
+  assert.equal(routine?.humanGate, true);
+  assert.equal(routine?.sourceMutation, false);
+  const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
+  const projection = buildProjection(empty, new Date("2026-10-08T12:00:00Z"), { orgId: "synthetic-org", competence: "2026-10" }) as any;
+  const policy = projection.nativeRoutines.engineeringAutonomyPolicy;
+  assert.equal(policy.id, routine?.id);
+  assert.equal(policy.registrationOnly, true);
+  assert.equal(policy.executorState, "SPECIFIED");
+  assert.equal(policy.cloudAutomaticRollback, "SPECIFIED_NOT_IMPLEMENTED");
+  assert.equal(policy.permissionsGranted, false);
+  assert.equal(policy.repeatedOwnerPromptRequired, false);
+  assert.equal(policy.executableSecurityGatesRequired, true);
+  assert.equal(policy.authenticationAndMfaBypassAllowed, false);
+  assert.equal(policy.fabricatedHumanReviewReceiptAllowed, false);
+  assert.equal(policy.arbitraryCodeExecutionAllowed, false);
+  assert.equal(policy.sourceMutationAllowed, false);
+  assert.equal(policy.tenantRawDataTransferAllowed, false);
+  assert.equal(policy.validatedOutcomeRequiredForLearning, true);
+});
+
 
 test("projeção e inteligência nativa recebem o estado real de migração das rotinas", () => {
   const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };

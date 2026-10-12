@@ -1,5 +1,5 @@
-export const AURORA_PRODUCT_VERSION = "1.0.0-rc.1";
-export const AURORA_RELEASE_TRAIN = "2026.09";
+export const AURORA_PRODUCT_VERSION = "1.1.0-beta.1";
+export const AURORA_RELEASE_TRAIN = "2026.10";
 
 export type ReleaseGateStatus = "DONE" | "IN_PROGRESS" | "BLOCKED" | "PLANNED";
 

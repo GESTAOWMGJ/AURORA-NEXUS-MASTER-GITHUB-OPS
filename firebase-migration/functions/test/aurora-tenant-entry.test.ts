@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import { Script } from "node:vm";
 import type { DecodedIdToken } from "firebase-admin/auth";
 import { companyEntry, companyEntryAllowsMember, companyEntryPath, companyManifest, portalManifest, sessionOrganization, userFacingEntryPath } from "../src/auroraTenantEntry.js";
 import { auroraProtectedShell } from "../src/auroraFrontend.js";
@@ -12,10 +13,11 @@ const member = { uid: "synthetic-user", email: "user@example.invalid", orgId: "s
 const csrf = { action: "test-action", refresh: "test-refresh", integrationKey: "test-integration", distributionApproval: "test-distribution", logout: "test-logout" };
 
 test("authenticated navigation converges to the canonical portal; anonymous and foreign tenants stay denied", async context => {
-  const names = ["AURORA_NEXUS_ALLOWED_EMAILS", "AURORA_NEXUS_CSRF_HMAC_KEY"];
+  const names = ["AURORA_NEXUS_ALLOWED_EMAILS", "AURORA_NEXUS_CSRF_HMAC_KEY", "AURORA_CANONICAL_PORTAL_READY"];
   const previous = names.map(name => process.env[name]);
   process.env[names[0]] = member.email;
   process.env[names[1]] = "a".repeat(64);
+  process.env[names[2]] = "true";
   context.after(() => names.forEach((name, index) => {
     if (previous[index] === undefined) delete process.env[name];
     else process.env[name] = previous[index];
@@ -31,7 +33,7 @@ test("authenticated navigation converges to the canonical portal; anonymous and 
       ? { active: true, role: "viewer", permissions: [], allFacilities: false }
       : { active: true } }) };
   });
-  async function invoke(path: string, authenticated = true, host = "auroranexus.com.br", forwardedHost?: string) {
+  async function invoke(path: string, authenticated = true, host = "auroranexus.com.br", forwardedHost?: string, query = "") {
     let status = 200, html = "", location = "";
     const res: any = {
       on: () => res, set: () => res, setHeader: () => res, type: () => res,
@@ -39,27 +41,63 @@ test("authenticated navigation converges to the canonical portal; anonymous and 
       send: (body: string) => { html = body; return res; },
       redirect: (code: number, target: string) => { status = code; location = target; return res; }
     };
-    await auroraNexusAuthGate({ method: "GET", path, get: (name: string) =>
+    await auroraNexusAuthGate({ method: "GET", path, originalUrl: path + query, get: (name: string) =>
       name.toLowerCase() === "cookie" && authenticated ? "__session=synthetic"
         : name.toLowerCase() === "x-forwarded-host" ? forwardedHost
           : name.toLowerCase() === "host" ? host : undefined } as any, res);
     return { status, html, location };
   }
   assert.deepEqual(await invoke("/"), { status: 303, html: "", location: "/portal" });
+  process.env[names[2]] = "false";
+  const technicalBeta = await invoke("/", false, "wmgj-hml-jfn-20260927.web.app");
+  assert.equal(technicalBeta.status, 200);
+  assert.match(technicalBeta.html, /id="login-form"/);
+  assert.match(technicalBeta.html, /id="open-password-recovery"/);
+  assert.doesNotMatch(technicalBeta.html, /location\.replace\("https:\/\/auroranexus\.com\.br/);
+  assert.doesNotMatch(technicalBeta.html, /id="aurora-app"/);
+  delete process.env[names[2]];
+  const defaultTechnical=await invoke("/portal",false,"wmgj-hml-jfn-20260927.web.app");
+  assert.equal(defaultTechnical.status,200);
+  assert.doesNotMatch(defaultTechnical.html,/location\.replace\("https:\/\/auroranexus\.com\.br/);
+  process.env[names[2]] = "true";
   assert.deepEqual(await invoke("/", false, "wmgj-hml-jfn-20260927.web.app"), { status: 308, html: "", location: "https://auroranexus.com.br/portal" });
   assert.deepEqual(await invoke("/downloads", false, "wmgj-hml-jfn-20260927.firebaseapp.com"), { status: 308, html: "", location: "https://auroranexus.com.br/downloads" });
   assert.deepEqual(await invoke("/", false, "aurora-nexus-master-github-ops.run.app", "wmgj-hml-jfn-20260927.web.app"), { status: 308, html: "", location: "https://auroranexus.com.br/portal" });
+  for (const path of ["/account-recovery", "/portal", "/login"]) {
+    const reset=await invoke(path,true,"wmgj-hml-jfn-20260927.web.app",undefined,"?mode=resetPassword&oobCode=SYNTHETIC_CODE_42&continueUrl=https%3A%2F%2Fevil.invalid&apiKey=ignored");
+    assert.deepEqual(reset,{status:308,html:"",location:"https://auroranexus.com.br/account-recovery?mode=resetPassword&oobCode=SYNTHETIC_CODE_42"});
+  }
+  for (const query of ["?mode=resetPassword&oobCode=one&oobCode=two","?mode=resetPassword&mode=resetPassword&oobCode=one",
+    "?mode=verifyEmail&oobCode=one","?mode=resetPassword&oobCode=%3Cscript%3E","?mode=resetPassword&oobCode=", "?mode=resetPassword&oobCode="+"a".repeat(2049)]) {
+    assert.equal((await invoke("/account-recovery",false,"wmgj-hml-jfn-20260927.web.app",undefined,query)).location,"https://auroranexus.com.br/account-recovery");
+  }
+  const security=await invoke("/account-security");
+  assert.equal(security.status,200);assert.match(security.html,/id="security-auth-form"/);
+  assert.match(security.html,/id="security-resume-totp"/);assert.doesNotMatch(security.html,/id="login-form"/);
+  const anonymousSecurity=await invoke("/account-security",false);
+  assert.equal(anonymousSecurity.status,200);assert.match(anonymousSecurity.html,/id="login-form"/);
+  for(const authenticated of [true,false]) {
+    const recovery=await invoke("/account-recovery",authenticated);
+    assert.equal(recovery.status,200);assert.match(recovery.html,/id="password-recovery-panel"/);
+    assert.doesNotMatch(recovery.html,/id="session-identity"/);
+  }
+  const fallback=await invoke("/login",false);
+  const fallbackCode=fallback.html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(fallbackCode);
+  const redirects:string[]=[];
+  new Script(fallbackCode).runInNewContext({URLSearchParams,location:{hostname:"wmgj-hml-jfn-20260927.web.app",pathname:"/portal",search:"?mode=resetPassword&oobCode=SYNTHETIC_CODE_42&continueUrl=https://evil.invalid",replace:(url:string)=>redirects.push(url)}});
+  assert.deepEqual(redirects,["https://auroranexus.com.br/account-recovery?mode=resetPassword&oobCode=SYNTHETIC_CODE_42"]);
   assert.deepEqual(await invoke("/wmgj"), { status: 303, html: "", location: "/portal" });
   const pilot = await invoke("/portal");
   assert.equal(pilot.status, 200);
-  assert.match(pilot.html, /Centro de gestão WMGJ/);
+  assert.match(pilot.html, /id="implant-org">WMGJ<\/span>/);
   assert.match(pilot.html, /id="session-identity"/);
   for (const path of ["/", "/wmgj"]) {
     const anonymous = await invoke(path, false);
     assert.equal(anonymous.status, 200);
     assert.match(anonymous.html, /<title>Aurora Nexus \| Login<\/title>/);
     assert.match(anonymous.html, /wmgj-hml-jfn-20260927\.web\.app/);
-    assert.match(anonymous.html, /location\.replace\("https:\/\/auroranexus\.com\.br\/portal/);
+    assert.match(anonymous.html, /location\.replace\("https:\/\/auroranexus\.com\.br"\+p/);
     assert.doesNotMatch(anonymous.html, /id="session-identity"/);
   }
   const foreign = await invoke("/other-company");
@@ -82,17 +120,17 @@ test("company URLs preserve login, PWA start and same-origin return", () => {
   const html = auroraProtectedShell(member, csrf, "/synthetic-company/login");
   assert.match(html, /href="\/manifest.webmanifest"/);
   assert.equal((html.match(/location\.replace\("\/portal"\)/g) || []).length, 2);
-  assert.match(html, /Centro de gestão SYNTHETIC-COMPANY/);
-  assert.doesNotMatch(html, /Centro de gestão WMGJ|GPT|OpenAI|Gemini|chatgpt\.site/i);
+  assert.match(html, /id="implant-org">SYNTHETIC-COMPANY<\/span>/);
+  assert.doesNotMatch(html, /id="implant-org">WMGJ|GPT|OpenAI|Gemini|chatgpt\.site/i);
 });
 
 test("reserved paths and hostile values never become company selectors or redirects", () => {
-  for (const path of ["/", "/login", "/portal", "/downloads/file", "/api/bootstrap", "/organic", "/reports/shareholders",
+  for (const path of ["/", "/login", "/portal", "/account-security", "/account-recovery", "/account-security/login", "/account-recovery/manifest.webmanifest", "/downloads/file", "/api/bootstrap", "/organic", "/reports/shareholders",
                        "//evil.invalid", "/%2e%2e", "/wmgj%2fother", "/wmgj/../other", "/wmgj?orgId=other",
                        "/wmgj#evil", "/wmgj\\evil", "/<script>", "/Wmgj", "/wmgj--other"]) {
     assert.equal(companyEntry(path), null, path);
   }
-  for (const slug of ["//evil.invalid", "a/b", "login", "a", "A".repeat(100)]) {
+  for (const slug of ["//evil.invalid", "a/b", "login", "account-security", "account-recovery", "a", "A".repeat(100)]) {
     assert.throws(() => companyEntryPath(slug));
   }
 });

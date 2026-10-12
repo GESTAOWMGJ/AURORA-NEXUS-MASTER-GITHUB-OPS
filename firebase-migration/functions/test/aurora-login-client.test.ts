@@ -18,7 +18,7 @@ async function fixture(managed=true, sessionLoginResponse:any={ok:true,json:asyn
   const user={emailVerified:false,getIdToken:async()=> 'synthetic-id-token'};
   let signIn:any=async()=>({user}); let redemption:any={ok:true,json:async()=>({})}; let currentSessionResponse=sessionLoginResponse;
   const factors:any[]=[]; const winHandlers=new Map();
-  const sandbox={document:{getElementById:el,createElement:()=>new Element()},window:{addEventListener:(n:string,h:any)=>winHandlers.set(n,h)},navigator:{},location:{replace:(path:string)=>redirects.push(path)},
+  const sandbox={URL,URLSearchParams,history:{replaceState:()=>{}},document:{getElementById:el,createElement:()=>new Element()},window:{addEventListener:(n:string,h:any)=>{const previous=winHandlers.get(n);winHandlers.set(n,()=>{previous?.();h();});}},navigator:{},location:{replace:(path:string)=>redirects.push(path)},
     fetch:async(url:string,options:any)=>{calls.push({name:'fetch',url,options});return url==='/__sessionLogin'?currentSessionResponse:url==='/api/user-profiles'?(typeof redemption==='function'?await redemption():redemption):{ok:true,json:async()=>({})};},
     initializeApp:()=>({}),getAuth:()=>({}),setPersistence:async()=>{},inMemoryPersistence:{},
     signInWithEmailAndPassword:async()=>signIn(),getIdTokenResult:async()=>({claims}),signOut:async()=>{calls.push({name:'signOut'});},

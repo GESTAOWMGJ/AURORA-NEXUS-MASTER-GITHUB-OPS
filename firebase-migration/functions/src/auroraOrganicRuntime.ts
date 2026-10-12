@@ -13,7 +13,7 @@ const EXPECTED_ERRORS=new Set(['INVALID_COMMAND','PERMISSION_DENIED','ORGANIZATI
 export const auroraNexusOrganic=onRequest({cors:false,secrets:[ALLOWED_EMAILS,CSRF_KEY],timeoutSeconds:120,maxInstances:3},async(req,res)=>{
   res.set('Cache-Control','no-store');res.set('X-Content-Type-Options','nosniff');res.set('X-Frame-Options','DENY');res.set('Referrer-Policy','no-referrer');res.set('Permissions-Policy','camera=(), microphone=(), geolocation=(), payment=()');
   const nonce=randomBytes(24).toString('base64url');
-  res.set('Content-Security-Policy',`default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`);
+    res.set('Content-Security-Policy',`default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`);
   if(!['GET','POST'].includes(req.method)){res.set('Allow','GET, POST');res.status(405).json({ok:false,code:'METHOD_NOT_ALLOWED'});return;}
   try {
     const member=await verifyAuroraAccess(req.get('cookie'),ALLOWED_EMAILS.value());

@@ -3,6 +3,7 @@ import { setImmediate } from "node:timers/promises";
 import { Script, createContext } from "node:vm";
 import test from "node:test";
 import { auroraProtectedShell } from "../src/auroraFrontend.js";
+import { fixtureDom, addHandler, type Handler } from "./aurora-browser-dom.fixture.ts";
 
 const member = { uid: "synthetic-master", email: "synthetic@example.invalid", orgId: "synthetic-company", role: "org_admin",
   permissions: [], facilityIds: [], allFacilities: true, mfaVerified: true };
@@ -15,19 +16,6 @@ const profiles = { ok: true, engineEnabled: true, currentAdminUid: member.uid, p
   { uid: member.uid, name: "Synthetic master", role: "org_admin", active: true, managed: false, onboardingState: null },
   { uid: "anx_" + "a".repeat(40), name: "Synthetic professional", role: "operator", active: true, managed: true, onboardingState: "INVITED" }
 ] };
-type Handler = (event?: any) => unknown;
-class Element {
-  textContent = ""; className = ""; hidden = false; disabled = false; value = ""; checked = false;
-  children: Element[] = []; handlers = new Map<string, Handler>(); button: Element | null = null;
-  classList = { remove: (_name: string) => {} };
-  addEventListener(name: string, callback: Handler) { this.handlers.set(name, callback); }
-  appendChild(child: Element) { this.children.push(child); return child; }
-  append(...children: Element[]) { this.children.push(...children); }
-  replaceChildren() { this.children = []; this.textContent = ""; }
-  querySelector(selector: string) { assert.equal(selector, "button"); return this.button ??= new Element(); }
-  reset() { this.value = ""; }
-  scrollIntoView() {}
-}
 const response = (status: number, body: unknown = {}) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
 function deferred<T>() {
   let resolve!: (value: T) => void; let reject!: (error: Error) => void;
@@ -35,16 +23,16 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 async function fixture() {
-  const elements = new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(match => [match[1]!, new Element()]));
+  const { elements, document } = fixtureDom(html);
   const el = (id: string) => { const element = elements.get(id); assert.ok(element, `Known DOM id: ${id}`); return element; };
   el("profile-invitation").hidden = true;
   const calls: { url: string; options: any }[] = []; const redirects: string[] = []; const winHandlers = new Map<string, Handler>();
   let fetcher = async (url: string, options: any): Promise<any> => url === "/api/bootstrap" ? response(200, snapshot)
     : url === "/api/user-profiles" && !options?.method ? response(200, profiles) : response(200, { keys: [] });
   const context = createContext({
-    document: { getElementById: el, createElement: () => new Element(), addEventListener() {}, visibilityState: "visible", activeElement: null },
-    window: { addEventListener: (name: string, callback: Handler) => winHandlers.set(name, callback), confirm: () => true },
-    navigator: { onLine: true }, location: { replace: (url: string) => redirects.push(url) }, Intl, Date, AbortController,
+    document,
+    window: { addEventListener: (name: string, callback: Handler) => addHandler(winHandlers, name, callback), dispatchEvent: (event: Event) => { winHandlers.get(event.type)?.(event); return true; }, confirm: () => true },
+    navigator: { onLine: true }, location: { origin: "https://auroranexus.com.br", hostname: "auroranexus.com.br", hash: "", search: "", replace: (url: string) => redirects.push(url) }, history: { pushState() {} }, matchMedia: () => ({ matches: false }), Event, Intl, Date, AbortController,
     crypto: { randomUUID: () => "synthetic-invitation-0001" }, setInterval() {}, setTimeout: () => 1, clearTimeout() {},
     fetch: (url: string, options: any) => { calls.push({ url, options }); return fetcher(url, options); }
   });

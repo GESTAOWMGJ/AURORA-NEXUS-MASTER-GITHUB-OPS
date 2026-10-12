@@ -2,7 +2,7 @@
 """Offline regression of the real HML workflow blocks; never contacts Firebase.
 
 Run: python -m unittest discover -s scripts/tests -p test_hml_auth_contract.py -v
-Requires Python 3.9+, PyYAML, bash and jq. All credentials/responses are synthetic.
+Requires Python 3.9+, PyYAML, bash, jq and Node 22. All credentials/responses are synthetic.
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,15 @@ TOKEN = "SYNTHETIC_TEST_TOKEN_NOT_A_CREDENTIAL"
 UID = "synthetic-smoke-user"
 GOOD_AUTH = {"idToken": TOKEN, "refreshToken": "SYNTHETIC_REFRESH", "expiresIn": "3600", "isNewUser": False}
 GOOD_ACCOUNT = {"users": [{"localId": UID, "disabled": False}]}
+SHELL_TEST_TIMEOUT = 60 if os.name == "nt" else 10
+
+
+def shell_path(path):
+    """Git Bash accepts POSIX drive paths; Linux keeps its native paths."""
+    value = str(Path(path).resolve()).replace("\\", "/")
+    if os.name == "nt":
+        return "/" + value[0].lower() + value[2:]
+    return value
 
 
 class UniqueKeyLoader(yaml.BaseLoader):
@@ -130,14 +140,27 @@ class WorkflowStructureTests(unittest.TestCase):
         self.assertEqual(negative.count(public_gate), 1)
         self.assertEqual(negative.count(technical_gate), 1)
         self.assertLess(negative.index(public_gate), negative.index(technical_gate))
-        self.assertIn('technical_shell="$(curl --fail --silent --show-error --max-time 30 "${technical_origin}/")"', negative)
-        self.assertIn('location.replace("https://auroranexus.com.br/portal', negative)
+        self.assertIn('technical_headers="$(mktemp "${RUNNER_TEMP}/aurora-technical-headers.XXXXXX")"', negative)
+        self.assertIn('--dump-header "$technical_headers"', negative)
+        self.assertIn('--output "$technical_shell"', negative)
+        self.assertIn('if [ "$technical_status" = "308" ]; then', negative)
+        self.assertIn("tolower($0) ~ /^location:/", negative)
+        self.assertIn('test "$technical_location" = "${canonical_origin}/portal"', negative)
+        self.assertIn('elif [ "$technical_status" = "200" ]; then', negative)
+        self.assertIn('assert_private_login "$technical_shell" "$technical_headers"', negative)
+        self.assertIn('assert_private_login "$canonical_shell" "$canonical_headers" canonical', negative)
+        self.assertIn('!hasUsableLoginForm(html)', negative)
+        self.assertIn('browserGuard', negative)
         self.assertIn('Technical Firebase host exposed the private shell', negative)
+        self.assertEqual(negative.count('assert_auth_required "'), 7)
+        self.assertIn('code="$(jq -r', negative)
+        self.assertIn('Anonymous smoke contract mismatch', negative)
         self.assertNotIn('shell="$(curl --fail --silent --show-error --max-time 30 "${canonical_origin}/portal")"', negative)
         self.assertNotIn('grep -Fq "Ambiente privado"', negative)
         self.assertIn('-H "Origin: ${canonical_origin}"', negative)
         self.assertIn('"${technical_origin}/api/bootstrap"', negative)
-        self.assertNotIn('"${canonical_origin}/api/bootstrap"', negative)
+        self.assertIn('"${canonical_origin}/api/bootstrap"', negative)
+        self.assertIn('assert_auth_required "canonical-bootstrap"', negative)
         self.assertNotIn('base_url', negative)
         user_profiles = next(step["run"] for step in deploy if step.get("name") == "Verify user profile API rejects anonymous access")
         self.assertIn('-H "Origin: ${canonical_origin}"', user_profiles)
@@ -149,35 +172,179 @@ class WorkflowStructureTests(unittest.TestCase):
         self.assertIn('"${technical_origin}/__sessionLogin"', auth)
         self.assertNotIn('AUTH_PRIVATE_SHELL_VERIFIED', auth)
 
-    def test_technical_probe_requires_browser_guard_to_canonical_without_following(self):
+    def test_technical_probe_requires_functional_login_or_verified_canonical_redirect(self):
         steps = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")["jobs"]["deploy"]["steps"]
         smoke = next(step["run"] for step in steps if step.get("name") == "Smoke test private shell and deployed functions")
-        start = smoke.index('technical_shell="$(')
-        end = smoke.index('negative_response=', start)
+        start = smoke.index('technical_headers="$(mktemp')
+        end = smoke.index('assert_auth_required() {', start)
         probe = smoke[start:end]
         self.assertNotIn('--location', probe)
         self.assertNotRegex(probe, r'\s-L\b')
         prefix = '''set -euo pipefail
 canonical_origin="https://auroranexus.com.br"
 technical_origin="https://wmgj-hml-jfn-20260927.web.app"
+mktemp() {
+  local path="${1/XXXXXX/synthetic}"
+  test "$path" != "$1"
+  : > "$path"
+  printf '%s' "$path"
+}
+# TemporaryDirectory performs fixture cleanup after the shell returns.
+rm() { :; }
 curl() {
-  local last
-  for last; do :; done
-  test "$last" = "${technical_origin}/"
-  printf '%s' "$TEST_TECHNICAL_SHELL"
+  local headers="" output="" last="" status="" location="" body=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dump-header) headers="$2"; shift 2 ;;
+      --output) output="$2"; shift 2 ;;
+      --write-out|--max-time) shift 2 ;;
+      --silent|--show-error) shift ;;
+      *) last="$1"; shift ;;
+    esac
+  done
+  if [ "$last" = "${technical_origin}/" ]; then
+    status="$TEST_TECHNICAL_STATUS"; location="$TEST_TECHNICAL_LOCATION"; body="$TEST_TECHNICAL_BODY"
+  else
+    test "$last" = "${canonical_origin}/portal"
+    status="$TEST_CANONICAL_STATUS"; body="$TEST_CANONICAL_BODY"
+  fi
+  printf 'HTTP/2 %s\\r\\n%s: %s\\r\\nContent-Type: %s\\r\\n\\r\\n' "$status" "$TEST_LOCATION_HEADER" "$location" "$TEST_CONTENT_TYPE" > "$headers"
+  printf '%s' "$body" > "$output"
+  printf '%s' "$status"
 }
 '''
-        for value, expected in [
-            ('<script>location.replace("https://auroranexus.com.br/portal"+location.search)</script>', 0),
-            ('<html><title>Aurora Nexus | Login</title></html>', 1),
-            ('<script>location.replace("https://example.test/portal")</script>', 1),
-            ('<script>location.replace("https://auroranexus.com.br/portal")</script>Centro de gestão WMGJ', 90),
+        login = '<form id="login-form"><input name="email" type="email"><input name="password" type="password"><button id="submit" type="submit">Entrar</button></form>'
+        guard = '<script>location.replace("https://auroranexus.com.br/portal"+location.search)</script>'
+        gate_source = (ROOT / "firebase-migration/functions/src/auroraAuthGate.ts").read_text(encoding="utf-8")
+        host_bound_guard = re.search(r'function technicalHostBrowserRedirect\(\): string \{[\s\S]*?return `([^`]+)`;', gate_source).group(1)
+        landing = '<!doctype html><html><head><script src="/_next/static/main.js"></script></head><body>Portal público</body></html>'
+        for status, location, body, canonical_status, canonical_body, expected in [
+            ('200', '', login, '200', landing, 0),
+            ('308', 'https://auroranexus.com.br/portal', '', '200', login, 0),
+            ('308', 'https://auroranexus.com.br/portal', '', '200', host_bound_guard + login, 0),
+            ('308', 'https://auroranexus.com.br/portal', '', '200', guard + login, 91),
+            ('308', 'https://example.test/portal', '', '200', login, 1),
+            ('308', 'http://auroranexus.com.br/portal', '', '200', login, 1),
+            ('308', 'https://auroranexus.com.br/portal?next=evil', '', '200', login, 1),
+            ('308', 'https://auroranexus.com.br/portal', '', '200', landing, 91),
+            ('308', 'https://auroranexus.com.br/portal', '', '308', '', 1),
+            ('200', '', guard, '200', login, 91),
+            ('200', '', guard + login, '200', login, 91),
+            ('200', '', host_bound_guard + login, '200', login, 91),
+            ('200', '', '<meta http-equiv="refresh" content="0;url=/portal">' + login, '200', login, 91),
+            ('200', '', '<html><title>Aurora Nexus | Login</title></html>', '200', login, 91),
+            ('200', '', login.replace('type="password"', 'type="password" disabled'), '200', login, 91),
+            ('200', '', login.replace('name="email"', 'id="email"'), '200', login, 91),
+            ('200', '', landing, '200', login, 91),
+            ('200', '', guard + 'Centro de gestão WMGJ', '200', login, 90),
+            ('308', 'https://auroranexus.com.br/portal', 'Centro de gestão WMGJ', '200', login, 90),
+            ('302', 'https://auroranexus.com.br/portal', '', '200', login, 90),
         ]:
-            with self.subTest(html=value):
-                result = subprocess.run(['bash', '--noprofile', '--norc', '-c', prefix + probe],
-                                        env=dict(os.environ, TEST_TECHNICAL_SHELL=value),
-                                        capture_output=True, timeout=10)
-                self.assertEqual(result.returncode, expected)
+            with self.subTest(status=status, location=location, body=body):
+                with tempfile.TemporaryDirectory() as temporary:
+                    bridge = ""
+                    if os.name == "nt":
+                        # Git Bash can retain inherited native Node pipe handles
+                        # after the command completes. Pump the same Node script
+                        # through Python with explicit streams on Windows.
+                        node_bridge = Path(temporary) / "node-bridge.py"
+                        node_bridge.write_text('''import os, re, subprocess, sys
+args = [value[1] + ":" + value[2:] if re.match(r"^/[A-Za-z]/", value) else value for value in sys.argv[1:]]
+result = subprocess.run([os.environ["TEST_NODE_EXECUTABLE"], *args], input=sys.stdin.buffer.read(), capture_output=True, timeout=20)
+sys.stdout.buffer.write(result.stdout)
+sys.stderr.buffer.write(result.stderr)
+sys.exit(result.returncode)
+''', encoding="utf-8")
+                        bridge = "node() { " + shlex.quote(shell_path(sys.executable)) + " " + shlex.quote(shell_path(node_bridge)) + ' "$@"; }\n'
+                    result = subprocess.run(['bash', '--noprofile', '--norc', '-c', prefix + bridge + probe],
+                                            env=dict(os.environ, RUNNER_TEMP=shell_path(temporary),
+                                                     TEST_TECHNICAL_STATUS=status,
+                                                     TEST_TECHNICAL_LOCATION=location,
+                                                     TEST_TECHNICAL_BODY=body,
+                                                     TEST_CANONICAL_STATUS=canonical_status,
+                                                     TEST_CANONICAL_BODY=canonical_body,
+                                                     TEST_LOCATION_HEADER='lOcAtIoN',
+                                                     TEST_NODE_EXECUTABLE=shutil.which('node') or 'node',
+                                                     TEST_CONTENT_TYPE='text/html; charset=utf-8'),
+                                            capture_output=True, timeout=SHELL_TEST_TIMEOUT)
+                    self.assertEqual(result.returncode, expected, result.stderr.decode())
+
+    def test_anonymous_contract_mismatch_is_sanitized_and_actionable(self):
+        steps = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")["jobs"]["deploy"]["steps"]
+        smoke = next(step["run"] for step in steps if step.get("name") == "Smoke test private shell and deployed functions")
+        start = smoke.index('assert_auth_required() {')
+        end = smoke.index('if [ "$technical_status" = "308" ]; then', start)
+        helper = smoke[start:end]
+        for status, payload, expected, expected_code in [
+            ('401', '{"ok":false,"code":"AUTH_REQUIRED"}', 0, None),
+            ('403', '{"ok":false,"code":"CROSS_SITE_REJECTED","secret":"must-not-leak"}', 91, 'CROSS_SITE_REJECTED'),
+            ('401', 'not-json-with-secret', 91, 'NON_JSON'),
+        ]:
+            with self.subTest(status=status, payload=payload):
+                with tempfile.TemporaryDirectory() as temporary:
+                    response = Path(temporary) / 'response.json'
+                    response.write_text(payload, encoding='utf-8')
+                    script = f'''set -euo pipefail
+{helper}
+assert_auth_required "synthetic-endpoint" "{status}" "{shell_path(response)}"
+'''
+                    result = subprocess.run(['bash', '--noprofile', '--norc', '-c', script],
+                                            capture_output=True, timeout=10)
+                    self.assertEqual(result.returncode, expected, result.stderr.decode())
+                    stderr = result.stderr.decode()
+                    self.assertNotIn('must-not-leak', stderr)
+                    self.assertNotIn('not-json-with-secret', stderr)
+                    if expected_code:
+                        self.assertIn('synthetic-endpoint', stderr)
+                        self.assertIn(f'HTTP {status}', stderr)
+                        self.assertIn(f'code {expected_code}', stderr)
+
+    def test_canonical_redirect_requires_anonymous_api_denial(self):
+        steps = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")["jobs"]["deploy"]["steps"]
+        smoke = next(step["run"] for step in steps if step.get("name") == "Smoke test private shell and deployed functions")
+        helper_start = smoke.index('assert_auth_required() {')
+        gate_start = smoke.index('if [ "$technical_status" = "308" ]; then', helper_start)
+        gate_end = smoke.index('\nbootstrap_status=', gate_start)
+        helper_and_gate = smoke[helper_start:gate_end]
+        for root_status, api_status, payload, expected in [
+            ('308', '401', '{"ok":false,"code":"AUTH_REQUIRED"}', 0),
+            ('308', '200', '{"ok":true,"secret":"must-not-leak"}', 91),
+            ('308', '401', '{"ok":false,"code":"OTHER_DENIAL"}', 91),
+            ('308', '200', '<html>Public landing</html>', 91),
+            ('308', '403', '{"ok":false,"code":"CROSS_SITE_REJECTED"}', 91),
+            ('200', '200', 'must-not-call-canonical', 0),
+        ]:
+            with self.subTest(root_status=root_status, api_status=api_status):
+                with tempfile.TemporaryDirectory() as temporary:
+                    env = dict(os.environ, RUNNER_TEMP=shell_path(temporary),
+                               TEST_ROOT_STATUS=root_status, TEST_API_STATUS=api_status,
+                               TEST_API_PAYLOAD=payload)
+                    prefix = '''set -euo pipefail
+canonical_origin="https://auroranexus.com.br"
+technical_status="$TEST_ROOT_STATUS"
+negative_response="$(mktemp "${RUNNER_TEMP}/canonical-api.XXXXXX.json")"
+trap 'rm -f "$negative_response"' EXIT
+rm() { :; }
+curl() {
+  local output="" last=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --output) output="$2"; shift 2 ;;
+      --write-out|--max-time|-H) shift 2 ;;
+      --silent|--show-error) shift ;;
+      *) last="$1"; shift ;;
+    esac
+  done
+  test "$last" = "${canonical_origin}/api/bootstrap"
+  test "$TEST_API_PAYLOAD" != "must-not-call-canonical"
+  printf '%s' "$TEST_API_PAYLOAD" > "$output"
+  printf '%s' "$TEST_API_STATUS"
+}
+'''
+                    result = subprocess.run(['bash', '--noprofile', '--norc', '-c', prefix + helper_and_gate],
+                                            env=env, capture_output=True, timeout=10)
+                    self.assertEqual(result.returncode, expected, result.stderr.decode())
+                    self.assertNotIn('must-not-leak', result.stdout.decode() + result.stderr.decode())
 
     def test_critical_deploy_steps_are_unique_and_gates_remain(self):
         workflow = load_workflow(WORKFLOWS / "deploy-aurora-firebase.yml")
@@ -221,7 +388,7 @@ curl() {
 class AuthContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        for executable in ("bash", "jq"):
+        for executable in ("bash", "jq", "node"):
             if not shutil.which(executable):
                 raise RuntimeError(f"Required test executable not available: {executable}")
         cls.blocks = {filename: actual_block(filename) for filename in TARGETS}
@@ -235,28 +402,37 @@ class AuthContractTests(unittest.TestCase):
                 (root / name).write_text(auth_text, encoding="utf-8")
             mock = root / "bin"
             mock.mkdir()
-            curl = mock / "curl"
-            curl.write_text(f"#!{sys.executable}\n" + '''import json, os, pathlib, sys
-root = pathlib.Path(os.environ["tmp"])
+            curl_script = mock / "curl.py"
+            curl_script.write_text('''import json, os, pathlib, re, sys
+def native_path(value):
+    if os.name == "nt" and re.match(r"^/[A-Za-z]/", value):
+        value = value[1] + ":" + value[2:]
+    return pathlib.Path(value)
+root = pathlib.Path(os.environ["MOCK_ROOT"])
 args = sys.argv[1:]
 (root / "curl-called").write_text("called")
 assert args[-1] == "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=SYNTHETIC_KEY"
 assert "--insecure" not in args and "-k" not in args
-payload = pathlib.Path(args[args.index("--data-binary") + 1][1:])
+payload = native_path(args[args.index("--data-binary") + 1][1:])
 assert json.loads(payload.read_text()) == {"idToken": os.environ["TEST_TOKEN"]}
-assert payload.stat().st_mode & 0o077 == 0
+# POSIX permissions are enforced in CI; Windows has ACLs rather than mode bits.
+if os.name != "nt":
+    assert payload.stat().st_mode & 0o077 == 0
 transport = int(os.environ["MOCK_TRANSPORT"])
 if transport:
     sys.exit(transport)
-out = pathlib.Path(args[args.index("-o") + 1])
+out = native_path(args[args.index("-o") + 1])
 out.write_text(os.environ["MOCK_ACCOUNT"])
 print(os.environ["MOCK_HTTP"], end="")
 ''', encoding="utf-8")
-            curl.chmod(0o700)
-            env = dict(os.environ, tmp=str(root), smoke_dir=str(root), auth_response=str(root / "auth-response.json"),
+            # A shell function cannot accidentally resolve to a real network curl
+            # when Windows and POSIX PATH formats differ.
+            curl_command = shlex.quote(shell_path(sys.executable)) + " " + shlex.quote(shell_path(curl_script))
+            env = dict(os.environ, smoke_dir=shell_path(root),
+                       auth_response=shell_path(root / "auth-response.json"), MOCK_ROOT=str(root),
                        SMOKE_UID=UID, api_key="SYNTHETIC_KEY", TEST_TOKEN=TOKEN,
                        MOCK_ACCOUNT=account_text, MOCK_HTTP=http, MOCK_TRANSPORT=transport,
-                       PATH=str(mock) + os.pathsep + os.environ["PATH"])
+                       TMPDIR=shell_path(root))
             # Do not inherit an opt-in shell trace from a developer's environment.
             for name in ("BASH_ENV", "ENV", "SHELLOPTS", "BASHOPTS"):
                 env.pop(name, None)
@@ -267,7 +443,10 @@ local_id="$(jq -r '.localId // empty' "$auth_response")"
 test -n "$id_token"
 test "$local_id" = "$SMOKE_UID"
 '''
-            result = subprocess.run(["bash", "--noprofile", "--norc", "-c", "set -euo pipefail\n" + block],
+            # Windows environment names are case-insensitive (tmp collides with
+            # TMP); assign this workflow variable in Bash itself.
+            script = "set -euo pipefail\ntmp=" + shlex.quote(shell_path(root)) + "\ncurl() { " + curl_command + ' "$@"; }\n' + block
+            result = subprocess.run(["bash", "--noprofile", "--norc", "-c", script],
                                     env=env, text=True, capture_output=True, timeout=10)
             return result, (root / "curl-called").exists()
 
