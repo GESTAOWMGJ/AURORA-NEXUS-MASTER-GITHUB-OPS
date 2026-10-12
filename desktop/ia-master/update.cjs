@@ -14,7 +14,12 @@ const BASELINE_VERSION = '1.0.1', CANDIDATE_VERSION = '1.1.0';
 const REGISTRY_SHA = 'dc6c99e407faa11adb46e68d798bd49374e54ada820c0f755520fcfec32abbb8';
 const SCHEMA = 'aurora.master.update.v1';
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
+const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 function demand(condition, code) { if (!condition) throw Error(code); }
+function parseLocalJSON(bytes) {
+  const jsonBytes = bytes.subarray(0, UTF8_BOM.length).equals(UTF8_BOM) ? bytes.subarray(UTF8_BOM.length) : bytes;
+  return JSON.parse(jsonBytes.toString('utf8'));
+}
 function durableFile(filename, bytes, flag = 'wx', mode = 0o600) {
   const descriptor = fs.openSync(filename, flag, mode);
   try { fs.writeFileSync(descriptor, bytes); fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
@@ -109,7 +114,7 @@ function inspect(options) {
   const baseline = inspectRelease(places.target, BASELINE_VERSION, BASELINE, options.baselineManifestSha256);
   const candidate = inspectRelease(places.candidate, CANDIDATE_VERSION, options.sourceRevision, options.manifestSha256);
   knowledgeCompatibility(baseline, candidate);
-  const installationBytes = read(places.installation, 65536), installation = JSON.parse(installationBytes.toString('utf8'));
+  const installationBytes = read(places.installation, 65536), installation = parseLocalJSON(installationBytes);
   demand(installation.version === BASELINE_VERSION && installation.sourceRevision === BASELINE &&
     installation.binding === '127.0.0.1' && installation.externalAiEnabled === false && installation.existingClientPreserved === true &&
     /^[a-z0-9][a-z0-9-]{1,63}$/.test(installation.organization || ''), 'INSTALLED_IDENTITY_REQUIRES_REVIEW');
@@ -286,7 +291,7 @@ if (require.main === module) {
     const [operation, optionsFile] = process.argv.slice(2);
     demand(['preflight', 'update', 'rollback'].includes(operation) && path.isAbsolute(optionsFile || ''), 'EXPLICIT_OPERATION_AND_OPTIONS_REQUIRED');
     demand(process.platform === 'win32' && Number(process.versions.node.split('.')[0]) >= 22, 'WINDOWS_NODE_22_REQUIRED');
-    const options = JSON.parse(read(optionsFile, 65536).toString('utf8'));
+    const options = parseLocalJSON(read(optionsFile, 65536));
     const expectedRoot = path.join(process.env.LOCALAPPDATA || '', 'AuroraNexus');
     const expectedStartup = path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'AURORA IA Master.cmd');
     demand(options.root === expectedRoot && options.startup === expectedStartup && !options.nodeExecutable, 'EXISTING_CURRENT_USER_INSTALLATION_REQUIRED');

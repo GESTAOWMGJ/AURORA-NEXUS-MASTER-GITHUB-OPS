@@ -8,6 +8,7 @@ const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const { preflight, update, rollback, BASELINE, REGISTRY_SHA } = require('./update.cjs');
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const candidateRevision = '1234567890abcdef1234567890abcdef12345678';
 const stopped = { observeStopped() {} };
 const registry = fs.readFileSync(path.join(__dirname, 'knowledge-registry.cjs'));
@@ -53,6 +54,11 @@ function repinCandidate(value) {
   const filename = path.join(value.candidate, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(filename));
   for (const name of Object.keys(manifest.files)) manifest.files[name] = hash(fs.readFileSync(path.join(value.candidate, ...name.split('/'))));
   fs.writeFileSync(filename, JSON.stringify(manifest, null, 2) + '\n'); value.options.manifestSha256 = hash(fs.readFileSync(filename));
+}
+function bomMetadata(value) {
+  value.beforeInstallation = Buffer.concat([UTF8_BOM, value.beforeInstallation]);
+  fs.writeFileSync(path.join(value.state, 'installation.json'), value.beforeInstallation);
+  return value;
 }
 test('preflight verifies exact clean artifacts and performs no installation or process operation', t => {
   const value = fixture(t), result = preflight(value.options);
@@ -179,5 +185,74 @@ test('CLI accepts only explicit operations and confines preflight to the current
     const wrongUser = spawnSync(process.execPath, [entry, 'preflight', config], { env: { ...expectedEnv, LOCALAPPDATA: path.join(path.dirname(value.root), 'other-user') }, encoding: 'utf8' });
     assert.equal(wrongUser.status, 1); assert.match(wrongUser.stderr, /EXISTING_CURRENT_USER_INSTALLATION_REQUIRED/);
   } else { assert.equal(result.status, 1); assert.match(result.stderr, /WINDOWS_NODE_22_REQUIRED/); }
+  assert.equal(fs.existsSync(path.join(value.root, 'installation-rollbacks')), false); value.preserved();
+});
+test('BOM metadata preflight hashes raw bytes and update/rollback preserve the original exact backup', t => {
+  const value = bomMetadata(fixture(t)), filename = path.join(value.state, 'installation.json');
+  const checked = preflight(value.options);
+  assert.equal(checked.installationSha256, hash(value.beforeInstallation));
+  assert.notEqual(checked.installationSha256, hash(value.beforeInstallation.subarray(UTF8_BOM.length)));
+  assert.deepEqual(fs.readFileSync(filename), value.beforeInstallation);
+  assert.equal(fs.existsSync(path.join(value.root, 'installation-rollbacks')), false);
+  const result = update(value.options, stopped), receipt = JSON.parse(fs.readFileSync(path.join(result.backup, 'update-receipt.json')));
+  assert.equal(receipt.oldInstallationSha256, checked.installationSha256);
+  assert.deepEqual(fs.readFileSync(path.join(result.backup, 'installation.original.json')), value.beforeInstallation);
+  assert.deepEqual(fs.readFileSync(path.join(result.backup, 'installation.displaced.json')), value.beforeInstallation);
+  assert.equal(JSON.parse(fs.readFileSync(filename)).version, '1.1.0'); value.preserved();
+  const restored = rollback({ ...value.options, backup: result.backup, receiptSha256: result.receiptSha256 }, stopped);
+  assert.equal(restored.status, 'BASELINE_RESTORED_FILES_VERIFIED_RUNTIME_NOT_VERIFIED');
+  assert.deepEqual(fs.readFileSync(filename), value.beforeInstallation);
+  assert.equal(hash(fs.readFileSync(filename)), checked.installationSha256); value.preserved();
+});
+test('automatic rollback after metadata commit restores a BOM predecessor byte for byte', t => {
+  const value = bomMetadata(fixture(t)); let failure;
+  try { update(value.options, { ...stopped, checkpoint(phase) { if (phase === 'METADATA_COMMITTED') throw Error('SYNTHETIC_FAILURE'); } }); } catch (error) { failure = error; }
+  assert.equal(failure?.message, 'SYNTHETIC_FAILURE'); assert.equal(failure.rollback, 'ROLLBACK_COMPLETED');
+  assert.deepEqual(fs.readFileSync(path.join(value.state, 'installation.json')), value.beforeInstallation);
+  assert.deepEqual(fs.readFileSync(path.join(failure.backup, 'installation.original.json')), value.beforeInstallation); value.preserved();
+});
+test('BOM support does not normalize an encoding-only concurrent metadata change before the swap', t => {
+  const value = bomMetadata(fixture(t)), filename = path.join(value.state, 'installation.json');
+  const concurrentBytes = value.beforeInstallation.subarray(UTF8_BOM.length);
+  assert.throws(() => update(value.options, { ...stopped, checkpoint(phase) { if (phase === 'STAGED') fs.writeFileSync(filename, concurrentBytes); } }), /INSTALLATION_CHANGED_REQUIRES_REVIEW/);
+  assert.deepEqual(fs.readFileSync(filename), concurrentBytes);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(value.target, 'manifest.json'))).version, '1.0.1'); value.preserved();
+});
+test('explicit rollback refuses BOM added by another writer to the new metadata', t => {
+  const value = bomMetadata(fixture(t)), result = update(value.options, stopped), filename = path.join(value.state, 'installation.json');
+  const concurrentBytes = Buffer.concat([UTF8_BOM, fs.readFileSync(filename)]); fs.writeFileSync(filename, concurrentBytes);
+  assert.throws(() => rollback({ ...value.options, backup: result.backup, receiptSha256: result.receiptSha256 }, stopped), /INSTALLATION_CHANGED_REQUIRES_REVIEW/);
+  assert.deepEqual(fs.readFileSync(filename), concurrentBytes);
+  assert.deepEqual(fs.readFileSync(path.join(result.backup, 'installation.original.json')), value.beforeInstallation);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(value.target, 'manifest.json'))).version, '1.1.0'); value.preserved();
+});
+test('only one initial UTF-8 BOM is accepted; JSON syntax and installed identity gates remain strict', t => {
+  for (const prefix of [Buffer.concat([UTF8_BOM, UTF8_BOM]), Buffer.concat([Buffer.from(' '), UTF8_BOM])]) {
+    const value = fixture(t); fs.writeFileSync(path.join(value.state, 'installation.json'), Buffer.concat([prefix, value.beforeInstallation]));
+    assert.throws(() => preflight(value.options), SyntaxError);
+  }
+  const comments = fixture(t); fs.writeFileSync(path.join(comments.state, 'installation.json'), Buffer.concat([UTF8_BOM, Buffer.from('// not JSON\n'), comments.beforeInstallation]));
+  assert.throws(() => preflight(comments.options), SyntaxError);
+  const identity = fixture(t), changed = JSON.parse(identity.beforeInstallation); changed.version = '1.1.0';
+  fs.writeFileSync(path.join(identity.state, 'installation.json'), Buffer.concat([UTF8_BOM, Buffer.from(JSON.stringify(changed))]));
+  assert.throws(() => preflight(identity.options), /INSTALLED_IDENTITY_REQUIRES_REVIEW/);
+  const manifest = fixture(t), manifestFile = path.join(manifest.candidate, 'manifest.json');
+  fs.writeFileSync(manifestFile, Buffer.concat([UTF8_BOM, fs.readFileSync(manifestFile)])); manifest.options.manifestSha256 = hash(fs.readFileSync(manifestFile));
+  assert.throws(() => preflight(manifest.options), SyntaxError, 'Release manifest parsing is unchanged.');
+});
+test('CLI supports BOM options produced by Windows tools without modifying those options or metadata', t => {
+  const value = bomMetadata(fixture(t)), entry = path.join(__dirname, 'update.cjs'), config = path.join(path.dirname(value.root), 'bom-options.json');
+  const optionsBytes = Buffer.concat([UTF8_BOM, Buffer.from(JSON.stringify(value.options))]); write(config, optionsBytes);
+  const expectedEnv = { ...process.env, LOCALAPPDATA: path.dirname(value.root), APPDATA: path.join(path.dirname(value.root), 'appdata') };
+  const result = spawnSync(process.execPath, [entry, 'preflight', config], { env: expectedEnv, encoding: 'utf8' });
+  if (process.platform === 'win32') {
+    assert.equal(result.status, 0, result.stderr); assert.equal(JSON.parse(result.stdout).installationSha256, hash(value.beforeInstallation));
+    write(config, Buffer.concat([UTF8_BOM, Buffer.from(JSON.stringify({ ...value.options, nodeExecutable: process.execPath }))]));
+    const override = spawnSync(process.execPath, [entry, 'preflight', config], { env: expectedEnv, encoding: 'utf8' });
+    assert.equal(override.status, 1); assert.match(override.stderr, /EXISTING_CURRENT_USER_INSTALLATION_REQUIRED/);
+    write(config, optionsBytes);
+  } else { assert.equal(result.status, 1); assert.match(result.stderr, /WINDOWS_NODE_22_REQUIRED/); }
+  assert.deepEqual(fs.readFileSync(config), optionsBytes);
+  assert.deepEqual(fs.readFileSync(path.join(value.state, 'installation.json')), value.beforeInstallation);
   assert.equal(fs.existsSync(path.join(value.root, 'installation-rollbacks')), false); value.preserved();
 });

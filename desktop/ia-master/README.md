@@ -111,6 +111,8 @@ node C:\caminho\candidata\update.cjs update C:\caminho\opcoes-revisadas.json
 
 `preflight` verifica pacote/baseline sem atualizar. `update` exige Master parado e porta livre; não encerra processos por conta própria. Lock, backup, staging, troca de diretório e readback conservam o predecessor. Falha tenta retorno somente se os hashes ainda corresponderem à própria tentativa. Alteração concorrente ou backup adulterado bloqueia a recuperação e preserva a evidência. A ausência da entrada de startup é preservada.
 
+Metadados legados e opções CLI aceitam um BOM UTF-8 inicial produzido por ferramentas Windows. O parser normaliza somente a view de leitura; hashes, CAS, backup e rollback continuam usando os bytes originais. Manifestos e recibos permanecem estritos.
+
 O resultado `UPDATED_FILES_VERIFIED_RUNTIME_NOT_VERIFIED` comprova somente os arquivos. Iniciar pelo atalho existente e conferir `/health`, conhecimento, sessão, modelo e fluxo de tarefa antes de registrar aceite operacional. A reversão explícita usa `node C:\caminho\candidata\update.cjs rollback C:\caminho\opcoes-revisadas.json`, com `backup` e `receiptSha256` reais acrescentados às opções e processo parado. O retorno também exige readback do runtime original. Os testes usam instalações temporárias sintéticas; não constituem recibo desta atualização no PC do titular.
 
 ## Conhecimento e interface
