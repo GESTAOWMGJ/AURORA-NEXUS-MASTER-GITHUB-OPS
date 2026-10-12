@@ -689,3 +689,69 @@ test('partial source materialization is preserved across explicit recovery and a
   assert.equal(fs.readdirSync(path.join(a.stateDir, 'studio', 'sources')).length, 2);
   assert.deepEqual(fs.readFileSync(path.join(partial, '.env.example')), retained); assert.equal(a.git(['rev-parse', 'HEAD']), a.base);
 });
+
+test('initialization and restart preserve an existing valid cursor byte for byte', async t => {
+  const a = fixture(t), file = cursor(a), record = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const retained = Buffer.from(JSON.stringify(record, null, 2) + '\n'); fs.writeFileSync(file, retained);
+  a.studio = createStudio(a.options);
+  assert.equal((await a.studio.route('GET', '/api/studio/capabilities')).value.source.headRevision, a.base);
+  assert.deepEqual(fs.readFileSync(file), retained);
+  const next = await task(a); assert.equal(next.context.baseRevision, a.base); assert.deepEqual(fs.readFileSync(file), retained);
+});
+
+test('concurrent initializers never overwrite an exclusively opened cursor and can read it after the writer finishes', async t => {
+  const a = fixture(t), file = cursor(a), retained = fs.readFileSync(file); fs.unlinkSync(file);
+  const { spawn } = require('node:child_process');
+  const script = String.raw`
+    const fs=require('node:fs'),path=require('node:path'),options=JSON.parse(process.argv[2]);
+    const file=path.join(options.stateDir,'studio','source-cursor.json'),open=fs.openSync;
+    if(process.argv[3]==='pause')fs.openSync=function(filename,flags,...rest){const fd=open.call(this,filename,flags,...rest);
+      if(filename===file&&flags==='wx'){process.stdout.write('OWN_INITIALIZER_OPENED\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,4000);}return fd;};
+    const studio=require(process.argv[1]).createStudio(options);
+    async function read(){try{const value=await studio.route('GET','/api/studio/capabilities');process.stdout.write(value.value.repository.state==='AVAILABLE'?'AVAILABLE\n':'CLOSED\n');}
+      catch{process.stdout.write('CLOSED\n');}}
+    read().then(()=>setTimeout(async()=>{await read();},4500));`;
+  const children = [], launch = mode => {
+    const child = spawn(process.execPath, ['-e', script, require.resolve('./studio.cjs'), JSON.stringify(a.options), mode],
+      { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: require('./publisher.cjs').environment() });
+    const value = { child, output: '', closed: new Promise(resolve => child.once('close', resolve)) };
+    child.stdout.on('data', chunk => { value.output += chunk; }); children.push(value); return value;
+  };
+  t.after(async () => { for (const value of children) if (value.child.exitCode === null && value.child.signalCode === null) { value.child.kill('SIGKILL'); await value.closed; } });
+  const first = launch('pause');
+  await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(Error('Own initializer did not reach the exclusive open.')), 60000);
+    first.child.stdout.on('data', () => { if (first.output.includes('OWN_INITIALIZER_OPENED\n')) { clearTimeout(timer); resolve(); } });
+    first.child.once('error', error => { clearTimeout(timer); reject(error); }); });
+  const second = launch('normal');
+  assert.equal(await first.closed, 0); assert.equal(await second.closed, 0);
+  assert(first.output.includes('AVAILABLE\n')); assert(second.output.includes('CLOSED\n'), 'Incomplete concurrent cursor stays closed.');
+  assert(second.output.endsWith('AVAILABLE\n'), 'A later read accepts only the completed valid cursor.');
+  assert.deepEqual(fs.readFileSync(file), retained); a.studio = createStudio(a.options);
+  assert.equal((await task(a)).context.baseRevision, a.base);
+});
+
+test('initialization refuses an opening error other than EEXIST instead of accepting an absent cursor', async t => {
+  const a = fixture(t), file = cursor(a); fs.unlinkSync(file); const original = fs.openSync;
+  fs.openSync = function (filename, flags, ...rest) {
+    if (filename === file && flags === 'wx') throw Object.assign(Error('SYNTHETIC_OPEN_DENIED'), { code: 'EACCES' });
+    return original.call(this, filename, flags, ...rest);
+  };
+  try { a.studio = createStudio(a.options); } finally { fs.openSync = original; }
+  assert.equal(fs.existsSync(file), false);
+  await assert.rejects(a.studio.route('GET', '/api/studio/capabilities'), { code: 'STUDIO_SOURCE_RECORD_INVALID' });
+});
+
+test('initialization preserves an incomplete cursor and does not mistake a write failure for opening EEXIST', async t => {
+  const a = fixture(t), file = cursor(a); fs.unlinkSync(file);
+  const open = fs.openSync, write = fs.writeFileSync; let descriptor;
+  fs.openSync = function (filename, flags, ...rest) { const fd = open.call(this, filename, flags, ...rest); if (filename === file && flags === 'wx') descriptor = fd; return fd; };
+  fs.writeFileSync = function (filename, ...rest) {
+    if (filename === descriptor) throw Object.assign(Error('SYNTHETIC_WRITE_INTERRUPTED'), { code: 'EEXIST' });
+    return write.call(this, filename, ...rest);
+  };
+  try { a.studio = createStudio(a.options); } finally { fs.openSync = open; fs.writeFileSync = write; }
+  assert.equal(fs.readFileSync(file).length, 0);
+  await assert.rejects(a.studio.route('GET', '/api/studio/capabilities'), { code: 'STUDIO_SOURCE_RECORD_INVALID' });
+  a.studio = createStudio(a.options); assert.equal(fs.readFileSync(file).length, 0);
+  await assert.rejects(task(a), { code: 'STUDIO_SOURCE_RECORD_INVALID' });
+});

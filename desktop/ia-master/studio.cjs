@@ -499,11 +499,16 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
   }
   function initializeSource() {
     if (!originalRepo) return;
-    if (!fs.existsSync(sourceFile)) {
-      const initial = { schemaVersion: 'aurora.master.source.v1', orgId, bindingSha256: sourceBinding,
-        originalRevision: git(['rev-parse', '--verify', 'HEAD'], originalRepo.root).trim(), version: 0, active: null, operation: null, history: [] };
-      try { fs.writeFileSync(sourceFile, canonical({ payload: initial, sha256: fingerprint(initial) }), { flag: 'wx', mode: 0o600 }); }
-      catch (error) { if (error.code !== 'EEXIST') throw error; }
+    // Prepare bytes before the exclusive open; an existing (even incomplete)
+    // cursor is only read and never replaced by initialization.
+    const initial = { schemaVersion: 'aurora.master.source.v1', orgId, bindingSha256: sourceBinding,
+      originalRevision: git(['rev-parse', '--verify', 'HEAD'], originalRepo.root).trim(), version: 0, active: null, operation: null, history: [] };
+    const bytes = Buffer.from(canonical({ payload: initial, sha256: fingerprint(initial) })); let descriptor;
+    try { descriptor = fs.openSync(sourceFile, 'wx', 0o600); }
+    catch (error) { if (error.code !== 'EEXIST') throw error; }
+    if (descriptor !== undefined) {
+      try { fs.writeFileSync(descriptor, bytes); fs.fsyncSync(descriptor); }
+      finally { fs.closeSync(descriptor); }
     }
     loadSource(true);
   }
