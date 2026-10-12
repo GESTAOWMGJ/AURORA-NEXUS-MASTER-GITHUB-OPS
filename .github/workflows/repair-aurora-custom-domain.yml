@@ -254,29 +254,16 @@ jobs:
             cat "${RUNNER_TEMP}/aurora-custom-domain-dns-schema.json"
           fi
 
-          # Preserve only DNS record names/types/counts and SHA-256 digests of record values.
-          # Raw ownership challenge values are never emitted.
+          # Preserve record metadata plus SHA-256 of each rdata; never emit raw DNS values.
           if [ -n "$domain_json" ]; then
-            dns_summary="$(
-              jq -c '
-                def summarize:
-                  if type == "array" then
-                    map({
-                      domainName: (.domainName // ""),
-                      type: (.type // ""),
-                      valueCount: ((.rdata // []) | length),
-                      valueHashes: ((.rdata // []) | map(@base64) )
-                    })
-                  else [] end;
-                {
-                  desired: (.requiredDnsUpdates.desired | summarize),
-                  discovered: (.requiredDnsUpdates.discovered | summarize)
-                }' <<<"$domain_json"
-            )"
-            dns_summary_hashed="$(python3 -c 'import base64,hashlib,json,sys;x=json.loads(sys.argv[1]);[(row.__setitem__("valueHashes",[hashlib.sha256(base64.b64decode(v)).hexdigest() for v in row.get("valueHashes",[])])) for side in ("desired","discovered") for row in x.get(side,[])];print(json.dumps(x,separators=(",",":")))' "$dns_summary")"
-            jq -nc --argjson updates "$dns_summary_hashed"               --arg project "$PROJECT_ID" --arg site "$SITE_ID" --arg domain "$DOMAIN"               '{schemaVersion:1,projectId:$project,siteId:$site,domain:$domain,stage:"REQUIRED_DNS_UPDATES_HASHED",
-                requiredDnsUpdates:$updates,secretsIncluded:false,rawDnsValuesIncluded:false,iamChanged:false,dnsChanged:false}'               > "${RUNNER_TEMP}/aurora-custom-domain-dns-summary.json"
-            cat "${RUNNER_TEMP}/aurora-custom-domain-dns-summary.json"
+            printf '%s' "$domain_json" \
+              | python3 -c 'import hashlib,json,sys;x=json.load(sys.stdin);r=x.get("requiredDnsUpdates",{});print(json.dumps({s:[{"domainName":(rec.get("domainName") or g.get("domainName") or ""),"type":(rec.get("type") or ""),"requiredAction":rec.get("requiredAction"),"rdataPresent":bool(rec.get("rdata")),"rdataSha256":hashlib.sha256(str(rec.get("rdata") or "").encode()).hexdigest()} for g in (r.get(s) or []) for rec in (g.get("records") or [])] for s in ("desired","discovered")},separators=(",",":")))' \
+              | jq -c --arg project "$PROJECT_ID" --arg site "$SITE_ID" --arg domain "$DOMAIN" \
+                  '{schemaVersion:1,projectId:$project,siteId:$site,domain:$domain,
+                    stage:"REQUIRED_DNS_RECORD_HASHES",requiredDnsRecords:.,
+                    rawDnsValuesIncluded:false,secretsIncluded:false,iamChanged:false,dnsChanged:false}' \
+              > "${RUNNER_TEMP}/aurora-custom-domain-dns-record-hashes.json"
+            cat "${RUNNER_TEMP}/aurora-custom-domain-dns-record-hashes.json"
           fi
 
           current='{}'
