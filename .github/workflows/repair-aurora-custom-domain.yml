@@ -122,8 +122,8 @@ jobs:
           if [ "$site_code" != "200" ]; then diagnostic "SITE_GET" "$site_code" "$site_file"; exit 61; fi
           site_name="$(jq -r '.name // empty' "$site_file")"
           default_url="$(jq -r '.defaultUrl // empty' "$site_file")"
-          test -n "$site_name"
-          test "${site_name##*/}" = "$SITE_ID"
+          if [ -z "$site_name" ]; then diagnostic "SITE_NAME_MISSING" "200" "$site_file"; exit 64; fi
+          if [ "${site_name##*/}" != "$SITE_ID" ]; then diagnostic "SITE_ID_MISMATCH" "200" "$site_file"; exit 65; fi
           case "$default_url" in
             "https://$SITE_ID.web.app"|"https://$SITE_ID.web.app/") ;;
             *) diagnostic "SITE_CONTRACT" "200" "$site_file"; exit 62 ;;
@@ -141,33 +141,44 @@ jobs:
             validate_file="$(mktemp "${RUNNER_TEMP}/aurora-custom-domain-validate.XXXXXX.json")"
             trap 'rm -f "$validate_file"' EXIT
             validate_code="$(curl --silent --show-error --max-time 30 -o "$validate_file" -w '%{http_code}'               -X POST "${auth[@]}" -H 'Content-Type: application/json' --data '{}'               "$BASE/$site_name/customDomains?customDomainId=$DOMAIN&validateOnly=true")"
-            test "$validate_code" = "200"
-            jq -e '.name | type == "string"' "$validate_file" >/dev/null
+            if [ "$validate_code" != "200" ]; then diagnostic "CREATE_VALIDATE" "$validate_code" "$validate_file"; exit 66; fi
+            if ! jq -e '.name | type == "string" and length > 0' "$validate_file" >/dev/null; then
+              diagnostic "CREATE_VALIDATE_CONTRACT" "200" "$validate_file"; exit 67
+            fi
             action="CREATE_REQUIRED"
             if [ "$REPAIR_CONFIRMATION" = "REPAIR_HML_DOMAIN" ]; then
               mutation_file="$(mktemp "${RUNNER_TEMP}/aurora-custom-domain-create.XXXXXX.json")"
               trap 'rm -f "$validate_file" "$mutation_file"' EXIT
               mutation_code="$(curl --silent --show-error --max-time 30 -o "$mutation_file" -w '%{http_code}'                 -X POST "${auth[@]}" -H 'Content-Type: application/json' --data '{}'                 "$BASE/$site_name/customDomains?customDomainId=$DOMAIN")"
-              test "$mutation_code" = "200"
-              jq -e '.name | type == "string"' "$mutation_file" >/dev/null
+              if [ "$mutation_code" != "200" ]; then diagnostic "CREATE" "$mutation_code" "$mutation_file"; exit 68; fi
+              if ! jq -e '.name | type == "string" and length > 0' "$mutation_file" >/dev/null; then
+                diagnostic "CREATE_CONTRACT" "200" "$mutation_file"; exit 69
+              fi
               action="CREATE_REQUESTED"
             fi
           elif [ "$(jq -r '.deleteTime // empty' <<<"$domain_json")" != "" ]; then
             etag="$(jq -r '.etag // empty' <<<"$domain_json")"
-            test -n "$etag"
+            if [ -z "$etag" ]; then
+              jq -nc --arg project "$PROJECT_ID" --arg site "$SITE_ID" --arg domain "$DOMAIN" \
+                '{schemaVersion:1,projectId:$project,siteId:$site,domain:$domain,stage:"UNDELETE_ETAG_MISSING",httpStatus:"200",
+                  apiStatus:"NOT_AVAILABLE",apiCode:"NOT_AVAILABLE",secretsIncluded:false,iamChanged:false,dnsChanged:false}' > "$evidence"
+              exit 70
+            fi
             validate_payload="$(jq -nc --arg etag "$etag" '{validateOnly:true,etag:$etag}')"
             validate_file="$(mktemp "${RUNNER_TEMP}/aurora-custom-domain-undelete-validate.XXXXXX.json")"
             trap 'rm -f "$validate_file"' EXIT
             validate_code="$(curl --silent --show-error --max-time 30 -o "$validate_file" -w '%{http_code}'               -X POST "${auth[@]}" -H 'Content-Type: application/json' --data "$validate_payload"               "$BASE/$resource:undelete")"
-            test "$validate_code" = "200"
+            if [ "$validate_code" != "200" ]; then diagnostic "UNDELETE_VALIDATE" "$validate_code" "$validate_file"; exit 71; fi
             action="UNDELETE_REQUIRED"
             if [ "$REPAIR_CONFIRMATION" = "REPAIR_HML_DOMAIN" ]; then
               mutation_payload="$(jq -nc --arg etag "$etag" '{validateOnly:false,etag:$etag}')"
               mutation_file="$(mktemp "${RUNNER_TEMP}/aurora-custom-domain-undelete.XXXXXX.json")"
               trap 'rm -f "$validate_file" "$mutation_file"' EXIT
               mutation_code="$(curl --silent --show-error --max-time 30 -o "$mutation_file" -w '%{http_code}'                 -X POST "${auth[@]}" -H 'Content-Type: application/json' --data "$mutation_payload"                 "$BASE/$resource:undelete")"
-              test "$mutation_code" = "200"
-              jq -e '.name | type == "string"' "$mutation_file" >/dev/null
+              if [ "$mutation_code" != "200" ]; then diagnostic "UNDELETE" "$mutation_code" "$mutation_file"; exit 72; fi
+              if ! jq -e '.name | type == "string" and length > 0' "$mutation_file" >/dev/null; then
+                diagnostic "UNDELETE_CONTRACT" "200" "$mutation_file"; exit 73
+              fi
               action="UNDELETE_REQUESTED"
             fi
           fi
