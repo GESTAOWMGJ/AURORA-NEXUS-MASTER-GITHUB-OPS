@@ -4,23 +4,79 @@ import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ACTIVE_RELEASE_SOURCE, ACTIVE_RELEASE_ORIGIN, activeReleaseSigningBytes, verifyActiveReleaseEnvelope } from '../functions/lib/auroraActiveRelease.js';
+import ownerDecision from '../policy/hml-owner-release-approval-v1.json' with { type: 'json' };
 
 const REPOSITORY='GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS';
 const DEPLOY_WORKFLOW='.github/workflows/deploy-aurora-firebase.yml';
 const CI_WORKFLOW='.github/workflows/validate-firestore-migration.yml';
 const PUBLISH_JOB='Publish verified canonical active release';
+const OWNER_MODE='OWNER_DEPLOYMENT_APPROVAL',PR_MODE='GITHUB_PULL_REQUEST_REVIEW';
+const HML_ENVIRONMENT='firebase-homologation',HML_PROJECT='wmgj-hml-jfn-20260927';
 const REQUIRED_DEPLOY_STEPS=['Deploy Functions, Hosting, Rules and indexes','Smoke test private shell and deployed functions',
   'Authenticated smoke test without stored password','Verify canonical source-bound runtime'];
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fail=code=>{throw new Error(code);};
 const id=value=>typeof value==='string'&&/^[1-9][0-9]{0,19}$/.test(value);
 const sha=value=>typeof value==='string'&&/^[a-f0-9]{40}$/.test(value);
+const ownerDecisionSha256=hash(JSON.stringify(ownerDecision));
 const runMatches=(run,sourceSha,path)=>run?.head_sha===sourceSha&&run?.head_branch==='main'&&run?.path===path
   &&run?.repository?.full_name===REPOSITORY&&run?.status==='completed'&&run?.conclusion==='success';
 
-/** Every boolean below is derived from GitHub responses, never caller-supplied success flags. */
+function requireCurrentOwnerDecision(now) {
+  if(ownerDecision.schemaVersion!==1||ownerDecision.approvalSource!=='DIRECT_OWNER_CHAT'
+    ||ownerDecision.scope.repository!==REPOSITORY||ownerDecision.scope.projectId!==HML_PROJECT
+    ||ownerDecision.scope.environment!==HML_ENVIRONMENT||ownerDecision.scope.branch!=='main'
+    ||ownerDecision.integrationAndHmlPublicationAuthorized!==true||ownerDecision.productionAuthorized!==false
+    ||ownerDecision.clinicalSensitiveAuthorized!==false||ownerDecision.laterMainCodeReviewClaimed!==false
+    ||ownerDecision.independentGithubPullRequestReviewClaimed!==false
+    ||ownerDecision.riskAcceptance.status!=='ACCEPTED_BY_OWNER_HML_TEST_TOOLS_ONLY') fail('OWNER_APPROVAL_SCOPE_INVALID');
+  const recordedAt=Date.parse(`${ownerDecision.recordedOn}T00:00:00.000Z`),expiresAt=Date.parse(ownerDecision.scope.validUntilUtc);
+  if(!Number.isSafeInteger(recordedAt)||!Number.isSafeInteger(expiresAt)||expiresAt<=recordedAt
+    ||!Number.isSafeInteger(now)||now<recordedAt||now>=expiresAt) fail('OWNER_APPROVAL_EXPIRED');
+}
+
+async function verifyOwnerDeploymentApproval(input,release,pr,githubJSON) {
+  requireCurrentOwnerDecision(input.now);
+  const owner=ownerDecision.repositoryOwner;
+  const ownerUser=user=>user?.type==='User'&&user.id===owner.id&&user.login===owner.login;
+  if(input.projectId!==HML_PROJECT||input.deploymentEnvironment!==HML_ENVIRONMENT
+    ||input.publisherRunId!==input.releaseRunId||input.actorLogin!==owner.login||input.actorId!==String(owner.id)
+    ||!ownerUser(release.actor)||!ownerUser(release.triggering_actor)) fail('OWNER_HML_CONTEXT_NOT_VERIFIED');
+  const environment=await githubJSON(`/environments/${HML_ENVIRONMENT}`);
+  const reviewerRule=environment?.protection_rules?.find(rule=>rule.type==='required_reviewers');
+  if(!Number.isSafeInteger(environment?.id)||environment.id<1||environment.name!==HML_ENVIRONMENT
+    ||environment.deployment_branch_policy?.custom_branch_policies!==true
+    ||environment.deployment_branch_policy.protected_branches!==false
+    ||reviewerRule?.prevent_self_review!==false
+    ||!reviewerRule.reviewers?.some(row=>row.type==='User'&&ownerUser(row.reviewer))) fail('OWNER_ENVIRONMENT_REVIEWER_NOT_VERIFIED');
+  const branches=await githubJSON(`/environments/${HML_ENVIRONMENT}/deployment-branch-policies?per_page=100`);
+  if(branches?.total_count!==1||branches.branch_policies?.length!==1
+    ||branches.branch_policies[0].name!=='main'||branches.branch_policies[0].type!=='branch') fail('OWNER_ENVIRONMENT_BRANCH_NOT_VERIFIED');
+  const approvals=await githubJSON(`/actions/runs/${input.releaseRunId}/approvals`);
+  if(!Array.isArray(approvals)||approvals.length>=100) fail('OWNER_DEPLOYMENT_APPROVAL_INCOMPLETE');
+  const relevant=approvals.filter(row=>row.environments?.some(env=>env.id===environment.id&&env.name===HML_ENVIRONMENT));
+  // A caller flag, run actor or administrator bypass is never an approval. Any recorded rejection blocks this mode.
+  if(relevant.some(row=>row.state!=='approved')||!relevant.some(row=>row.state==='approved'&&ownerUser(row.user))) fail('OWNER_DEPLOYMENT_APPROVAL_NOT_VERIFIED');
+  for(const reviewed of ownerDecision.reviewedPullRequests) {
+    const original=await githubJSON(`/pulls/${reviewed.number}`);
+    if(original?.merged!==true||original.head?.sha!==reviewed.headSha||original.base?.ref!=='main'
+      ||original.base?.repo?.full_name!==REPOSITORY) fail('OWNER_CHAT_REVIEW_HEAD_CONFLICT');
+  }
+  return {mode:OWNER_MODE,sourceSha:input.sourceSha,releaseRunId:input.releaseRunId,reviewPrNumber:input.reviewPrNumber,
+    integrationPrHeadSha:pr.head.sha,environmentId:environment.id,environment:HML_ENVIRONMENT,
+    approverLogin:owner.login,approverId:owner.id,ownerDecisionId:ownerDecision.decisionId,ownerDecisionSha256,
+    approvalSource:ownerDecision.approvalSource,approvalReaffirmations:structuredClone(ownerDecision.reaffirmations),
+    reviewedPullRequests:structuredClone(ownerDecision.reviewedPullRequests),
+    gateway:structuredClone(ownerDecision.gateway),riskAcceptance:structuredClone(ownerDecision.riskAcceptance),
+    subsequentTechnicalGatewayEvidence:structuredClone(ownerDecision.subsequentTechnicalGatewayEvidence),
+    laterMainCodeReviewClaimed:false,independentGithubPullRequestReviewClaimed:false};
+}
+
+/** Technical gates come from GitHub; owner-chat scope is a separate versioned decision, never a supplied success flag. */
 export async function verifyProtectedReleaseEvidence(input,githubJSON) {
   const {sourceSha,ciRunId,releaseRunId,reviewPrNumber}=input;
+  const reviewMode=input.reviewMode??PR_MODE;
+  if(![PR_MODE,OWNER_MODE].includes(reviewMode)) fail('INVALID_REVIEW_MODE');
   if(!sha(sourceSha)||![ciRunId,releaseRunId,reviewPrNumber].every(id)) fail('INVALID_RELEASE_EVIDENCE_IDS');
   const main=await githubJSON('/git/ref/heads/main');
   if(main?.object?.sha!==sourceSha) fail('CURRENT_MAIN_CONFLICT');
@@ -58,10 +114,17 @@ export async function verifyProtectedReleaseEvidence(input,githubJSON) {
     const previous=latest.get(review.user.id);
     if(!previous||Date.parse(review.submitted_at)>Date.parse(previous.submitted_at)) latest.set(review.user.id,review);
   }
-  const approved=[...latest.values()].some(review=>review.state==='APPROVED'&&review.commit_id===pr.head.sha
+  const approved=[...latest.values()].find(review=>review.state==='APPROVED'&&review.commit_id===pr.head.sha
     &&review.user.type==='User'&&review.user.id!==pr.user?.id&&['OWNER','MEMBER','COLLABORATOR'].includes(review.author_association));
-  if(!approved||[...latest.values()].some(review=>review.state==='CHANGES_REQUESTED')) fail('EXACT_HUMAN_REVIEW_NOT_VERIFIED');
-  return {ciPassed:true,humanReviewApproved:true,protectedDeploySucceeded:true,smokePassed:true};
+  if([...latest.values()].some(review=>review.state==='CHANGES_REQUESTED')) fail('EXACT_HUMAN_REVIEW_NOT_VERIFIED');
+  let approvalProvenance;
+  if(reviewMode===OWNER_MODE) approvalProvenance=await verifyOwnerDeploymentApproval(input,release,pr,githubJSON);
+  else {
+    if(!approved) fail('EXACT_HUMAN_REVIEW_NOT_VERIFIED');
+    approvalProvenance={mode:PR_MODE,sourceSha,releaseRunId,reviewPrNumber,reviewedHeadSha:pr.head.sha,
+      reviewerId:approved.user.id,reviewerLogin:approved.user.login??null};
+  }
+  return {ciPassed:true,humanReviewApproved:true,protectedDeploySucceeded:true,smokePassed:true,approvalProvenance};
 }
 
 function manifestComponent(bytes,sourceSha) {
@@ -83,8 +146,11 @@ export async function publishActiveRelease(env,deps) {
   if(env.GCLOUD_PROJECT!=='wmgj-hml-jfn-20260927') fail('APPROVED_DEPLOY_PROJECT_REQUIRED');
   const previous=env.AURORA_ACTIVE_RELEASE_PREVIOUS_SHA256;
   if(previous!=='NONE'&&!/^[a-f0-9]{64}$/.test(previous??'')) fail('EXPLICIT_PREDECESSOR_REQUIRED');
-  const checks=await verifyProtectedReleaseEvidence({sourceSha:env.GITHUB_SHA,ciRunId:env.AURORA_ACTIVE_RELEASE_CI_RUN_ID,
-    releaseRunId:env.AURORA_ACTIVE_RELEASE_DEPLOY_RUN_ID,reviewPrNumber:env.AURORA_ACTIVE_RELEASE_REVIEW_PR,publisherRunId:env.GITHUB_RUN_ID},deps.githubJSON);
+  const {approvalProvenance,...checks}=await verifyProtectedReleaseEvidence({sourceSha:env.GITHUB_SHA,ciRunId:env.AURORA_ACTIVE_RELEASE_CI_RUN_ID,
+    releaseRunId:env.AURORA_ACTIVE_RELEASE_DEPLOY_RUN_ID,reviewPrNumber:env.AURORA_ACTIVE_RELEASE_REVIEW_PR,publisherRunId:env.GITHUB_RUN_ID,
+    reviewMode:env.AURORA_ACTIVE_RELEASE_REVIEW_MODE,projectId:env.GCLOUD_PROJECT,
+    deploymentEnvironment:env.AURORA_ACTIVE_RELEASE_DEPLOYMENT_ENVIRONMENT,actorLogin:env.GITHUB_ACTOR,actorId:env.GITHUB_ACTOR_ID,
+    now:deps.now?.()??Date.now()},deps.githubJSON);
   const components={};
   for(const component of ['server','web','satellite']) {
     const bytes=await deps.readManifest(component);
@@ -108,18 +174,34 @@ export async function publishActiveRelease(env,deps) {
   if(verified.status!=='CANDIDATE_UNVERIFIED') fail('SIGNED_CANDIDATE_REJECTED');
   // Recheck main after evidence/artifact collection, immediately before atomic promotion.
   if((await deps.githubJSON('/git/ref/heads/main'))?.object?.sha!==env.GITHUB_SHA) fail('CURRENT_MAIN_CONFLICT');
+  if(approvalProvenance.mode===OWNER_MODE) requireCurrentOwnerDecision(deps.now?.()??Date.now());
   await deps.commit(envelope,previous,verified.certificateSha256,env.AURORA_ACTIVE_RELEASE_PUBLIC_KEY,
-    async()=>(await deps.githubJSON('/git/ref/heads/main'))?.object?.sha);
+    async()=>{
+      if(approvalProvenance.mode===OWNER_MODE) requireCurrentOwnerDecision(deps.now?.()??Date.now());
+      const currentMainSha=(await deps.githubJSON('/git/ref/heads/main'))?.object?.sha;
+      if(approvalProvenance.mode===OWNER_MODE) requireCurrentOwnerDecision(deps.now?.()??Date.now());
+      return currentMainSha;
+    },approvalProvenance);
   return {status:'ACTIVE_PIN_PUBLISHED',sourceSha:certificate.sourceSha,certificateSha256:verified.certificateSha256,
     releaseRunId:certificate.releaseRunId,deviceInstallationVerified:false};
 }
 
 /** Compare-and-swap and immutable predecessor history use the existing Firestore only. */
 export function firestoreReleaseCommit(database) {
-  return async(envelope,expectedPrevious,certificateSha256,publicKey,readCurrentMainSha)=>{
+  return async(envelope,expectedPrevious,certificateSha256,publicKey,readCurrentMainSha,approvalProvenance)=>{
     const incoming=verifyActiveReleaseEnvelope(envelope,publicKey);
     if(incoming.status!=='CANDIDATE_UNVERIFIED'||incoming.certificateSha256!==certificateSha256) fail('SIGNED_CANDIDATE_REJECTED');
     if(typeof readCurrentMainSha!=='function') fail('CURRENT_MAIN_PROOF_REQUIRED');
+    if(!approvalProvenance||![PR_MODE,OWNER_MODE].includes(approvalProvenance.mode)
+      ||approvalProvenance.sourceSha!==envelope.certificate.sourceSha||approvalProvenance.releaseRunId!==envelope.certificate.releaseRunId
+      ||!id(approvalProvenance.reviewPrNumber)) fail('APPROVAL_PROVENANCE_REQUIRED');
+    if(approvalProvenance.mode===OWNER_MODE
+      &&(approvalProvenance.ownerDecisionSha256!==ownerDecisionSha256||approvalProvenance.environment!==HML_ENVIRONMENT
+        ||approvalProvenance.approverId!==ownerDecision.repositoryOwner.id||approvalProvenance.approverLogin!==ownerDecision.repositoryOwner.login
+        ||approvalProvenance.laterMainCodeReviewClaimed!==false||approvalProvenance.independentGithubPullRequestReviewClaimed!==false)) fail('APPROVAL_PROVENANCE_REQUIRED');
+    if(approvalProvenance.mode===PR_MODE&&(!sha(approvalProvenance.reviewedHeadSha)
+      ||!Number.isSafeInteger(approvalProvenance.reviewerId)||approvalProvenance.reviewerId<1)) fail('APPROVAL_PROVENANCE_REQUIRED');
+    const approvalRecord=structuredClone(approvalProvenance);
     return database.runTransaction(async tx=>{
     const active=database.doc(ACTIVE_RELEASE_SOURCE);
     const history=database.doc(`${ACTIVE_RELEASE_SOURCE}/history/release-${envelope.certificate.releaseRunId}`);
@@ -134,7 +216,7 @@ export function firestoreReleaseCommit(database) {
     // This minimizes stale promotion; GitHub and Firestore are not a distributed atomic transaction.
     if(await readCurrentMainSha()!==envelope.certificate.sourceSha) fail('CURRENT_MAIN_CONFLICT');
     tx.create(history,{envelope,previousCertificateSha256:expectedPrevious==='NONE'?null:expectedPrevious,
-      certificateSha256,createdAtUtc:envelope.certificate.publishedAtUtc});
+      certificateSha256,createdAtUtc:envelope.certificate.publishedAtUtc,approvalProvenance:approvalRecord});
     tx.set(active,envelope);
     });
   };

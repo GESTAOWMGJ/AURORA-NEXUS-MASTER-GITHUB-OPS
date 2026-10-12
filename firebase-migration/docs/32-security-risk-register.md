@@ -44,7 +44,7 @@
 | R026 | Admin Master concentra privilégios | 3 | 5 | 15 | HIGH | MFA/audit required | break-glass, dual review, scoped admin operations | Governance | MEDIUM |
 | R027 | key rotation deixa versão antiga desativada cedo | 2 | 5 | 10 | HIGH | policy | verificar activeKeyVersion antes de disable | KMS Owner | LOW |
 | R028 | dado clínico enviado a IA externa | 2 | 5 | 10 | HIGH | clinical gate | DLP/schema block + provider contract/retention review | AI/Privacy | LOW |
-| R029 | advisories residuais nas ferramentas de teste de Security Rules | 3 | 4 | 12 | HIGH | dependências de desenvolvimento separadas, fixtures sintéticas, CI de validação sem credenciais ou deploy | corrigir árvore upstream e submeter proposta temporária SEC-EXC-TEST-20261007 à revisão do owner | AppSec / Security Governance | LOW |
+| R029 | advisories residuais nas ferramentas de teste de Security Rules | 3 | 4 | 12 | HIGH | dependências de desenvolvimento separadas, fixtures sintéticas, CI de validação sem credenciais ou deploy | exceção temporária SEC-EXC-TEST-20261007 aceita pelo titular somente para ferramentas de teste HML; corrigir upstream e revisar até 14/10/2026 | AppSec / Security Governance | LOW |
 
 ## 3. Regras de tratamento
 
@@ -61,14 +61,17 @@ R001, R003, R004, R005, R006, R007, R009, R010, R013, R014, R017, R018, R019, R0
 
 A matriz deve ser atualizada após: incidente, pentest, nova integração, alteração IAM/KMS, mudança de arquitetura, aquisição de fornecedor, nova categoria de dado ou release que mude trust boundary.
 
-## 6. Proposta temporária para R029 — revisão pendente
+## 6. Exceção temporária para R029 — aceite específico do titular
 
 - **ID:** SEC-EXC-TEST-20261007
-- **Status:** `PENDING_OWNER_REVIEW`
-- **Owner requerido:** AppSec / Security Governance, com aceite explícito do titular responsável.
+- **Status:** `ACCEPTED_BY_OWNER_HML_TEST_TOOLS_ONLY`
+- **Responsável pelo aceite:** titular responsável, por autorização humana direta no chat em 08/10/2026; acompanhamento AppSec / Security Governance.
+- **Reafirmação:** revisão e decisão específica de R029 reiteradas pelo titular em 12/10/2026, preservando o escopo original e sem extensão de prazo.
 - **Revisão até:** 14/10/2026, no fuso `America/Sao_Paulo`.
 
-**Escopo:** somente as ferramentas de teste em `firebase-migration/tests`. Esta proposta não aceita o risco, não libera produção e não altera os gates atuais.
+**Escopo:** somente as ferramentas de teste em `firebase-migration/tests`, nas condições sintéticas de HML descritas abaixo. O titular declarou ter realizado a revisão das quatro candidatas e do gateway, aceitou especificamente R029 e autorizou integração/publicação HML. Este aceite não libera produção ou dado clínico sensível, não altera dependências e não remove os demais gates.
+
+A decisão sanitizada está em [`hml-owner-release-approval-v1.json`](../policy/hml-owner-release-approval-v1.json), com as quatro cabeças e hashes exatos do gateway. Sua proveniência é `DIRECT_OWNER_CHAT`; ela não fabrica review GitHub, não declara revisão independente nem afirma que toda main posterior foi revisada. O modo de promoção e sua evidência própria estão em [`38-hml-owner-release-governance.md`](38-hml-owner-release-governance.md).
 
 No candidato derivado da baseline `203670bc562bbb48694b08e55af363a07d90a8f5`, a auditoria desse pacote passou de 29 agregações (1 crítica, 17 altas e 11 moderadas) para 11 (0 críticas, 7 altas e 4 moderadas). Essas contagens incluem pacotes afetados transitivamente; não são contagens de falhas independentes ou prova de exploração. A auditoria do runtime Functions é uma verificação separada e não cobre as ferramentas de teste.
 
@@ -90,6 +93,6 @@ Compensações verificáveis do fluxo existente:
 - O pacote de testes declara essas ferramentas como `devDependencies`. A configuração Firebase aponta o código de Functions para seu diretório próprio, com manifesto e lockfile separados; este candidato não altera suas dependências de runtime nem o CLI de deploy.
 - A instalação local no Node `22.23.3`, `npm ls` e o carregamento do CLI `15.32.1` passaram. O workflow existente usa Node 22 e Java 21. Os 27 testes de Rules e os checks necessários continuam obrigatórios no SHA final do PR; os resultados anteriores não substituem essa verificação.
 
-Antes de qualquer aceite, registrar o SHA final, run de CI, resultado dos 27 testes de Rules, auditoria atualizada, responsável pela decisão e condições de revogação. A proposta permanece pendente mesmo com CI verde. A revisão deve ocorrer até a data acima ou antes de mudança de escopo, introdução de credenciais/dados reais, falha de teste ou novo advisory relevante.
+O aceite cobre o head revisado do PR #184 `bf5bbc1146245bdf112cedfd9a9c6cc558e46106`, CI Firestore `37712091783` com 27 Rules aprovados, e a auditoria registrada de 11 agregações acima; não é uma auditoria nova nem alegação de fechamento dos alertas. Cada main que será promovida continua exigindo CI exato atualizado. A revisão deve ocorrer até a data acima ou antes de mudança de escopo, introdução de credenciais/dados reais, falha de teste ou novo advisory relevante; qualquer dessas condições suspende este aceite até nova decisão específica.
 
 Rollback do candidato: reverter o commit que altera manifesto, lockfile e este registro, mantendo o risco aberto e a promoção bloqueada. Não aplicar downgrade do Firebase SDK, `npm audit fix --force` ou alteração de política para ocultar os advisories.

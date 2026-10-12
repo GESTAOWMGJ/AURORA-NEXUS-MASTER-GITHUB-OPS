@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { generateKeyPairSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { ACTIVE_RELEASE_SOURCE, verifyActiveReleaseEnvelope } from '../src/auroraActiveRelease.js';
 import {publishActiveRelease,firestoreReleaseCommit,verifyProtectedReleaseEvidence} from '../../scripts/publish-active-release.mjs';
 const repo='GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS',sourceSha='a'.repeat(40),now=Date.parse('2026-10-07T12:00:00.000Z');
@@ -24,12 +26,12 @@ function fixture() {
     [`/pulls/${reviewPrNumber}`,{merged:true,merge_commit_sha:sourceSha,base:{ref:'main',repo:{full_name:repo}},head:{sha:'b'.repeat(40)},user:{id:1}}],
     [`/pulls/${reviewPrNumber}/reviews?per_page=100`,[{state:'APPROVED',commit_id:'b'.repeat(40),user:{id:2,type:'User'},author_association:'OWNER',submitted_at:'2026-10-07T11:00:00Z'}]]
   ]);
-  let writes=0,mainReads=0,envelope:any;
+  let writes=0,mainReads=0,envelope:any,approvalProvenance:any;
   const githubJSON=async(path:string)=>{if(path==='/git/ref/heads/main')mainReads++;assert.ok(responses.has(path));return structuredClone(responses.get(path));};
   const manifest=Buffer.from(JSON.stringify({schemaVersion:1,sourceSha,version:'1.0.0-test',files:{'lib/synthetic.js':'a'.repeat(64)}}));
   const deps={githubJSON,readManifest:async(component:string)=>component==='satellite'?undefined:manifest,now:()=>now,
-    commit:async(value:any)=>{writes++;envelope=value;}};
-  return {env,responses,deps,writes:()=>writes,envelope:()=>envelope,mainReads:()=>mainReads};
+    commit:async(value:any,...args:any[])=>{writes++;envelope=value;approvalProvenance=args[4];}};
+  return {env,responses,deps,writes:()=>writes,envelope:()=>envelope,approvalProvenance:()=>approvalProvenance,mainReads:()=>mainReads};
 }
 
 test('publisher derives gates from exact trusted GitHub records and signs only after preflight',async()=>{
@@ -95,12 +97,12 @@ test('CAS preserves current pointer and history on mismatch; history is create-o
   }};
   const commit=firestoreReleaseCommit(database);
   const readMain=async()=>sourceSha;
-  await assert.rejects(commit(signed,'a'.repeat(64),candidate.certificateSha256,publicKey,readMain));assert.equal(rows.size,0);
-  await commit(signed,'NONE',candidate.certificateSha256,publicKey,readMain);assert.equal(rows.size,2);const before=JSON.stringify([...rows]);
-  await assert.rejects(commit(signed,'NONE',candidate.certificateSha256,publicKey,readMain));assert.equal(JSON.stringify([...rows]),before);
+  await assert.rejects(commit(signed,'a'.repeat(64),candidate.certificateSha256,publicKey,readMain,f.approvalProvenance()));assert.equal(rows.size,0);
+  await commit(signed,'NONE',candidate.certificateSha256,publicKey,readMain,f.approvalProvenance());assert.equal(rows.size,2);const before=JSON.stringify([...rows]);
+  await assert.rejects(commit(signed,'NONE',candidate.certificateSha256,publicKey,readMain,f.approvalProvenance()));assert.equal(JSON.stringify([...rows]),before);
   assert.equal(rows.get(ACTIVE_RELEASE_SOURCE).certificate.sourceSha,sourceSha);
   assert.equal(rows.has(`${ACTIVE_RELEASE_SOURCE}/history/release-${releaseRunId}`),true);
-  await assert.rejects(commit({...signed,signature:'a'.repeat(86)},'NONE',candidate.certificateSha256,publicKey,readMain));assert.equal(JSON.stringify([...rows]),before);
+  await assert.rejects(commit({...signed,signature:'a'.repeat(86)},'NONE',candidate.certificateSha256,publicKey,readMain,f.approvalProvenance()));assert.equal(JSON.stringify([...rows]),before);
 });
 
 test('transaction retry after main advances discards candidate writes and preserves prior storage',async()=>{
@@ -113,7 +115,7 @@ test('transaction retry after main advances discards candidate writes and preser
     main='c'.repeat(40);attempts++;await body(transaction());committed++;
   }};
   const commit=firestoreReleaseCommit(database);
-  await assert.rejects(commit(signed,'NONE',candidate.certificateSha256,publicKey,async()=>{proofReads++;return main;}),/CURRENT_MAIN_CONFLICT/);
+  await assert.rejects(commit(signed,'NONE',candidate.certificateSha256,publicKey,async()=>{proofReads++;return main;},f.approvalProvenance()),/CURRENT_MAIN_CONFLICT/);
   assert.equal(attempts,2);assert.equal(proofReads,2);assert.equal(committed,0);
 });
 
@@ -129,4 +131,172 @@ test('publisher wires its real transaction adapter with a fresh main-proof callb
   const result=await publishActiveRelease(f.env,{...f.deps,commit:firestoreReleaseCommit(database)});
   assert.equal(result.status,'ACTIVE_PIN_PUBLISHED');assert.equal(f.mainReads(),3);assert.equal(rows.size,2);
   assert.equal(rows.get(ACTIVE_RELEASE_SOURCE).certificate.sourceSha,sourceSha);
+  assert.deepEqual(rows.get(`${ACTIVE_RELEASE_SOURCE}/history/release-${releaseRunId}`).approvalProvenance,
+    {mode:'GITHUB_PULL_REQUEST_REVIEW',sourceSha,releaseRunId,reviewPrNumber,reviewedHeadSha:'b'.repeat(40),reviewerId:2,reviewerLogin:null});
+});
+
+const owner={login:'GESTAOWMGJ',id:278915189,type:'User'},ownerNow=Date.parse('2026-10-08T00:00:00.000Z');
+const ownerDecision=JSON.parse(readFileSync(new URL('../../policy/hml-owner-release-approval-v1.json',import.meta.url),'utf8'));
+function ownerFixture() {
+  const f=fixture();Object.assign(f.env,{GITHUB_RUN_ID:releaseRunId,GITHUB_ACTOR:owner.login,GITHUB_ACTOR_ID:String(owner.id),
+    AURORA_ACTIVE_RELEASE_REVIEW_MODE:'OWNER_DEPLOYMENT_APPROVAL',AURORA_ACTIVE_RELEASE_DEPLOYMENT_ENVIRONMENT:'firebase-homologation'});
+  f.deps.now=()=>ownerNow;
+  Object.assign(f.responses.get(`/actions/runs/${releaseRunId}`),{actor:structuredClone(owner),triggering_actor:structuredClone(owner)});
+  f.responses.set(`/pulls/${reviewPrNumber}/reviews?per_page=100`,[]);
+  f.responses.set('/environments/firebase-homologation',{id:100,name:'firebase-homologation',can_admins_bypass:true,
+    deployment_branch_policy:{custom_branch_policies:true,protected_branches:false},
+    protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:structuredClone(owner)}]}]});
+  f.responses.set('/environments/firebase-homologation/deployment-branch-policies?per_page=100',
+    {total_count:1,branch_policies:[{name:'main',type:'branch'}]});
+  f.responses.set(`/actions/runs/${releaseRunId}/approvals`,[{state:'approved',user:structuredClone(owner),environments:[{id:100,name:'firebase-homologation'}]}]);
+  for(const pr of ownerDecision.reviewedPullRequests) f.responses.set(`/pulls/${pr.number}`,
+    {merged:true,head:{sha:pr.headSha},base:{ref:'main',repo:{full_name:repo}}});
+  return f;
+}
+
+test('HML owner mode consumes real deployment approval and preserves original chat review scope',async()=>{
+  const f=ownerFixture();await publishActiveRelease(f.env,f.deps);
+  assert.equal(f.writes(),1);const proof=f.approvalProvenance();
+  assert.equal(proof.mode,'OWNER_DEPLOYMENT_APPROVAL');assert.equal(proof.approverLogin,owner.login);
+  assert.equal(proof.approvalSource,'DIRECT_OWNER_CHAT');assert.match(proof.ownerDecisionSha256,/^[a-f0-9]{64}$/);
+  assert.deepEqual(proof.reviewedPullRequests,ownerDecision.reviewedPullRequests);
+  assert.deepEqual(proof.approvalReaffirmations,ownerDecision.reaffirmations);
+  assert.equal(proof.laterMainCodeReviewClaimed,false);assert.equal(proof.independentGithubPullRequestReviewClaimed,false);
+  assert.equal(proof.riskAcceptance.status,'ACCEPTED_BY_OWNER_HML_TEST_TOOLS_ONLY');
+  assert.equal('approvalProvenance' in f.envelope().certificate,false);
+  assert.equal(verifyActiveReleaseEnvelope(f.envelope(),publicKey,{now:ownerNow}).status,'CANDIDATE_UNVERIFIED');
+});
+
+test('the 12 October reaffirmation preserves the original risk deadline and does not permit late promotion',async()=>{
+  assert.equal(ownerDecision.recordedOn,'2026-10-08');
+  assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-15T03:00:00.000Z');
+  assert.equal(ownerDecision.riskAcceptance.reviewBy,'2026-10-14');
+  assert.equal(ownerDecision.reaffirmations[0].recordedOn,'2026-10-12');
+  assert.equal(ownerDecision.reaffirmations[0].originalScopeUnchanged,true);
+  assert.equal(ownerDecision.reaffirmations[0].riskReviewDeadlineExtended,false);
+  const current=ownerFixture();current.deps.now=()=>Date.parse('2026-10-12T18:00:00Z');
+  await publishActiveRelease(current.env,current.deps);assert.equal(current.writes(),1);
+  const expired=ownerFixture();expired.deps.now=()=>Date.parse(ownerDecision.scope.validUntilUtc);
+  await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(expired.writes(),0);
+});
+
+test('pre-cloud workflow gate requires signed promotion when a canonical public key is configured',()=>{
+  const workflow=readFileSync(new URL('../../../.github/workflows/deploy-aurora-firebase.yml',import.meta.url),'utf8').replace(/\r\n/g,'\n');
+  const preflight=workflow.split('      - name: Require canonical publisher configuration before cloud changes')[1]
+    .split('      - name: Require protected deployment configuration')[0];
+  const source=preflight.split("node - <<'NODE'\n")[1].split('\n          NODE')[0];
+  const invoke=(env:Record<string,string>)=>spawnSync(process.execPath,['-'],{input:source,encoding:'utf8',env});
+  const configured={AURORA_ACTIVE_RELEASE_PUBLIC_KEY:publicKey,AURORA_ACTIVE_RELEASE_PRIVATE_KEY:privateKey,
+    RELEASE_CI_RUN_ID:ciRunId,RELEASE_REVIEW_PR:reviewPrNumber,RELEASE_PREVIOUS_SHA256:'NONE'};
+  const skipped=invoke({...configured,PUBLISH_ACTIVE_RELEASE:'false'});
+  assert.notEqual(skipped.status,0);assert.match(skipped.stderr,/CANONICAL_RELEASE_PROMOTION_REQUIRED/);
+  assert.equal(invoke({...configured,PUBLISH_ACTIVE_RELEASE:'true'}).status,0);
+  assert.notEqual(invoke({...configured,PUBLISH_ACTIVE_RELEASE:'true',RELEASE_PREVIOUS_SHA256:''}).status,0);
+});
+
+for(const scenario of ['no approval','rejected approval','approval different environment','approval different owner','approval bot',
+  'actor different owner','actor bot','triggering actor different owner','environment no reviewers','owner no longer reviewer',
+  'self review prohibited','branch wildcard','extra branch allowed','branch evidence incomplete','project production','environment production',
+  'different publisher run','runner actor forged','owner decision expired','invalid clock','original reviewed head changed',
+  'original PR not merged','current integration PR not merged','changes requested','unknown mode']) test(`HML owner mode rejects ${scenario} before mutation`,async()=>{
+  const f=ownerFixture(),release=f.responses.get(`/actions/runs/${releaseRunId}`),environment=f.responses.get('/environments/firebase-homologation');
+  const approvals=f.responses.get(`/actions/runs/${releaseRunId}/approvals`),branches=f.responses.get('/environments/firebase-homologation/deployment-branch-policies?per_page=100');
+  if(scenario==='no approval')f.responses.set(`/actions/runs/${releaseRunId}/approvals`,[]);
+  if(scenario==='rejected approval')approvals.push({...approvals[0],state:'rejected'});
+  if(scenario==='approval different environment')approvals[0].environments[0].id=101;
+  if(scenario==='approval different owner')approvals[0].user={...owner,id:3,login:'other'};
+  if(scenario==='approval bot')approvals[0].user.type='Bot';
+  if(scenario==='actor different owner')release.actor={...owner,id:3,login:'other'};
+  if(scenario==='actor bot')release.actor.type='Bot';
+  if(scenario==='triggering actor different owner')release.triggering_actor={...owner,id:3,login:'other'};
+  if(scenario==='environment no reviewers')environment.protection_rules=[];
+  if(scenario==='owner no longer reviewer')environment.protection_rules[0].reviewers=[];
+  if(scenario==='self review prohibited')environment.protection_rules[0].prevent_self_review=true;
+  if(scenario==='branch wildcard')branches.branch_policies[0].name='*';
+  if(scenario==='extra branch allowed'){branches.total_count=2;branches.branch_policies.push({name:'develop',type:'branch'});}
+  if(scenario==='branch evidence incomplete')branches.total_count=2;
+  if(scenario==='project production')f.env.GCLOUD_PROJECT='production';
+  if(scenario==='environment production')(f.env as any).AURORA_ACTIVE_RELEASE_DEPLOYMENT_ENVIRONMENT='firebase-production';
+  if(scenario==='different publisher run')f.env.GITHUB_RUN_ID='124';
+  if(scenario==='runner actor forged')(f.env as any).GITHUB_ACTOR='other';
+  if(scenario==='owner decision expired')f.deps.now=()=>Date.parse(ownerDecision.scope.validUntilUtc);
+  if(scenario==='invalid clock')f.deps.now=()=>NaN;
+  if(scenario==='original reviewed head changed')f.responses.get('/pulls/190').head.sha='c'.repeat(40);
+  if(scenario==='original PR not merged')f.responses.get('/pulls/190').merged=false;
+  if(scenario==='current integration PR not merged')f.responses.get(`/pulls/${reviewPrNumber}`).merged=false;
+  if(scenario==='changes requested')f.responses.get(`/pulls/${reviewPrNumber}/reviews?per_page=100`).push(
+    {state:'CHANGES_REQUESTED',commit_id:'b'.repeat(40),user:{id:3,type:'User'},submitted_at:'2026-10-08T07:00:00Z'});
+  if(scenario==='unknown mode')(f.env as any).AURORA_ACTIVE_RELEASE_REVIEW_MODE='APPROVED';
+  await assert.rejects(publishActiveRelease(f.env,f.deps));assert.equal(f.writes(),0);
+});
+
+test('owner mode still rejects every existing main, CI, smoke and other-check gate',async()=>{
+  for(const scenario of ['main','CI','smoke','check']) {
+    const f=ownerFixture();
+    if(scenario==='main')f.responses.get('/git/ref/heads/main').object.sha='c'.repeat(40);
+    if(scenario==='CI')f.responses.get(`/actions/runs/${ciRunId}`).conclusion='failure';
+    if(scenario==='smoke')f.responses.get(`/actions/runs/${releaseRunId}/jobs?filter=latest&per_page=100`).jobs[1].steps.pop();
+    if(scenario==='check')f.responses.get(`/commits/${sourceSha}/check-runs?filter=latest&per_page=100`).check_runs[0].status='in_progress';
+    await assert.rejects(publishActiveRelease(f.env,f.deps));assert.equal(f.writes(),0);
+  }
+});
+
+test('unavailable environment, branch, approval or original review evidence never falls back to a caller claim',async()=>{
+  for(const unavailable of ['/environments/firebase-homologation',
+    '/environments/firebase-homologation/deployment-branch-policies?per_page=100',
+    `/actions/runs/${releaseRunId}/approvals`,'/pulls/190']) {
+    const f=ownerFixture(),original=f.deps.githubJSON;
+    f.deps.githubJSON=async(path:string)=>{if(path===unavailable)throw new Error('GITHUB_EVIDENCE_UNAVAILABLE');return original(path);};
+    await assert.rejects(publishActiveRelease(f.env,f.deps),/GITHUB_EVIDENCE_UNAVAILABLE/);assert.equal(f.writes(),0);
+  }
+});
+
+test('owner scope expiration during a transaction retry prevents its atomic write',async()=>{
+  const f=ownerFixture();let clock=ownerNow,committed=0,attempts=0;f.deps.now=()=>clock;
+  const database={doc:(path:string)=>({path}),runTransaction:async(body:any)=>{
+    const tx=()=>({get:async()=>({exists:false}),create:()=>{},set:()=>{}});
+    attempts++;await body(tx());clock=Date.parse(ownerDecision.scope.validUntilUtc);attempts++;await body(tx());committed++;
+  }};
+  await assert.rejects(publishActiveRelease(f.env,{...f.deps,commit:firestoreReleaseCommit(database)}),/OWNER_APPROVAL_EXPIRED/);
+  assert.equal(attempts,2);assert.equal(committed,0);
+});
+
+test('owner scope expiration crossed by the final GitHub await prevents writes in the same transaction attempt',async()=>{
+  const f=ownerFixture();let clock=ownerNow,writes=0,committed=0;f.deps.now=()=>clock;
+  const original=f.deps.githubJSON;
+  f.deps.githubJSON=async(path:string)=>{
+    const value=await original(path);
+    if(path==='/git/ref/heads/main'&&f.mainReads()===3)clock=Date.parse(ownerDecision.scope.validUntilUtc);
+    return value;
+  };
+  const database={doc:(path:string)=>({path}),runTransaction:async(body:any)=>{
+    await body({get:async()=>({exists:false}),create:()=>{writes++;},set:()=>{writes++;}});committed++;
+  }};
+  await assert.rejects(publishActiveRelease(f.env,{...f.deps,commit:firestoreReleaseCommit(database)}),/OWNER_APPROVAL_EXPIRED/);
+  assert.equal(f.mainReads(),3);assert.equal(writes,0);assert.equal(committed,0);
+});
+
+test('owner provenance is stored atomically alongside history without altering the signed envelope schema',async()=>{
+  const f=ownerFixture();const rows=new Map<string,any>();
+  const database={doc:(path:string)=>({path}),runTransaction:async(body:any)=>{
+    const draft=new Map(rows);let wrote=false;
+    const tx={get:async(ref:any)=>{assert.equal(wrote,false);return {exists:draft.has(ref.path),data:()=>draft.get(ref.path)};},
+      create:(ref:any,value:any)=>{wrote=true;assert.equal(draft.has(ref.path),false);draft.set(ref.path,structuredClone(value));},
+      set:(ref:any,value:any)=>{wrote=true;draft.set(ref.path,structuredClone(value));}};
+    await body(tx);rows.clear();draft.forEach((value,key)=>rows.set(key,value));
+  }};
+  await publishActiveRelease(f.env,{...f.deps,commit:firestoreReleaseCommit(database)});
+  const history=rows.get(`${ACTIVE_RELEASE_SOURCE}/history/release-${releaseRunId}`);
+  assert.equal(rows.size,2);assert.equal(history.approvalProvenance.mode,'OWNER_DEPLOYMENT_APPROVAL');
+  assert.equal(history.approvalProvenance.releaseRunId,releaseRunId);assert.equal(history.approvalProvenance.laterMainCodeReviewClaimed,false);
+  assert.equal(verifyActiveReleaseEnvelope(rows.get(ACTIVE_RELEASE_SOURCE),publicKey,{now:ownerNow}).status,'CANDIDATE_UNVERIFIED');
+});
+
+test('publisher GitHub token remains read-only for approvals and the owner mode is explicit in workflow inputs',()=>{
+  const workflow=readFileSync(new URL('../../../.github/workflows/deploy-aurora-firebase.yml',import.meta.url),'utf8');
+  const publisher=workflow.split('  publish-active-release:')[1],permissions=publisher.split('    permissions:')[1].split('    steps:')[0];
+  assert.match(permissions,/actions: read/);assert.match(permissions,/pull-requests: read/);
+  assert.doesNotMatch(permissions,/(?:actions|pull-requests|deployments): write/);
+  assert.ok(publisher.includes('GH_TOKEN: ${{ github.token }}'));assert.ok(publisher.includes('environment: firebase-homologation'));
+  assert.ok(workflow.includes('default: GITHUB_PULL_REQUEST_REVIEW'));assert.ok(workflow.includes('AURORA_ACTIVE_RELEASE_REVIEW_MODE: ${{ inputs.active_release_review_mode }}'));
 });
