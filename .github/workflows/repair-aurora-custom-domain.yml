@@ -1,0 +1,199 @@
+name: Repair Aurora HML Custom Domain
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: "Firebase homologation project ID"
+        required: true
+        type: string
+      expected_main_sha:
+        description: "Exact main SHA to repair"
+        required: true
+        type: string
+      repair_confirmation:
+        description: "VALIDATE_ONLY or REPAIR_HML_DOMAIN"
+        required: true
+        default: "VALIDATE_ONLY"
+        type: choice
+        options:
+          - VALIDATE_ONLY
+          - REPAIR_HML_DOMAIN
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-hml-custom-domain-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Inspect and repair canonical Firebase Hosting domain
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: firebase-homologation
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Pin repair to current main and HML only
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+          DOMAIN: auroranexus.com.br
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test -n "$APPROVED_PROJECT"
+          test "$PROJECT_ID" = "$APPROVED_PROJECT"
+          test "$PROJECT_ID" = "wmgj-hml-jfn-20260927"
+          test "$EXPECTED_MAIN_SHA" = "$GITHUB_SHA"
+          test "$DOMAIN" = "auroranexus.com.br"
+          case "$PROJECT_ID" in *prod*|*production*|*live*|*principal*) exit 42 ;; esac
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned 2026-10-01
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Reconfirm immutable main
+        env:
+          EXPECTED_MAIN_SHA: ${{ inputs.expected_main_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_MAIN_SHA"
+          git fetch --no-tags --prune --depth=1 origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "$EXPECTED_MAIN_SHA"
+
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2 pinned 2026-10-01
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2 pinned 2026-10-01
+        with:
+          version: "548.0.0"
+          project_id: ${{ inputs.project_id }}
+
+      - name: Inspect and repair exact custom domain
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+          REPAIR_CONFIRMATION: ${{ inputs.repair_confirmation }}
+          DOMAIN: auroranexus.com.br
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = "$APPROVED_PROJECT"
+          test "$PROJECT_ID" = "wmgj-hml-jfn-20260927"
+          test "$DOMAIN" = "auroranexus.com.br"
+          test "$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')" = "$DEPLOY_SERVICE_ACCOUNT"
+          case "$REPAIR_CONFIRMATION" in VALIDATE_ONLY|REPAIR_HML_DOMAIN) ;; *) exit 44 ;; esac
+
+          SITE_ID="$PROJECT_ID"
+          BASE="https://firebasehosting.googleapis.com/v1beta1"
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          test -n "$ACCESS_TOKEN"
+          printf '::add-mask::%s\n' "$ACCESS_TOKEN"
+          auth=(-H "Authorization: Bearer $ACCESS_TOKEN" -H "Accept: application/json")
+          umask 077
+          evidence="${RUNNER_TEMP}/aurora-custom-domain-evidence.json"
+
+          site_json="$(curl --fail --silent --show-error --max-time 30 "${auth[@]}"             "$BASE/projects/$PROJECT_ID/sites/$SITE_ID")"
+          jq -e --arg expected "projects/$PROJECT_ID/sites/$SITE_ID" --arg url "https://$SITE_ID.web.app"             '.name == $expected and .defaultUrl == $url' <<<"$site_json" >/dev/null
+
+          list_json="$(curl --fail --silent --show-error --max-time 30 "${auth[@]}"             "$BASE/projects/$PROJECT_ID/sites/$SITE_ID/customDomains?pageSize=100&showDeleted=true")"
+          resource="projects/$PROJECT_ID/sites/$SITE_ID/customDomains/$DOMAIN"
+          domain_json="$(jq -c --arg name "$resource" '[.customDomains[]? | select(.name == $name)] | first // empty' <<<"$list_json")"
+          action="NONE"
+
+          if [ -z "$domain_json" ]; then
+            validate_file="$(mktemp "${RUNNER_TEMP}/aurora-custom-domain-validate.XXXXXX.json")"
+            trap 'rm -f "$validate_file"' EXIT
+            validate_code="$(curl --silent --show-error --max-time 30 -o "$validate_file" -w '%{http_code}'               -X POST "${auth[@]}" -H 'Content-Type: application/json' --data '{}'               "$BASE/projects/$PROJECT_ID/sites/$SITE_ID/customDomains?customDomainId=$DOMAIN&validateOnly=true")"
+            test "$validate_code" = "200"
+            jq -e '.name | type == "string"' "$validate_file" >/dev/null
+            action="CREATE_REQUIRED"
+            if [ "$REPAIR_CONFIRMATION" = "REPAIR_HML_DOMAIN" ]; then
+              mutation_file="$(mktemp "${RUNNER_TEMP}/aurora-custom-domain-create.XXXXXX.json")"
+              trap 'rm -f "$validate_file" "$mutation_file"' EXIT
+              mutation_code="$(curl --silent --show-error --max-time 30 -o "$mutation_file" -w '%{http_code}'                 -X POST "${auth[@]}" -H 'Content-Type: application/json' --data '{}'                 "$BASE/projects/$PROJECT_ID/sites/$SITE_ID/customDomains?customDomainId=$DOMAIN")"
+              test "$mutation_code" = "200"
+              jq -e '.name | type == "string"' "$mutation_file" >/dev/null
+              action="CREATE_REQUESTED"
+            fi
+          elif [ "$(jq -r '.deleteTime // empty' <<<"$domain_json")" != "" ]; then
+            etag="$(jq -r '.etag // empty' <<<"$domain_json")"
+            test -n "$etag"
+            validate_payload="$(jq -nc --arg etag "$etag" '{validateOnly:true,etag:$etag}')"
+            validate_file="$(mktemp "${RUNNER_TEMP}/aurora-custom-domain-undelete-validate.XXXXXX.json")"
+            trap 'rm -f "$validate_file"' EXIT
+            validate_code="$(curl --silent --show-error --max-time 30 -o "$validate_file" -w '%{http_code}'               -X POST "${auth[@]}" -H 'Content-Type: application/json' --data "$validate_payload"               "$BASE/$resource:undelete")"
+            test "$validate_code" = "200"
+            action="UNDELETE_REQUIRED"
+            if [ "$REPAIR_CONFIRMATION" = "REPAIR_HML_DOMAIN" ]; then
+              mutation_payload="$(jq -nc --arg etag "$etag" '{validateOnly:false,etag:$etag}')"
+              mutation_file="$(mktemp "${RUNNER_TEMP}/aurora-custom-domain-undelete.XXXXXX.json")"
+              trap 'rm -f "$validate_file" "$mutation_file"' EXIT
+              mutation_code="$(curl --silent --show-error --max-time 30 -o "$mutation_file" -w '%{http_code}'                 -X POST "${auth[@]}" -H 'Content-Type: application/json' --data "$mutation_payload"                 "$BASE/$resource:undelete")"
+              test "$mutation_code" = "200"
+              jq -e '.name | type == "string"' "$mutation_file" >/dev/null
+              action="UNDELETE_REQUESTED"
+            fi
+          fi
+
+          current='{}'
+          for attempt in $(seq 1 30); do
+            code="$(curl --silent --show-error --max-time 30 -o "$evidence.current" -w '%{http_code}'               "${auth[@]}" "$BASE/$resource" || true)"
+            if [ "$code" = "200" ]; then
+              current="$(cat "$evidence.current")"
+              host="$(jq -r '.hostState // "UNKNOWN"' <<<"$current")"
+              owner="$(jq -r '.ownershipState // "UNKNOWN"' <<<"$current")"
+              cert="$(jq -r '.cert.state // "UNKNOWN"' <<<"$current")"
+              reconciling="$(jq -r '.reconciling // false' <<<"$current")"
+              if [ "$host" = "HOST_ACTIVE" ] && [ "$owner" = "OWNERSHIP_ACTIVE" ] && [ "$cert" = "CERT_ACTIVE" ] && [ "$reconciling" = "false" ]; then
+                break
+              fi
+            fi
+            if [ "$REPAIR_CONFIRMATION" != "REPAIR_HML_DOMAIN" ]; then break; fi
+            sleep 10
+          done
+
+          host="$(jq -r '.hostState // "NOT_OBSERVED"' <<<"$current")"
+          owner="$(jq -r '.ownershipState // "NOT_OBSERVED"' <<<"$current")"
+          cert="$(jq -r '.cert.state // "NOT_OBSERVED"' <<<"$current")"
+          reconciling="$(jq -r '.reconciling // false' <<<"$current")"
+          issue_count="$(jq -r '(.issues // []) | length' <<<"$current")"
+          jq -nc             --arg project "$PROJECT_ID" --arg site "$SITE_ID" --arg domain "$DOMAIN"             --arg action "$action" --arg host "$host" --arg owner "$owner" --arg cert "$cert"             --argjson reconciling "$reconciling" --argjson issueCount "$issue_count"             '{schemaVersion:1,projectId:$project,siteId:$site,domain:$domain,action:$action,
+              hostState:$host,ownershipState:$owner,certState:$cert,reconciling:$reconciling,
+              issueCount:$issueCount,secretsIncluded:false,iamChanged:false,dnsChanged:false}' > "$evidence"
+          cat "$evidence"
+
+          if [ "$REPAIR_CONFIRMATION" = "REPAIR_HML_DOMAIN" ]; then
+            test "$host" = "HOST_ACTIVE"
+            test "$owner" = "OWNERSHIP_ACTIVE"
+            test "$cert" = "CERT_ACTIVE"
+            test "$reconciling" = "false"
+          fi
+
+      - name: Verify canonical login-first HTTP contract
+        if: ${{ inputs.repair_confirmation == 'REPAIR_HML_DOMAIN' }}
+        run: |
+          set -euo pipefail
+          portal_status="$(curl --silent --show-error --max-time 30 --output /tmp/portal.html --write-out '%{http_code}'             'https://auroranexus.com.br/portal')"
+          test "$portal_status" = "200"
+          bootstrap_status="$(curl --silent --show-error --max-time 30 -H 'Accept: application/json'             --output /tmp/bootstrap.json --write-out '%{http_code}' 'https://auroranexus.com.br/api/bootstrap')"
+          test "$bootstrap_status" = "401"
+          jq -e '.ok == false and .code == "AUTH_REQUIRED"' /tmp/bootstrap.json >/dev/null
+          echo "AURORA_CANONICAL_DOMAIN_VERIFIED"
+
+      - name: Preserve sanitized custom-domain evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-hml-custom-domain-${{ github.sha }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/aurora-custom-domain.*.json
+          if-no-files-found: ignore
+          retention-days: 14
