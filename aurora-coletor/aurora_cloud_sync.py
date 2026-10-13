@@ -163,7 +163,8 @@ def request_json(url, token, payload=None, idempotency=None):
     data = None
     if payload is not None:
         data = json.dumps(payload, ensure_ascii=True, separators=(',', ':'), allow_nan=False).encode()
-        headers.update({'Content-Type': 'application/json', 'Idempotency-Key': idempotency})
+        headers['Content-Type']='application/json'
+        if idempotency is not None:headers['Idempotency-Key']=idempotency
     request = urllib.request.Request(url, data=data, headers=headers)
     try:
         with urllib.request.build_opener(NoRedirect()).open(request, timeout=30) as response:

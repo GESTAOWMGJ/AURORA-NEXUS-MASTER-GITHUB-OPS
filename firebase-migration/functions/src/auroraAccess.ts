@@ -14,6 +14,7 @@ export const CSRF_PURPOSES = {
   organic: "POST:/organic",
   crypto: "POST:/api/crypto/self-test",
   integrationKey: "POST:/api/integration-keys",
+  documentIngest: "POST:/api/integration/documents",
   userProfile: "POST:/api/user-profiles",
   distributionApproval: "POST:/api/distribution-approval",
   logout: "POST:/__sessionLogout"

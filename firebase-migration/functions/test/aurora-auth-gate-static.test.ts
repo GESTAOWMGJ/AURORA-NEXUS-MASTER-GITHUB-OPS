@@ -14,7 +14,7 @@ test("setup receives a session-bound refresh CSRF token only after membership ch
   assert.match(setup, /csrfTokenForSession\(req.get\("cookie"\), AURORA_NEXUS_CSRF_HMAC_KEY.value\(\), CSRF_PURPOSES.refresh\)/);
   assert.match(setup, /if \(!refreshCsrf\)/);
   assert.match(setup, /res.status\(503\)/);
-  assert.match(setup, /setupPage\(member, refreshCsrf\)/);
+  assert.match(setup, /setupPage\(member, refreshCsrf, ingestCsrf\)/);
 });
 
 test("private login exposes reset without account enumeration", () => {

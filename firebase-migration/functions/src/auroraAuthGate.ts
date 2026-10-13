@@ -248,7 +248,9 @@ export const auroraNexusAuthGate = onRequest(
         res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança.", entry?.orgId));
         return;
       }
-      res.status(200).type("html").send(req.method === "HEAD" ? "" : setupPage(member, refreshCsrf));
+      const ingestCsrf=csrfTokenForSession(req.get('cookie'),AURORA_NEXUS_CSRF_HMAC_KEY.value(),CSRF_PURPOSES.documentIngest);
+      if(!ingestCsrf){res.status(503).type('html').send(loginPage('Configuração de segurança indisponível.'));return;}
+      res.status(200).type("html").send(req.method === "HEAD" ? "" : setupPage(member, refreshCsrf, ingestCsrf));
       return;
     }
     if (isDownload) {
@@ -269,10 +271,11 @@ export const auroraNexusAuthGate = onRequest(
       refresh: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.refresh),
       userProfile: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.userProfile),
       integrationKey: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.integrationKey),
+      documentIngest: csrfTokenForSession(req.get('cookie'),csrfSecret,CSRF_PURPOSES.documentIngest),
       distributionApproval: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.distributionApproval),
       logout: csrfTokenForSession(req.get("cookie"), csrfSecret, CSRF_PURPOSES.logout)
     };
-    if (!csrfTokens.action || !csrfTokens.refresh || !csrfTokens.integrationKey || !csrfTokens.userProfile || !csrfTokens.distributionApproval || !csrfTokens.logout) {
+    if (!csrfTokens.action || !csrfTokens.refresh || !csrfTokens.integrationKey || !csrfTokens.documentIngest || !csrfTokens.userProfile || !csrfTokens.distributionApproval || !csrfTokens.logout) {
       logger.error("Aurora Nexus CSRF key is not configured");
       res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança.", entry?.orgId));
       return;
