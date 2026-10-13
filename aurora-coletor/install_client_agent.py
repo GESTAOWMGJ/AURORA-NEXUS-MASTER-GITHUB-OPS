@@ -13,7 +13,7 @@ import uuid
 
 from aurora_deployment import safe_path
 from aurora_cloud_sync import SyncError
-from client_agent import validate,SCHEMA
+from client_agent import validate,SCHEMA,VERSION
 from client_secret_store import store
 
 ASSETS=('client_agent.py','provider_connectors.py','client_secret_store.py','aurora_cloud_sync.py','aurora_deployment.py','install_client_agent.py')
@@ -53,7 +53,7 @@ def install(target,config,source=None,startup=False,configure_secrets=False,star
         subprocess.run(['icacls.exe',str(target),'/inheritance:r','/grant:r',user+':(OI)(CI)F','*S-1-5-18:(OI)(CI)F'],check=True,capture_output=True)
     for name in ASSETS:shutil.copy2(source/name,target/'bin'/name)
     cfg=target/'agent-config.json';cfg.write_text(json.dumps(config,indent=2)+'\n');cfg.chmod(0o600)
-    prepared={'component':'AURORA_CLIENT_AGENT','version':'1.0.0','orgId':config['org'],'packageFiles':files,'startupPath':None,'state':'PREPARED','connectionVerified':False,'firstIngestionVerified':False}
+    prepared={'component':'AURORA_CLIENT_AGENT','version':VERSION,'orgId':config['org'],'packageFiles':files,'startupPath':None,'state':'PREPARED','connectionVerified':False,'firstIngestionVerified':False}
     (target/'installation.json').write_text(json.dumps(prepared)+'\n');(target/'installation.json').chmod(0o600)
     if configure_secrets:
         aliases={config['tokenEnv'],*(p['tokenEnv'] for p in config.get('providers',[]))}
@@ -61,7 +61,7 @@ def install(target,config,source=None,startup=False,configure_secrets=False,star
     if launcher:
         with launcher.open('xb') as handle:handle.write(content)
         launcher.chmod(0o600)
-    receipt={'component':'AURORA_CLIENT_AGENT','version':'1.0.0','orgId':config['org'],'schemaVersion':SCHEMA,
+    receipt={'component':'AURORA_CLIENT_AGENT','version':VERSION,'orgId':config['org'],'schemaVersion':SCHEMA,
         'packageFiles':files,'startupInstalled':startup,'connectionVerified':False,'firstIngestionVerified':False,
         'providerConnectionsVerified':False,'existingApplicationPreserved':True,'processStarted':False,
         'startupPath':str(launcher) if launcher else None,

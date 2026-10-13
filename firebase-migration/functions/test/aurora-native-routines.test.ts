@@ -50,6 +50,16 @@ test("instalação canônica é governada e está presente na projeção, sem no
   const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
   const projection = buildProjection(empty, new Date("2026-10-04T12:00:00Z"), { orgId: "synthetic-org", competence: "2026-10" }) as any;
   assert.ok(projection.nativeRoutines.routines.some((item: any) => item.id === routine?.id));
+  const cloud = projection.nativeRoutines.cloudIntakePolicy;
+  assert.equal(cloud.id, routine?.id);
+  assert.equal(cloud.executor, "AURORA_CLIENT_AGENT");
+  assert.equal(cloud.executorState, "IMPLEMENTED_PENDING_RUNTIME_VALIDATION");
+  assert.equal(cloud.continuation, "PERSISTED_CURSOR_AFTER_PROCESSED_PAGE_RECEIPTS");
+  assert.equal(cloud.providerConsentRequired, true);
+  assert.equal(cloud.pendingExtractionBlocksCompletion, true);
+  assert.equal(cloud.firstDocumentEqualsFullIngestion, false);
+  assert.equal(cloud.permissionsGranted, false);
+  assert.equal(cloud.schedulerCreated, false);
 });
 
 test("autonomia permanente chega ao motor como política abstrata sem conceder acesso ou fingir executor ativo", () => {

@@ -73,24 +73,36 @@ def token_for(source, environment=os.environ):
     return token
 
 
-def pull(source, transport=api, environment=os.environ, imap_factory=imaplib.IMAP4_SSL):
+def page_token(value):
+    if value is None:return None
+    if not isinstance(value,str) or not value or len(value)>4096 or any(c in value for c in '\r\n\x00'):
+        raise SyncError('PROVIDER_CURSOR_INVALID')
+    return value
+
+
+def pull(source, transport=api, environment=os.environ, imap_factory=imaplib.IMAP4_SSL, cursor=None):
     provider=source.get('provider')
     if provider not in PROVIDERS:raise SyncError('PROVIDER_NOT_SUPPORTED')
     token=token_for(source,environment)
-    rows=[]; pending=0
+    rows=[]; pending=0;next_cursor=None
     if provider=='GOOGLE_DRIVE':
         folder=identifier(source.get('folderId'))
-        query=parse.urlencode({'q':"'"+folder+"' in parents and trashed = false",'pageSize':MAX_ITEMS,'fields':'files(id,name,mimeType),nextPageToken'})
+        params={'q':"'"+folder+"' in parents and trashed = false",'pageSize':MAX_ITEMS,'fields':'files(id,name,mimeType),nextPageToken'}
+        if cursor is not None:params['pageToken']=page_token(cursor)
+        query=parse.urlencode(params)
         result=transport('https://www.googleapis.com/drive/v3/files?'+query,token)
         for item in result.get('files',[])[:MAX_ITEMS]:
             if str(item.get('name','')).lower().endswith('.json'):
                 raw=transport('https://www.googleapis.com/drive/v3/files/'+identifier(item.get('id'))+'?alt=media',token,True)
                 rows.extend(exports(raw))
             else:pending+=1
-        limited=bool(result.get('nextPageToken'))
+        next_cursor=page_token(result.get('nextPageToken'))
+        limited=next_cursor is not None
     elif provider=='GMAIL':
         label=identifier(source.get('labelId'))
-        result=transport('https://gmail.googleapis.com/gmail/v1/users/me/messages?'+parse.urlencode({'labelIds':label,'maxResults':MAX_ITEMS}),token)
+        params={'labelIds':label,'maxResults':MAX_ITEMS}
+        if cursor is not None:params['pageToken']=page_token(cursor)
+        result=transport('https://gmail.googleapis.com/gmail/v1/users/me/messages?'+parse.urlencode(params),token)
         part_budget=MAX_ITEMS
         def attachments(part,depth=0):
             nonlocal pending
@@ -113,21 +125,33 @@ def pull(source, transport=api, environment=os.environ, imap_factory=imaplib.IMA
             message=transport(message_url+'?format=full',token)
             if label not in message.get('labelIds',[]):raise SyncError('PROVIDER_SCOPE_MISMATCH')
             attachments(message.get('payload',{}))
-        limited=bool(result.get('nextPageToken'))
+        next_cursor=page_token(result.get('nextPageToken'))
+        limited=next_cursor is not None
     elif provider=='MICROSOFT_MAIL':
         folder=identifier(source.get('folderId'))
-        result=transport('https://graph.microsoft.com/v1.0/me/mailFolders/'+folder+'/messages?$top=20&$select=id,hasAttachments',token)
+        prefix='https://graph.microsoft.com/v1.0/me/mailFolders/'+folder+'/messages'
+        url=prefix+'?$top=20&$select=id,hasAttachments'
+        def scoped_link(link):
+            link=page_token(link)
+            if link is not None and (parse.urlsplit(link).scheme!='https' or parse.urlsplit(link).netloc!='graph.microsoft.com' or parse.urlsplit(link).path!=parse.urlsplit(prefix).path or parse.urlsplit(link).fragment):
+                raise SyncError('PROVIDER_CURSOR_SCOPE_MISMATCH')
+            return link
+        if cursor is not None:url=scoped_link(cursor)
+        result=transport(url,token)
         for item in result.get('value',[])[:MAX_ITEMS]:
             if not item.get('hasAttachments'):continue
             attachment_url='https://graph.microsoft.com/v1.0/me/messages/'+identifier(item.get('id'))+'/attachments?$top=20'
             data=transport(attachment_url,token)
+            # Do not advance the message page while attachments remain unread.
+            if data.get('@odata.nextLink'):raise SyncError('PROVIDER_ATTACHMENT_PAGINATION_PENDING')
             for attachment in data.get('value',[])[:MAX_ITEMS]:
                 if str(attachment.get('name','')).lower().endswith('.json') and attachment.get('@odata.type')=='#microsoft.graph.fileAttachment':
                     try:raw=base64.b64decode(attachment.get('contentBytes',''),validate=True)
                     except ValueError:raise SyncError('PROVIDER_EXPORT_INVALID') from None
                     rows.extend(exports(raw))
                 else:pending+=1
-        limited=bool(result.get('@odata.nextLink'))
+        next_cursor=scoped_link(result.get('@odata.nextLink'))
+        limited=next_cursor is not None
     else:
         host=source.get('host');user=source.get('user');folder=source.get('folder')
         if not isinstance(host,str) or not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9.-]{1,250})',host) or not isinstance(user,str) or any(c in user for c in '\r\n\x00') or not isinstance(folder,str) or not folder or any(c in folder for c in '\r\n\x00'):
@@ -136,10 +160,22 @@ def pull(source, transport=api, environment=os.environ, imap_factory=imaplib.IMA
         try:
             connection.authenticate('XOAUTH2',lambda _:('user='+user+'\x01auth=Bearer '+token+'\x01\x01').encode())
             if connection.select(folder,readonly=True)[0]!='OK':raise SyncError('IMAP_SCOPE_REQUIRED')
+            validity=connection.response('UIDVALIDITY')[1]
+            uid_validity=(validity[0].decode() if validity and validity[0] else '')
+            if not uid_validity.isdigit():raise SyncError('IMAP_UIDVALIDITY_REQUIRED')
+            after=0
+            if cursor is not None:
+                if not isinstance(cursor,dict) or set(cursor)!={'uidValidity','afterUid'} or cursor['uidValidity']!=uid_validity or type(cursor['afterUid']) is not int or cursor['afterUid']<0:
+                    raise SyncError('IMAP_CURSOR_RECONCILIATION_REQUIRED')
+                after=cursor['afterUid']
             typ,data=connection.uid('search',None,'ALL')
             if typ!='OK':raise SyncError('PROVIDER_UNAVAILABLE')
-            ids=data[0].split();limited=len(ids)>MAX_ITEMS
-            for uid in ids[-MAX_ITEMS:]:
+            ids=sorted((int(uid) for uid in data[0].split() if int(uid)>after))
+            limited=len(ids)>MAX_ITEMS
+            page=ids[:MAX_ITEMS]
+            next_cursor={'uidValidity':uid_validity,'afterUid':page[-1]} if limited else None
+            for number in page:
+                uid=str(number).encode()
                 typ,sizes=connection.uid('fetch',uid,'(RFC822.SIZE)')
                 size=b' '.join(x for x in sizes if isinstance(x,bytes))
                 match=re.search(rb'RFC822.SIZE (\d+)',size)
@@ -158,4 +194,5 @@ def pull(source, transport=api, environment=os.environ, imap_factory=imaplib.IMA
             try:connection.logout()
             except Exception:pass
     if len(rows)>MAX_ITEMS:raise SyncError('PROVIDER_EXPORT_LIMIT')
-    return {'documents':rows,'pendingExtraction':pending,'coverageLimited':limited}
+    if next_cursor is not None and next_cursor==cursor:raise SyncError('PROVIDER_CURSOR_NOT_ADVANCING')
+    return {'documents':rows,'pendingExtraction':pending,'coverageLimited':limited,'nextCursor':next_cursor}

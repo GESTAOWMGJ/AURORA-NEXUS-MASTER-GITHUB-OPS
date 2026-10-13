@@ -101,6 +101,19 @@ Mudanças futuras devem preservar esta linhagem ou registrar explicitamente a ra
 
 ### Implantação reutilizável — AURORA-INSTALL-INTEGRATION-001
 
+Incremento 13/10/2026: primeira instalação autorizada deve conectar a nuvem
+do próprio cliente e continuar o escopo até o fim pelo agente existente.
+O agente 1.0.1 conserva cursores Drive/Gmail/Microsoft e UIDVALIDITY/UID no IMAP
+no seu estado protegido. Uma página só avança após recibos de processamento;
+falha, mudança da página em curso ou ausência de consentimento permanece pendente.
+Fim da listagem não prova extração de PDF/planilha, sincronização integral ou
+validação financeira. Todos os conectores necessários à configuração do cliente
+exigem consentimento oficial, credenciais protegidas e teste real por organização;
+presença de adaptador não comprova provisionamento. Nenhuma chave é fabricada
+nem herdada de outro tenant. `cloudIntakePolicy` representa esta capacidade no
+mesmo registro nativo. Evidência e retomada em
+`docs/AURORA_CLOUD_FIRST_INSTALL_CONTINUATION_20261013.md`.
+
 O aprendizado da integração Windows/cloud passa a compor M08 no mesmo motor:
 validar amostra estruturada e destino explícitos → verificar identidade da
 organização → enviar amostra autorizada → conferir recibo → reconciliar no
