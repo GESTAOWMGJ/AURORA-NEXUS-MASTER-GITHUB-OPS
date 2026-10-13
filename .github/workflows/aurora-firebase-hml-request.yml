@@ -103,7 +103,7 @@ jobs:
           echo "AURORA_HML_EXACT_CI_RUN_ID=$ci_run_id"
           echo "AURORA_HML_EXACT_REVIEW_PR=$review_pr"
 
-      - name: Dispatch protected deploy and canonical promotion at exact main SHA
+      - name: Prepare protected owner-origin deployment at exact main SHA
         env:
           GH_TOKEN: ${{ github.token }}
           REQUEST_FILE: .github/requests/aurora-firebase-hml.json
@@ -115,16 +115,14 @@ jobs:
           previous_sha256="$(jq -r '.activeReleasePreviousSha256' "$REQUEST_FILE")"
           review_mode="$(jq -r '.activeReleaseReviewMode' "$REQUEST_FILE")"
           test "$review_mode" = "OWNER_DEPLOYMENT_APPROVAL"
-          gh workflow run deploy-aurora-firebase.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main \
-            -f project_id="$project_id" \
-            -f deploy_confirmation=DEPLOY_HOMOLOGATION \
-            -f deployment_mode=SHADOW_UPDATE \
-            -f expected_main_sha="$GITHUB_SHA" \
-            -f publish_active_release=true \
-            -f active_release_ci_run_id="$CI_RUN_ID" \
-            -f active_release_review_pr="$REVIEW_PR" \
-            -f active_release_review_mode="$review_mode" \
-            -f active_release_previous_sha256="$previous_sha256"
-          echo "AURORA_HML_DEPLOY_AND_PROMOTION_DISPATCHED_SHA=$GITHUB_SHA"
+          # GITHUB_TOKEN dispatch creates a bot-origin child run. The publisher
+          # requires the verified owner's actor, triggering_actor and approval.
+          # Prepare the inputs; the authorized owner session starts that run.
+          jq -nc --arg project "$project_id" --arg sha "$GITHUB_SHA" \
+            --arg ci "$CI_RUN_ID" --arg pr "$REVIEW_PR" --arg mode "$review_mode" \
+            --arg previous "$previous_sha256" \
+            '{state:"OWNER_ORIGIN_DISPATCH_REQUIRED",workflow:"deploy-aurora-firebase.yml",ref:"main",
+              inputs:{project_id:$project,deploy_confirmation:"DEPLOY_HOMOLOGATION",deployment_mode:"SHADOW_UPDATE",
+                expected_main_sha:$sha,publish_active_release:"true",active_release_ci_run_id:$ci,
+                active_release_review_pr:$pr,active_release_review_mode:$mode,
+                active_release_previous_sha256:$previous}}'
