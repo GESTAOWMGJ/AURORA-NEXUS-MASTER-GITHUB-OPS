@@ -73,3 +73,12 @@ Toda solicitação relevante deve:
 4. validar atualização do app Mac instalado;
 5. hardening comercial, domínio, distribuição e documentação;
 6. promover RC aprovada para `1.0.0` GA.
+
+### 13/10/2026 — importação web: feedback e retomada
+
+Candidata baseada em 86cec72: elimina descarte silencioso durante bootstrap e a
+mensagem de fonte ausente para documentos recebidos aguardando validação. Mantém
+recibos parciais, idempotência, MFA, tenant e revisão humana. Dezoito regressões
+focadas e TypeScript no executor remoto passaram; CI, publicação, smoke e recibos
+reais ainda PENDING. Fonte/rollback no adendo de
+`docs/AURORA_MASTER_KNOWHOW_TRANSFER_20261013.md`. Não muda gate clínico ou financeiro.
