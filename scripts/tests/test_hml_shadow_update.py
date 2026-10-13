@@ -91,7 +91,7 @@ class HmlShadowUpdateTests(unittest.TestCase):
         request_workflow = yaml.load(REQUEST_WORKFLOW.read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
         permissions = request_workflow['permissions']
         self.assertEqual(permissions['contents'], 'read')
-        self.assertEqual(permissions['actions'], 'write')
+        self.assertEqual(permissions['actions'], 'read')
         self.assertEqual(permissions['pull-requests'], 'read')
         dispatch = request_workflow['jobs']['dispatch']['steps']
         resolve = next(step['run'] for step in dispatch if step.get('name') == 'Resolve exact CI and merged review evidence')

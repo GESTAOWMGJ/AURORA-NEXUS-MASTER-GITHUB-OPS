@@ -10,7 +10,7 @@ on:
 
 permissions:
   contents: read
-  actions: write
+  actions: read
   pull-requests: read
 
 concurrency:
