@@ -703,9 +703,10 @@ jobs:
             --arg sub "$DEPLOY_SERVICE_ACCOUNT" \
             --arg uid "$SMOKE_UID" \
             --arg aud "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit" \
+            --arg org "wmgj" \
             --argjson iat "$now" \
             --argjson exp "$exp" \
-            '{iss:$iss,sub:$sub,aud:$aud,iat:$iat,exp:$exp,uid:$uid}' > "$claims_file"
+            '{iss:$iss,sub:$sub,aud:$aud,iat:$iat,exp:$exp,uid:$uid,auroraOrgId:$org}' > "$claims_file"
           gcloud iam service-accounts sign-jwt "$claims_file" "$custom_token_file" \
             --iam-account "$DEPLOY_SERVICE_ACCOUNT" \
             --project "$PROJECT_ID" >/dev/null
