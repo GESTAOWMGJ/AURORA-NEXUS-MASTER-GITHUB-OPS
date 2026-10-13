@@ -11,6 +11,6 @@
   "requestReason": "OWNER_AUTHORIZED_HML_SIGNED_PROMOTION_CURRENT_MAIN",
   "publishActiveRelease": true,
   "activeReleaseReviewMode": "OWNER_DEPLOYMENT_APPROVAL",
-  "activeReleaseReviewPr": 0,
+  "activeReleaseReviewPr": 239,
   "activeReleasePreviousSha256": "NONE"
 }
