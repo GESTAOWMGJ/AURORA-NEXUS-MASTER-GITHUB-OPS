@@ -773,10 +773,18 @@ jobs:
             .organization.id == "wmgj" and
             .member.email == $email
           ' "$bootstrap_response" >/dev/null
-          jq -e '
-            .release.productVersion == "1.0.0-rc.1" and
+          expected_product_version="$(
+            node --input-type=module -e '
+              import {AURORA_PRODUCT_VERSION} from "./firebase-migration/functions/lib/auroraReleaseStatus.js";
+              process.stdout.write(AURORA_PRODUCT_VERSION);
+            '
+          )"
+          test -n "$expected_product_version"
+          jq -e --arg expectedProductVersion "$expected_product_version" '
+            .release.productVersion == $expectedProductVersion and
             (.release.engineeringReadinessPercent | type) == "number"
           ' "$bootstrap_response" >/dev/null
+          echo "AUTH_SMOKE_PRODUCT_VERSION_VERIFIED=$expected_product_version"
           native_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --cookie "$cookie_jar" \
