@@ -112,7 +112,7 @@ export const auroraNexusIntegrationKeys = onRequest(
         const data=report.data();
         if(!report.exists||data?.orgId!==member.orgId||data.keyId!==credential.id||data.component!=='client-agent')return null;
         const reportedAt=timestampIso(data.reportedAt);
-        const active=credentialAllowsScope(credential.data()||{},'integration.write');
+        const active=credentialAllowsScope(credential.data()||{},'documents.ingest');
         return {keyId:credential.id,state:active&&reportedAt&&Date.now()-Date.parse(reportedAt)<180000
           ?'CONNECTED_REPORTED':'OFFLINE_OR_STALE',reportedAt,
           providers:Array.isArray(data.providers)?data.providers:[],pendingExtraction:data.pendingExtraction,
@@ -264,7 +264,7 @@ export const auroraNexusIntegrationPing = onRequest({cors:false}, async (req,res
     res.status(405).json({ok:false, code:"METHOD_NOT_ALLOWED"});
     return;
   }
-  const principal=await verifyIntegrationBearer(req.get("authorization"), req.method==='POST'?'integration.write':"integration.read");
+  const principal=await verifyIntegrationBearer(req.get("authorization"), req.method==='POST'?'documents.ingest':"integration.read");
   if (!principal) {
     res.status(401).json({ok:false, code:"INVALID_INTEGRATION_KEY"});
     return;
@@ -287,7 +287,7 @@ export const auroraNexusIntegrationPing = onRequest({cors:false}, async (req,res
     const accepted=await auroraDb.runTransaction(async tx=>{
       const org=await tx.get(auroraDb.doc(base));
       const credential=await tx.get(auroraDb.doc(`${base}/integrationCredentials/${principal.keyId}`));
-      if(!org.exists||org.data()?.active!==true||!credential.exists||!credentialAllowsScope(credential.data()||{},'integration.write'))return false;
+      if(!org.exists||org.data()?.active!==true||!credential.exists||!credentialAllowsScope(credential.data()||{},'documents.ingest'))return false;
       tx.set(auroraDb.doc(`${base}/runtimeCheckpoints/client-agent-${principal.keyId}`),{
         orgId:principal.orgId,keyId:principal.keyId,component:'client-agent',
         instanceHash:createHash('sha256').update(principal.orgId+':'+body.instanceId).digest('hex'),
