@@ -773,10 +773,14 @@ jobs:
             .organization.id == "wmgj" and
             .member.email == $email
           ' "$bootstrap_response" >/dev/null
-          jq -e '
-            .release.productVersion == "1.0.0-rc.1" and
+          expected_product_version="$(node -p "require('./firebase-migration/functions/lib/auroraReleaseStatus.js').AURORA_PRODUCT_VERSION")"
+          if ! jq -e --arg version "$expected_product_version" '
+            .release.productVersion == $version and
             (.release.engineeringReadinessPercent | type) == "number"
-          ' "$bootstrap_response" >/dev/null
+          ' "$bootstrap_response" >/dev/null; then
+            echo "::error::AUTH_SMOKE_RELEASE_VERSION_MISMATCH"
+            exit 97
+          fi
           native_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --cookie "$cookie_jar" \
