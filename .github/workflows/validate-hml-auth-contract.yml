@@ -9,6 +9,7 @@ on:
       - 'scripts/tests/test_hml_shadow_update.py'
       - 'scripts/tests/test_hml_gate_readonly.py'
       - 'scripts/tests/test_hml_cli_access.py'
+      - 'scripts/tests/test_custom_domain_repair.py'
       - 'scripts/tests/check_canonical_preflight.test.mjs'
       - 'scripts/tests/promote_hml_authgate_traffic.test.mjs'
       - 'firebase-migration/scripts/promote-hml-authgate-traffic.mjs'
@@ -25,6 +26,7 @@ on:
       - 'scripts/tests/test_hml_shadow_update.py'
       - 'scripts/tests/test_hml_gate_readonly.py'
       - 'scripts/tests/test_hml_cli_access.py'
+      - 'scripts/tests/test_custom_domain_repair.py'
       - 'scripts/tests/check_canonical_preflight.test.mjs'
       - 'scripts/tests/promote_hml_authgate_traffic.test.mjs'
       - 'firebase-migration/scripts/promote-hml-authgate-traffic.mjs'
@@ -72,6 +74,7 @@ jobs:
           python -m unittest discover -s scripts/tests -p 'test_hml_shadow_update.py' -v
           python -m unittest discover -s scripts/tests -p 'test_hml_gate_readonly.py' -v
           python -m unittest discover -s scripts/tests -p 'test_hml_cli_access.py' -v
+          python -m unittest discover -s scripts/tests -p 'test_custom_domain_repair.py' -v
       - name: Validate anonymous canonical routing preflight offline
         run: node --test scripts/tests/check_canonical_preflight.test.mjs
       - name: Validate AuthGate traffic promotion and rollback offline

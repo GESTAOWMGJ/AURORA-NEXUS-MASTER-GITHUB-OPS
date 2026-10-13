@@ -300,7 +300,8 @@ jobs:
             if [ "$owner" != "OWNERSHIP_ACTIVE" ]; then
               jq -nc --arg owner "$owner" --arg action "$action" \
                 '{schemaVersion:1,stage:"WAITING_FOR_FIREBASE_OWNERSHIP_RECHECK",ownershipState:$owner,
-                  action:$action,mutationPerformed:false,dnsChanged:false,iamChanged:false}' \
+                  action:$action,mutationPerformed:($action == "CREATE_REQUESTED" or $action == "UNDELETE_REQUESTED"),
+                  dnsChanged:false,iamChanged:false}' \
                 > "${RUNNER_TEMP}/aurora-custom-domain-ownership-wait.json"
               cat "${RUNNER_TEMP}/aurora-custom-domain-ownership-wait.json"
               exit 84

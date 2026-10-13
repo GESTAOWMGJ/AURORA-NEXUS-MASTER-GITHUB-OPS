@@ -332,6 +332,16 @@ Nenhum dado real é promovido para compensar falta de recuperação, autenticaç
 
 ## 10. Segurança estrutural
 
+Aprendizado de auditoria de recuperação de domínio (13/10/2026, PR #226/P2):
+espera por titularidade não desfaz uma mutação já solicitada com sucesso. O recibo
+`WAITING_FOR_FIREBASE_OWNERSHIP_RECHECK` deriva `mutationPerformed` de
+`CREATE_REQUESTED`/`UNDELETE_REQUESTED`; domínio existente com divergência de
+titularidade continua somente leitura. Regressão executa o bloco real com API
+sintética no CI `Validate HML Auth Contract`. Isto é correção de evidência,
+não mudança de política, reavaliação do domínio real ou autorização de recursos.
+Baseline, estados de validação e rollback em
+`docs/AURORA_CUSTOM_DOMAIN_MUTATION_RECEIPT_20261013.md`.
+
 Aprendizado `AURORA-PROD-PROJECT-001` (05/10/2026): nome pretendido ou candidato
 histórico não é recurso provisionado. Destino produtivo exige ID/número explícitos,
 contrato coerente e consulta autorizada confirmando projeto ativo antes de mutar.
