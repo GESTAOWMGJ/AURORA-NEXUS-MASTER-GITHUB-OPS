@@ -82,3 +82,30 @@ pertinentes são incorporados. Nenhum treinamento de pesos foi executado.
 
 Rollback: reverter somente o incremento de política/dispatcher pelo fluxo revisado;
 preservar corpus, fontes, auditoria, filas, cursores, credenciais e recibos existentes.
+
+## Importação web sem resposta — correção candidata 13/10
+
+Desafio sanitizado: arquivo selecionado e consentimento marcado, mas sem confirmação
+visível após envio. Baseline de diagnóstico: `86cec72`.
+
+Reproduzido no cliente gerado: envio durante bootstrap era descartado silenciosamente;
+leitura do arquivo não mostrava progresso; `PENDING_CANONICAL_DATA` era apresentado
+como ausência de fonte. Esse último caso ocultava o recebimento de documentos ainda
+sujeitos à revisão. São defeitos demonstrados, não prova de qual caminho ocorreu na
+sessão real, cujo navegador ficou indisponível para observação.
+
+Resolução candidata: serializar envio após a preparação já em curso; sinalizar leitura
+imediata; manter contagem de recibos; distinguir validação pendente de fonte ausente;
+mapear somente códigos de erro permitidos para mensagens, sem expor resposta bruta.
+Reenvio preserva hash/chave/versão. Saída da sessão cancela envio aguardando; nenhum
+estado pendente é promovido a VALIDATED e nenhuma permissão é alterada.
+
+Regressão: `aurora-native-ingestion-view.test.ts`, incluindo resposta perdida seguida
+de recibo duplicado com chave idêntica. Testes de instalação e ingestão existentes
+continuam exigindo tenant e revisão imutável correspondentes. Dezoito testes passaram
+no executor remoto Node24; o gate CI Node22 e a publicação têm recibos próprios.
+
+Estado do aprendizado: método registrado nesta fonte do registro nativo;
+implementação e regressão verificadas localmente, adoção instalada PENDING.
+Não há inferência de receita, ingestão integral, pesos treinados ou corpus do Xeon.
+Rollback: reverter o incremento do cliente; preservar documentos, versões e recibos.
