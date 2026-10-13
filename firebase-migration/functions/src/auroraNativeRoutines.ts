@@ -119,6 +119,26 @@ export function nativeRoutineSummary(): Record<string, unknown> {
       modelWeightsTrained: false,
       documentation: "docs/AURORA_CLOUD_FIRST_INSTALL_CONTINUATION_20261013.md"
     },
+    learningCapturePolicy: {
+      source: "AURORA-MO-001",
+      version: "2026-10-13",
+      instruction: "INCORPORATE_EACH_AVAILABLE_OPERATIONAL_PROMPT_AND_VERIFIED_RESOLUTION",
+      captureScope: "AVAILABLE_AUTHORIZED_TASK_CONTEXT_ONLY",
+      completeExternalChatHistoryAccess: false,
+      orgScope: "AUTHENTICATED_TENANT_ONLY",
+      storage: "EXISTING_NATIVE_REGISTRY_AND_GOVERNED_MOTOR_ADAPTER",
+      recordRequiredForUnresolvedChallenges: true,
+      lifecycle: ["OBSERVED", "PROPOSED", "VALIDATED", "PENDING", "REJECTED"],
+      proofRequired: ["SOURCE_VERSION_HASH", "TEST_OR_EXECUTOR_RECEIPT", "RECOVERY_AND_USE_READBACK"],
+      rawClientDataInSharedMethodsAllowed: false,
+      credentialCaptureAllowed: false,
+      externalAiRequired: false,
+      inferencePriority: ["NATIVE_DETERMINISTIC_RULES", "EXISTING_KNOWLEDGE_REGISTRY", "AUTHORIZED_PRIVATE_LOCAL_MODEL"],
+      automaticPrivilegeEscalationAllowed: false,
+      modelWeightTrainingPerformed: false,
+      runtimeAdoptionInferredFromDocumentation: false,
+      documentation: "docs/AURORA_MASTER_KNOWHOW_TRANSFER_20261013.md"
+    },
     ingestionRecoveryPolicy: {
       version: 2,
       source: "AURORA-MO-001",

@@ -64,19 +64,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          gh workflow run validate-firestore-migration.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main
+          # The request path triggers the existing push CI at this same SHA.
+          # Dispatching a second run cancels it through the shared concurrency group.
 
           ci_run_id=""
           ci_state=""
           for attempt in $(seq 1 90); do
-            runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/validate-firestore-migration.yml/runs?event=workflow_dispatch&per_page=30")"
-            ci_run_id="$(jq -r --arg sha "$GITHUB_SHA" --arg started "$started_at" '
+            runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/validate-firestore-migration.yml/runs?event=push&per_page=30")"
+            ci_run_id="$(jq -r --arg sha "$GITHUB_SHA" '
               [.workflow_runs[]?
-                | select(.head_sha == $sha and .head_branch == "main" and .event == "workflow_dispatch"
-                  and .created_at >= $started)]
+                | select(.head_sha == $sha and .head_branch == "main" and .event == "push")]
               | sort_by(.created_at) | last | .id // empty
             ' <<<"$runs")"
             if [[ "$ci_run_id" =~ ^[1-9][0-9]{0,19}$ ]]; then
