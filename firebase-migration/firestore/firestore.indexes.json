@@ -100,6 +100,16 @@
     }
   ],
   "fieldOverrides": [
+    {
+      "collectionGroup": "integrationCredentials",
+      "fieldPath": "keyId",
+      "indexes": [
+        { "order": "ASCENDING", "queryScope": "COLLECTION" },
+        { "order": "DESCENDING", "queryScope": "COLLECTION" },
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION" },
+        { "order": "ASCENDING", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
     { "collectionGroup": "sourceDocuments", "fieldPath": "normalized", "indexes": [] },
     { "collectionGroup": "sourceDocuments", "fieldPath": "sourceSnapshot", "indexes": [] },
     { "collectionGroup": "aiRuns", "fieldPath": "output", "indexes": [] },
