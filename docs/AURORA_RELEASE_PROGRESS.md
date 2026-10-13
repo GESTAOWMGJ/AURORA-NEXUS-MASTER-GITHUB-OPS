@@ -92,3 +92,14 @@ seleção ao deploy atual comprovado e preserva todos os gates CI/segurança,
 aprovação e CAS. Regressões sintéticas verificam a seleção e os bloqueios;
 CI/HML do patch pendentes. Evidência, limites e rollback no adendo do
 `AURORA_MASTER_KNOWHOW_TRANSFER_20261013.md`.
+
+### 13/10/2026 — candidata de cobertura comum dos componentes
+
+O pin v1 do run `38457139904` é verificável, mas cobre Server/Web e Satellite,
+sem pacote local IA Master ou integração Windows. A candidata v2 exige cinco
+componentes com bytes reais e leitor privado por `integration.read`, nonce e
+runtime coerentes. O registro e o Cockpit mantêm v1 PARCIAL, dispositivos/Mac
+UNVERIFIED e `allClientsSynchronized=false`; não criam executor ou auto-instalação.
+Esta candidata ainda está NOT_DEPLOYED, sem CI/publicação v2 ou recibo instalado.
+Contrato, autoridade existente, testes e rollback em
+`AURORA_ACTIVE_RELEASE_COMPONENTS_V2.md`. R029 conserva prazo e escopo originais.

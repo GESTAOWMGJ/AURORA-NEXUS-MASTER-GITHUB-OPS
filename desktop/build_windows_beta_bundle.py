@@ -10,7 +10,9 @@ import zipfile
 
 NAME = 'AURORA-NEXUS-Windows-Beta.zip'
 SOURCES = ('desktop/install_windows_beta.py', 'aurora-coletor/aurora_deployment.py',
-           'aurora-coletor/aurora_cloud_sync.py')
+           'aurora-coletor/aurora_cloud_sync.py', 'aurora-coletor/client_agent.py',
+           'aurora-coletor/provider_connectors.py', 'aurora-coletor/client_secret_store.py',
+           'aurora-coletor/install_client_agent.py', 'aurora-coletor/published_release.py')
 LAUNCHER = r'''@echo off
 setlocal
 cd /d "%~dp0"

@@ -2,13 +2,15 @@ import { createHash, createPublicKey, verify } from "node:crypto";
 
 export const ACTIVE_RELEASE_SOURCE = "platformRuntime/activeRelease" as const;
 export const ACTIVE_RELEASE_ORIGIN = "https://auroranexus.com.br";
-export type ReleaseComponent = "server" | "web" | "satellite";
+export const REQUIRED_RELEASE_COMPONENTS = ["server", "web", "satellite", "iaMaster", "windowsIntegration"] as const;
+export type ReleaseComponent = typeof REQUIRED_RELEASE_COMPONENTS[number];
 export type ReleaseComponentPin = { version: string; sourceSha: string; manifestSha256: string };
 export type ActiveReleaseCertificate = {
-  schemaVersion: 1; sourceSha: string; productVersion: string; canonicalOrigin: string;
+  schemaVersion: 1 | 2; sourceSha: string; productVersion: string; canonicalOrigin: string;
   releaseRunId: string; ciRunId: string; publishedAtUtc: string; status: "ACTIVE";
   checks: { ciPassed: boolean; humanReviewApproved: boolean; protectedDeploySucceeded: boolean; smokePassed: boolean };
-  components: { server: ReleaseComponentPin; web: ReleaseComponentPin; satellite?: ReleaseComponentPin };
+  components: { server: ReleaseComponentPin; web: ReleaseComponentPin; satellite?: ReleaseComponentPin;
+    iaMaster?: ReleaseComponentPin; windowsIntegration?: ReleaseComponentPin };
 };
 export type ActiveReleaseEnvelope = { certificate: ActiveReleaseCertificate; signature: string };
 const pinBrand: unique symbol = Symbol("verified-canonical-active-release");
@@ -33,16 +35,19 @@ function canonical(value: any): string {
 }
 /** Signing serialization; it does not sign, promote or attest a release. */
 export function activeReleaseSigningBytes(certificate: ActiveReleaseCertificate): Buffer {
-  return Buffer.from("AURORA_ACTIVE_RELEASE_V1\0" + canonical(certificate), "utf8");
+  return Buffer.from((certificate.schemaVersion === 2 ? "AURORA_ACTIVE_RELEASE_V2\0" : "AURORA_ACTIVE_RELEASE_V1\0") + canonical(certificate), "utf8");
 }
 function parseCertificate(value: unknown): ActiveReleaseCertificate | undefined {
   if (!row(value) || !exactKeys(value, ["schemaVersion", "sourceSha", "productVersion", "canonicalOrigin", "releaseRunId", "ciRunId", "publishedAtUtc", "status", "checks", "components"])
-      || value.schemaVersion !== 1 || !sha(value.sourceSha) || !version(value.productVersion)
+      || ![1, 2].includes(value.schemaVersion) || !sha(value.sourceSha) || !version(value.productVersion)
       || value.canonicalOrigin !== ACTIVE_RELEASE_ORIGIN || value.status !== "ACTIVE" || !utc(value.publishedAtUtc)
       || ![value.releaseRunId, value.ciRunId].every(id => typeof id === "string" && /^[1-9][0-9]{0,19}$/.test(id))) return;
   const checks = ["ciPassed", "humanReviewApproved", "protectedDeploySucceeded", "smokePassed"];
   if (!row(value.checks) || !exactKeys(value.checks, checks) || checks.some(key => typeof value.checks[key] !== "boolean")) return;
-  if (!row(value.components) || !Object.hasOwn(value.components, "server") || !Object.hasOwn(value.components, "web")
+  if (!row(value.components)) return;
+  if (value.schemaVersion === 2) {
+    if (!exactKeys(value.components, [...REQUIRED_RELEASE_COMPONENTS])) return;
+  } else if (!Object.hasOwn(value.components, "server") || !Object.hasOwn(value.components, "web")
       || Object.keys(value.components).some(key => !["server", "web", "satellite"].includes(key))) return;
   for (const component of Object.values(value.components)) {
     if (!row(component) || !exactKeys(component, ["version", "sourceSha", "manifestSha256"])
@@ -99,6 +104,25 @@ export async function readCanonicalActiveRelease(source: CanonicalActiveReleaseS
   return { status: "VERIFIED_ACTIVE_PIN", pin };
 }
 const validPin = (pin: VerifiedActiveRelease | undefined): pin is VerifiedActiveRelease => Boolean(pin && pins.has(pin));
+/** Signed component coverage is distinct from receipt, installation and native acceptance. */
+export function assessReleaseComponentCoverage(pin: VerifiedActiveRelease | undefined) {
+  const coveredComponents = validPin(pin) ? REQUIRED_RELEASE_COMPONENTS.filter(component => Boolean(pin.certificate.components[component])) : [];
+  const missingComponents = REQUIRED_RELEASE_COMPONENTS.filter(component => !coveredComponents.includes(component));
+  const complete = validPin(pin) && pin.certificate.schemaVersion === 2 && missingComponents.length === 0;
+  return { status: !validPin(pin) ? "UNVERIFIED" : complete ? "COMPLETE_SIGNED_COMPONENT_SET" : "PARTIAL",
+    complete, requiredComponents: [...REQUIRED_RELEASE_COMPONENTS], coveredComponents, missingComponents };
+}
+export function componentManifestIdentityMatches(component: ReleaseComponent, manifest: unknown): boolean {
+  if (!row(manifest)) return false;
+  if (component === "iaMaster") return manifest.component === "AURORA_IA_MASTER" && manifest.dirty === false
+    && manifest.nodeMinimumMajor === 22 && manifest.externalAiEnabled === false && row(manifest.files)
+    && ["server.cjs", "studio.cjs", "manage.cjs", "published-update.cjs", "kernel/auroraMasterEngine.js"].every(name => Object.hasOwn(manifest.files, name));
+  if (component === "windowsIntegration") return manifest.schemaVersion === 1 && manifest.component === "AURORA_WINDOWS_INTEGRATION"
+    && manifest.platform === "windows" && row(manifest.files)
+    && ["client_agent.py", "provider_connectors.py", "client_secret_store.py", "install_client_agent.py", "aurora_cloud_sync.py", "aurora_deployment.py", "published_release.py"]
+      .every(name => Object.hasOwn(manifest.files, name));
+  return true;
+}
 export function assessReleaseManifest(pin: VerifiedActiveRelease | undefined, component: ReleaseComponent, manifestBytes: Uint8Array,
   fileBytes?: Record<string, Uint8Array>) {
   const expected = validPin(pin) ? pin.certificate.components[component] : undefined;
@@ -109,7 +133,7 @@ export function assessReleaseManifest(pin: VerifiedActiveRelease | undefined, co
   let manifest: Record<string, any>;
   try { manifest = JSON.parse(Buffer.from(manifestBytes).toString("utf8")); }
   catch { return { status: "INVALID_MANIFEST", fileIntegrityVerified: false }; }
-  if (!row(manifest)) return { status: "INVALID_MANIFEST", fileIntegrityVerified: false };
+  if (!row(manifest) || !componentManifestIdentityMatches(component, manifest)) return { status: "INVALID_MANIFEST", fileIntegrityVerified: false };
   const sources = [manifest.sourceSha, manifest.sourceCommit, manifest.sourceRevision].filter(value => value !== undefined);
   const versions = [manifest.version, manifest.clientVersion].filter(value => value !== undefined);
   if (!sources.length || !versions.length || sources.some(value => value !== expected.sourceSha) || versions.some(value => value !== expected.version)

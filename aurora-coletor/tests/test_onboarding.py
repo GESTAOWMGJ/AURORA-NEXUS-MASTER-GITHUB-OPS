@@ -17,7 +17,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import aurora_onboarding as onboarding
 import install as installer
-from aurora_deployment import VERSION as INTEGRATION_VERSION
+from aurora_deployment import ASSETS as INTEGRATION_ASSETS, VERSION as INTEGRATION_VERSION
 
 
 class OnboardingTests(unittest.TestCase):
@@ -235,7 +235,7 @@ class OnboardingTests(unittest.TestCase):
         source = self.base / 'package'; source.mkdir()
         (source / 'aurora_collector.py').write_text('# synthetic collector fixture only\n')
         (source / 'aurora_onboarding.py').write_text(Path(onboarding.__file__).read_text())
-        for name in ('aurora_cloud_sync.py', 'aurora_deployment.py'):
+        for name in INTEGRATION_ASSETS:
             (source / name).write_bytes((Path(onboarding.__file__).parent / name).read_bytes())
         target = self.base / "Application Support & O'Brien"
         document = self.document(); before = document.stat().st_mtime_ns
@@ -253,7 +253,16 @@ class OnboardingTests(unittest.TestCase):
             plist = plistlib.loads((target / name).read_bytes())
             self.assertEqual(plist['ProgramArguments'][0], sys.executable)
         self.assertEqual(document.stat().st_mtime_ns, before)
-        self.assertTrue((target / 'integration' / INTEGRATION_VERSION / 'aurora_deployment.py').is_file())
+        integration = target / 'integration' / INTEGRATION_VERSION
+        manifest = json.loads((integration / 'manifest.json').read_text())
+        self.assertEqual(set(manifest['sha256']), set(INTEGRATION_ASSETS))
+        for name in INTEGRATION_ASSETS:
+            with self.subTest(asset=name):
+                installed = integration / name
+                self.assertTrue(installed.is_file())
+                content = installed.read_bytes()
+                self.assertEqual(content, (source / name).read_bytes())
+                self.assertEqual(hashlib.sha256(content).hexdigest(), manifest['sha256'][name])
         self.assertEqual(json.loads((target / 'collector-config.json').read_text())['allowedExtensions'], ['.csv', '.json', '.jsonl'])
 
     def test_installer_authorization_enables_only_bounded_metadata_mode(self):

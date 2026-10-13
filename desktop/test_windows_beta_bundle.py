@@ -9,17 +9,24 @@ import zipfile
 
 import build_windows_beta_bundle as bundle
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'aurora-coletor'))
+from aurora_deployment import ASSETS as INTEGRATION_ASSETS
+
 
 class WindowsBetaBundleTests(unittest.TestCase):
     def test_bundle_is_reproducible_and_contains_complete_dependencies(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             repo = Path(__file__).resolve().parents[1]
+            required_assets = {'aurora-coletor/' + name for name in INTEGRATION_ASSETS}
+            self.assertEqual(bundle.SOURCES[0], 'desktop/install_windows_beta.py')
+            self.assertEqual(set(bundle.SOURCES), {'desktop/install_windows_beta.py'} | required_assets)
             first = bundle.build(repo, root / 'one', 'a' * 40)
             second = bundle.build(repo, root / 'two', 'a' * 40)
             self.assertEqual(first.read_bytes(), second.read_bytes())
             with zipfile.ZipFile(first) as archive:
                 manifest = json.loads(archive.read('manifest.json'))
+                self.assertTrue(required_assets.issubset(manifest['files']))
                 for name, digest in manifest['files'].items():
                     self.assertEqual(hashlib.sha256(archive.read(name)).hexdigest(), digest)
                 self.assertEqual(manifest['sourceCommit'], 'a' * 40)
@@ -38,6 +45,7 @@ class WindowsBetaBundleTests(unittest.TestCase):
             component = state / 'integration' / integration['version']
             installed_manifest = json.loads((component / 'manifest.json').read_text())
             self.assertEqual(installed_manifest['version'], integration['version'])
+            self.assertEqual(set(installed_manifest['sha256']), set(INTEGRATION_ASSETS))
             for name, digest in installed_manifest['sha256'].items():
                 self.assertEqual(hashlib.sha256((component / name).read_bytes()).hexdigest(), digest)
 

@@ -3,7 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ACTIVE_RELEASE_SOURCE, ACTIVE_RELEASE_ORIGIN, activeReleaseSigningBytes, verifyActiveReleaseEnvelope } from '../functions/lib/auroraActiveRelease.js';
+import { ACTIVE_RELEASE_SOURCE, ACTIVE_RELEASE_ORIGIN, REQUIRED_RELEASE_COMPONENTS, componentManifestIdentityMatches,
+  activeReleaseSigningBytes, verifyActiveReleaseEnvelope } from '../functions/lib/auroraActiveRelease.js';
+import {readComponentPackage} from './release-component-packages.mjs';
 import ownerDecision from '../policy/hml-owner-release-approval-v1.json' with { type: 'json' };
 
 const REPOSITORY='GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS';
@@ -154,9 +156,10 @@ export async function verifyProtectedReleaseEvidence(input,githubJSON) {
   return {ciPassed:true,humanReviewApproved:true,protectedDeploySucceeded:true,smokePassed:true,approvalProvenance};
 }
 
-function manifestComponent(bytes,sourceSha) {
+function manifestComponent(bytes,sourceSha,component) {
   let manifest;try{manifest=JSON.parse(Buffer.from(bytes).toString('utf8'));}catch{fail('INVALID_RELEASE_MANIFEST');}
-  if(!manifest||typeof manifest!=='object'||Array.isArray(manifest)||manifest.dirty===true) fail('INVALID_RELEASE_MANIFEST');
+  if(!manifest||typeof manifest!=='object'||Array.isArray(manifest)||manifest.dirty===true
+    ||!componentManifestIdentityMatches(component,manifest)) fail('INVALID_RELEASE_MANIFEST');
   const sources=[manifest.sourceSha,manifest.sourceCommit,manifest.sourceRevision].filter(value=>value!==undefined);
   const versions=[manifest.version,manifest.clientVersion].filter(value=>value!==undefined);
   if(!sources.length||sources.some(value=>value!==sourceSha)||!versions.length||versions.some(value=>value!==versions[0])
@@ -179,14 +182,22 @@ export async function publishActiveRelease(env,deps) {
     deploymentEnvironment:env.AURORA_ACTIVE_RELEASE_DEPLOYMENT_ENVIRONMENT,actorLogin:env.GITHUB_ACTOR,actorId:env.GITHUB_ACTOR_ID,
     now:deps.now?.()??Date.now()},deps.githubJSON);
   const components={};
-  for(const component of ['server','web','satellite']) {
+  for(const component of REQUIRED_RELEASE_COMPONENTS) {
     const bytes=await deps.readManifest(component);
-    if(bytes===undefined&&component==='satellite') continue;
     if(!(bytes instanceof Uint8Array)||bytes.length>65_536) fail('RELEASE_MANIFEST_REQUIRED');
-    components[component]=manifestComponent(bytes,env.GITHUB_SHA);
+    components[component]=manifestComponent(bytes,env.GITHUB_SHA,component);
+    if(['iaMaster','windowsIntegration'].includes(component)){
+      if(typeof deps.readPackage!=='function')fail('RELEASE_COMPONENT_FILES_REQUIRED');
+      const pkg=await deps.readPackage(component);
+      if(!(pkg?.manifestBytes instanceof Uint8Array)||!Buffer.from(bytes).equals(Buffer.from(pkg.manifestBytes)))fail('RELEASE_COMPONENT_FILES_CONFLICT');
+      const manifest=JSON.parse(Buffer.from(bytes).toString('utf8'));
+      if(!pkg.fileBytes||Object.keys(pkg.fileBytes).length!==Object.keys(manifest.files).length
+        ||Object.entries(manifest.files).some(([name,digest])=>!(pkg.fileBytes[name] instanceof Uint8Array)||hash(pkg.fileBytes[name])!==digest))
+        fail('RELEASE_COMPONENT_FILES_CONFLICT');
+    }
   }
   const publishedAtUtc=new Date(deps.now?.()??Date.now()).toISOString();
-  const certificate={schemaVersion:1,sourceSha:env.GITHUB_SHA,productVersion:env.AURORA_ACTIVE_RELEASE_PRODUCT_VERSION,
+  const certificate={schemaVersion:2,sourceSha:env.GITHUB_SHA,productVersion:env.AURORA_ACTIVE_RELEASE_PRODUCT_VERSION,
     canonicalOrigin:ACTIVE_RELEASE_ORIGIN,releaseRunId:env.AURORA_ACTIVE_RELEASE_DEPLOY_RUN_ID,
     ciRunId:env.AURORA_ACTIVE_RELEASE_CI_RUN_ID,publishedAtUtc,status:'ACTIVE',checks,components};
   let signature;
@@ -218,6 +229,7 @@ export function firestoreReleaseCommit(database) {
   return async(envelope,expectedPrevious,certificateSha256,publicKey,readCurrentMainSha,approvalProvenance)=>{
     const incoming=verifyActiveReleaseEnvelope(envelope,publicKey);
     if(incoming.status!=='CANDIDATE_UNVERIFIED'||incoming.certificateSha256!==certificateSha256) fail('SIGNED_CANDIDATE_REJECTED');
+    if(incoming.certificate.schemaVersion!==2)fail('FULL_COMPONENT_RELEASE_REQUIRED');
     if(typeof readCurrentMainSha!=='function') fail('CURRENT_MAIN_PROOF_REQUIRED');
     if(!approvalProvenance||![PR_MODE,OWNER_MODE].includes(approvalProvenance.mode)
       ||approvalProvenance.sourceSha!==envelope.certificate.sourceSha||approvalProvenance.releaseRunId!==envelope.certificate.releaseRunId
@@ -262,12 +274,19 @@ async function main() {
   const {getFirestore}=require('firebase-admin/firestore');
   const app=getApps()[0]??initializeApp({projectId:env.GCLOUD_PROJECT});
   const readManifest=async component=>{
-    const path=env[`AURORA_ACTIVE_RELEASE_${component.toUpperCase()}_MANIFEST`];
-    if(!path&&component==='satellite') return undefined;
+    const names={server:'SERVER',web:'WEB',satellite:'SATELLITE',iaMaster:'IA_MASTER',windowsIntegration:'WINDOWS_INTEGRATION'};
+    const path=env[`AURORA_ACTIVE_RELEASE_${names[component]}_MANIFEST`];
     if(!path) fail('RELEASE_MANIFEST_REQUIRED');
     return readFile(path);
   };
-  const result=await publishActiveRelease(env,{githubJSON,readManifest,commit:firestoreReleaseCommit(getFirestore(app))});
+  const readPackage=async component=>{
+    const names={iaMaster:'IA_MASTER',windowsIntegration:'WINDOWS_INTEGRATION'};
+    const manifestPath=env[`AURORA_ACTIVE_RELEASE_${names[component]}_MANIFEST`];
+    if(!manifestPath)fail('RELEASE_MANIFEST_REQUIRED');
+    const folder=component==='iaMaster'?'ia-master-package':'windows-integration-package';
+    return readComponentPackage(resolve(manifestPath,'..',folder),component,env.GITHUB_SHA);
+  };
+  const result=await publishActiveRelease(env,{githubJSON,readManifest,readPackage,commit:firestoreReleaseCommit(getFirestore(app))});
   process.stdout.write(JSON.stringify(result)+'\n');
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href) {

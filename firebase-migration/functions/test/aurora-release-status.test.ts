@@ -22,3 +22,10 @@ test("real operational ingestion stays blocked in this release candidate", () =>
   assert.equal(status.installerIntegration.status, "IMPLEMENTED_PENDING_LIVE_VALIDATION");
   assert.equal(status.installerIntegration.fullSynchronizationVerified, false);
 });
+
+test('cockpit distinguishes signed component coverage from installed convergence and original Mac acceptance',()=>{
+  const status=buildReleaseStatus({active:true,organicEnabled:true,organicSectors:['AUDIT','FINANCE'],allClientsSynchronized:true}) as any;
+  assert.equal(status.releaseConvergence.historicalSchema1Coverage,'PARTIAL');assert.equal(status.releaseConvergence.requiredSchema2Components.length,5);
+  assert.equal(status.releaseConvergence.signedCoverageIsDeviceAcceptance,false);assert.equal(status.releaseConvergence.nativeMacAcceptance,'UNVERIFIED');
+  assert.equal(status.releaseConvergence.allClientsSynchronized,false);assert.equal(status.installerIntegration.fullSynchronizationVerified,false);
+});

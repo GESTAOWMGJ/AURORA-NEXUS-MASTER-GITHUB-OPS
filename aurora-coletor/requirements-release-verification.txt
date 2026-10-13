@@ -1,0 +1,3 @@
+# Optional native published-release verification backend; missing means pending.
+# Version observed and tested in the provisioned runtime on 2026-10-13.
+cryptography==50.0.2

@@ -93,6 +93,16 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}): 
     iaMaster: { routineId: "AURORA-IA-MASTER-001", version: "1.0.0", status: "IMPLEMENTED_PENDING_DEVICE_ATTESTATION", externalAiEnabled: false, cloudSyncVerified: false, autonomousDevelopmentPromoted: false },
     userProfiles: { routineId: "AURORA-USER-PROFILES-001", version: "1.0.0", status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", verifiedEmailRequired: true, mfaRequired: true, tenantOptInRequired: true, productionVerified: false },
     dailyUpdates: { routineId: "AURORA-DAILY-UPDATES-001", webPwaCheckIntervalHours: 24, status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", desktopBinaryUpdateVerified: false, mobileDeviceVerified: false, productionVerified: false },
+    releaseConvergence: {
+      routineId: "AURORA-CANONICAL-RELEASE-001",
+      status: "IMPLEMENTED_PENDING_LIVE_VALIDATION",
+      historicalSchema1Coverage: "PARTIAL",
+      requiredSchema2Components: ["server", "web", "satellite", "iaMaster", "windowsIntegration"],
+      signedCoverageIsDeviceAcceptance: false,
+      nativeMacAcceptance: "UNVERIFIED",
+      allClientsSynchronized: false,
+      detail: "Referência v1 cobre parte dos componentes. A candidata v2 exige cinco manifestos e leitura privada atual; instalação, recibos e aceite do Mac permanecem gates próprios."
+    },
     installerIntegration: {
       routineId: "AURORA-INSTALL-INTEGRATION-001",
       componentVersion: "1.0.0",

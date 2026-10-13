@@ -109,6 +109,13 @@
         }
       },
       {
+        "source": "/api/integration/active-release",
+        "function": {
+          "functionId": "auroraNexusIntegrationPing",
+          "region": "southamerica-east1"
+        }
+      },
+      {
         "source": "/api/integration-keys",
         "function": {
           "functionId": "auroraNexusIntegrationKeys",

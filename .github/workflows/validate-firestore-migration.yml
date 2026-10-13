@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "firebase-migration/**"
+      - "desktop/ia-master/**"
+      - "aurora-coletor/**"
       - "app-foundation/contracts/**"
       - ".github/workflows/validate-firestore-migration.yml"
       - ".github/workflows/deploy-aurora-firebase.yml"
@@ -19,6 +21,8 @@ on:
       - feat/firestore-migration-foundation-20260826
     paths:
       - "firebase-migration/**"
+      - "desktop/ia-master/**"
+      - "aurora-coletor/**"
       - "app-foundation/contracts/**"
       - ".github/workflows/validate-firestore-migration.yml"
       - ".github/workflows/deploy-aurora-firebase.yml"
@@ -140,6 +144,13 @@ jobs:
       - name: Block high or critical production dependency advisories
         working-directory: firebase-migration/functions
         run: npm audit --omit=dev --audit-level=high
+
+      - name: Validate signed release desktop and Windows integration consumers
+        run: |
+          set -euo pipefail
+          python3 -m pip install -r aurora-coletor/requirements-release-verification.txt
+          node --test desktop/ia-master/published-update.test.cjs
+          python3 -m unittest discover -s aurora-coletor/tests -p test_published_release.py -v
 
       - name: Validate FastAPI, OpenAI contracts and dashboard
         working-directory: firebase-migration/api
