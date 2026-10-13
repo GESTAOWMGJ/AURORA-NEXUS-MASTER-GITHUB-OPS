@@ -91,12 +91,12 @@ class HmlShadowUpdateTests(unittest.TestCase):
         request_workflow = yaml.load(REQUEST_WORKFLOW.read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
         permissions = request_workflow['permissions']
         self.assertEqual(permissions['contents'], 'read')
-        self.assertEqual(permissions['actions'], 'write')
+        self.assertEqual(permissions['actions'], 'read')
         self.assertEqual(permissions['pull-requests'], 'read')
         dispatch = request_workflow['jobs']['dispatch']['steps']
         resolve = next(step['run'] for step in dispatch if step.get('name') == 'Resolve exact CI and merged review evidence')
         promote = next(step['run'] for step in dispatch
-                       if step.get('name') == 'Dispatch protected deploy and canonical promotion at exact main SHA')
+                       if step.get('name') == 'Prepare protected owner-origin deployment at exact main SHA')
         for required in [
             'head_sha == $sha',
             'head_branch == "main"',
@@ -108,14 +108,16 @@ class HmlShadowUpdateTests(unittest.TestCase):
             self.assertIn(required, resolve)
         self.assertNotIn('gh workflow run validate-firestore-migration.yml', resolve)
         for required in [
-            '-f publish_active_release=true',
-            '-f active_release_ci_run_id="$CI_RUN_ID"',
-            '-f active_release_review_pr="$REVIEW_PR"',
-            '-f active_release_review_mode="$review_mode"',
-            '-f active_release_previous_sha256="$previous_sha256"',
-            '-f expected_main_sha="$GITHUB_SHA"',
+            'publish_active_release:"true"',
+            'active_release_ci_run_id:$ci',
+            'active_release_review_pr:$pr',
+            'active_release_review_mode:$mode',
+            'active_release_previous_sha256:$previous',
+            'expected_main_sha:$sha',
+            'OWNER_ORIGIN_DISPATCH_REQUIRED',
         ]:
             self.assertIn(required, promote)
+        self.assertNotIn('gh workflow run deploy-aurora-firebase.yml', promote)
         request = json.loads(REQUEST_FILE.read_text(encoding='utf-8'))
         self.assertIs(request['publishActiveRelease'], True)
         self.assertEqual(request['activeReleaseReviewMode'], 'OWNER_DEPLOYMENT_APPROVAL')

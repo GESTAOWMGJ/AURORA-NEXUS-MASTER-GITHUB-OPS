@@ -354,6 +354,14 @@ Nenhum dado real é promovido para compensar falta de recuperação, autenticaç
 
 ## 10. Segurança estrutural
 
+Aprendizado de publicação 13/10/2026: `GITHUB_TOKEN` dispara runs como bot,
+mesmo quando o workflow pai foi autorizado pelo proprietário. Uma aprovação
+real do environment não muda `actor`/`triggering_actor` do run. Preservar o
+publisher que exige origem proprietária: request prepara CI/PR/SHA/predecessor
+e a sessão proprietária autorizada dispara a publicação. Não ampliar acesso
+do bot nem criar PAT para contornar esse gate. Verificação de origem é separada
+de CI verde, deploy, smoke e assinatura.
+
 Aprendizado de auditoria de recuperação de domínio (13/10/2026, PR #226/P2):
 espera por titularidade não desfaz uma mutação já solicitada com sucesso. O recibo
 `WAITING_FOR_FIREBASE_OWNERSHIP_RECHECK` deriva `mutationPerformed` de
