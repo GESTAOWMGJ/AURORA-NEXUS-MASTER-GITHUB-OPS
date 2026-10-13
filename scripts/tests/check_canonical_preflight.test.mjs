@@ -261,3 +261,15 @@ test('CLI rejects insecure TLS settings and invalid scope without network or sec
   assert.equal(invalid.stdout, '');
   assert.match(invalid.stderr, /HML_PROJECT_REQUIRED/);
 });
+
+
+test('full native AuthGate document passes routing with the same security headers', async () => {
+  const native = '<!doctype html><html><body>' + form + '</body></html>';
+  assert.equal(hasCanonicalPortalShell(native), true);
+  const f = fixture({'/portal': {status: 200, headers: htmlHeaders, body: native}});
+  const proof = await checkCanonicalPreflight(project, f.options);
+  assert.equal(proof.anonymousDenied, true);
+  assert.equal(proof.firebaseProjectMatched, true);
+  assert.equal(hasCanonicalPortalShell(native.replace('name="password"', 'disabled name="password"')), false);
+  assert.equal(hasCanonicalPortalShell(native.replace('</body>', '<h1>Centro de gestão WMGJ</h1></body>')), false);
+});
