@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-13",
+  "projectId": "wmgj-prod-jfn-20261005",
+  "projectNumber": "616997609173",
+  "providerApproval": {
+    "status": "GRANTED_IN_PROVIDER_EMAIL_SUPPLIED_BY_OWNER",
+    "source": "Cloud Firestore Engineering Team email pasted by owner in this conversation",
+    "originalEmailIndependentlyRetrieved": false
+  },
+  "organizationWideAllowlisting": {
+    "status": "NOT_CONFIRMED",
+    "providerEstimatedWindow": "1-2 weeks if requested"
+  },
+  "runtimeVerification": {
+    "status": "PENDING",
+    "cmekDatabaseVerified": false,
+    "keyPermissionsVerified": false,
+    "clinicalSensitiveReleased": false
+  },
+  "nextAction": "Validate canonical production project and approved CMEK capability through authenticated GCP channel; inspect existing database encryption before using approved CMEK plan. Preserve existing database; do not imply in-place conversion. Validate key location and IAM, dedicated database strategy, recovery and application encryption before clinical-sensitive release.",
+  "independentBlockers": {
+    "canonicalDomain": "Last HTTP probe still 404 on 2026-10-13; CMEK approval does not resolve Hosting ownership",
+    "physicalWindows": "Offline at latest remote inventory"
+  },
+  "references": [
+    "https://cloud.google.com/firestore/docs/cmek",
+    "https://cloud.google.com/firestore/docs/use-cmek"
+  ]
+}
