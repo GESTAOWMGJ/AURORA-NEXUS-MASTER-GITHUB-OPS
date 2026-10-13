@@ -721,3 +721,19 @@ Registro nativo, Release Cockpit e seção IA Master representam a capacidade; s
 presença não comprova dispositivo conectado, integração autenticada ou deploy.
 Instalação, teste físico e publicação exigem evidências separadas por SHA.
 Procedimento e limites: `desktop/ia-master/README.md`.
+
+## Reconciliação de autorização CMEK — 13/10/2026
+
+M08/M09/M10, desafio AURORA-PROD-CMEK-RECON-001: separar acesso ao recurso,
+configuração observada, recuperação testada e liberação formal. A confirmação
+oficial resolve apenas o acesso ao recurso do projeto explicitamente citado.
+Erro/indisponibilidade de consulta não prova ausência nem autoriza criação.
+Banco Google-managed exige destino novo criado com CMEK; não há conversão in-place.
+
+Registro do resultado e limites em
+[reconciliação CMEK produtiva](../firebase-migration/docs/39-production-cmek-reconciliation.md).
+Somente autorização foi verificada; migração permanece PROPOSED e runtime
+UNVERIFIED. O controle pertence à governança de dados existente
+`AURORA-DATA-GOV-AUTONOMY-001`, sem nova rotina, scheduler ou memória.
+Nenhum dado privado de cliente ou MIME de e-mail alimenta aprendizado genérico.
+Carga/adoção no motor local/cloud exige recibo independente, ausente nesta etapa.

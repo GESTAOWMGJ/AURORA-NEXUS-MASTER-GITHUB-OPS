@@ -96,3 +96,14 @@ Compensações verificáveis do fluxo existente:
 O aceite cobre o head revisado do PR #184 `bf5bbc1146245bdf112cedfd9a9c6cc558e46106`, CI Firestore `37712091783` com 27 Rules aprovados, e a auditoria registrada de 11 agregações acima; não é uma auditoria nova nem alegação de fechamento dos alertas. Cada main que será promovida continua exigindo CI exato atualizado. A revisão deve ocorrer até a data acima ou antes de mudança de escopo, introdução de credenciais/dados reais, falha de teste ou novo advisory relevante; qualquer dessas condições suspende este aceite até nova decisão específica.
 
 Rollback do candidato: reverter o commit que altera manifesto, lockfile e este registro, mantendo o risco aberto e a promoção bloqueada. Não aplicar downgrade do Firebase SDK, `npm audit fix --force` ou alteração de política para ocultar os advisories.
+
+## Delta CMEK produtivo — 13/10/2026
+
+A autorização do recurso no projeto `wmgj-prod-jfn-20261005` foi confirmada.
+Não reduzir scores/residuais R003/R004/R005/R006/R023/R027 por esse e-mail:
+persistência, IAM/KMS, integridade, backup READY e recuperação não foram verificados.
+Riscos seguem abertos e gate clínico BLOCKED.
+Cloud Security/DR deve coletar metadados live no executor autorizado e executar
+o ensaio protegido antes de propor promoção; indisponibilidade de inspeção
+não é diagnóstico de inexistência de banco.
+[Plano de migração, integridade e reversão](39-production-cmek-reconciliation.md).
