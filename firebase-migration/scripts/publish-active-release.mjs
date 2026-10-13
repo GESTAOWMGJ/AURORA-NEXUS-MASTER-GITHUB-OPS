@@ -98,12 +98,39 @@ export async function verifyProtectedReleaseEvidence(input,githubJSON) {
   const publishJob=runningHere?jobs.jobs.find(job=>job.name===PUBLISH_JOB&&job.status==='in_progress'):undefined;
   if(runningHere&&(!publishJob||!Number.isSafeInteger(publishJob.id))) fail('PROTECTED_PUBLISH_JOB_NOT_VERIFIED');
   const checks=await githubJSON(`/commits/${sourceSha}/check-runs?filter=latest&per_page=100`);
-  if(!Array.isArray(checks?.check_runs)||!checks.check_runs.length||checks.total_count>checks.check_runs.length
-    ||checks.check_runs.some(check=>{
-      const currentPublisher=publishJob&&check.name===PUBLISH_JOB&&check.app?.slug==='github-actions'
-        &&check.details_url===`https://github.com/${REPOSITORY}/actions/runs/${releaseRunId}/job/${publishJob.id}`;
-      return check.head_sha!==sourceSha||(!currentPublisher&&(check.status!=='completed'||check.conclusion!=='success'));
-    })) fail('EXACT_CHECKS_NOT_VERIFIED');
+  if(!Array.isArray(checks?.check_runs)||!checks.check_runs.length||checks.total_count>checks.check_runs.length)
+    fail('EXACT_CHECKS_NOT_VERIFIED');
+  // filter=latest retains independent dispatch suites. A terminal older deploy is
+  // historical evidence, not the outcome of the exact replacement verified above.
+  // Never exempt by name alone or apply this exception to CI/security workflows.
+  const historicalRuns=new Map();
+  for(const check of checks.check_runs) {
+    if(check.head_sha!==sourceSha) fail('EXACT_CHECKS_NOT_VERIFIED');
+    const currentPublisher=publishJob&&check.name===PUBLISH_JOB&&check.app?.slug==='github-actions'
+      &&check.details_url===`https://github.com/${REPOSITORY}/actions/runs/${releaseRunId}/job/${publishJob.id}`;
+    if(currentPublisher||(check.status==='completed'&&check.conclusion==='success')) continue;
+    const prefix=`https://github.com/${REPOSITORY}/actions/runs/`;
+    const match=typeof check.details_url==='string'&&check.details_url.startsWith(prefix)
+      ? /^([1-9][0-9]{0,19})\/job\/([1-9][0-9]{0,19})$/.exec(check.details_url.slice(prefix.length)):null;
+    if(check.app?.slug!=='github-actions'||check.status!=='completed'||!match||match[1]===releaseRunId
+      ||!['Validate exact main candidate','Deploy with protected environment',PUBLISH_JOB].includes(check.name))
+      fail('EXACT_CHECKS_NOT_VERIFIED');
+    const oldId=match[1];
+    if(!historicalRuns.has(oldId)) {
+      const old=await githubJSON(`/actions/runs/${oldId}`);
+      if(String(old?.id)!==oldId||old.head_sha!==sourceSha||old.head_branch!=='main'||old.path!==DEPLOY_WORKFLOW
+        ||old.repository?.full_name!==REPOSITORY||old.event!=='workflow_dispatch'||old.status!=='completed'
+        ||!Number.isSafeInteger(old.workflow_id)||old.workflow_id!==release.workflow_id
+        ||!Number.isSafeInteger(old.run_number)||!Number.isSafeInteger(release.run_number)||old.run_number>=release.run_number
+        ||!(Date.parse(old.created_at)<Date.parse(release.created_at))) fail('EXACT_CHECKS_NOT_VERIFIED');
+      const oldJobs=await githubJSON(`/actions/runs/${oldId}/jobs?filter=latest&per_page=100`);
+      if(!Array.isArray(oldJobs?.jobs)||oldJobs.total_count>oldJobs.jobs.length) fail('EXACT_CHECKS_NOT_VERIFIED');
+      historicalRuns.set(oldId,oldJobs.jobs);
+    }
+    const oldJob=historicalRuns.get(oldId).find(job=>String(job.id)===match[2]);
+    if(oldJob?.name!==check.name||oldJob.status!=='completed'||oldJob.conclusion!==check.conclusion)
+      fail('EXACT_CHECKS_NOT_VERIFIED');
+  }
   const pr=await githubJSON(`/pulls/${reviewPrNumber}`);
   if(pr?.merged!==true||pr.merge_commit_sha!==sourceSha||pr.base?.ref!=='main'||pr.base?.repo?.full_name!==REPOSITORY||!sha(pr.head?.sha)) fail('MERGED_REVIEW_SOURCE_NOT_VERIFIED');
   const reviews=await githubJSON(`/pulls/${reviewPrNumber}/reviews?per_page=100`);

@@ -300,3 +300,63 @@ test('publisher GitHub token remains read-only for approvals and the owner mode 
   assert.ok(publisher.includes('GH_TOKEN: ${{ github.token }}'));assert.ok(publisher.includes('environment: firebase-homologation'));
   assert.ok(workflow.includes('default: GITHUB_PULL_REQUEST_REVIEW'));assert.ok(workflow.includes('AURORA_ACTIVE_RELEASE_REVIEW_MODE: ${{ inputs.active_release_review_mode }}'));
 });
+
+// Regression: GitHub filter=latest retains separate workflow_dispatch check suites.
+function historicalDeployFixture() {
+  const f=fixture(),oldId='120';
+  Object.assign(f.responses.get(`/actions/runs/${releaseRunId}`),{id:123,workflow_id:500,run_number:20,created_at:'2026-10-07T11:00:00Z'});
+  const oldRun={...structuredClone(f.responses.get(`/actions/runs/${releaseRunId}`)),id:120,run_number:19,created_at:'2026-10-07T10:00:00Z',conclusion:'failure'};
+  const check={head_sha:sourceSha,name:'Deploy with protected environment',status:'completed',conclusion:'failure',app:{slug:'github-actions'},details_url:`https://github.com/${repo}/actions/runs/${oldId}/job/900`};
+  const job={id:900,name:check.name,status:'completed',conclusion:'failure'};
+  f.responses.set(`/actions/runs/${oldId}`,oldRun);
+  f.responses.set(`/actions/runs/${oldId}/jobs?filter=latest&per_page=100`,{total_count:1,jobs:[job]});
+  const checks=f.responses.get(`/commits/${sourceSha}/check-runs?filter=latest&per_page=100`);
+  checks.check_runs.push(check);checks.total_count++;
+  return {...f,check,oldRun,job,oldId};
+}
+
+for(const conclusion of ['failure','skipped','cancelled']) test(`completed historical deploy ${conclusion} does not poison a verified replacement`,async()=>{
+  const f=historicalDeployFixture();f.check.conclusion=conclusion;f.job.conclusion=conclusion;
+  await publishActiveRelease(f.env,f.deps);assert.equal(f.writes(),1);
+});
+
+for(const scenario of ['other workflow','other workflow ID','other SHA','other branch','other repository','other event','other app','other job name',
+  'foreign URL','unknown job','incomplete jobs','job name mismatch','old run pending','job pending','newer run','missing run ordering',
+  'failed security check','pending security check','current deploy failure','unavailable provenance']) test(`historical check exception rejects ${scenario}`,async()=>{
+  const f=historicalDeployFixture();
+  if(scenario==='other workflow')f.oldRun.path='.github/workflows/security.yml';
+  if(scenario==='other workflow ID')f.oldRun.workflow_id=501;
+  if(scenario==='other SHA')f.oldRun.head_sha='c'.repeat(40);
+  if(scenario==='other branch')f.oldRun.head_branch='other';
+  if(scenario==='other repository')f.oldRun.repository.full_name='other/repo';
+  if(scenario==='other event')f.oldRun.event='pull_request';
+  if(scenario==='other app')f.check.app.slug='untrusted';
+  if(scenario==='other job name')f.check.name='CodeQL';
+  if(scenario==='foreign URL')f.check.details_url=f.check.details_url.replace(repo,'other/repo');
+  if(scenario==='unknown job')f.job.id=901;
+  if(scenario==='incomplete jobs')f.responses.get(`/actions/runs/${f.oldId}/jobs?filter=latest&per_page=100`).total_count=2;
+  if(scenario==='job name mismatch')f.job.name='Other';
+  if(scenario==='old run pending')f.oldRun.status='in_progress';
+  if(scenario==='job pending')f.job.status='in_progress';
+  if(scenario==='newer run')f.oldRun.run_number=21;
+  if(scenario==='missing run ordering')delete (f.oldRun as any).created_at;
+  if(scenario==='failed security check'||scenario==='pending security check'){
+    const check=f.responses.get(`/commits/${sourceSha}/check-runs?filter=latest&per_page=100`).check_runs[0];
+    check.conclusion='failure';if(scenario==='pending security check')check.status='in_progress';
+  }
+  if(scenario==='current deploy failure')f.responses.get(`/actions/runs/${releaseRunId}/jobs?filter=latest&per_page=100`).jobs[1].conclusion='failure';
+  if(scenario==='unavailable provenance')f.responses.delete(`/actions/runs/${f.oldId}`);
+  await assert.rejects(publishActiveRelease(f.env,f.deps));assert.equal(f.writes(),0);
+});
+
+test('current publisher exception and historical dispatch selection coexist without hiding a new security failure',async()=>{
+  const f=historicalDeployFixture();f.env.GITHUB_RUN_ID=releaseRunId;
+  f.responses.get(`/actions/runs/${releaseRunId}`).status='in_progress';
+  const jobs=f.responses.get(`/actions/runs/${releaseRunId}/jobs?filter=latest&per_page=100`);
+  jobs.jobs.push({id:999,name:'Publish verified canonical active release',status:'in_progress'});jobs.total_count++;
+  const checks=f.responses.get(`/commits/${sourceSha}/check-runs?filter=latest&per_page=100`);
+  checks.check_runs.push({head_sha:sourceSha,name:'Publish verified canonical active release',status:'in_progress',app:{slug:'github-actions'},details_url:`https://github.com/${repo}/actions/runs/${releaseRunId}/job/999`});checks.total_count++;
+  await publishActiveRelease(f.env,f.deps);assert.equal(f.writes(),1);
+  checks.check_runs[0].conclusion='failure';
+  await assert.rejects(publishActiveRelease(f.env,f.deps),/EXACT_CHECKS_NOT_VERIFIED/);assert.equal(f.writes(),1);
+});
