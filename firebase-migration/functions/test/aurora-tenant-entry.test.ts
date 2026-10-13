@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
@@ -11,6 +12,14 @@ import { auroraNexusAuthGate } from "../src/auroraAuthGate.js";
 
 const member = { uid: "synthetic-user", email: "user@example.invalid", orgId: "synthetic-company", role: "viewer", permissions: [], facilityIds: [], allFacilities: false, mfaVerified: false };
 const csrf = { action: "test-action", refresh: "test-refresh", integrationKey: "test-integration", distributionApproval: "test-distribution", logout: "test-logout" };
+
+test("HML synthetic smoke token must bind the canonical wmgj organization", () => {
+  const workflow = readFileSync(new URL("../../../.github/workflows/deploy-aurora-firebase.yml", import.meta.url), "utf8");
+  assert.match(workflow, /--arg org "wmgj"/);
+  assert.match(workflow, /auroraOrgId:\$org/);
+  assert.match(workflow, /SMOKE_UID/);
+  assert.match(workflow, /SMOKE_EMAIL/);
+});
 
 test("authenticated navigation converges to the canonical portal; anonymous and foreign tenants stay denied", async context => {
   const names = ["AURORA_NEXUS_ALLOWED_EMAILS", "AURORA_NEXUS_CSRF_HMAC_KEY", "AURORA_CANONICAL_PORTAL_READY"];
