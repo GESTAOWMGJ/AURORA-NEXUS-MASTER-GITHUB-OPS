@@ -22,7 +22,7 @@ from aurora_deployment import safe_path
 from provider_connectors import pull, exports
 from client_secret_store import load as load_secret
 
-VERSION='1.0.0'
+VERSION='1.0.1'
 SCHEMA='aurora.client-agent.v1'
 MAX_ENTRIES=200
 FORMATS={'.pdf','.doc','.docx','.odt','.rtf','.xls','.xlsx','.ods','.csv','.json','.jsonl','.xml','.txt','.md','.png','.jpg','.jpeg','.tif','.tiff'}
@@ -132,38 +132,91 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
     token=environment.get(config['tokenEnv'],'')
     # Verify the tenant before any source-content or provider access.
     sync.connect(config['origin'],config['org'],token,transport)
-    documents,pending,limited=local_documents(roots)
-    provider_states=[]
-    for source in config.get('providers',[]):
-        try:
-            result=provider_pull(source,environment=environment)
-            documents.extend(result['documents']);pending+=result['pendingExtraction'];limited|=result['coverageLimited']
-            provider_states.append({'provider':source['provider'],'state':'READ_CONFIRMED','coverageLimited':result['coverageLimited']})
-        except (sync.SyncError,OSError,ValueError):
-            provider_states.append({'provider':source.get('provider'),'state':'CONNECTION_PENDING'})
-    conn=queue(state);accepted=0;verified=0;waiting=0
+    conn=queue(state);accepted=0;verified=0;waiting=0;provider_states=[];provider_errors=[]
     try:
-        for raw in documents[:MAX_ENTRIES]:
+        conn.execute('CREATE TABLE IF NOT EXISTS binding (id INTEGER PRIMARY KEY, hash TEXT NOT NULL)')
+        binding=sync.digest(json.dumps({k:config.get(k) for k in ('org','origin','roots','providers')},sort_keys=True))
+        previous=conn.execute('SELECT hash FROM binding WHERE id=1').fetchone()
+        if previous and previous[0]!=binding:raise sync.SyncError('SOURCE_STATE_BINDING_CHANGED')
+        conn.execute('INSERT OR IGNORE INTO binding VALUES (1,?)',(binding,))
+        conn.execute('CREATE TABLE IF NOT EXISTS provider_pages (id TEXT PRIMARY KEY, cursor TEXT, completed INTEGER NOT NULL, pending_extraction INTEGER NOT NULL, pages INTEGER NOT NULL)')
+        conn.execute('CREATE TABLE IF NOT EXISTS provider_inflight (id TEXT PRIMARY KEY, hash TEXT NOT NULL)')
+        conn.commit()
+        sources=config.get('providers',[])
+        ids=[sync.digest(config['org']+':'+json.dumps(source,sort_keys=True)) for source in sources]
+        checkpoints={key:conn.execute('SELECT cursor,completed,pending_extraction,pages FROM provider_pages WHERE id=?',(key,)).fetchone() for key in ids}
+        # A completed traversal is rescanned next cycle to discover later arrivals/changes.
+        # Canonical receipts and idempotency remain in the existing intake table.
+        if ids and all(checkpoints[key] and checkpoints[key][1] for key in ids):
+            conn.executemany('DELETE FROM provider_pages WHERE id=?',[(key,) for key in ids]);conn.commit()
+            checkpoints={key:None for key in ids}
+        documents,pending,limited=local_documents(roots)
+        if sources and len(documents)>MAX_ENTRIES//2:
+            documents=documents[:MAX_ENTRIES//2];limited=True
+        groups=[(None,documents,None)]
+        budget=MAX_ENTRIES-len(documents)
+        for source,key in zip(sources,ids):
+            validate(config)
             if (state/'disabled.json').exists():raise sync.SyncError('AGENT_DISABLED')
-            payload=sync.validate_payload(raw)
-            identity=sync.digest(config['org']+':'+json.dumps(payload,sort_keys=True,separators=(',',':')))
-            previous=conn.execute('SELECT state,attempts,next_attempt FROM intake WHERE hash=?',(identity,)).fetchone()
-            if previous and previous[0]=='PROCESSING_VERIFIED':verified+=1;continue
-            if previous and previous[2]>time.time():waiting+=1;continue
-            attempts=(previous[1] if previous else 0)+1
-            # Reserve before transport; a crash after remote commit replays the same canonical key.
-            conn.execute('INSERT INTO intake VALUES (?, ?, ?, NULL, 0) ON CONFLICT(hash) DO UPDATE SET state=excluded.state,attempts=excluded.attempts',
-                         (identity,'PENDING',attempts));conn.commit()
+            checkpoint=checkpoints[key]
+            if checkpoint and checkpoint[1]:
+                provider_states.append({'provider':source['provider'],'state':'READ_CONFIRMED','coverageLimited':False})
+                continue
+            if budget<20:
+                provider_states.append({'provider':source['provider'],'state':'CONNECTION_PENDING'})
+                continue
             try:
-                receipt=sync.synchronize(payload,config['origin'],config['org'],token,True,transport)
-                done=receipt['processing']['firstIngestionVerified'] is True
-                state_name='PROCESSING_VERIFIED' if done else 'PROCESSING_PENDING'
-                conn.execute('UPDATE intake SET state=?,receipt=?,next_attempt=0 WHERE hash=?',(state_name,json.dumps({
-                    'documentId':receipt['documentId'],'idempotencyKey':receipt['idempotencyKey'],
-                    'payloadSha256':receipt['payloadSha256'],'processing':receipt['processing']}),identity));conn.commit()
-                accepted+=1;verified+=int(done);waiting+=int(not done)
-            except (sync.SyncError,OSError):
-                conn.execute('UPDATE intake SET state=?,next_attempt=? WHERE hash=?',('RETRY',time.time()+min(3600,30*2**min(attempts-1,7)),identity));conn.commit();waiting+=1
+                cursor=json.loads(checkpoint[0]) if checkpoint and checkpoint[0] is not None else None
+                result=provider_pull(source,environment=environment,cursor=cursor)
+                if len(result['documents'])>budget:raise sync.SyncError('PROVIDER_PAGE_BUDGET_EXCEEDED')
+                if result['coverageLimited'] and result.get('nextCursor') is None:raise sync.SyncError('PROVIDER_CURSOR_REQUIRED')
+                page_hash=sync.digest(json.dumps({'documents':sorted(sync.digest(json.dumps(row,sort_keys=True)) for row in result['documents']),
+                    'pendingExtraction':result['pendingExtraction'],'nextCursor':result.get('nextCursor')},sort_keys=True))
+                inflight=conn.execute('SELECT hash FROM provider_inflight WHERE id=?',(key,)).fetchone()
+                if inflight and inflight[0]!=page_hash:raise sync.SyncError('PROVIDER_PAGE_CHANGED_RECONCILIATION_REQUIRED')
+                conn.execute('INSERT OR IGNORE INTO provider_inflight VALUES (?,?)',(key,page_hash));conn.commit()
+                groups.append((key,result['documents'],result));budget-=len(result['documents'])
+                provider_states.append({'provider':source['provider'],'state':'READ_CONFIRMED','coverageLimited':result['coverageLimited']})
+            except (sync.SyncError,OSError,ValueError) as exc:
+                provider_states.append({'provider':source.get('provider'),'state':'CONNECTION_PENDING'})
+                provider_errors.append({'provider':source.get('provider'),'code':str(exc) if isinstance(exc,sync.SyncError) else 'PROVIDER_UNAVAILABLE'})
+        for key,documents,page in groups:
+            page_done=True
+            for raw in documents:
+                validate(config)
+                if (state/'disabled.json').exists():raise sync.SyncError('AGENT_DISABLED')
+                payload=sync.validate_payload(raw)
+                identity=sync.digest(config['org']+':'+json.dumps(payload,sort_keys=True,separators=(',',':')))
+                previous=conn.execute('SELECT state,attempts,next_attempt FROM intake WHERE hash=?',(identity,)).fetchone()
+                if previous and previous[0]=='PROCESSING_VERIFIED':verified+=1;continue
+                if previous and previous[2]>time.time():waiting+=1;page_done=False;continue
+                attempts=(previous[1] if previous else 0)+1
+                # Reserve before transport. A crash replays the same canonical key.
+                conn.execute('INSERT INTO intake VALUES (?, ?, ?, NULL, 0) ON CONFLICT(hash) DO UPDATE SET state=excluded.state,attempts=excluded.attempts',
+                             (identity,'PENDING',attempts));conn.commit()
+                try:
+                    receipt=sync.synchronize(payload,config['origin'],config['org'],token,True,transport)
+                    done=receipt['processing']['firstIngestionVerified'] is True
+                    state_name='PROCESSING_VERIFIED' if done else 'PROCESSING_PENDING'
+                    conn.execute('UPDATE intake SET state=?,receipt=?,next_attempt=0 WHERE hash=?',(state_name,json.dumps({
+                        'documentId':receipt['documentId'],'idempotencyKey':receipt['idempotencyKey'],
+                        'payloadSha256':receipt['payloadSha256'],'processing':receipt['processing']}),identity));conn.commit()
+                    accepted+=1;verified+=int(done);waiting+=int(not done);page_done &= done
+                except (sync.SyncError,OSError):
+                    conn.execute('UPDATE intake SET state=?,next_attempt=? WHERE hash=?',('RETRY',time.time()+min(3600,30*2**min(attempts-1,7)),identity));conn.commit();waiting+=1;page_done=False
+            if key and page_done:
+                cursor=page.get('nextCursor')
+                conn.execute('INSERT INTO provider_pages VALUES (?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET cursor=excluded.cursor,completed=excluded.completed,pending_extraction=provider_pages.pending_extraction+excluded.pending_extraction,pages=provider_pages.pages+1',
+                             (key,json.dumps(cursor) if cursor is not None else None,int(cursor is None),page['pendingExtraction']))
+                conn.execute('DELETE FROM provider_inflight WHERE id=?',(key,))
+                conn.commit()
+            elif key:
+                pending+=page['pendingExtraction']
+        progress=[conn.execute('SELECT completed,pending_extraction,pages FROM provider_pages WHERE id=?',(key,)).fetchone() for key in ids]
+        pending+=sum(row[1] for row in progress if row)
+        complete=bool(ids) and all(row and row[0] for row in progress) and all(p['state']=='READ_CONFIRMED' for p in provider_states)
+        cloud_verified=complete and pending==0 and waiting==0 and conn.execute("SELECT 1 FROM intake WHERE state='PROCESSING_VERIFIED' LIMIT 1").fetchone() is not None
+        limited|=bool(ids) and not complete
     finally:conn.close()
     report_confirmed=False
     try:
@@ -172,7 +225,9 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
     except (sync.SyncError,OSError):pass
     return {'schemaVersion':SCHEMA,'componentVersion':VERSION,'orgId':config['org'],'connectionVerified':True,'agentReportConfirmed':report_confirmed,
             'receiptsConfirmed':accepted,'processingReceiptsCached':verified,'pending':waiting,'pendingExtraction':pending,
-            'coverageLimited':limited or len(documents)>MAX_ENTRIES,'providers':provider_states,'fullSynchronizationVerified':False}
+            'coverageLimited':limited,'cloudEnumerationComplete':complete,'cloudSnapshotVerified':cloud_verified,
+            'cloudPagesCommitted':sum(row[2] for row in progress if row),'providers':provider_states,
+            'providerPendingCodes':provider_errors,'fullSynchronizationVerified':False}
 
 
 def main(argv=None):
