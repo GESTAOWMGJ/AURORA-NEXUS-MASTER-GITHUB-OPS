@@ -26,6 +26,20 @@ class DeploymentTests(unittest.TestCase):
     def run_setup(self, **kwargs):
         return deployment.run(self.payload, ORIGIN, ORG, self.state, **kwargs)
 
+    @unittest.skipUnless(sys.platform == 'darwin', 'macOS platform alias regression')
+    def test_macos_system_tmp_alias_is_allowed_but_nested_symlink_is_rejected(self):
+        temp_root = Path('/tmp') / ('aurora-safe-path-' + next(tempfile._get_candidate_names()))
+        canonical_root = Path('/private/tmp') / temp_root.name
+        canonical_root.mkdir(mode=0o700)
+        self.addCleanup(lambda: canonical_root.exists() and __import__('shutil').rmtree(canonical_root))
+        self.assertEqual(deployment.safe_path(temp_root), temp_root)
+        outside = canonical_root / 'outside'
+        outside.mkdir()
+        link = canonical_root / 'linked'
+        link.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(sync.SyncError, 'LINK_PATH_REJECTED'):
+            deployment.safe_path(link / 'state')
+
     def test_offline_validation_and_no_secret_or_business_values_in_checkpoint(self):
         network = Mock()
         original = copy.deepcopy(self.payload)
