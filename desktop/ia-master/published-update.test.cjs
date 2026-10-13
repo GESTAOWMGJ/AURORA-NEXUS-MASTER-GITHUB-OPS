@@ -40,12 +40,13 @@ function emitResponse(callback, body, status=200, headers={'content-type':'appli
   });
   return req;
 }
-function load(overrides = {}, bootstrapHash, bootstrapHelper, runtimeRoot) {
+function load(overrides = {}, bootstrapHash, bootstrapHelper, runtimeRoot, windowsRoot) {
   const module={exports:{}};
   let source=fs.readFileSync(path.join(__dirname,'published-update.cjs'),'utf8');
   if(bootstrapHash) source=source.replace("'d48d98e6ab94d5e08bcb82732eca6b78e84bd93fc2db9e6022b550ea1e9c63c8'","'"+bootstrapHash+"'");
   if(bootstrapHelper) source=source.replace("'5c9a54d9d2c5fb980f88f4d73998ead5ae7d06dc877a1446c4f35249cb9d3eed'","'"+bootstrapHelper+"'");
   if(runtimeRoot) source=source.replace("'D:\\\\AuroraNexus'",JSON.stringify(runtimeRoot));
+  if(windowsRoot) source=source.replace("'C:\\\\Windows'",JSON.stringify(windowsRoot));
   const sandbox={module,exports:module.exports,Buffer,URL,structuredClone,console,setTimeout,clearTimeout,process:overrides.process||process,
     require:name=>overrides[name]||(name==='./safe-read.cjs'?require('./safe-read.cjs'):require(name))};
   vm.runInNewContext(source,sandbox,{filename:'published-update.cjs'});
@@ -83,25 +84,47 @@ function transactionFixture(t) {
   const metadata=encode({version:'1.1.0',sourceRevision:OLD,organization:'fixture-org',binding:'127.0.0.1',externalAiEnabled:false,existingClientPreserved:true});
   fs.writeFileSync(path.join(state,'installation.json'),metadata);
   const helper=path.join(root,'server-location-manager.cjs');fs.writeFileSync(helper,'synthetic reviewed helper D state C');
+  const windowsRoot=path.join(base,'protected-system-fixture'),systemDirectory=path.join(windowsRoot,'System32');
+  const powershellHome=path.join(systemDirectory,'WindowsPowerShell','v1.0'),powershell=path.join(powershellHome,'powershell.exe');
+  fs.mkdirSync(powershellHome,{recursive:true});
   const layout={runtimeRoot:root,stateDir:state,helperPath:helper,nodeExecutable:process.execPath,expectedHelperSha256:h(fs.readFileSync(helper)),
     expectedNodeSha256:h(fs.readFileSync(process.execPath)),expectedInstallationSha256:h(metadata),
     expectedCheckpointSha256:h(fs.readFileSync(path.join(path.dirname(state),'integration-setup.json')))};
   const pair=keyPair(),env=envelope(pair,{iaMaster:h(candidate.bytes)}),commands=[];let running=true;
-  const controls={fault:null,failStartOnce:false,denyOwner:false,denyStage:false,foreignListener:false,alterResponse:null};
+  const controls={fault:null,failStartOnce:false,denyOwner:false,denyStage:false,foreignListener:false,alterResponse:null,powerShellCalls:[],toolMissing:false};
+  const descriptors=new Map();
   const fsProxy=new Proxy(fs,{get(target,key){
+    if(key==='lstatSync')return (filename,...args)=>{
+      // Only synthetic metadata: no substitute executable is written or run.
+      if(filename===powershell){if(controls.toolMissing)throw Error('synthetic unavailable tool');return fs.lstatSync(helper,...args);}
+      return fs.lstatSync(filename,...args);
+    };
+    if(key==='openSync')return (filename,flags,...args)=>{
+      controls.fault?.('before-open',filename,flags);
+      const fd=fs.openSync(filename,flags,...args);descriptors.set(fd,filename);return fd;
+    };
+    if(key==='fsyncSync')return fd=>{
+      const result=fs.fsyncSync(fd);controls.fault?.('after-durable',descriptors.get(fd),fd);return result;
+    };
+    if(key==='closeSync')return fd=>{descriptors.delete(fd);return fs.closeSync(fd);};
     if(key==='renameSync') return (a,b)=>{controls.fault?.('before-rename',a,b);const result=fs.renameSync(a,b);controls.fault?.('after-rename',a,b);return result;};
-    if(key==='writeFileSync') return (a,b,...rest)=>{controls.fault?.('before-write',a,b);return fs.writeFileSync(a,b,...rest);};
+    if(key==='writeFileSync') return (a,b,...rest)=>{
+      controls.fault?.('before-write',typeof a==='number'?descriptors.get(a):a,b);return fs.writeFileSync(a,b,...rest);
+    };
     return target[key];
   }});
   const child={execFileSync:(exe,args,opts)=>{
-    if(exe==='powershell.exe'){
+    if(exe===powershell){
+      controls.powerShellCalls.push({exe,args,options:opts});
+      assert.equal(opts.cwd,systemDirectory);assert.equal(opts.env.PATH,systemDirectory);assert.equal(opts.env.Path,undefined);
+      assert.equal(opts.env.SystemRoot,windowsRoot);assert.equal(opts.env.PSModulePath,path.join(powershellHome,'Modules'));
       if(args.join(' ').includes('currentOwnerAuthorized'))return JSON.stringify({currentOwnerAuthorized:!controls.denyOwner&&!(opts.env.AURORA_RELEASE_STAGE&&controls.denyStage)});
       return JSON.stringify({listeners:running?[
         {port:38765,address:controls.foreignListener?'0.0.0.0':'127.0.0.1',pid:999901,exe:process.execPath,command:'"'+process.execPath+'" "'+path.join(pkg,'server.cjs')+'"'},
         {port:11435,address:'127.0.0.1',pid:999902,exe:path.join(root,'components','ollama','0.35.1','ollama.exe'),command:'ignored'}
       ]:[]});
     }
-    assert.equal(exe,process.execPath);assert.equal(args[0],helper);assert.equal(opts.env.AURORA_INTEGRATION_TOKEN,undefined);
+    assert.equal(exe,process.execPath);assert.equal(args[0],helper);assert.equal(opts.env.AURORA_INTEGRATION_TOKEN,undefined);assert.equal(opts.cwd,root);
     commands.push(args[1]);
     if(args[1]==='start'&&controls.failStartOnce){controls.failStartOnce=false;throw Error('private native failure');}
     running=args[1]==='start';return Buffer.from('ignored public operation output');
@@ -113,16 +136,17 @@ function transactionFixture(t) {
     })():{models:[{name:'qwen3:8b'}]});
     req.end();return req;
   }};
-  const fakeProcess={...process,platform:'win32',versions:{...process.versions,node:'22.0.0'},pid:999990,execPath:process.execPath,env:{LOCALAPPDATA:local},
+  const fakeProcess={...process,platform:'win32',versions:{...process.versions,node:'22.0.0'},pid:999990,execPath:process.execPath,
+    env:{LOCALAPPDATA:local,SystemRoot:windowsRoot,WINDIR:windowsRoot,PATH:path.join(base,'untrusted-path')},
     kill:()=>{const e=Error('synthetic stopped process');e.code='ESRCH';throw e;}};
   const api=load({'node:fs':fsProxy,'node:child_process':child,'node:http':loopback,
-    'node:https':nativeReader(env,b=>controls.alterResponse?.(b)),process:fakeProcess},h(baseline.bytes),layout.expectedHelperSha256,root);
+    'node:https':nativeReader(env,b=>controls.alterResponse?.(b)),process:fakeProcess},h(baseline.bytes),layout.expectedHelperSha256,root,windowsRoot);
   const before={control:h(identity['control.key']),org:h(identity['organization.txt']),checkpoint:layout.expectedCheckpointSha256,git:h(fs.readFileSync(path.join(state,'git-task-marker.txt')))};
   const assertIdentity=()=>{assert.equal(h(fs.readFileSync(path.join(state,'control.key'))),before.control);assert.equal(h(fs.readFileSync(path.join(state,'organization.txt'))),before.org);
     assert.equal(h(fs.readFileSync(path.join(path.dirname(state),'integration-setup.json'))),before.checkpoint);assert.equal(h(fs.readFileSync(path.join(state,'git-task-marker.txt'))),before.git);};
   const options=async()=>({mode:'activate',pin:await api.readActivePin('synthetic-process-bearer',pair.trust,NEXT,'fixture-org'),bearer:'synthetic-process-bearer',trust:pair.trust,
     expectedSourceSha:NEXT,expectedOrg:'fixture-org',layout,packageDirectory:candidateDir,manifestBytes:candidate.bytes,stageDirectory:path.join(root,'reviewed-stage')});
-  return {base,root,state,pkg,layout,pair,env,candidate,candidateDir,baseline,commands,controls,api,options,metadata,assertIdentity};
+  return {base,root,state,pkg,layout,pair,env,candidate,candidateDir,baseline,commands,controls,api,options,metadata,assertIdentity,fakeProcess,powershell,systemDirectory};
 }
 test('isolated verified V2 remains candidate, V1 partial and no activation authority',async()=>{
   const pair=keyPair(),v2=real.verifyCandidate(envelope(pair),pair.trust,NEXT),v1=real.verifyCandidate(envelope(pair,{},1),pair.trust,NEXT);
@@ -187,11 +211,12 @@ for(const phase of ['baseline-rename','candidate-rename','metadata-rename','new-
   const f=transactionFixture(t);let fired=false;
   if(phase==='new-start') f.controls.failStartOnce=true;
   else f.controls.fault=(when,a,b)=>{
-    const match=phase==='baseline-rename'?String(b).endsWith('component.previous'):
-      phase==='candidate-rename'?String(a).endsWith(path.join('reviewed-stage','package')):String(a).includes('.prepared-')&&String(b).endsWith('installation.json');
-    if(!fired&&when==='after-rename'&&match){fired=true;throw Error('SYNTHETIC_IO_FAILURE');}
+    const match=phase==='baseline-rename'?when==='after-rename'&&String(b).endsWith('component.previous'):
+      phase==='candidate-rename'?when==='after-rename'&&String(a).endsWith(path.join('reviewed-stage','package')):
+      when==='after-durable'&&String(a).endsWith('installation.json');
+    if(!fired&&match){fired=true;throw Error('SYNTHETIC_IO_FAILURE');}
   };
-  await assert.rejects(f.api.activatePublished(await f.options()),/SYNTHETIC_IO_FAILURE|OWNED_MANAGER_OPERATION_FAILED/);
+  await assert.rejects(f.api.activatePublished(await f.options()),/SYNTHETIC_IO_FAILURE|OWNED_MANAGER_OPERATION_FAILED|METADATA_CAS_CONFLICT/);
   assert.equal(h(fs.readFileSync(path.join(f.pkg,'manifest.json'))),h(f.baseline.bytes));
   assert.deepEqual(fs.readFileSync(path.join(f.state,'installation.json')),f.metadata);f.assertIdentity();
   assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),false);
@@ -242,4 +267,98 @@ test('concurrent new content is never overwritten by rollback',async t=>{
   await assert.rejects(f.api.activatePublished(await f.options()),/ROLLBACK_INCOMPLETE/);
   assert.equal(fs.readFileSync(path.join(f.pkg,'concurrent.txt'),'utf8'),'synthetic concurrent owner');f.assertIdentity();
   assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),true);
+});
+test('native proof uses the fixed Windows binary and controlled CWD, not PATH lookup',async t=>{
+  const f=transactionFixture(t);await f.api.activatePublished(await f.options());
+  assert.ok(f.controls.powerShellCalls.length>0);
+  for(const call of f.controls.powerShellCalls){
+    assert.equal(call.exe,f.powershell);assert.equal(path.isAbsolute(call.exe),true);
+    assert.equal(call.options.cwd,f.systemDirectory);
+    assert.equal(call.options.env.PATH,f.systemDirectory);
+    assert.equal(call.options.env.PSModulePath,path.join(path.dirname(f.powershell),'Modules'));
+    assert.ok(call.args.includes('-NoProfile'));
+  }
+  assert.equal(fs.existsSync(f.powershell),false); // Metadata stub only, no substitute exe/PoC.
+});
+test('native proof fails closed before a child when Windows root, architecture or tool is unavailable',async t=>{
+  for(const mutation of [f=>f.fakeProcess.env.SystemRoot=path.join(f.base,'unapproved-windows'),
+    f=>f.fakeProcess.env.WINDIR=path.join(f.base,'unapproved-windows'),f=>f.fakeProcess.arch='ia32',
+    f=>f.controls.toolMissing=true]){
+    const f=transactionFixture(t);mutation(f);
+    await assert.rejects(f.api.activatePublished(await f.options()),/LOCAL_OWNER_OR_PROCESS_PROOF_UNAVAILABLE/);
+    assert.equal(f.controls.powerShellCalls.length,0);assert.deepEqual(f.commands,[]);f.assertIdentity();
+  }
+});
+function attemptOf(f){
+  const directory=path.join(f.root,'installation-rollbacks');
+  return path.join(directory,fs.readdirSync(directory).find(name=>name.startsWith('published-')));
+}
+for(const moment of ['after-displace','before-exclusive-create'])test('metadata publication preserves a writer inserted '+moment,async t=>{
+  const f=transactionFixture(t),installation=path.join(f.state,'installation.json');
+  const concurrent=encode({syntheticConcurrentWriter:true,revision:'legitimate-public-metadata'});
+  let inserted=false;
+  f.controls.fault=(when,a,b)=>{
+    const matched=moment==='after-displace'?when==='after-rename'&&a===installation&&String(b).includes('.displaced-'):
+      when==='before-open'&&a===installation&&b==='wx';
+    if(!inserted&&matched){inserted=true;fs.writeFileSync(installation,concurrent);}
+  };
+  await assert.rejects(f.api.activatePublished(await f.options()),/LOCAL_APPLICATION_ROLLBACK_INCOMPLETE/);
+  assert.equal(inserted,true);assert.deepEqual(fs.readFileSync(installation),concurrent);
+  const attempt=attemptOf(f),journal=JSON.parse(fs.readFileSync(path.join(attempt,'journal.json')));
+  assert.deepEqual(fs.readFileSync(path.join(attempt,'metadata.previous')),f.metadata);
+  assert.deepEqual(fs.readFileSync(installation+'.displaced-'+journal.id),f.metadata);
+  assert.equal(fs.existsSync(installation+'.prepared-'+journal.id),true);
+  const commands=[...f.commands];
+  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt}),/RECOVERY_METADATA_CHANGED/);
+  assert.deepEqual(fs.readFileSync(installation),concurrent);assert.deepEqual(f.commands,commands);f.assertIdentity();
+  assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),true);
+});
+test('metadata writer between final CAS check and displacement is preserved byte for byte',async t=>{
+  const f=transactionFixture(t),installation=path.join(f.state,'installation.json');
+  const concurrent=encode({syntheticConcurrentWriter:true,revision:'changed-before-displacement'});let inserted=false;
+  f.controls.fault=(when,a,b)=>{
+    if(!inserted&&when==='before-rename'&&a===installation&&String(b).includes('.displaced-')){
+      inserted=true;fs.writeFileSync(installation,concurrent);
+    }
+  };
+  await assert.rejects(f.api.activatePublished(await f.options()),/LOCAL_APPLICATION_ROLLBACK_INCOMPLETE/);
+  assert.deepEqual(fs.readFileSync(installation),concurrent);
+  assert.deepEqual(fs.readFileSync(path.join(attemptOf(f),'metadata.previous')),f.metadata);f.assertIdentity();
+});
+test('restore exclusive creation preserves an intervening writer and rejects later recovery',async t=>{
+  const f=transactionFixture(t),installation=path.join(f.state,'installation.json');
+  const concurrent=encode({syntheticConcurrentWriter:true,revision:'during-owned-rollback'});let inserted=false;
+  f.controls.failStartOnce=true;
+  f.controls.fault=(when,a,b)=>{
+    if(!inserted&&when==='after-rename'&&a===installation&&String(b).includes('.candidate-')){
+      inserted=true;fs.writeFileSync(installation,concurrent);
+    }
+  };
+  await assert.rejects(f.api.activatePublished(await f.options()),/LOCAL_APPLICATION_ROLLBACK_INCOMPLETE/);
+  assert.equal(inserted,true);assert.deepEqual(fs.readFileSync(installation),concurrent);
+  const attempt=attemptOf(f),journal=JSON.parse(fs.readFileSync(path.join(attempt,'journal.json')));
+  assert.deepEqual(fs.readFileSync(installation+'.recovery-'+journal.id),f.metadata);
+  assert.equal(h(fs.readFileSync(installation+'.candidate-'+journal.id)),journal.nextMetadataSha256);
+  assert.deepEqual(fs.readFileSync(path.join(attempt,'metadata.previous')),f.metadata);
+  const commands=[...f.commands];
+  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt}),/RECOVERY_METADATA_CHANGED/);
+  assert.deepEqual(f.commands,commands);assert.deepEqual(fs.readFileSync(installation),concurrent);f.assertIdentity();
+});
+test('partial exclusive restoration fails closed and retains both complete backups',async t=>{
+  const f=transactionFixture(t),installation=path.join(f.state,'installation.json');let interrupted=false;
+  f.controls.failStartOnce=true;
+  f.controls.fault=(when,a,bytes)=>{
+    if(!interrupted&&when==='before-write'&&a===installation&&Buffer.isBuffer(bytes)&&h(bytes)===h(f.metadata)){
+      interrupted=true;throw Error('SYNTHETIC_CRASH_AFTER_EXCLUSIVE_OPEN');
+    }
+  };
+  await assert.rejects(f.api.activatePublished(await f.options()),/LOCAL_APPLICATION_ROLLBACK_INCOMPLETE/);
+  assert.equal(interrupted,true);assert.equal(fs.readFileSync(installation).length,0);
+  const attempt=attemptOf(f),journal=JSON.parse(fs.readFileSync(path.join(attempt,'journal.json')));
+  assert.deepEqual(fs.readFileSync(path.join(attempt,'metadata.previous')),f.metadata);
+  assert.deepEqual(fs.readFileSync(installation+'.recovery-'+journal.id),f.metadata);
+  assert.equal(h(fs.readFileSync(installation+'.candidate-'+journal.id)),journal.nextMetadataSha256);
+  const commands=[...f.commands];
+  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt}),/RECOVERY_METADATA_CHANGED/);
+  assert.equal(fs.readFileSync(installation).length,0);assert.deepEqual(f.commands,commands);f.assertIdentity();
 });

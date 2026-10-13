@@ -23,6 +23,10 @@ const BOOTSTRAP_MANIFEST = 'd48d98e6ab94d5e08bcb82732eca6b78e84bd93fc2db9e6022b5
 // A caller-supplied checksum cannot substitute a different manager or layout.
 const BOOTSTRAP_HELPER = '5c9a54d9d2c5fb980f88f4d73998ead5ae7d06dc877a1446c4f35249cb9d3eed';
 const REVIEWED_RUNTIME_ROOT = 'D:\\AuroraNexus';
+const REVIEWED_WINDOWS_ROOT = 'C:\\Windows';
+const WINDOWS_SYSTEM = path.join(REVIEWED_WINDOWS_ROOT, 'System32');
+const WINDOWS_POWERSHELL_HOME = path.join(WINDOWS_SYSTEM, 'WindowsPowerShell', 'v1.0');
+const WINDOWS_POWERSHELL = path.join(WINDOWS_POWERSHELL_HOME, 'powershell.exe');
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 const row = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const exact = (value, names) => row(value) && Object.keys(value).length === names.length && names.every(name => Object.hasOwn(value, name));
@@ -240,8 +244,20 @@ function cleanEnvironment() {
 }
 function nativePowerShell(script, values = {}) {
   try {
-    return JSON.parse(childProcess.execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
-      { env: { ...cleanEnvironment(), ...values }, windowsHide: true, timeout: 20000, encoding: 'utf8',
+    demand(process.platform === 'win32' && process.arch === 'x64' && typeof process.env.SystemRoot === 'string'
+      && process.env.SystemRoot.toLowerCase() === REVIEWED_WINDOWS_ROOT.toLowerCase()
+      && (!process.env.WINDIR || process.env.WINDIR.toLowerCase() === REVIEWED_WINDOWS_ROOT.toLowerCase()),
+      'REVIEWED_WINDOWS_SYSTEM_REQUIRED');
+    noLinks(WINDOWS_SYSTEM); noLinks(WINDOWS_POWERSHELL);
+    const binary = fs.lstatSync(WINDOWS_POWERSHELL);
+    demand(binary.isFile() && !binary.isSymbolicLink() && Number.isInteger(binary.nlink) && binary.nlink > 0,
+      'WINDOWS_SYSTEM_TOOL_REQUIRED');
+    const environment = cleanEnvironment();
+    delete environment.PATH; delete environment.Path;
+    Object.assign(environment, { ...values, SystemRoot: REVIEWED_WINDOWS_ROOT, WINDIR: REVIEWED_WINDOWS_ROOT,
+      PATH: WINDOWS_SYSTEM, PSModulePath: path.join(WINDOWS_POWERSHELL_HOME, 'Modules') });
+    return JSON.parse(childProcess.execFileSync(WINDOWS_POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', script],
+      { cwd: WINDOWS_SYSTEM, env: environment, windowsHide: true, timeout: 20000, encoding: 'utf8',
         maxBuffer: 65536, stdio: ['ignore', 'pipe', 'pipe'] }));
   } catch { throw Error('LOCAL_OWNER_OR_PROCESS_PROOF_UNAVAILABLE'); }
 }
@@ -315,7 +331,7 @@ function initialBaseline(layout, expectedOrg) {
 function runManager(layout, operation) {
   helperAndNode(layout);
   try { childProcess.execFileSync(layout.nodeExecutable, [layout.helperPath, operation], {
-    env: cleanEnvironment(), windowsHide: true, timeout: 30000, maxBuffer: 32768, stdio: ['ignore', 'pipe', 'pipe'] }); }
+    cwd: layout.runtimeRoot, env: cleanEnvironment(), windowsHide: true, timeout: 30000, maxBuffer: 32768, stdio: ['ignore', 'pipe', 'pipe'] }); }
   catch { throw Error('OWNED_MANAGER_OPERATION_FAILED'); }
 }
 function listeners(layout) {
@@ -368,8 +384,19 @@ function saveJournal(filename, journal) {
 function compareMetadata(layout, oldHash, nextBytes, id) {
   const displaced = layout.installation + '.displaced-' + id, prepared = layout.installation + '.prepared-' + id;
   demand(hashFile(layout.installation, 65536) === oldHash && !fs.existsSync(displaced) && !fs.existsSync(prepared), 'METADATA_CAS_CONFLICT');
-  durable(prepared, nextBytes); demand(hashFile(layout.installation, 65536) === oldHash, 'METADATA_CAS_CONFLICT');
-  fs.renameSync(layout.installation, displaced); fs.renameSync(prepared, layout.installation);
+  durable(prepared, nextBytes);
+  demand(hashFile(prepared, 65536) === digest(nextBytes) && hashFile(layout.installation, 65536) === oldHash, 'METADATA_CAS_CONFLICT');
+  fs.renameSync(layout.installation, displaced);
+  const displacedBytes = readRegularFile(displaced, 65536);
+  if (digest(displacedBytes) !== oldHash) {
+    // A writer may have replaced the source after the final hash check. Preserve
+    // its exact displaced bytes, and restore the name only when still absent.
+    try { durable(layout.installation, displacedBytes); } catch {}
+    throw Error('METADATA_CAS_CONFLICT');
+  }
+  try { durable(layout.installation, nextBytes); }
+  catch { throw Error('METADATA_CAS_CONFLICT'); }
+  demand(hashFile(layout.installation, 65536) === digest(nextBytes), 'METADATA_PUBLICATION_CHANGED');
 }
 function restoreMetadata(layout, journal, previousBytes) {
   demand(digest(previousBytes) === journal.previousMetadataSha256, 'ROLLBACK_METADATA_INTEGRITY_FAILED');
@@ -381,9 +408,20 @@ function restoreMetadata(layout, journal, previousBytes) {
   else durable(recovery, previousBytes);
   if (current !== null) {
     demand(hashFile(layout.installation, 65536) === journal.nextMetadataSha256, 'ROLLBACK_METADATA_CHANGED');
-    fs.renameSync(layout.installation, layout.installation + '.candidate-' + journal.id);
+    const candidate = layout.installation + '.candidate-' + journal.id;
+    demand(!fs.existsSync(candidate), 'ROLLBACK_CANDIDATE_MARKER_EXISTS');
+    fs.renameSync(layout.installation, candidate);
+    const displaced = readRegularFile(candidate, 65536);
+    if (digest(displaced) !== journal.nextMetadataSha256) {
+      try { durable(layout.installation, displaced); } catch {}
+      throw Error('ROLLBACK_METADATA_CHANGED');
+    }
   }
-  fs.renameSync(recovery, layout.installation);
+  // Exclusive creation cannot replace a legitimate writer that filled the name
+  // while our candidate was displaced. Keep both recovery and candidate backups.
+  try { durable(layout.installation, previousBytes); }
+  catch { throw Error('ROLLBACK_METADATA_CHANGED'); }
+  demand(hashFile(layout.installation, 65536) === journal.previousMetadataSha256, 'ROLLBACK_METADATA_CHANGED');
 }
 async function rollbackOwned(layout, attempt, journal) {
   helperAndNode(layout); ownership(layout); unchangedIdentity(layout, journal.identity);
@@ -564,6 +602,9 @@ async function recoverPublished({ mode, layout: rawLayout, attemptDirectory }) {
     && journal.packageDir === layout.packageDir && journal.stateDir === layout.stateDir && journal.helperPath === layout.helperPath
     && ['PREPARED', 'BASELINE_MOVED', 'CANDIDATE_INSTALLED', 'METADATA_COMMITTED', 'COMPLETED', 'FAILED_ROLLBACK_UNVERIFIED', 'ROLLED_BACK_LOCAL_PREVIOUS'].includes(journal.phase)
     && [journal.previousTreeSha256, journal.nextTreeSha256, journal.previousMetadataSha256, journal.nextMetadataSha256].every(value => hex(value, 64)), 'RECOVERY_JOURNAL_CONFLICT');
+  const metadataHash = fs.existsSync(layout.installation) ? hashFile(layout.installation, 65536) : null;
+  demand(metadataHash === null || metadataHash === journal.previousMetadataSha256 || metadataHash === journal.nextMetadataSha256,
+    'RECOVERY_METADATA_CHANGED');
   const proof = await rollbackOwned(layout, attempt, journal);
   journal.phase = 'ROLLED_BACK_LOCAL_PREVIOUS'; journal.rollbackProof = proof;
   saveJournal(path.join(attempt, 'journal.json'), journal);

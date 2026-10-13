@@ -194,3 +194,26 @@ O teste transacional usa arquivos sintéticos, fingerprints de baseline substitu
 somente no harness VM e HTTPS/health/managers interceptados. Nenhum bypass de
 teste é exportado na implementação. A fixture compartilhada contém só chave
 pública sintética e assinatura; nunca é trust de operação real.
+
+O leitor nativo de owner/processos usa somente o executável absoluto
+`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`, com CWD em
+`System32` e PATH/PSModulePath do sistema. Pré-condições Windows x64, SystemRoot
+fixo e caminho regular sem reparse são conferidas antes de criar o processo.
+Esse guard não usa PATH/CWD para localizar PowerShell e não o executa para
+descobrir seu próprio endereço. Os testes usam metadata sintética e interceptam
+o child; não escrevem nem executam um binário substituto. Isso não comprova
+as ACLs efetivas entre contas de uma máquina real, ainda não auditadas.
+
+A publicação/restauração de `installation.json` usa criação exclusiva `wx`
+após deslocar a versão própria. Um writer que ocupa o nome nessa janela é
+preservado; backups de metadata anterior/candidata e markers próprios continuam
+disponíveis. Recovery rejeita metadata desconhecida antes de chamar managers.
+Uma queda durante a escrita exclusiva pode deixar arquivo parcial: o guard
+preserva esse arquivo e o lock, exigindo reconciliação explícita com os backups
+verificados. Ele não sobrescreve o arquivo para simular recuperação concluída.
+
+Esse updater cobre a primeira transição da baseline D 1.1.0/source 56a813a
+e a repetição/recuperação dessa mesma aplicação. Os hashes de baseline/helper
+e o destino Windows C/D são fixos; outra instalação, arquitetura ou próxima
+baseline exige um contrato revisado. Este código não habilita atualização
+contínua de todas as versões seguintes nem comprova instalação do Mac.
