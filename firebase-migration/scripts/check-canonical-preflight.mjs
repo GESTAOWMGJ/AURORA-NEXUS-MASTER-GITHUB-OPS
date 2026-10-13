@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {lookup} from 'node:dns/promises';
 import {request} from 'node:https';
 import {isIP} from 'node:net';
@@ -30,10 +31,12 @@ export function requestOrigin(origin, path) {
       reject(new CanonicalPreflightError('CANONICAL_ORIGIN_REQUIRED'));
       return;
     }
+    // A fresh URL avoids stale negative Hosting edge-cache entries after domain binding.
+    url.searchParams.set('auroraPreflight', randomUUID());
     const fail = code => reject(new CanonicalPreflightError(code));
     const req = request(url, {
       method: 'GET', rejectUnauthorized: true, minVersion: 'TLSv1.2',
-      headers: {Accept: path === '/portal' ? 'text/html' : 'application/json'},
+      headers: {Accept: path === '/portal' ? 'text/html' : 'application/json', 'Cache-Control': 'no-cache'},
     }, res => {
       if (!res.socket.authorized) {
         res.destroy();
@@ -221,7 +224,7 @@ export function hasCanonicalPortalShell(html) {
   const exposesPrivateShell = lower.includes('centro de gestão wmgj')
     || lower.includes('id="session-identity"')
     || lower.includes('id="logout"');
-  return hasHtmlDocument && hasNextRuntime && !exposesPrivateShell;
+  return hasHtmlDocument && (hasNextRuntime || hasUsableLoginForm(html)) && !exposesPrivateShell;
 }
 
 async function checkedResponse(transport, path) {
