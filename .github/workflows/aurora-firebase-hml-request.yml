@@ -45,6 +45,10 @@ jobs:
             .sourceMutation == false and
             .productionMutation == false and
             .clinicalSensitiveEnabled == false and
+            .publishActiveRelease == true and
+            .activeReleaseReviewMode == "OWNER_DEPLOYMENT_APPROVAL" and
+            (.activeReleaseReviewPr | type == "number" and . >= 1) and
+            (.activeReleasePreviousSha256 == "NONE" or (.activeReleasePreviousSha256 | test("^[a-f0-9]{64}$"))) and
             (.expectedSourceSha | test("^[a-f0-9]{40}$"))
           ' "$REQUEST_FILE" >/dev/null
           expected_source="$(jq -r '.expectedSourceSha' "$REQUEST_FILE")"
@@ -53,10 +57,47 @@ jobs:
           current_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
           test "$current_main" = "$GITHUB_SHA"
 
-      - name: Dispatch protected deploy workflow at exact main SHA
+      - name: Resolve exact signed-release evidence
+        id: evidence
         env:
           GH_TOKEN: ${{ github.token }}
           REQUEST_FILE: .github/requests/aurora-firebase-hml.json
+        run: |
+          set -euo pipefail
+          review_pr="$(jq -r '.activeReleaseReviewPr' "$REQUEST_FILE")"
+          previous_sha256="$(jq -r '.activeReleasePreviousSha256' "$REQUEST_FILE")"
+          test "$review_pr" -ge 1
+          test "$previous_sha256" = "NONE" || [[ "$previous_sha256" =~ ^[a-f0-9]{64}$ ]]
+
+          pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$review_pr")"
+          test "$(jq -r '.merged' <<<"$pr_json")" = "true"
+          test "$(jq -r '.merge_commit_sha' <<<"$pr_json")" = "$GITHUB_SHA"
+          test "$(jq -r '.base.ref' <<<"$pr_json")" = "main"
+
+          ci_run_id=""
+          for attempt in $(seq 1 90); do
+            runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&per_page=100")"
+            ci_run_id="$(jq -r '[.workflow_runs[] | select(.name == "Validate Firestore Migration" and .status == "completed" and .conclusion == "success")] | first | .id // empty' <<<"$runs")"
+            hml_auth="$(jq -r '[.workflow_runs[] | select(.name == "Validate HML Auth Contract" and .status == "completed" and .conclusion == "success")] | length' <<<"$runs")"
+            codeql="$(jq -r '[.workflow_runs[] | select(.name == "Security - CodeQL" and .status == "completed" and .conclusion == "success")] | length' <<<"$runs")"
+            if [ -n "$ci_run_id" ] && [ "$hml_auth" -ge 1 ] && [ "$codeql" -ge 1 ]; then
+              break
+            fi
+            sleep 10
+          done
+          test -n "$ci_run_id"
+          test "$hml_auth" -ge 1
+          test "$codeql" -ge 1
+          printf 'ci_run_id=%s\nreview_pr=%s\nprevious_sha256=%s\n' \
+            "$ci_run_id" "$review_pr" "$previous_sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch protected signed deploy workflow at exact main SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUEST_FILE: .github/requests/aurora-firebase-hml.json
+          CI_RUN_ID: ${{ steps.evidence.outputs.ci_run_id }}
+          REVIEW_PR: ${{ steps.evidence.outputs.review_pr }}
+          PREVIOUS_SHA256: ${{ steps.evidence.outputs.previous_sha256 }}
         run: |
           set -euo pipefail
           project_id="$(jq -r '.projectId' "$REQUEST_FILE")"
@@ -66,5 +107,10 @@ jobs:
             -f project_id="$project_id" \
             -f deploy_confirmation=DEPLOY_HOMOLOGATION \
             -f deployment_mode=SHADOW_UPDATE \
-            -f expected_main_sha="$GITHUB_SHA"
-          echo "AURORA_HML_DEPLOY_DISPATCHED_SHA=$GITHUB_SHA"
+            -f expected_main_sha="$GITHUB_SHA" \
+            -f publish_active_release=true \
+            -f active_release_ci_run_id="$CI_RUN_ID" \
+            -f active_release_review_pr="$REVIEW_PR" \
+            -f active_release_review_mode=OWNER_DEPLOYMENT_APPROVAL \
+            -f active_release_previous_sha256="$PREVIOUS_SHA256"
+          echo "AURORA_HML_SIGNED_DEPLOY_DISPATCHED_SHA=$GITHUB_SHA"
