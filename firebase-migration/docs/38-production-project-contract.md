@@ -1,11 +1,35 @@
 # AURORA NEXUS — contrato de projeto de produção
 
-Código: AURORA-PROD-PROJECT-001. Versão: 2. Data: 05/10/2026.
+Código: AURORA-PROD-PROJECT-001. Versão: 3. Reconciliação: 13/10/2026.
 Baseline observada: `68467209b55f1f8e281ecb5d21acb9a8211757cf`. Módulos: M08/M09/M10.
 Reconciliado com a main `19937d96be37a570caa9e074a9c03d51543cdbc8` em 05/10/2026.
 Estado histórico de 05/10: **BLOCKED_PROJECT_NOT_VALIDATED**.
 
-## Estado vigente — 07/10/2026
+## Estado vigente — 13/10/2026
+
+Projeto canônico: `wmgj-prod-jfn-20261005`, número contratado
+`616997609173`. O request existente permanece `READY_FOR_PROVISIONING`,
+`COLD_PRODUCTION`, `productionMutation=false`, `sourceMutation=false` e
+`clinicalSensitiveEnabled=false`; não foi alterado nesta reconciliação.
+
+**CMEK_FEATURE_ACCESS_GRANTED**: confirmação oficial recebida em 13/10/2026
+às 10h12 de Brasília, relida integralmente no Gmail. A concessão resolve a
+pendência de acesso ao recurso para este ID; não comprova banco CMEK criado,
+Cloud KMS configurado, backup, restauração, deploy ou homologação.
+Allowlisting de toda a organização não foi confirmado pelo e-mail.
+
+**CMEK_DATABASE_CONFIGURATION_UNVERIFIED**: inspeção cloud nesta reconciliação
+não executada; CLI gcloud indisponível no PATH e caminhos usuais do Mac conectado,
+nó Windows offline. Não interpretar esse limite como ausência de banco/chave,
+`NOT_FOUND`, recusa IAM ou falha de produção. Nenhum banco foi criado ou alterado.
+
+[Registro de evidência, decisão e migração controlada](39-production-cmek-reconciliation.md).
+O gate [AURORA-SEC-002-CLINICAL-GATE](37-clinical-sensitive-release-gate.md)
+continua **BLOCKED**. Somente `cmekConfig.kmsKeyName` e
+`cmekConfig.activeKeyVersion` relidos do banco correto, com KMS/IAM verificados,
+podem comprovar configuração CMEK; acesso concedido não promove esse gate.
+
+## Checkpoint histórico — 07/10/2026
 
 O PR #168 substituiu o bloqueio de seleção pelo contrato `READY_FOR_PROVISIONING`,
 com projeto e número explícitos. As descrições de campos nulos abaixo são históricas.
@@ -35,7 +59,12 @@ remove essa criação e o vínculo automático de billing. Ausência, recusa,
 timeout e resposta inválida encerram a execução, sem fallback para HML,
 `wmgj-ops`, candidato histórico ou projeto padrão da CLI.
 
-## Estado canônico e preflight
+## Histórico do contrato bloqueado v2 — 05/10/2026
+
+Os campos nulos e o bloqueio nesta seção foram substituídos pelo PR #168;
+não representam o request atual identificado na seção vigente.
+
+### Preflight preservado
 
 - `.github/requests/aurora-firebase-production.json`: `projectId`,
   `projectNumber` e `confirmation` nulos; status bloqueado.
@@ -55,7 +84,7 @@ Referências técnicas: [metadados de projetos](https://docs.cloud.google.com/re
 [gcloud projects describe](https://docs.cloud.google.com/sdk/gcloud/reference/projects/describe)
 e [billing describe](https://docs.cloud.google.com/sdk/gcloud/reference/billing/projects/describe).
 
-## Futuro desbloqueio — mudança separada
+## Procedimento histórico de desbloqueio — seleção concluída pelo PR #168
 
 1. Identificar um projeto GCP existente com ID e número explícitos, ativo e
    acessível, separado de HML/fallback, com billing habilitado. Registrar evidência
@@ -92,4 +121,5 @@ São testes de código; não comprovam provisionamento nem homologação de prod
 Reversão funcional deve manter o request e o domínio bloqueados/nulos e preservar
 a proibição de criação automática. Não restaurar o candidato como default.
 Nenhum projeto, recurso, variável remota ou permissão foi alterado por este patch.
-Próximo gate: seleção/evidência de projeto existente em mudança separada.
+Próximo gate atual: inspeção read-only de Firestore/KMS e evidências de recuperação;
+a seleção de projeto já foi reconciliada pelo PR #168.

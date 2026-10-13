@@ -38,7 +38,20 @@ Cloud Run existente, executar preflight real e CI no SHA final antes do deploy H
 Rollback: reverter o patch e restaurar a revisão conhecida do gateway; preservar
 sessão, banco existente e backups, sem publicar redirect técnico antes do cutover.
 
-### Projeto de produção — 05/10/2026
+### Projeto de produção e CMEK — reconciliação de 13/10/2026
+
+O projeto contratado é `wmgj-prod-jfn-20261005` / `616997609173`;
+request vigente `READY_FOR_PROVISIONING`, estágio `COLD_PRODUCTION`.
+A confirmação oficial de CMEK foi relida no Gmail: **FEATURE_ACCESS_GRANTED**.
+Banco CMEK/KMS/backups/restore: **UNVERIFIED/PENDING**; inspeção administrativa
+não executada por falta de CLI nos caminhos verificados e Windows offline.
+O gate clínico permanece **BLOCKED**. Esta reconciliação não prova deploy,
+homologação produtiva ou liberação comercial.
+[Registro, decisão condicional de banco novo e migração](../firebase-migration/docs/39-production-cmek-reconciliation.md).
+
+#### Histórico preservado — 05/10/2026
+
+O bloqueio e campos nulos abaixo foram substituídos pelo PR #168; não são estado vigente.
 `AURORA-PROD-PROJECT-001`: produção permanece `BLOCKED_PROJECT_NOT_VALIDATED`.
 Request v2 e domínio mantêm ID/número nulos; candidato recusado somente histórico.
 Bootstrap/workflow exigem contrato explícito e consulta GCP read-only bem-sucedida

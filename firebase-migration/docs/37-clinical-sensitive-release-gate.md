@@ -50,3 +50,14 @@ BLOCKED
 ```
 
 Somente revisão humana formal pode promover. Qualquer revogação de KMS, falha de restore, incidente relevante, pentest crítico ou quebra de segregação rebaixa imediatamente para `BLOCKED`.
+
+## 6. Reconciliação produtiva — 13/10/2026
+
+O Google confirmou acesso ao recurso CMEK para `wmgj-prod-jfn-20261005`
+às 10h12 de Brasília. **FEATURE_ACCESS_GRANTED** não satisfaz o gate
+“Firestore CMEK”: banco, cmekConfig, KMS/IAM, backup READY e restore continuam
+sem evidência live nesta reconciliação. `CLINICAL_SENSITIVE` permanece **BLOCKED**;
+nenhum estado de promoção acima foi emitido.
+
+[Autorização, limites de inspeção e migração proposta](39-production-cmek-reconciliation.md).
+A concessão não autoriza automaticamente cópia de dados clínicos nem IA externa.
