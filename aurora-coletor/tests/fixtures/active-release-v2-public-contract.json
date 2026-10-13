@@ -1,0 +1,90 @@
+{
+  "testOnly": true,
+  "actualRunOrOwnerApproval": false,
+  "testNowUtc": "2026-10-13T12:00:00.000Z",
+  "syntheticPublicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAgiInsqVWR2xIPK3ltOKgbRwFmIUOHcI1rNYNnbAt5Vg=\n-----END PUBLIC KEY-----\n",
+  "syntheticPublicKeySpkiSha256": "674401cf72c722dcfd403f142b67de74e4fd3b1410917327bde25f5c275a0a9c",
+  "requestNonce": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "expectedOrg": "fixture-org",
+  "response": {
+    "schemaVersion": "aurora.active-release-read.v1",
+    "source": "platformRuntime/activeRelease",
+    "canonicalOrigin": "https://auroranexus.com.br",
+    "orgId": "fixture-org",
+    "requestNonce": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "observedAtUtc": "2026-10-13T12:00:00.000Z",
+    "certificateSha256": "a56c388490f6d3079b88656333f2504ca023e3e9cd8b9998753bda1ae03afa95",
+    "envelope": {
+      "certificate": {
+        "schemaVersion": 2,
+        "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "productVersion": "1.1.0-test",
+        "canonicalOrigin": "https://auroranexus.com.br",
+        "releaseRunId": "13",
+        "ciRunId": "12",
+        "publishedAtUtc": "2026-10-13T11:00:00.000Z",
+        "status": "ACTIVE",
+        "checks": {
+          "ciPassed": true,
+          "humanReviewApproved": true,
+          "protectedDeploySucceeded": true,
+          "smokePassed": true
+        },
+        "components": {
+          "server": {
+            "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": "1.1.0-test",
+            "manifestSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "web": {
+            "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": "1.1.0-test",
+            "manifestSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "satellite": {
+            "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": "1.1.0-test",
+            "manifestSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "iaMaster": {
+            "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": "1.1.0-test",
+            "manifestSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          },
+          "windowsIntegration": {
+            "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": "1.1.0-test",
+            "manifestSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
+        }
+      },
+      "signature": "f6-95HZBqdCFkpGAKWHwvTF8uL3VU0c_xa-2xOcrnm7z-9LMmKgx78iegUnSLl5UcrMeadK0r9ZOWIbe6i2aDw"
+    },
+    "runtime": {
+      "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "serverManifestSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "webManifestSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "componentCoverage": {
+      "status": "COMPLETE_SIGNED_COMPONENT_SET",
+      "complete": true,
+      "requiredComponents": [
+        "server",
+        "web",
+        "satellite",
+        "iaMaster",
+        "windowsIntegration"
+      ],
+      "coveredComponents": [
+        "server",
+        "web",
+        "satellite",
+        "iaMaster",
+        "windowsIntegration"
+      ],
+      "missingComponents": []
+    },
+    "nativeMacInstallation": "UNVERIFIED",
+    "deviceInstallationVerified": false
+  }
+}

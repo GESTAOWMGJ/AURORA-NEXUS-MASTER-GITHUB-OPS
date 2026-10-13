@@ -124,6 +124,12 @@ jobs:
           uv run python scripts/run_evals.py
           node --check wmgj_api/static/dashboard.js
           node --test tests/static/dashboard_static.test.mjs
+      - name: Validate signed release desktop and Windows integration consumers
+        run: |
+          set -euo pipefail
+          python3 -m pip install -r aurora-coletor/requirements-release-verification.txt
+          node --test desktop/ia-master/published-update.test.cjs
+          python3 -m unittest discover -s aurora-coletor/tests -p test_published_release.py -v
       - name: Validate target and deployment scope
         env:
           REQUESTED_PROJECT: ${{ inputs.project_id }}
@@ -900,7 +906,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aurora-active-release-manifests-${{ github.sha }}
-          path: firebase-migration/functions/runtime-release/*-manifest.json
+          path: |
+            firebase-migration/functions/runtime-release/*-manifest.json
+            firebase-migration/functions/runtime-release/*-package.zip
+            firebase-migration/functions/runtime-release/ia-master-package/
+            firebase-migration/functions/runtime-release/windows-integration-package/
           if-no-files-found: error
           retention-days: 14
       - name: Restore owned AuthGate traffic when deploy or smoke fails
@@ -959,6 +969,8 @@ jobs:
           AURORA_ACTIVE_RELEASE_SERVER_MANIFEST: firebase-migration/functions/runtime-release/server-manifest.json
           AURORA_ACTIVE_RELEASE_WEB_MANIFEST: firebase-migration/functions/runtime-release/web-manifest.json
           AURORA_ACTIVE_RELEASE_SATELLITE_MANIFEST: firebase-migration/functions/runtime-release/satellite-manifest.json
+          AURORA_ACTIVE_RELEASE_IA_MASTER_MANIFEST: firebase-migration/functions/runtime-release/iaMaster-manifest.json
+          AURORA_ACTIVE_RELEASE_WINDOWS_INTEGRATION_MANIFEST: firebase-migration/functions/runtime-release/windowsIntegration-manifest.json
         run: |
           export AURORA_ACTIVE_RELEASE_PRODUCT_VERSION="$(node -p "require('./firebase-migration/functions/lib/auroraReleaseStatus.js').AURORA_PRODUCT_VERSION")"
           node firebase-migration/scripts/publish-active-release.mjs

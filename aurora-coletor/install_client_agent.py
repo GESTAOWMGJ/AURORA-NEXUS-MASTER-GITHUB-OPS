@@ -16,7 +16,7 @@ from aurora_cloud_sync import SyncError
 from client_agent import validate,SCHEMA,VERSION
 from client_secret_store import store
 
-ASSETS=('client_agent.py','provider_connectors.py','client_secret_store.py','aurora_cloud_sync.py','aurora_deployment.py','install_client_agent.py')
+ASSETS=('client_agent.py','provider_connectors.py','client_secret_store.py','aurora_cloud_sync.py','aurora_deployment.py','install_client_agent.py','published_release.py')
 
 
 def install(target,config,source=None,startup=False,configure_secrets=False,start_now=False):

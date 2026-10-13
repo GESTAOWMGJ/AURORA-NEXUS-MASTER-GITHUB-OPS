@@ -286,7 +286,12 @@ function rollback(options, testing = {}) {
 }
 
 module.exports = { preflight, update, rollback, inspectRelease, knowledgeCompatibility, BASELINE, REGISTRY_SHA };
-if (require.main === module) {
+if (require.main === module && process.argv[2] === 'published') {
+  require('./published-update.cjs').runCli(process.argv.slice(3)).then(result => console.log(JSON.stringify(result))).catch(error => {
+    console.error(JSON.stringify({ status: 'PENDING_PUBLISHED_RELEASE', code: /^[A-Z0-9_]+$/.test(error.message) ? error.message : 'PUBLIC_RELEASE_OPERATION_FAILED', activated: false }));
+    process.exitCode = 2;
+  });
+} else if (require.main === module) {
   try {
     const [operation, optionsFile] = process.argv.slice(2);
     demand(['preflight', 'update', 'rollback'].includes(operation) && path.isAbsolute(optionsFile || ''), 'EXPLICIT_OPERATION_AND_OPTIONS_REQUIRED');

@@ -1,8 +1,10 @@
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {readdir,readFile,mkdir,writeFile} from 'node:fs/promises';
-import {resolve,relative,dirname} from 'node:path';
+import {readdir,readFile,mkdir,writeFile,mkdtemp,rm} from 'node:fs/promises';
+import {resolve,relative,dirname,basename} from 'node:path';
+import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
+import {readComponentPackage,windowsIntegrationPackage,retainComponentPackage,retainComponentZip} from './release-component-packages.mjs';
 
 const repo=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 const functions=resolve(repo,'firebase-migration/functions');
@@ -52,3 +54,25 @@ for(const file of data.files){
 }
 await writeFile(resolve(output,'satellite-manifest.json'),satellite);
 console.log(JSON.stringify({component:'satellite',sourceSha,version:data.version,manifestSha256:digest(satellite)}));
+
+// The existing official IA builder produces real public package bytes. Never
+// substitute the repository SHA or a synthetic manifest for these build outputs.
+const temporary=await mkdtemp(resolve(tmpdir(),'aurora-release-components-'));
+const python=process.platform==='win32'?'python':'python3';
+try{
+  const candidate=resolve(temporary,'ia-master');
+  execFileSync(python,[resolve(repo,'desktop/ia-master/build.py'),'--output',candidate],{cwd:repo,stdio:'pipe',windowsHide:true});
+  const iaMaster=await readComponentPackage(candidate,'iaMaster',sourceSha);
+  const windowsIntegration=windowsIntegrationPackage(iaMaster,sourceSha);
+  for(const [component,name,pkg] of [['iaMaster','ia-master-package',iaMaster],['windowsIntegration','windows-integration-package',windowsIntegration]]){
+    const retained=await retainComponentPackage(output,name,pkg);
+    const zip=await retainComponentZip(python,retained,resolve(output,`${component}-package.zip`),pkg);
+    await writeFile(resolve(output,`${component}-manifest.json`),pkg.manifestBytes);
+    console.log(JSON.stringify({component,sourceSha,version:pkg.manifest.version,manifestSha256:digest(pkg.manifestBytes),
+      fileCount:Object.keys(pkg.fileBytes).length,archiveSha256:zip.sha256,archiveSize:zip.size,deviceInstallationVerified:false}));
+  }
+}finally{
+  // The only recursive cleanup target is this newly created, bounded temporary directory.
+  if(dirname(temporary)!==resolve(tmpdir())||!basename(temporary).startsWith('aurora-release-components-'))throw Error('COMPONENT_TEMP_PATH_REJECTED');
+  await rm(temporary,{recursive:true,force:true});
+}

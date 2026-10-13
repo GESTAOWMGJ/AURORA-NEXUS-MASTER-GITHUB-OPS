@@ -22,6 +22,15 @@ test("rotinas legadas ficam espelhadas até migração e nunca são fingidas com
   assert.equal(maintenance?.cadence, "DAILY");
 });
 
+test('release convergence reuses the governed registry entry without asserting installation or another executor',()=>{
+  assert.equal(AURORA_NATIVE_ROUTINES.filter(item=>item.id==='AURORA-CANONICAL-RELEASE-001').length,1);
+  const policy=(nativeRoutineSummary() as any).releaseConvergencePolicy;
+  assert.equal(policy.routineId,'AURORA-CANONICAL-RELEASE-001');assert.equal(policy.historicalSchema1Coverage,'PARTIAL');
+  assert.equal(policy.requiredSchema2Components.length,5);assert.equal(policy.fullSynchronizationInferredFromSignedCoverage,false);
+  assert.equal(policy.nativeMacAcceptanceInferredFromSatellite,false);assert.equal(policy.allClientsSynchronized,false);
+  assert.equal(policy.schedulerCreated,false);assert.equal(policy.automaticInstallationEnabled,false);assert.equal(policy.permissionsGranted,false);
+});
+
 test("aprendizado orgânico promove capacidade, não dados entre clientes", () => {
   const summary = nativeRoutineSummary() as any;
   assert.equal(summary.organicPromotion.tenantRawDataTransfer, false);

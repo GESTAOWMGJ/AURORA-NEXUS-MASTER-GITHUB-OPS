@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { ACTIVE_RELEASE_SOURCE, verifyActiveReleaseEnvelope } from '../src/auroraActiveRelease.js';
+import { ACTIVE_RELEASE_SOURCE, activeReleaseSigningBytes, verifyActiveReleaseEnvelope } from '../src/auroraActiveRelease.js';
 import {publishActiveRelease,firestoreReleaseCommit,verifyProtectedReleaseEvidence} from '../../scripts/publish-active-release.mjs';
 const repo='GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS',sourceSha='a'.repeat(40),now=Date.parse('2026-10-07T12:00:00.000Z');
 const keys=generateKeyPairSync('ed25519'); // Synthetic private key is exported only to the in-memory env fixture.
@@ -29,9 +29,20 @@ function fixture() {
   let writes=0,mainReads=0,envelope:any,approvalProvenance:any;
   const githubJSON=async(path:string)=>{if(path==='/git/ref/heads/main')mainReads++;assert.ok(responses.has(path));return structuredClone(responses.get(path));};
   const manifest=Buffer.from(JSON.stringify({schemaVersion:1,sourceSha,version:'1.0.0-test',files:{'lib/synthetic.js':'a'.repeat(64)}}));
-  const deps={githubJSON,readManifest:async(component:string)=>component==='satellite'?undefined:manifest,now:()=>now,
+  const makePackage=(component:string)=>{
+    const names=component==='iaMaster'?['server.cjs','studio.cjs','manage.cjs','published-update.cjs','kernel/auroraMasterEngine.js']:
+      ['client_agent.py','provider_connectors.py','client_secret_store.py','install_client_agent.py','aurora_cloud_sync.py','aurora_deployment.py','published_release.py'];
+    const fileBytes=Object.fromEntries(names.map(name=>[name,Buffer.from('// synthetic '+name)]));
+    const files=Object.fromEntries(Object.entries(fileBytes).map(([name,bytes])=>[name,createHash('sha256').update(bytes).digest('hex')]));
+    const metadata=component==='iaMaster'?{component:'AURORA_IA_MASTER',version:'1.1.0',sourceRevision:sourceSha,dirty:false,nodeMinimumMajor:22,externalAiEnabled:false,files}:
+      {schemaVersion:1,component:'AURORA_WINDOWS_INTEGRATION',version:'1.0.1',sourceSha,platform:'windows',files};
+    return {manifestBytes:Buffer.from(JSON.stringify(metadata)),fileBytes};
+  };
+  const packages:any={iaMaster:makePackage('iaMaster'),windowsIntegration:makePackage('windowsIntegration')};
+  const deps={githubJSON,readManifest:async(component:string)=>packages[component]?.manifestBytes??manifest,
+    readPackage:async(component:string)=>packages[component],now:()=>now,
     commit:async(value:any,...args:any[])=>{writes++;envelope=value;approvalProvenance=args[4];}};
-  return {env,responses,deps,writes:()=>writes,envelope:()=>envelope,approvalProvenance:()=>approvalProvenance,mainReads:()=>mainReads};
+  return {env,responses,deps,packages,writes:()=>writes,envelope:()=>envelope,approvalProvenance:()=>approvalProvenance,mainReads:()=>mainReads};
 }
 
 test('publisher derives gates from exact trusted GitHub records and signs only after preflight',async()=>{
@@ -39,6 +50,8 @@ test('publisher derives gates from exact trusted GitHub records and signs only a
   assert.equal(result.status,'ACTIVE_PIN_PUBLISHED');assert.equal(f.writes(),1);assert.equal(f.mainReads(),2);
   assert.equal(verifyActiveReleaseEnvelope(f.envelope(),publicKey,{now,expectedSourceSha:sourceSha}).status,'CANDIDATE_UNVERIFIED');
   assert.equal('privateKey' in f.envelope(),false);assert.equal(JSON.stringify(f.envelope()).includes('PRIVATE KEY'),false);
+  assert.equal(f.envelope().certificate.schemaVersion,2);
+  assert.deepEqual(Object.keys(f.envelope().certificate.components),['server','web','satellite','iaMaster','windowsIntegration']);
 });
 
 for(const missing of ['AURORA_ACTIVE_RELEASE_PUBLIC_KEY','AURORA_ACTIVE_RELEASE_PRIVATE_KEY','AURORA_ACTIVE_RELEASE_PREVIOUS_SHA256']) test(`publisher missing ${missing} cannot mutate`,async()=>{
@@ -359,4 +372,52 @@ test('current publisher exception and historical dispatch selection coexist with
   await publishActiveRelease(f.env,f.deps);assert.equal(f.writes(),1);
   checks.check_runs[0].conclusion='failure';
   await assert.rejects(publishActiveRelease(f.env,f.deps),/EXACT_CHECKS_NOT_VERIFIED/);assert.equal(f.writes(),1);
+});
+
+for(const component of ['server','web','satellite','iaMaster','windowsIntegration'])test(`v2 publication missing ${component} cannot write`,async()=>{
+  const f=fixture(),read=f.deps.readManifest;f.deps.readManifest=async(name)=>name===component?undefined as any:read(name);
+  await assert.rejects(publishActiveRelease(f.env,f.deps),/RELEASE_MANIFEST_REQUIRED/);assert.equal(f.writes(),0);
+});
+for(const scenario of ['missing reader','changed file','extra file','substituted manifest'])test(`v2 actual component bytes reject ${scenario}`,async()=>{
+  const f=fixture();
+  if(scenario==='missing reader')delete(f.deps as any).readPackage;
+  if(scenario==='changed file')f.packages.iaMaster.fileBytes['server.cjs']=Buffer.from('changed');
+  if(scenario==='extra file')f.packages.windowsIntegration.fileBytes['control.key']=Buffer.from('synthetic extra');
+  if(scenario==='substituted manifest')f.deps.readPackage=async(component)=>({...f.packages[component],manifestBytes:Buffer.from('{}')});
+  await assert.rejects(publishActiveRelease(f.env,f.deps),/RELEASE_COMPONENT_FILES/);assert.equal(f.writes(),0);
+});
+test('atomic writer refuses a new v1 promotion, while predecessor verification remains compatible',async()=>{
+  const f=fixture();await publishActiveRelease(f.env,f.deps);const c=structuredClone(f.envelope().certificate);c.schemaVersion=1;
+  delete c.components.iaMaster;delete c.components.windowsIntegration;
+  const signed={certificate:c,signature:sign(null,activeReleaseSigningBytes(c),keys.privateKey).toString('base64url')};
+  const candidate=verifyActiveReleaseEnvelope(signed,publicKey,{now});assert.equal(candidate.status,'CANDIDATE_UNVERIFIED');
+  if(candidate.status!=='CANDIDATE_UNVERIFIED')throw Error('synthetic fixture');
+  let transactions=0;const db={doc:(path:string)=>({path}),runTransaction:async()=>{transactions++;}};
+  await assert.rejects(firestoreReleaseCommit(db)(signed,'NONE',candidate.certificateSha256,publicKey,async()=>sourceSha,f.approvalProvenance()),/FULL_COMPONENT_RELEASE_REQUIRED/);
+  assert.equal(transactions,0);
+});
+
+test('v2 promotion preserves a verified historical v1 predecessor and its exact CAS hash',async()=>{
+  const f=fixture();await publishActiveRelease(f.env,f.deps);const incoming=f.envelope();
+  const certificate=structuredClone(incoming.certificate);certificate.schemaVersion=1;
+  delete certificate.components.iaMaster;delete certificate.components.windowsIntegration;
+  certificate.releaseRunId='121';certificate.publishedAtUtc='2026-10-07T11:00:00.000Z';
+  const predecessor={certificate,signature:sign(null,activeReleaseSigningBytes(certificate),keys.privateKey).toString('base64url')};
+  const prior=verifyActiveReleaseEnvelope(predecessor,publicKey,{now}),next=verifyActiveReleaseEnvelope(incoming,publicKey,{now});
+  assert.equal(prior.status,'CANDIDATE_UNVERIFIED');assert.equal(next.status,'CANDIDATE_UNVERIFIED');
+  if(prior.status!=='CANDIDATE_UNVERIFIED'||next.status!=='CANDIDATE_UNVERIFIED')throw Error('synthetic fixture');
+  const oldHistory=`${ACTIVE_RELEASE_SOURCE}/history/release-121`,newHistory=`${ACTIVE_RELEASE_SOURCE}/history/release-${releaseRunId}`;
+  const rows=new Map<string,any>([[ACTIVE_RELEASE_SOURCE,predecessor],[oldHistory,{envelope:structuredClone(predecessor)}]]);
+  const before=JSON.stringify(rows.get(oldHistory));
+  const database={doc:(path:string)=>({path}),runTransaction:async(body:any)=>{
+    const draft=new Map([...rows].map(([path,value])=>[path,structuredClone(value)]));let wrote=false;
+    const tx={get:async(ref:any)=>{assert.equal(wrote,false);return {exists:draft.has(ref.path),data:()=>draft.get(ref.path)};},
+      create:(ref:any,value:any)=>{wrote=true;assert.equal(draft.has(ref.path),false);draft.set(ref.path,structuredClone(value));},
+      set:(ref:any,value:any)=>{wrote=true;draft.set(ref.path,structuredClone(value));}};
+    await body(tx);rows.clear();draft.forEach((value,key)=>rows.set(key,value));
+  }};
+  await firestoreReleaseCommit(database)(incoming,prior.certificateSha256,next.certificateSha256,publicKey,async()=>sourceSha,f.approvalProvenance());
+  assert.equal(rows.get(ACTIVE_RELEASE_SOURCE).certificate.schemaVersion,2);
+  assert.equal(rows.get(newHistory).previousCertificateSha256,prior.certificateSha256);
+  assert.equal(JSON.stringify(rows.get(oldHistory)),before);
 });

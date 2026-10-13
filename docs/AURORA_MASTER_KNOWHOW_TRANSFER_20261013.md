@@ -131,3 +131,15 @@ proveniência, ordenação, jobs incompletos, falha atual e segurança. CI e HML
 correção permanecem pendentes até seus recibos. Reverter o commit restaura o
 bloqueio conservador; nenhum histórico remoto deve ser apagado para publicar.
 Conhecimento versionado não comprova adoção pela IA Master instalada.
+
+### Cobertura assinada não é convergência instalada
+
+O run real `38457139904` publicou v1, cujos três componentes não incluem o pacote
+IA Master local nem o fechamento Python Windows. O método candidato exige v2 com
+cinco pins, bytes reais, proveniência do ponteiro fixo e leitura TLS privada com
+nonce/escopo/runtime. v1 permanece histórico válido PARCIAL; assinatura não vira
+aceite de aparelho ou identidade do Mac por inferência. Reutiliza-se
+`AURORA-CANONICAL-RELEASE-001`, sem outro robô, privilégio, cron ou banco.
+Contrato e regressões em `AURORA_ACTIVE_RELEASE_COMPONENTS_V2.md`.
+Estado: implementação candidata e testes sintéticos; CI, endpoint/deploy/publicação
+v2 e adoção instalada NOT_DEPLOYED/PENDING. Rollback preserva o pin e os históricos.

@@ -2,7 +2,7 @@ import { lstat, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { auroraDb } from "./firebase.js";
-import { ACTIVE_RELEASE_SOURCE, assessReleaseManifest, readCanonicalActiveRelease } from "./auroraActiveRelease.js";
+import { ACTIVE_RELEASE_SOURCE, assessReleaseComponentCoverage, assessReleaseManifest, readCanonicalActiveRelease } from "./auroraActiveRelease.js";
 
 type Dependencies = {
   publicKey: () => string | undefined;
@@ -69,6 +69,8 @@ export function createActiveReleaseRuntime(deps: Dependencies) {
       runtimeBuild,
       runtimeBuildWeb,
       localServer: { status: "UNVERIFIED", sourceSha: null, version: null, manifestMatches: false, fileIntegrityVerified: false },
+      componentCoverage: assessReleaseComponentCoverage(undefined),
+      nativeMacInstallation: "UNVERIFIED",
       allClientsSynchronized: false
     };
     let localServer = { status: "SERVER_MANIFEST_UNAVAILABLE", sourceSha: null as string | null, version: null as string | null,
@@ -91,7 +93,8 @@ export function createActiveReleaseRuntime(deps: Dependencies) {
     }
     return { verification: { status: active.status, reason: null, source: ACTIVE_RELEASE_SOURCE,
       algorithm: "Ed25519", certificateSha256: active.pin.certificateSha256 },
-      certificate: active.pin.certificate, runtimeBuild, runtimeBuildWeb, localServer, localWeb, allClientsSynchronized: false };
+      certificate: active.pin.certificate, runtimeBuild, runtimeBuildWeb, localServer, localWeb,
+      componentCoverage: assessReleaseComponentCoverage(active.pin), nativeMacInstallation: "UNVERIFIED", allClientsSynchronized: false };
   };
 }
 export const readRuntimeActiveRelease = createActiveReleaseRuntime({

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { ACTIVE_RELEASE_ORIGIN, ACTIVE_RELEASE_SOURCE, activeReleaseSigningBytes, assessActiveReleaseReceipt,
-  assessReleaseManifest, readCanonicalActiveRelease, verifyActiveReleaseEnvelope,
+  assessReleaseManifest, assessReleaseComponentCoverage, REQUIRED_RELEASE_COMPONENTS, readCanonicalActiveRelease, verifyActiveReleaseEnvelope,
   type ActiveReleaseCertificate, type VerifiedActiveRelease } from '../src/auroraActiveRelease.js';
 
 // Synthetic keys remain in process memory; no signer, secret or release is persisted.
@@ -162,4 +162,43 @@ test('a fresh receipt reports a match but never asserts native device verificati
   assert.deepEqual(assessActiveReleaseReceipt(await pin(),'web',receipt(),{now}),{status:'MATCH_REPORTED',reportedCurrent:true,deviceInstallationVerified:false});
   const cert=certificate();delete cert.components.satellite;
   assert.equal(assessActiveReleaseReceipt(await pin(cert),'satellite',receipt(),{now}).status,'NO_ACTIVE_PIN');
+});
+
+function certificateV2():ActiveReleaseCertificate {
+  const c=certificate();c.schemaVersion=2;
+  c.components.iaMaster={...c.components.web};c.components.windowsIntegration={...c.components.web};return c;
+}
+test('historical v1 signing bytes remain compatible and its coverage stays partial',async()=>{
+  assert.ok(activeReleaseSigningBytes(certificate()).toString().startsWith('AURORA_ACTIVE_RELEASE_V1\0'));
+  assert.equal(verifyActiveReleaseEnvelope(envelope(),publicKey,{now}).status,'CANDIDATE_UNVERIFIED');
+  const active=await pin();const coverage=assessReleaseComponentCoverage(active);
+  assert.equal(coverage.status,'PARTIAL');assert.equal(coverage.complete,false);
+  assert.deepEqual(coverage.missingComponents,['iaMaster','windowsIntegration']);
+  assert.equal(assessReleaseManifest(active,'iaMaster',manifestBytes,files).status,'NO_ACTIVE_PIN');
+});
+test('v2 signs a distinct domain and requires all five components without asserting device acceptance',async()=>{
+  const c=certificateV2();assert.ok(activeReleaseSigningBytes(c).toString().startsWith('AURORA_ACTIVE_RELEASE_V2\0'));
+  const active=await pin(c),coverage=assessReleaseComponentCoverage(active);
+  assert.equal(coverage.status,'COMPLETE_SIGNED_COMPONENT_SET');assert.equal(coverage.complete,true);
+  assert.deepEqual(coverage.coveredComponents,[...REQUIRED_RELEASE_COMPONENTS]);
+  assert.equal(assessReleaseComponentCoverage(structuredClone(active)).complete,false);
+  assert.equal(assessActiveReleaseReceipt(active,'iaMaster',receipt(),{now}).deviceInstallationVerified,false);
+});
+for(const component of REQUIRED_RELEASE_COMPONENTS)test(`v2 missing ${component} fails even with a valid test signature`,()=>{
+  const c=certificateV2();delete(c.components as any)[component];
+  assert.equal(verifyActiveReleaseEnvelope(envelope(c),publicKey,{now}).status,'INVALID_ACTIVE_PIN');
+});
+test('schema relabelling, extra roles and mixed source cannot downgrade a v2 signature',()=>{
+  const signed=envelope(certificateV2());const changed=structuredClone(signed);changed.certificate.schemaVersion=1;
+  assert.equal(verifyActiveReleaseEnvelope(changed,publicKey,{now}).status,'INVALID_ACTIVE_PIN');
+  const relabelled=certificate();relabelled.schemaVersion=2;
+  assert.equal(verifyActiveReleaseEnvelope(envelope(relabelled),publicKey,{now}).status,'INVALID_ACTIVE_PIN');
+  const extra=certificateV2();(extra.components as any).arbitrary={...extra.components.web};
+  assert.equal(verifyActiveReleaseEnvelope(envelope(extra),publicKey,{now}).status,'INVALID_ACTIVE_PIN');
+  const mixed=certificateV2();mixed.components.iaMaster!.sourceSha='b'.repeat(40);
+  assert.equal(verifyActiveReleaseEnvelope(envelope(mixed),publicKey,{now}).status,'INVALID_ACTIVE_PIN');
+});
+for(const component of ['iaMaster','windowsIntegration'] as const)test(`a signed server manifest cannot impersonate ${component}`,async()=>{
+  const c=certificateV2();c.components[component]!.manifestSha256=digest(manifestBytes);
+  assert.equal(assessReleaseManifest(await pin(c),component,manifestBytes,files).status,'INVALID_MANIFEST');
 });

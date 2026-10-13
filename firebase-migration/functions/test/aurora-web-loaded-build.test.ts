@@ -72,6 +72,18 @@ test("the emitted page compares its captured web build to the official pin witho
   assert.equal(f.calls[0]?.options.cache, "no-store");
 });
 
+test("visible version keeps v1 partial and never treats a caller coverage flag as complete v2",async()=>{
+  const partial:any=canonical();partial.certificate.schemaVersion=1;partial.componentCoverage={status:'COMPLETE_SIGNED_COMPONENT_SET',complete:true};
+  const f=await fixture(build,snapshot(partial));assert.match(f.el('app-version-detail').textContent,/Cobertura parcial/);
+  const full:any=canonical();full.certificate.schemaVersion=2;
+  for(const name of ['satellite','iaMaster','windowsIntegration'])full.certificate.components[name]={...full.certificate.components.web};
+  full.componentCoverage={status:'COMPLETE_SIGNED_COMPONENT_SET',complete:true};
+  const current=await fixture(build,snapshot(full));assert.match(current.el('app-version-detail').textContent,/Cinco componentes/);
+  assert.match(current.el('app-version-detail').textContent,/exigem recibos/);assert.match(current.el('app-version-detail').textContent,/demais clientes não foram verificados/);
+  delete full.certificate.components.iaMaster;
+  const missing=await fixture(build,snapshot(full));assert.match(missing.el('app-version-detail').textContent,/Cobertura parcial/);
+});
+
 test("a new bootstrap pin never rewrites the old loaded build or reloads unsaved edits", async () => {
   const f = await fixture(); const next = { ...build, sourceSha: "d".repeat(40), version: "1.0.1-test", manifestSha256: "e".repeat(64) };
   f.el("review-title").value = "Unsaved synthetic edit";

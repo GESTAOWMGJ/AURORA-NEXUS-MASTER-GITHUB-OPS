@@ -24,6 +24,9 @@ import { loadInstallationReadiness, refreshProjection } from "./auroraRuntime.js
 import { immutableEntityVersionId, nextCanonicalEntityRevision, persistedDocumentHash,
   mergedDocumentForAudit, stableValue } from "./auroraCanonicalVersions.js";
 import { authorizeDocumentIngestion, canImportNativeDocuments, NATIVE_INGESTION_MAX_BYTES } from './auroraNativeIngestion.js';
+import { ACTIVE_RELEASE_READ_PATH, createActiveReleaseReadHandler } from './auroraActiveReleaseRead.js';
+import { ACTIVE_RELEASE_SOURCE } from './auroraActiveRelease.js';
+import { readRuntimeActiveRelease } from './auroraActiveReleaseRuntime.js';
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -257,7 +260,32 @@ export const auroraNexusIntegrationKeys = onRequest(
   }
 );
 
+const readIntegrationActiveRelease = createActiveReleaseReadHandler({
+  authorize: authorization => verifyIntegrationBearer(authorization, 'integration.read'),
+  authorityActive: async principal => {
+    if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(principal.orgId) || !KEY_ID_RE.test(principal.keyId)) return false;
+    const base = `organizations/${principal.orgId}`;
+    const [org, credential] = await Promise.all([auroraDb.doc(base).get(),
+      auroraDb.doc(`${base}/integrationCredentials/${principal.keyId}`).get()]);
+    const data = credential.data();
+    if (!org.exists || org.data()?.active !== true || !credential.exists || data?.orgId !== principal.orgId
+        || !credentialAllowsScope(data, 'integration.read') || typeof data.createdBy !== 'string'
+        || !/^[A-Za-z0-9_-]{1,128}$/.test(data.createdBy)) return false;
+    const member = await auroraDb.doc(`${base}/members/${data.createdBy}`).get(), issuer = member.data();
+    return member.exists && issuer?.active === true && issuer.allFacilities === true
+      && (['platform_admin', 'org_admin', 'director'].includes(issuer.role)
+        || (Array.isArray(issuer.permissions) && issuer.permissions.includes('integrations.manage')));
+  },
+  publicKey: () => process.env.AURORA_ACTIVE_RELEASE_PUBLIC_KEY,
+  readFixedProtectedEnvelope: async () => {
+    const snapshot = await auroraDb.doc(ACTIVE_RELEASE_SOURCE).get();
+    return snapshot.exists ? snapshot.data() : undefined;
+  },
+  readRuntime: readRuntimeActiveRelease
+});
+
 export const auroraNexusIntegrationPing = onRequest({cors:false}, async (req,res) => {
+  if (req.path === ACTIVE_RELEASE_READ_PATH) { await readIntegrationActiveRelease(req, res); return; }
   apiHeaders(res);
   if (!['GET','POST'].includes(req.method)) {
     res.set("Allow","GET, POST");

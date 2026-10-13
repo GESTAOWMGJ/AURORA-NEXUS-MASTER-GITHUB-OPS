@@ -90,3 +90,13 @@ test('tampered JS files, unsafe manifest names and missing real metadata never i
   const rejected=await createActiveReleaseRuntime({...dependencies(),readServerManifest:async()=>unsafe})();
   assert.equal(rejected.runtimeBuild.status,'BUILD_METADATA_INVALID');assert.equal(rejected.runtimeBuild.sourceSha,null);
 });
+
+test('runtime reports v1 partial versus complete v2 coverage without claiming client or Mac installation',async()=>{
+  const partial=await createActiveReleaseRuntime(dependencies())();assert.equal(partial.componentCoverage.status,'PARTIAL');
+  assert.equal(partial.componentCoverage.complete,false);assert.equal(partial.nativeMacInstallation,'UNVERIFIED');
+  const c={...certificate,schemaVersion:2 as const,components:{server:component,web:component,satellite:component,iaMaster:component,windowsIntegration:component}};
+  const signed={certificate:c,signature:sign(null,activeReleaseSigningBytes(c),keys.privateKey).toString('base64url')};
+  const value=await createActiveReleaseRuntime({...dependencies(),readProtectedEnvelope:async()=>signed})();
+  assert.equal(value.componentCoverage.status,'COMPLETE_SIGNED_COMPONENT_SET');assert.equal(value.componentCoverage.complete,true);
+  assert.equal(value.nativeMacInstallation,'UNVERIFIED');assert.equal(value.allClientsSynchronized,false);
+});

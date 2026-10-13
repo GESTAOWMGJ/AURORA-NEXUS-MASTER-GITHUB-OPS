@@ -22,7 +22,8 @@ import aurora_cloud_sync as sync
 VERSION = '1.0.1'
 SCHEMA = 'aurora.install.integration.v1'
 STATE_NAME = 'integration-setup.json'
-ASSETS = ('aurora_cloud_sync.py', 'aurora_deployment.py')
+ASSETS = ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
+          'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py')
 
 
 def _trusted_platform_alias(part):
@@ -220,15 +221,30 @@ def install_assets(source, target):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--input', required=True, help='Explicit approved structured sample JSON')
-    parser.add_argument('--origin', required=True)
+    parser.add_argument('--input', help='Explicit approved structured sample JSON')
+    parser.add_argument('--origin')
     parser.add_argument('--org', required=True)
-    parser.add_argument('--state-dir', required=True, help='Existing private installation state directory')
+    parser.add_argument('--state-dir', help='Existing private installation state directory')
+    parser.add_argument('--release-plan', action='store_true', help='Public release preflight; no checkpoint or document transport')
+    parser.add_argument('--release-config', help='Explicit public trust/source/component-manifest JSON')
+    parser.add_argument('--read-active', action='store_true', help='Explicit canonical authenticated GET with --release-plan')
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--connect', action='store_true', help='Authenticated ping only; no document POST')
     mode.add_argument('--send', action='store_true', help='Send or replay the same explicitly authorized sample once')
     args = parser.parse_args(argv)
     try:
+        if args.read_active and not args.release_plan:
+            raise sync.SyncError('EXPLICIT_RELEASE_PLAN_REQUIRED')
+        if args.release_plan or args.release_config:
+            import published_release as release
+            if args.release_plan and (args.connect or args.send):raise sync.SyncError('SEPARATE_RELEASE_PLAN_REQUIRED')
+            control = read_json(args.release_config) if args.release_config else None
+            published = release.release_status(control, args.org, os.environ.get('AURORA_INTEGRATION_TOKEN')
+                                              if args.read_active or args.connect or args.send else None,
+                                              args.read_active or args.connect or args.send)
+            if args.release_plan or published['status'] != 'PUBLISHED_COMPONENT_CURRENT_BYTES_VERIFIED':
+                print(json.dumps(published, sort_keys=True));return 0 if published['currentPointerVerified'] else 2
+        if not all((args.input, args.origin, args.state_dir)):raise sync.SyncError('EXPLICIT_SAMPLE_TARGET_STATE_REQUIRED')
         result = run(read_json(args.input), args.origin, args.org, args.state_dir,
                      os.environ.get('AURORA_INTEGRATION_TOKEN'), args.connect, args.send)
         print(json.dumps(result, sort_keys=True))

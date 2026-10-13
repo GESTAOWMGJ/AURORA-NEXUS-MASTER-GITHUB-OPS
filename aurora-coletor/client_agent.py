@@ -21,6 +21,7 @@ import aurora_cloud_sync as sync
 from aurora_deployment import safe_path
 from provider_connectors import pull, exports
 from client_secret_store import load as load_secret
+import published_release as release
 
 VERSION='1.0.1'
 SCHEMA='aurora.client-agent.v1'
@@ -29,13 +30,16 @@ FORMATS={'.pdf','.doc','.docx','.odt','.rtf','.xls','.xlsx','.ods','.csv','.json
 
 
 def validate(config):
-    allowed={'schemaVersion','org','origin','stateDir','roots','providers','authorization','tokenEnv','intervalSeconds','instanceId'}
+    allowed={'schemaVersion','org','origin','stateDir','roots','providers','authorization','tokenEnv','intervalSeconds','instanceId','releaseControl'}
     if not isinstance(config,dict) or set(config)-allowed or config.get('schemaVersion')!=SCHEMA:
         raise sync.SyncError('CLIENT_CONFIG_INVALID')
     if not re.fullmatch(r'[a-f0-9]{32}',config.get('instanceId','')):raise sync.SyncError('CLIENT_INSTANCE_INVALID')
     org=config.get('org')
     if not isinstance(org,str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{1,62}',org):raise sync.SyncError('TENANT_REQUIRED')
     sync.origin_url(config.get('origin'))
+    if 'releaseControl' in config:
+        try:release.validate_control(config['releaseControl'])
+        except release.ReleaseError:raise sync.SyncError('PUBLIC_RELEASE_CONFIGURATION_REQUIRED') from None
     auth=config.get('authorization',{})
     if auth.get('approved') is not True or not all(isinstance(auth.get(k),str) and re.fullmatch(r'[A-Za-z0-9_.:-]{2,160}',auth[k]) for k in ('actorRef','documentRef')):
         raise sync.SyncError('SOURCE_AUTHORIZATION_REQUIRED')
@@ -126,10 +130,16 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
     roots,state=validate(config)
     if (state/'disabled.json').exists():raise sync.SyncError('AGENT_DISABLED')
     environment=dict(environment)
-    aliases={config['tokenEnv'],*(p.get('tokenEnv','') for p in config.get('providers',[]))}
+    aliases={config['tokenEnv']}
     for alias in aliases:
         if not environment.get(alias):environment[alias]=load_secret(state,config['org'],alias) or ''
     token=environment.get(config['tokenEnv'],'')
+    published=release.release_status(config.get('releaseControl'),config['org'],token,read_active='releaseControl' in config)
+    if 'releaseControl' in config and published['status']!='PUBLISHED_COMPONENT_CURRENT_BYTES_VERIFIED':
+        return {'schemaVersion':SCHEMA,'componentVersion':VERSION,'orgId':config['org'],'state':'PENDING_PUBLISHED_RELEASE',
+                'publishedRelease':published,'connectionVerified':False,'receiptsConfirmed':0,'fullSynchronizationVerified':False}
+    for alias in {p.get('tokenEnv','') for p in config.get('providers',[])}:
+        if alias and not environment.get(alias):environment[alias]=load_secret(state,config['org'],alias) or ''
     # Verify the tenant before any source-content or provider access.
     sync.connect(config['origin'],config['org'],token,transport)
     conn=queue(state);accepted=0;verified=0;waiting=0;provider_states=[];provider_errors=[]
@@ -227,16 +237,23 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
             'receiptsConfirmed':accepted,'processingReceiptsCached':verified,'pending':waiting,'pendingExtraction':pending,
             'coverageLimited':limited,'cloudEnumerationComplete':complete,'cloudSnapshotVerified':cloud_verified,
             'cloudPagesCommitted':sum(row[2] for row in progress if row),'providers':provider_states,
-            'providerPendingCodes':provider_errors,'fullSynchronizationVerified':False}
+            'providerPendingCodes':provider_errors,'publishedRelease':published,'fullSynchronizationVerified':False}
 
 
 def main(argv=None):
     parser=argparse.ArgumentParser();parser.add_argument('--config',required=True);parser.add_argument('--once',action='store_true');parser.add_argument('--watch',action='store_true')
+    parser.add_argument('--release-status',action='store_true',help='Public release preflight without source reads or state writes')
+    parser.add_argument('--read-active',action='store_true',help='Explicit authenticated canonical GET, only with --release-status')
     args=parser.parse_args(argv)
     config_path=safe_path(args.config)
     if not config_path.is_file() or config_path.stat().st_nlink!=1:raise sync.SyncError('CONFIG_INTEGRITY_FAILED')
     config=json.loads(config_path.read_text())
     _,state=validate(config)
+    if args.read_active and not args.release_status:raise sync.SyncError('EXPLICIT_RELEASE_STATUS_REQUIRED')
+    if args.release_status:
+        if args.once or args.watch:raise sync.SyncError('SEPARATE_RELEASE_STATUS_REQUIRED')
+        result=release.release_status(config.get('releaseControl'),config['org'],os.environ.get(config['tokenEnv']) if args.read_active else None,args.read_active)
+        print(json.dumps(result,sort_keys=True));return 0 if result['currentPointerVerified'] else 2
     if not (args.once or args.watch):print(json.dumps({'state':'VALIDATED_NOT_STARTED','orgId':config['org']}));return 0
     with lock(state):
         binding=hashlib.sha256(json.dumps(config,sort_keys=True).encode()).hexdigest()

@@ -134,3 +134,63 @@ O adaptador de conhecimento da instalação 1.0.1 foi preservado **byte a byte**
 O portal oferece foco opcional no formato `src/modulo.ts@20-60`, um intervalo por arquivo selecionado, e mostra os intervalos efetivamente recebidos pelo modelo. Arquivos completos continuam no contexto privado da tarefa; o recorte não modifica o patch por truncamento.
 
 Desligar o componente: `node manage.cjs stop --disable-startup` da release verificada encerra somente processos correspondentes nas portas próprias e remove apenas a entrada de startup correspondente. Preserva modelo, dados privados, auditoria, cliente e integrações; não restaura uma versão anterior. Propostas isoladas não são aplicadas ao cliente por esse fluxo. CI/HML, revisão e rollback do projeto continuam necessários antes de promover qualquer draft publicado.
+# Consumo da publicação assinada V2
+
+O fluxo existente `update.cjs published` possui `--plan` (padrão), `--read-active`,
+`--stage`, `--activate` e `--recover`. Plano não lê credenciais nem faz requests
+ou writes. As demais operações usam um arquivo público de opções revisado; o
+bearer vem somente do processo em `AURORA_INTEGRATION_TOKEN`, nunca dos argumentos
+ou desse arquivo. O módulo não provisiona credenciais, MFA, Startup ou modelos.
+
+`--read-active` exige `trust` (`publicKeySpkiPem` e fingerprint SHA256 do DER SPKI),
+`expectedSourceSha` e `expectedOrg`. O GET canônico fixo é
+`https://auroranexus.com.br/api/integration/active-release`, com TLS, sem redirects,
+nonce novo, resposta no-store, organização e runtime vinculados ao certificado.
+Esse endpoint é parte da candidata; código/testes não provam que está implantado.
+V1 continua verificável como cobertura parcial e bloqueia ativação V2. Assinatura
+isolada representa candidata; staging representa bytes preparados, sem ativação.
+
+`--stage` acrescenta `packageDirectory`, `manifestPath` e `stageDirectory`.
+`--activate` acrescenta `layout` com `runtimeRoot`, `stateDir`, `helperPath`,
+`nodeExecutable`, `expectedHelperSha256`, `expectedNodeSha256`,
+`expectedInstallationSha256` e `expectedCheckpointSha256`. O contrato de aplicação
+é estreito: baseline 1.1.0/source 56a813a com seu manifest verificado de 26 arquivos,
+runtime `D:\AuroraNexus`, estado existente da conta em LOCALAPPDATA e helper
+`server-location-manager.cjs` com hash revisado 5c9a54d. Nenhum checksum fornecido
+pelo caller permite substituir esse helper. O pacote assinado contém 34 arquivos
+públicos mais manifest; o componente Windows contém os mesmos sete módulos Python
+do pacote. Origem canônica de controle não altera o checkpoint nem a origem HML
+de ingestão. Identidade, control.key, organization.txt, estado Git, modelos,
+wrappers e Startup existentes são preservados.
+
+Antes do stop, os guards conferem owner/DACL, layout/helper/Node, baseline inteira,
+metadata, checkpoint e staging privada dentro do root. A publicação é relida
+depois do staging e depois da saúde dos novos processos. A troca usa CAS, lock,
+journal, backup completo e readback dos bytes. Repetição comprovada da mesma
+aplicação retorna `SIGNED_LOCAL_COMPONENT_ALREADY_APPLIED` sem novo stop/start.
+`--recover` recebe somente `layout` e `attemptDirectory`: exige journal próprio,
+processo anterior encerrado e árvores/metadados ainda anteriores ou próprios.
+Recuperação concluída pode ser repetida após conferir identidade, bytes e saúde.
+Concorrência desconhecida preserva o lock e exige reconciliação; o código não
+sobrescreve mudanças de outro executor. Isso não é prova de recibo cloud nem de
+conformidade do Mac.
+
+O agente existente aceita `releaseControl` com `trust`, `expectedSourceSha` e
+`manifestPath` explícito (`windowsIntegration-manifest.json`). `client_agent.py
+--release-status` e `aurora_deployment.py --release-plan --org <org>` são preflights
+sem writes; `--read-active` autoriza somente o GET canônico nesse modo. Com
+`releaseControl` configurado, `client_agent.py --once/--watch` e o adapter com
+`--release-config` verificam a publicação e os sete bytes locais antes de ler
+fontes ou transmitir documentos. V1 parcial, offline, credential/backend ausente,
+manifest divergente ou resposta expirada retornam pendência. Sem configuração,
+o fluxo legado conserva sua autorização/recibos e informa que publicação não foi
+verificada. Não há daemon ou executor adicional. O backend opcional Ed25519 é
+declarado em `aurora-coletor/requirements-release-verification.txt`; ausência
+retorna pendência, sem auto-instalação.
+
+Testes locais: `node --test desktop/ia-master/published-update.test.cjs` e
+`python -B -m unittest discover -s aurora-coletor/tests -p test_published_release.py`.
+O teste transacional usa arquivos sintéticos, fingerprints de baseline substituídos
+somente no harness VM e HTTPS/health/managers interceptados. Nenhum bypass de
+teste é exportado na implementação. A fixture compartilhada contém só chave
+pública sintética e assinatura; nunca é trust de operação real.
