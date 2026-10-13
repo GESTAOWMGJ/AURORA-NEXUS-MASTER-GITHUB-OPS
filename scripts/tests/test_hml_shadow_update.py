@@ -12,6 +12,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / '.github/workflows/deploy-aurora-firebase.yml'
+REQUEST_WORKFLOW = ROOT / '.github/workflows/aurora-firebase-hml-request.yml'
+REQUEST_FILE = ROOT / '.github/requests/aurora-firebase-hml.json'
 
 
 class HmlShadowUpdateTests(unittest.TestCase):
@@ -84,6 +86,44 @@ class HmlShadowUpdateTests(unittest.TestCase):
             org = self.organization(True)
             org['fields']['organicSectors']['arrayValue']['values'] = [{'stringValue': s} for s in sectors]
             self.assertFalse(self.accepted(org, 'SHADOW_UPDATE'))
+
+    def test_canonical_hml_request_derives_exact_release_evidence_and_promotes(self):
+        request_workflow = yaml.load(REQUEST_WORKFLOW.read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
+        permissions = request_workflow['permissions']
+        self.assertEqual(permissions['contents'], 'read')
+        self.assertEqual(permissions['actions'], 'write')
+        self.assertEqual(permissions['pull-requests'], 'read')
+        dispatch = request_workflow['jobs']['dispatch']['steps']
+        resolve = next(step['run'] for step in dispatch if step.get('name') == 'Resolve exact CI and merged review evidence')
+        promote = next(step['run'] for step in dispatch
+                       if step.get('name') == 'Dispatch protected deploy and canonical promotion at exact main SHA')
+        for required in [
+            'gh workflow run validate-firestore-migration.yml',
+            'head_sha == $sha',
+            'head_branch == "main"',
+            'event == "workflow_dispatch"',
+            'commits/$GITHUB_SHA/pulls',
+            'merge_commit_sha == $sha',
+            'base.ref == "main"',
+        ]:
+            self.assertIn(required, resolve)
+        for required in [
+            '-f publish_active_release=true',
+            '-f active_release_ci_run_id="$CI_RUN_ID"',
+            '-f active_release_review_pr="$REVIEW_PR"',
+            '-f active_release_review_mode="$review_mode"',
+            '-f active_release_previous_sha256="$previous_sha256"',
+            '-f expected_main_sha="$GITHUB_SHA"',
+        ]:
+            self.assertIn(required, promote)
+        request = json.loads(REQUEST_FILE.read_text(encoding='utf-8'))
+        self.assertIs(request['publishActiveRelease'], True)
+        self.assertEqual(request['activeReleaseReviewMode'], 'OWNER_DEPLOYMENT_APPROVAL')
+        self.assertTrue(request['activeReleasePreviousSha256'] == 'NONE'
+                        or re.fullmatch(r'[a-f0-9]{64}', request['activeReleasePreviousSha256']))
+        self.assertIs(request['sourceMutation'], False)
+        self.assertIs(request['productionMutation'], False)
+        self.assertIs(request['clinicalSensitiveEnabled'], False)
 
     def test_default_and_protected_environment_unchanged(self):
         mode = self.workflow['on']['workflow_dispatch']['inputs']['deployment_mode']
