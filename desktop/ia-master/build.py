@@ -19,6 +19,11 @@ def build(output):
                     '--esModuleInterop', '--skipLibCheck'], cwd=functions, check=True)
     for name in ['server.cjs', 'studio.cjs', 'knowledge-registry.cjs', 'update.cjs', 'safe-read.cjs', 'publisher.cjs', 'index.html', 'app.js', 'app.css', 'studio-local.js', 'studio-local.css', 'manage.cjs', 'README.md']:
         shutil.copyfile(Path(__file__).parent / name, output / name)
+    # Same installer package: lightweight intake is a separate, declared child component.
+    # Packaging does not authorize roots, activate providers or install another model.
+    agent_output=output/'client-agent';agent_output.mkdir()
+    for name in ['client_agent.py','provider_connectors.py','client_secret_store.py','install_client_agent.py','aurora_cloud_sync.py','aurora_deployment.py']:
+        shutil.copyfile(ROOT/'aurora-coletor'/name,agent_output/name)
     fonts = ROOT / 'firebase-migration/hosting/aurora-nexus/assets/fonts'
     font_output = output / 'assets/fonts'
     font_output.mkdir(parents=True)
@@ -33,9 +38,12 @@ def build(output):
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
     dirty = bool(subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=all', '--',
                  'desktop/ia-master', 'firebase-migration/functions/src',
+                 'aurora-coletor',
                  'firebase-migration/hosting/aurora-nexus/assets/fonts',
                  'docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md'], cwd=ROOT, text=True).strip())
     manifest = {'component': 'AURORA_IA_MASTER', 'version': '1.1.0', 'sourceRevision': revision,
+                'clientAgent': {'component':'AURORA_CLIENT_AGENT','version':'1.0.0','platforms':['windows','macos'],
+                                'configured':False,'sourceAuthorizationRequired':True,'providerConnectionsVerified':False},
                 'dirty': dirty, 'nodeMinimumMajor': 22, 'externalAiEnabled': False,
                 'files': {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
                           for p in sorted(output.rglob('*')) if p.is_file()}}

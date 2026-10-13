@@ -7,7 +7,8 @@ const firebase = JSON.parse(fs.readFileSync("../firebase.json", "utf8"));
 
 test("canonical ERP document endpoint requires documents.ingest scope", () => {
   assert.match(runtime, /auroraNexusIntegrationDocuments/);
-  assert.match(runtime, /verifyIntegrationBearer\(req\.get\("authorization"\), "documents\.ingest"\)/);
+  assert.match(runtime, /verifyIntegrationBearer\(authorization, 'documents\.ingest'\)/);
+  assert.match(runtime, /authorizeDocumentIngestion/);
   assert.match(runtime, /parseIntegrationDocumentPayload/);
   assert.match(runtime, /canonicalIntegrationDocument/);
   assert.match(runtime, /sourceDocuments/);

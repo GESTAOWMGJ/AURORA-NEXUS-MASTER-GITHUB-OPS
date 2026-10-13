@@ -23,6 +23,7 @@ import { canonicalIntegrationDocument, parseIntegrationDocumentPayload } from ".
 import { loadInstallationReadiness, refreshProjection } from "./auroraRuntime.js";
 import { immutableEntityVersionId, nextCanonicalEntityRevision, persistedDocumentHash,
   mergedDocumentForAudit, stableValue } from "./auroraCanonicalVersions.js";
+import { authorizeDocumentIngestion, canImportNativeDocuments, NATIVE_INGESTION_MAX_BYTES } from './auroraNativeIngestion.js';
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -106,8 +107,22 @@ export const auroraNexusIntegrationKeys = onRequest(
 
     if (req.method === "GET") {
       const snapshot = await collection.orderBy("createdAt", "desc").limit(100).get();
+      const agents=await Promise.all(snapshot.docs.map(async credential=>{
+        const report=await auroraDb.doc(`organizations/${member.orgId}/runtimeCheckpoints/client-agent-${credential.id}`).get();
+        const data=report.data();
+        if(!report.exists||data?.orgId!==member.orgId||data.keyId!==credential.id||data.component!=='client-agent')return null;
+        const reportedAt=timestampIso(data.reportedAt);
+        const active=credentialAllowsScope(credential.data()||{},'integration.write');
+        return {keyId:credential.id,state:active&&reportedAt&&Date.now()-Date.parse(reportedAt)<180000
+          ?'CONNECTED_REPORTED':'OFFLINE_OR_STALE',reportedAt,
+          providers:Array.isArray(data.providers)?data.providers:[],pendingExtraction:data.pendingExtraction,
+          connectionReported:true,physicalInstallationVerified:false};
+      }));
       res.status(200).json({
         ok:true,
+        orgId:member.orgId,
+        installation:await loadInstallationReadiness(member.orgId),
+        agents:agents.filter(Boolean),
         credentials:snapshot.docs.map((doc) => {
           const data=doc.data();
           return {
@@ -244,15 +259,44 @@ export const auroraNexusIntegrationKeys = onRequest(
 
 export const auroraNexusIntegrationPing = onRequest({cors:false}, async (req,res) => {
   apiHeaders(res);
-  if (req.method !== "GET") {
-    res.set("Allow","GET");
+  if (!['GET','POST'].includes(req.method)) {
+    res.set("Allow","GET, POST");
     res.status(405).json({ok:false, code:"METHOD_NOT_ALLOWED"});
     return;
   }
-  const principal=await verifyIntegrationBearer(req.get("authorization"), "integration.read");
+  const principal=await verifyIntegrationBearer(req.get("authorization"), req.method==='POST'?'integration.write':"integration.read");
   if (!principal) {
     res.status(401).json({ok:false, code:"INVALID_INTEGRATION_KEY"});
     return;
+  }
+  if(req.method==='POST'){
+    const body=req.body;
+    const providers=new Set(['GOOGLE_DRIVE','GMAIL','MICROSOFT_MAIL','IMAP']);
+    if(!jsonRequest(req)||!body||typeof body!=='object'||Array.isArray(body)
+      ||Buffer.byteLength(JSON.stringify(body))>4096
+      ||Object.keys(body).some(key=>!['component','instanceId','pendingExtraction','providers'].includes(key))
+      ||body.component!=='AURORA_CLIENT_AGENT'||!/^([a-f0-9]{32}|[a-f0-9-]{36})$/.test(body.instanceId||'')
+      ||!Number.isSafeInteger(body.pendingExtraction)||body.pendingExtraction<0||body.pendingExtraction>10000
+      ||!Array.isArray(body.providers)||body.providers.length>12
+      ||body.providers.some((row:any)=>!row||typeof row!=='object'||Array.isArray(row)||Object.keys(row).some(k=>!['provider','state','coverageLimited'].includes(k))
+        ||!providers.has(row.provider)||!['READ_CONFIRMED','CONNECTION_PENDING'].includes(row.state)
+        ||(row.coverageLimited!==undefined&&typeof row.coverageLimited!=='boolean'))){
+      res.status(400).json({ok:false,code:'INVALID_AGENT_REPORT'});return;
+    }
+    const base=`organizations/${principal.orgId}`;
+    const accepted=await auroraDb.runTransaction(async tx=>{
+      const org=await tx.get(auroraDb.doc(base));
+      const credential=await tx.get(auroraDb.doc(`${base}/integrationCredentials/${principal.keyId}`));
+      if(!org.exists||org.data()?.active!==true||!credential.exists||!credentialAllowsScope(credential.data()||{},'integration.write'))return false;
+      tx.set(auroraDb.doc(`${base}/runtimeCheckpoints/client-agent-${principal.keyId}`),{
+        orgId:principal.orgId,keyId:principal.keyId,component:'client-agent',
+        instanceHash:createHash('sha256').update(principal.orgId+':'+body.instanceId).digest('hex'),
+        pendingExtraction:body.pendingExtraction,providers:body.providers,
+        reportedAt:FieldValue.serverTimestamp(),physicalInstallationVerified:false
+      },{merge:true});return true;
+    });
+    res.status(accepted?200:412).json(accepted?{ok:true,orgId:principal.orgId,reportAccepted:true,physicalInstallationVerified:false}
+      :{ok:false,code:'ORGANIZATION_DISABLED'});return;
   }
   const documentId=req.query?.documentId;
   if (documentId !== undefined && (typeof documentId !== 'string' || !/^[a-f0-9]{48}$/.test(documentId))) {
@@ -270,7 +314,7 @@ export const auroraNexusIntegrationPing = onRequest({cors:false}, async (req,res
 });
 
 
-export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (req,res) => {
+export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[ALLOWED_EMAILS, CSRF_HMAC_KEY], timeoutSeconds:120}, async (req,res) => {
   apiHeaders(res);
   if (req.method !== "POST") {
     res.set("Allow","POST");
@@ -281,10 +325,15 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
     res.status(415).json({ok:false, code:"UNSUPPORTED_MEDIA_TYPE"});
     return;
   }
-  const principal=await verifyIntegrationBearer(req.get("authorization"), "documents.ingest");
-  if (!principal) {
-    res.status(401).json({ok:false, code:"INVALID_INTEGRATION_KEY"});
-    return;
+  const access=await authorizeDocumentIngestion(req, {
+    bearer:authorization=>verifyIntegrationBearer(authorization, 'documents.ingest'),
+    session:cookie=>verifyAuroraAccess(cookie, ALLOWED_EMAILS.value()),
+    csrf:(cookie,token)=>validCsrf(cookie,token,CSRF_HMAC_KEY.value(),CSRF_PURPOSES.documentIngest)
+  });
+  if ('code' in access) {res.status(access.status).json({ok:false,code:access.code});return;}
+  const principal=access.principal;
+  if (Buffer.byteLength(JSON.stringify(req.body ?? null)) > NATIVE_INGESTION_MAX_BYTES) {
+    res.status(413).json({ok:false,code:'DOCUMENT_PAYLOAD_TOO_LARGE'});return;
   }
   const idempotencyKey=String(req.get("idempotency-key") || "");
   if (!/^[A-Za-z0-9._:-]{16,160}$/.test(idempotencyKey)) {
@@ -314,6 +363,14 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
     ]);
     if (!orgSnap.exists || orgSnap.data()?.active !== true) {
       return {kind:"ERROR" as const,code:"ORGANIZATION_DISABLED"};
+    }
+    if (principal.member) {
+      const membership=await tx.get(auroraDb.doc(`${base}/members/${principal.member.uid}`));
+      const current=membership.data();
+      if (!membership.exists || current?.active !== true || !canImportNativeDocuments({
+        ...principal.member,role:String(current.role),allFacilities:current.allFacilities===true,
+        permissions:Array.isArray(current.permissions)?current.permissions:[]
+      })) return {kind:'ERROR' as const,code:'MEMBERSHIP_REVOKED'};
     }
     if (idemSnap.exists) {
       if (idemSnap.data()?.bodyHash !== bodyHash) return {kind:"ERROR" as const,code:"IDEMPOTENCY_CONFLICT"};
@@ -373,7 +430,7 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
       integration:{
         keyId:principal.keyId,
         connector:principal.name,
-        transport:"AURORA_INTEGRATION_API",
+        transport:principal.member ? 'AURORA_NATIVE_SESSION_IMPORT' : "AURORA_INTEGRATION_API",
         payloadHash:bodyHash
       },
       createdAt:current?.createdAt ?? FieldValue.serverTimestamp(),
@@ -385,7 +442,8 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
     tx.create(versionRef,{
       orgId:principal.orgId, schemaVersion:1, entityType:"sourceDocument", entityId:docRef.id,
       entityKey, revision, sourceVersion:payload.sourceVersion, idempotencyId:idemId,
-      source:patch.source, actor:{keyId:principal.keyId, connector:principal.name}, beforeHash,afterHash,
+      source:patch.source, actor:principal.member ? {uid:principal.member.uid,role:principal.member.role}
+        : {keyId:principal.keyId, connector:principal.name}, beforeHash,afterHash,
       snapshot:stableValue(mergedDocumentForAudit(current,patch)),
       occurredAt:patch.occurredAt, createdAt:FieldValue.serverTimestamp()
     });
@@ -402,6 +460,7 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
       documentId:docRef.id,
       versionId, revision, beforeHash, afterHash,
       keyId:principal.keyId,
+      ...(principal.member ? {actorUid:principal.member.uid,transport:'AURORA_NATIVE_SESSION_IMPORT'} : {}),
       sourceSystem:payload.sourceSystem,
       sourceVersion:payload.sourceVersion,
       canonicalSnapshotHash:canonical.canonicalSnapshotHash,
@@ -437,6 +496,7 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false}, async (re
   }
   res.status(result.kind === "DUPLICATE" ? 200 : 202).json({
     ok:true,
+    orgId:principal.orgId,
     accepted:result.kind === "ACCEPTED",
     duplicate:result.kind === "DUPLICATE",
     documentId:result.documentId,

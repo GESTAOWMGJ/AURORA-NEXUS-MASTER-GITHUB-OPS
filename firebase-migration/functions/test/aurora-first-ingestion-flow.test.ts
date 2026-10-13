@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {FieldValue, Timestamp} from 'firebase-admin/firestore';
-import {auroraDb} from '../src/firebase.ts';
+import {auroraDb,auroraAuth} from '../src/firebase.ts';
+import {csrfTokenForSession,CSRF_PURPOSES} from '../src/auroraAccess.ts';
 import {auroraNexusIntegrationDocuments} from '../src/auroraIntegrationRuntime.ts';
 import {issueIntegrationCredential} from '../src/auroraIntegrationCredential.ts';
 import {completeInstallation} from '../src/auroraRuntime.ts';
@@ -87,4 +88,26 @@ test('committed ingest resumes projection with the same key and one source effec
  state.delete(versions[0]);
  await assert.rejects(completeInstallation(org,'synthetic-user'),/FIRST_INGESTION_PENDING/);
  assert.equal(creates.get(`${base}/runtimeCheckpoints/installation`),1);
+ const originalAllowed=process.env.AURORA_NEXUS_ALLOWED_EMAILS,originalCsrf=process.env.AURORA_NEXUS_CSRF_HMAC_KEY;
+ process.env.AURORA_NEXUS_ALLOWED_EMAILS='synthetic@example.test';process.env.AURORA_NEXUS_CSRF_HMAC_KEY='a'.repeat(64);
+ t.after(()=>{if(originalAllowed===undefined)delete process.env.AURORA_NEXUS_ALLOWED_EMAILS;else process.env.AURORA_NEXUS_ALLOWED_EMAILS=originalAllowed;
+   if(originalCsrf===undefined)delete process.env.AURORA_NEXUS_CSRF_HMAC_KEY;else process.env.AURORA_NEXUS_CSRF_HMAC_KEY=originalCsrf;});
+ let mfa=true;
+ t.mock.method(auroraAuth,'verifySessionCookie',async()=>({uid:'synthetic-user',email:'synthetic@example.test',auroraOrgId:org,
+   firebase:{sign_in_second_factor:mfa?'totp':undefined}}));
+ state.set(`${base}/members/synthetic-user`,{active:true,role:'org_admin',allFacilities:true,permissions:[]});
+ const cookie='__session=synthetic-session',csrf=csrfTokenForSession(cookie,'a'.repeat(64),CSRF_PURPOSES.documentIngest)!;
+ const nativeCall=async()=>{
+   let result:any,status=0;const h:any={'content-type':'application/json',origin:'https://auroranexus.com.br','sec-fetch-site':'same-origin',
+     cookie,'x-aurora-csrf':csrf,'idempotency-key':'synthetic-native-import-key'};
+   const req:any={method:'POST',body:{...body,externalDocumentId:'synthetic-native-source'},get:(name:string)=>h[name]};
+   const res:any={on(){return this;},set(){return this;},status(value:number){status=value;return this;},json(value:any){result=value;return this;}};
+   await (auroraNexusIntegrationDocuments as any)(req,res);return {status,result};
+ };
+ const native=await nativeCall();assert.equal(native.status,202);assert.equal(native.result.orgId,org);
+ assert.equal(native.result.installation.firstIngestionVerified,true);
+ const nativeReplay=await nativeCall();assert.equal(nativeReplay.status,200);assert.equal(nativeReplay.result.duplicate,true);
+ assert.equal(creates.get(`${base}/sourceDocuments/${native.result.documentId}`),1);
+ mfa=false;assert.equal((await nativeCall()).status,403);
+ assert.equal(creates.get(`${base}/sourceDocuments/${native.result.documentId}`),1);
 });
