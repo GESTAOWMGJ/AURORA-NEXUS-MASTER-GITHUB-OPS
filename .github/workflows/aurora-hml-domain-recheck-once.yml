@@ -1,0 +1,85 @@
+name: Aurora HML Domain Recheck Once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/aurora-hml-domain-recheck-once.yml
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  recheck:
+    name: Read-only Firebase ownership recheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: firebase-homologation
+    steps:
+      - name: Pin HML scope
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = "wmgj-hml-jfn-20260927"
+          test "$GITHUB_REF" = "refs/heads/main"
+
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+        with:
+          version: "548.0.0"
+          project_id: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+
+      - name: Read exact custom-domain state
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+          DOMAIN: auroranexus.com.br
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')" = "$DEPLOY_SERVICE_ACCOUNT"
+          access_token="$(gcloud auth print-access-token)"
+          printf '::add-mask::%s\n' "$access_token"
+          base="https://firebasehosting.googleapis.com/v1beta1"
+          site="$PROJECT_ID"
+          body="$(mktemp)"
+          trap 'rm -f "$body"' EXIT
+          code="$(curl --silent --show-error --max-time 30 -o "$body" -w '%{http_code}' -H "Authorization: Bearer $access_token" -H 'Accept: application/json' "$base/projects/$PROJECT_ID/sites/$site/customDomains/$DOMAIN")"
+          test "$code" = "200"
+          host="$(jq -r '.hostState // "UNKNOWN"' "$body")"
+          owner="$(jq -r '.ownershipState // "UNKNOWN"' "$body")"
+          cert="$(jq -r '.cert.state // "UNKNOWN"' "$body")"
+          reconciling="$(jq -r '.reconciling // false' "$body")"
+          issues="$(jq -r '(.issues // []) | length' "$body")"
+          jq -nc --arg host "$host" --arg owner "$owner" --arg cert "$cert" --arg reconciling "$reconciling" --argjson issues "$issues"             '{schemaVersion:1,stage:"FIREBASE_OWNERSHIP_RECHECK",hostState:$host,ownershipState:$owner,certState:$cert,reconciling:$reconciling,issues:$issues,mutationPerformed:false,dnsChanged:false,iamChanged:false}'
+          test "$host" = "HOST_ACTIVE"
+          test "$cert" = "CERT_ACTIVE"
+          if [ "$owner" = "OWNERSHIP_ACTIVE" ]; then
+            echo "AURORA_DOMAIN_OWNERSHIP=ACTIVE"
+          else
+            echo "AURORA_DOMAIN_OWNERSHIP=WAITING"
+          fi
+
+      - name: Verify canonical login-first HTTP contract
+        env:
+          PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          base="https://${PROJECT_ID}.web.app"
+          shell="$(curl --fail --silent --show-error --max-time 30 "$base/portal")"
+          if grep -Fq "Operação WMGJ" <<<"$shell"; then
+            echo "ANONYMOUS_PRIVATE_DATA_EXPOSED"
+            exit 90
+          fi
+          tmp="$(mktemp)"
+          trap 'rm -f "$tmp"' EXIT
+          code="$(curl --silent --show-error --max-time 30 -H 'Accept: application/json' -o "$tmp" -w '%{http_code}' "$base/api/bootstrap")"
+          test "$code" = "401"
+          jq -e '.ok == false and .code == "AUTH_REQUIRED"' "$tmp" >/dev/null
+          echo "LOGIN_FIRST=PASS"
