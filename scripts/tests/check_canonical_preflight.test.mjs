@@ -11,6 +11,7 @@ import {
 const project = 'wmgj-hml-jfn-20260927';
 const form = '<form id="login-form"><input name="email" type="email"><input name="password" type="password"><button id="submit" type="submit">Entrar</button></form>';
 const nextPortal = '<!DOCTYPE html><html lang="pt-BR"><head><link rel="stylesheet" href="/_next/static/css/app.css"></head><body><main id="aurora-root"></main><script src="/_next/static/chunks/app.js"></script></body></html>';
+const staticLoginPortal = '<!DOCTYPE html><html lang="pt-BR"><head><title>Aurora Nexus | Login</title></head><body><main><h1>Ambiente privado</h1>' + form + '<script type="module">fetch("/__/firebase/init.json");fetch("/__sessionLogin");</script></main></body></html>';
 const htmlHeaders = {'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, no-store',
   'x-frame-options': 'DENY', 'x-content-type-options': 'nosniff'};
 const json = (status, value) => ({status, headers: {'content-type': 'application/json'}, body: JSON.stringify(value)});
@@ -84,12 +85,16 @@ test('unknown preflight scopes fail before DNS and HTTP', async () => {
   assert.deepEqual(f.calls, []);
 });
 
-test('canonical portal shell accepts the Aurora Next runtime but rejects private shells', () => {
+test('canonical portal shell accepts Next or the canonical static login-first runtime but rejects private shells', () => {
   assert.equal(hasCanonicalPortalShell(nextPortal), true);
+  assert.equal(hasCanonicalPortalShell(staticLoginPortal), true);
   assert.equal(hasCanonicalPortalShell('<!DOCTYPE html><html><body><script>self.__next_f=[]</script></body></html>'), true);
   assert.equal(hasCanonicalPortalShell('<html><body><main></main></body></html>'), false);
+  assert.equal(hasCanonicalPortalShell('<!DOCTYPE html><html><body><h1>Ambiente privado</h1>' + form + '</body></html>'), false);
+  assert.equal(hasCanonicalPortalShell(staticLoginPortal.replace('/__/firebase/init.json', '/legacy/init.json')), false);
+  assert.equal(hasCanonicalPortalShell(staticLoginPortal.replace('/__sessionLogin', '/legacy/session')), false);
   assert.equal(hasCanonicalPortalShell(nextPortal + '<h1>Centro de gestão WMGJ</h1>'), false);
-  assert.equal(hasCanonicalPortalShell(nextPortal.replace('id="aurora-root"', 'id="session-identity"')), false);
+  assert.equal(hasCanonicalPortalShell(staticLoginPortal + '<div id="session-identity"></div>'), false);
 });
 
 test('actual AuthGate login controls satisfy the anonymous preflight', () => {
