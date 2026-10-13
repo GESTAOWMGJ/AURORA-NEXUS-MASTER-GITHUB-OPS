@@ -109,3 +109,25 @@ Estado do aprendizado: método registrado nesta fonte do registro nativo;
 implementação e regressão verificadas localmente, adoção instalada PENDING.
 Não há inferência de receita, ingestão integral, pesos treinados ou corpus do Xeon.
 Rollback: reverter o incremento do cliente; preservar documentos, versões e recibos.
+
+
+### Publisher: checks de tentativas históricas (13/10/2026)
+
+Run 38452585771, fonte c688f5c2652f947c1777eb422ac83946284ca2c8: validação,
+deploy e smoke passaram; publicação da versão ativa falhou com
+`EXACT_CHECKS_NOT_VERIFIED`. Consulta GitHub trouxe 16 checks, incluindo falhas
+ou skips dos dispatches anteriores 38451141882, 38451543822 e 38452034945.
+`filter=latest` não reduz dispatches independentes a um único resultado.
+
+Correção candidata no mesmo publisher: tentativa antiga só deixa de bloquear
+quando GitHub comprova mesmo repo/SHA/main/workflow/evento, execução terminal,
+ordem anterior ao run selecionado, app GitHub Actions e identidade/status do job.
+Nome sozinho não autoriza exceção. CI/segurança pendente ou falho continua
+bloqueando; o deploy atual exige todos os smokes. Aprovação real do ambiente,
+origem proprietária, revisão, assinatura, predecessor e CAS permanecem intactos.
+
+Três regressões positivas falharam antes do patch. Testes negativos cobrem
+proveniência, ordenação, jobs incompletos, falha atual e segurança. CI e HML da
+correção permanecem pendentes até seus recibos. Reverter o commit restaura o
+bloqueio conservador; nenhum histórico remoto deve ser apagado para publicar.
+Conhecimento versionado não comprova adoção pela IA Master instalada.

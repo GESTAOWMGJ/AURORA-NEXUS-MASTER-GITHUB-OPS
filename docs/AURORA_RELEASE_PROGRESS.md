@@ -82,3 +82,13 @@ recibos parciais, idempotência, MFA, tenant e revisão humana. Dezoito regress�
 focadas e TypeScript no executor remoto passaram; CI, publicação, smoke e recibos
 reais ainda PENDING. Fonte/rollback no adendo de
 `docs/AURORA_MASTER_KNOWHOW_TRANSFER_20261013.md`. Não muda gate clínico ou financeiro.
+
+
+### 13/10/2026 — proveniência dos checks da publicação
+
+Baseline c688f5c: run 38452585771 implantou e verificou o runtime, mas o registro
+ativo foi bloqueado por checks de dispatches históricos. Patch restringe a
+seleção ao deploy atual comprovado e preserva todos os gates CI/segurança,
+aprovação e CAS. Regressões sintéticas verificam a seleção e os bloqueios;
+CI/HML do patch pendentes. Evidência, limites e rollback no adendo do
+`AURORA_MASTER_KNOWHOW_TRANSFER_20261013.md`.
