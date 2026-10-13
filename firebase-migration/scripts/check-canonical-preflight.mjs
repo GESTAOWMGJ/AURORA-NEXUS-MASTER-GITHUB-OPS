@@ -218,10 +218,14 @@ export function hasCanonicalPortalShell(html) {
   const hasNextRuntime = /(?:href|src)=["']\/_next\/(?:static|image)\//i.test(html)
     || html.includes('self.__next_f')
     || html.includes('__NEXT_DATA__');
+  const hasCanonicalStaticLogin = hasUsableLoginForm(html)
+    && lower.includes('ambiente privado')
+    && html.includes('/__/firebase/init.json')
+    && html.includes('/__sessionLogin');
   const exposesPrivateShell = lower.includes('centro de gestão wmgj')
     || lower.includes('id="session-identity"')
     || lower.includes('id="logout"');
-  return hasHtmlDocument && hasNextRuntime && !exposesPrivateShell;
+  return hasHtmlDocument && (hasNextRuntime || hasCanonicalStaticLogin) && !exposesPrivateShell;
 }
 
 async function checkedResponse(transport, path) {
