@@ -37,6 +37,15 @@ permissões, não cria scheduler e não transforma representação em execução
 
 ## Diretriz permanente do titular — desafios alimentam o motor
 
+Reiteração expressa em 13/10/2026: cada prompt operacional disponível e autorizado,
+resolução, fluxo e algoritmo pertinente deve alimentar o mesmo AURORA MASTER,
+reduzindo dependência do chat por regras nativas, memória recuperável e regressões.
+Registrar também desafios não concluídos. Sanitizar contexto, preservar fonte/hash,
+tenant e estado; só evidência validada promove regra. Não alegar acesso integral
+a históricos externos, treinamento de pesos ou adoção instalada sem recibo.
+`learningCapturePolicy` materializa esta instrução no registro nativo existente;
+fontes e transferência verificável em `docs/AURORA_MASTER_KNOWHOW_TRANSFER_20261013.md`.
+
 Decisão de 04/10/2026: aplicar este modus operandi a todo desafio e solução relacionados
 à operação AURORA, WMGJ e clientes autorizados. Cada atendimento deve alimentar o mesmo
 organismo operacional: registrar o desafio, fatos e limites de acesso; confrontar fontes;

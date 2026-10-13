@@ -98,15 +98,15 @@ class HmlShadowUpdateTests(unittest.TestCase):
         promote = next(step['run'] for step in dispatch
                        if step.get('name') == 'Dispatch protected deploy and canonical promotion at exact main SHA')
         for required in [
-            'gh workflow run validate-firestore-migration.yml',
             'head_sha == $sha',
             'head_branch == "main"',
-            'event == "workflow_dispatch"',
+            'event == "push"',
             'commits/$GITHUB_SHA/pulls',
             'merge_commit_sha == $sha',
             'base.ref == "main"',
         ]:
             self.assertIn(required, resolve)
+        self.assertNotIn('gh workflow run validate-firestore-migration.yml', resolve)
         for required in [
             '-f publish_active_release=true',
             '-f active_release_ci_run_id="$CI_RUN_ID"',
