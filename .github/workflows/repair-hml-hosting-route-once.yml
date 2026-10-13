@@ -1,0 +1,110 @@
+name: Repair HML Hosting Route Once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/repair-hml-hosting-route-once.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aurora-hml-hosting-route-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    name: Validate and republish HML Hosting only
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: firebase-homologation
+    env:
+      PROJECT_ID: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+      DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      DOMAIN: auroranexus.com.br
+    steps:
+      - name: Pin HML scope
+        run: |
+          set -euo pipefail
+          test "$PROJECT_ID" = "wmgj-hml-jfn-20260927"
+          test "$GITHUB_REF" = "refs/heads/main"
+          case "$PROJECT_ID" in *prod*|*production*|*live*|*principal*) exit 42 ;; esac
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f
+        with:
+          version: "548.0.0"
+          project_id: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+
+      - name: Prove custom domain and technical host before mutation
+        run: |
+          set -euo pipefail
+          test "$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')" = "$DEPLOY_SERVICE_ACCOUNT"
+          access_token="$(gcloud auth print-access-token)"
+          printf '::add-mask::%s\n' "$access_token"
+          api="https://firebasehosting.googleapis.com/v1beta1/projects/$PROJECT_ID/sites/$PROJECT_ID/customDomains/$DOMAIN"
+          domain_json="$(curl --fail --silent --show-error --max-time 30 -H "Authorization: Bearer $access_token" "$api")"
+          test "$(jq -r '.hostState // empty' <<<"$domain_json")" = "HOST_ACTIVE"
+          test "$(jq -r '.ownershipState // empty' <<<"$domain_json")" = "OWNERSHIP_ACTIVE"
+          test "$(jq -r '.cert.state // empty' <<<"$domain_json")" = "CERT_ACTIVE"
+          test "$(jq -r '.reconciling // false' <<<"$domain_json")" = "false"
+          test "$(jq -r '(.issues // []) | length' <<<"$domain_json")" = "0"
+
+          a_records="$(dig +short "$DOMAIN" A | sort -u)"
+          test "$a_records" = "199.36.158.100"
+          txt_records="$(dig +short "$DOMAIN" TXT)"
+          grep -Fq '"hosting-site='"$PROJECT_ID"'"' <<<"$txt_records"
+
+          technical="https://$PROJECT_ID.web.app"
+          test "$(curl --silent --show-error --max-time 30 -o /tmp/portal.html -w '%{http_code}' "$technical/portal")" = "200"
+          grep -Fq "Ambiente privado" /tmp/portal.html
+          test "$(curl --silent --show-error --max-time 30 -o /tmp/bootstrap.json -w '%{http_code}' -H 'Accept: application/json' "$technical/api/bootstrap")" = "401"
+          jq -e '.ok == false and .code == "AUTH_REQUIRED"' /tmp/bootstrap.json >/dev/null
+
+          canonical_code="$(curl --silent --show-error --max-time 30 -o /tmp/canonical.html -w '%{http_code}' "https://$DOMAIN/portal")"
+          if [ "$canonical_code" = "200" ]; then
+            echo "CANONICAL_ALREADY_HEALTHY=YES"
+            exit 0
+          fi
+          test "$canonical_code" = "404"
+          grep -Fq "<title>Site Not Found</title>" /tmp/canonical.html
+          echo "HOSTING_ROUTE_REPAIR_REQUIRED=YES"
+
+      - name: Install Firebase CLI
+        if: success()
+        run: npm install --global firebase-tools@15.32.1
+
+      - name: Republish Hosting only
+        if: success()
+        working-directory: firebase-migration
+        run: |
+          set -euo pipefail
+          firebase deploy --project "$PROJECT_ID" --only hosting --non-interactive
+          echo "HOSTING_ONLY_REPUBLISH=COMPLETE"
+
+      - name: Verify canonical route after republish
+        if: success()
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 24); do
+            code="$(curl --silent --show-error --max-time 30 -o /tmp/canonical-after.html -w '%{http_code}' "https://$DOMAIN/portal" || true)"
+            if [ "$code" = "200" ] && grep -Fq "Ambiente privado" /tmp/canonical-after.html; then
+              init_code="$(curl --silent --show-error --max-time 30 -o /tmp/init.json -w '%{http_code}' "https://$DOMAIN/__/firebase/init.json" || true)"
+              if [ "$init_code" = "200" ] && jq -e --arg p "$PROJECT_ID" '.projectId == $p' /tmp/init.json >/dev/null; then
+                echo "CANONICAL_HOSTING_ROUTE=HEALTHY"
+                exit 0
+              fi
+            fi
+            sleep 5
+          done
+          echo "CANONICAL_HOSTING_ROUTE=STILL_PROPAGATING"
+          exit 75
