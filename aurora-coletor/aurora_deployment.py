@@ -25,12 +25,31 @@ STATE_NAME = 'integration-setup.json'
 ASSETS = ('aurora_cloud_sync.py', 'aurora_deployment.py')
 
 
+def _trusted_platform_alias(part):
+    """Allow only immutable macOS root aliases; reject all user-controlled links."""
+    if sys.platform != 'darwin':
+        return False
+    aliases = {
+        '/tmp': '/private/tmp',
+        '/var': '/private/var',
+        '/etc': '/private/etc',
+    }
+    expected = aliases.get(str(part))
+    if expected is None:
+        return False
+    try:
+        return str(part.resolve(strict=True)) == expected
+    except OSError:
+        return False
+
+
 def safe_path(value):
     path = Path(value).expanduser()
     if not path.is_absolute() or '..' in path.parts:
         raise sync.SyncError('ABSOLUTE_PATH_REQUIRED')
     for part in (path, *path.parents):
-        if part.is_symlink() or (hasattr(part, 'is_junction') and part.is_junction()):
+        linked = part.is_symlink() or (hasattr(part, 'is_junction') and part.is_junction())
+        if linked and not _trusted_platform_alias(part):
             raise sync.SyncError('LINK_PATH_REJECTED')
     return path
 
