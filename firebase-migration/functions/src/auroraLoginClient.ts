@@ -15,7 +15,7 @@ const element = id => document.getElementById(id);
 const form = element('login-form'), status = element('status'), submit = element('submit');
 const normalizeIdentityEmail = value => String(value || '').trim().toLowerCase();
 // Capture and remove action material before the first asynchronous Firebase initialization.
-const recoveryQueryAtEntry = String(location.search || '');
+let recoveryQueryAtEntry = String(location.search || '');
 const recoveryEntryParams = new URLSearchParams(recoveryQueryAtEntry);
 const recoveryQueryPresent = recoveryEntryParams.has('oobCode') || recoveryEntryParams.getAll('mode').includes('resetPassword');
 if (recoveryQueryPresent) history.replaceState(null, '', location.pathname);
@@ -63,6 +63,8 @@ function accessIssueMessage(error) {
   if (code === 'COMPANY_ACCESS_DENIED') return 'Conta autenticada, mas não autorizada para a empresa selecionada.';
   if (code === 'SESSION_DENIED' || code === 'INVALID_LOGIN') return 'Segundo fator aceito, mas a sessão privada foi negada pela autorização do ambiente.';
   if (code === 'SESSION_TEMPORARY_UNAVAILABLE') return 'A autenticação foi aceita, mas o serviço de sessão está temporariamente indisponível. Tente novamente.';
+  if (error?.code === 'auth/network-request-failed') return 'Falha de conexão ao confirmar a autenticação. Verifique a internet e tente novamente.';
+  if (error?.code === 'auth/too-many-requests') return 'Muitas tentativas em sequência. Aguarde e tente novamente.';
   return 'Segundo fator inválido ou expirado. Gere um novo código no autenticador e tente novamente.';
 }
 async function completeLogin(user) {
@@ -129,14 +131,19 @@ element('mfa-submit').addEventListener('click', async () => {
     if (!resolver && !mfaSessionRetryUser) throw new Error('MFA_REQUIRED');
     // A verified second factor may be reused in memory solely to recheck an unavailable app session.
     // Firebase and the server still validate a fresh token and current organization membership.
-    const user = mfaSessionRetryUser || (await resolver.resolveSignIn(
-      TotpMultiFactorGenerator.assertionForSignIn(element('mfa-factor').value, element('mfa-code').value.trim())
-    )).user;
+    let credential;
+    if (mfaSessionRetryUser) {
+      credential = {user:mfaSessionRetryUser};
+    } else {
+      const assertion = TotpMultiFactorGenerator.assertionForSignIn(element('mfa-factor').value, element('mfa-code').value.trim());
+      credential = await resolver.resolveSignIn(assertion);
+    }
     try {
-      await completeLogin(user);
+      await completeLogin(credential.user);
       mfaSessionRetryUser = null;
     } catch (error) {
-      mfaSessionRetryUser = error?.message === 'SESSION_TEMPORARY_UNAVAILABLE' ? user : null;
+      mfaSessionRetryUser = error?.message === 'SESSION_TEMPORARY_UNAVAILABLE' || error?.code === 'auth/network-request-failed'
+        ? credential.user : null;
       throw error;
     }
   } catch (error) { element('mfa-status').textContent = accessIssueMessage(error); }
