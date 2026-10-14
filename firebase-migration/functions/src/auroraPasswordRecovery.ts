@@ -25,10 +25,13 @@ export function passwordRecoveryClient(): string {
 let recoveryCode = null, recoveryBusy = false, recoveryCooldownUntil = 0;
 const recoveryStatus = element('recovery-status');
 const normalizeRecoveryEmail = value => String(value || '').trim().toLowerCase();
-const validRecoveryEmail = value => value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+const validRecoveryEmail = value => {
+  if (!value || value.length > 254 || value.includes(' ')) return false;
+  const at = value.indexOf('@');
+  return at > 0 && at === value.lastIndexOf('@') && value.lastIndexOf('.') > at + 1 && value[value.length - 1] !== '.';
+};
 const genericRecoveryMessage = 'Se o e-mail estiver autorizado, as instruções de redefinição serão enviadas.';
 const recoveryHosts = new Set([
-  String(location.hostname || '').toLowerCase(),
   'auroranexus.com.br',
   'wmgj-hml-jfn-20260927.web.app',
   'wmgj-hml-jfn-20260927.firebaseapp.com'
