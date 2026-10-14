@@ -23,7 +23,8 @@
     "bounded_autonomy_with_risk_profile",
     "advisory_human_review_only_for_noncritical_uncertainty",
     "operational_delivery_hardening",
-    "platform_unification_conflict_certification"
+    "platform_unification_conflict_certification",
+    "credential_continuity_and_recovery"
   ],
   "singleVersionRules": {
     "oneCanonicalDeliverable": true,
@@ -32,7 +33,8 @@
     "supersededVersionsMustNotBePromoted": true,
     "deliveryMustPreferOneBestPath": true,
     "allRobotsMustOperateUnderThisDeliverable": true,
-    "platformUnificationMustPassBeforePromotion": true
+    "platformUnificationMustPassBeforePromotion": true,
+    "credentialContinuityMustPassBeforePromotion": true
   },
   "flowSimplification": {
     "oneOperationalEntrypoint": "scripts/aurora/windows_online_robot_orchestrator.js",
@@ -40,7 +42,8 @@
     "onePlatformUnificationRobot": "scripts/aurora/platform_unification_robot.js",
     "onePolicyManifest": "firebase-migration/policy/manifest.json",
     "oneHardeningPolicy": "firebase-migration/policy/operational-delivery-hardening-v1.json",
-    "avoidParallelManualPromptPaths": true
+    "avoidParallelManualPromptPaths": true,
+    "oneCredentialContinuityPolicy": "firebase-migration/policy/credential-continuity-v1.json"
   },
   "promotionRules": {
     "lowRisk": "EXECUTE_AND_RECORD",
@@ -59,6 +62,8 @@
     "validation_or_reasonable_evidence",
     "rollback_or_recovery_path",
     "operational_hardening_policy",
-    "platform_unification_robot_output"
-  ]
+    "platform_unification_robot_output",
+    "credential_continuity_policy"
+  ],
+  "credentialContinuityRule": "Web, Windows, macOS and mobile surfaces use the same identity, membership, MFA and recovery plane; remote or physical access transports never become parallel credential authorities."
 }
