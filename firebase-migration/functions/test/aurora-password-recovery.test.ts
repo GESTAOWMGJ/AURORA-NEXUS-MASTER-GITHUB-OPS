@@ -23,7 +23,7 @@ async function fixture(options:{search?:string;invalid?:boolean;resetError?:bool
   await new Script('(async()=>{'+passwordRecoveryClient()+'})()').runInContext(createContext(sandbox));
   return {el,calls,events,async click(id:string){await el(id).handlers.get('click')();},async submit(){await el('new-password-form').handlers.get('submit')({preventDefault(){}});}};
 }
-const link='https://synthetic.firebaseapp.com/__/auth/action?mode=resetPassword&oobCode=synthetic-one-use-code';
+const link='https://auroranexus.com.br/__/auth/action?mode=resetPassword&oobCode=synthetic-one-use-code';
 
 test('password recovery never reveals account existence and sends only on explicit action',async()=>{
   for(const resetError of [false,true]) {
@@ -48,7 +48,7 @@ test('reset requires a verified action code and matching strong password, never 
   assert.doesNotMatch(passwordRecoveryClient(),/fetch\(|localStorage|sessionStorage|console\./);
 });
 test('expired/malformed/non-reset links never expose password form or provider details',async()=>{
-  for(const value of ['not-a-link','http://example.invalid/?mode=resetPassword&oobCode=synthetic','https://example.invalid/?mode=verifyEmail&oobCode=synthetic']) {
+  for(const value of ['not-a-link','http://example.invalid/?mode=resetPassword&oobCode=synthetic','https://example.invalid/?mode=resetPassword&oobCode=synthetic','https://example.invalid/?mode=verifyEmail&oobCode=synthetic']) {
     const f=await fixture();f.el('recovery-link').value=value;await f.click('verify-recovery-link');assert.equal(f.calls.length,0);
   }
   const f=await fixture({invalid:true});f.el('recovery-link').value=link;await f.click('verify-recovery-link');

@@ -12,16 +12,19 @@
     "offlineDatabaseReplica": false,
     "package": "AURORA-NEXUS-Instalar.exe",
     "guidedSetup": true,
-    "backgroundClientInstalled": false
+    "backgroundClientInstalled": false,
+    "credentialMode": "CANONICAL_PORTAL_IDENTITY"
   },
   "mac": {
     "strategy": "PRESERVE_EXISTING_APP_IDENTITY",
-    "nativeUpdate": "BLOCKED_BASELINE_INSPECTION"
+    "nativeUpdate": "BLOCKED_BASELINE_INSPECTION",
+    "credentialMode": "CANONICAL_PORTAL_IDENTITY"
   },
   "ios": {
     "type": "EXISTING_PWA",
     "nativeAppStoreBuild": false,
-    "deviceTest": "PENDING"
+    "deviceTest": "PENDING",
+    "credentialMode": "CANONICAL_PORTAL_IDENTITY"
   },
   "web": {
     "type": "CANONICAL_PRIVATE_PORTAL",
@@ -30,7 +33,8 @@
     "canonicalPortal": "https://auroranexus.com.br/portal",
     "technicalFallbackUrl": null,
     "singleAccessPath": true,
-    "technicalHostBehavior": "REDIRECT_TO_CANONICAL_DNS"
+    "technicalHostBehavior": "REDIRECT_TO_CANONICAL_DNS",
+    "credentialMode": "CANONICAL_PORTAL_IDENTITY"
   },
   "fullLocalCloudSync": "BLOCKED_INTEGRATION_RUNTIME_AND_DEVICE_AUTH",
   "productionReleased": false,
@@ -39,5 +43,21 @@
     "fallbackUrlIsInfrastructureOnly": true,
     "hideFirebaseWebAppFromClientLinks": true,
     "technicalHostsRedirectToCanonical": true
+  },
+  "android": {
+    "type": "EXISTING_PWA",
+    "nativePlayStoreBuild": false,
+    "deviceTest": "PENDING",
+    "credentialMode": "CANONICAL_PORTAL_IDENTITY"
+  },
+  "credentialGovernance": {
+    "policy": "firebase-migration/policy/credential-continuity-v1.json",
+    "singleIdentityPlane": true,
+    "identityProvider": "FIREBASE_AUTHENTICATION",
+    "sameMembershipAndMfaStateAcrossPlatforms": true,
+    "installersNeverStorePasswords": true,
+    "remoteAccessAgentsAreTransportOnly": true,
+    "physicalDeviceLoginDoesNotBypassAuroraAuthorization": true,
+    "clonePasswordsTokensCookiesOrKeychainsBetweenDevices": false
   }
 }

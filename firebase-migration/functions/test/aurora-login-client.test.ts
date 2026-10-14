@@ -12,17 +12,19 @@ class Element {
   replaceChildren(){this.children=[];}
   appendChild(child:Element){this.children.push(child);}
 }
-async function fixture(managed=true, sessionLoginResponse:any={ok:true,json:async()=>({})}) {
+async function fixture(managed=true, sessionLoginResponse:any={ok:true,status:204,json:async()=>({})}) {
   const elements=new Map<string,Element>();const el=(id:string)=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id)!;};
   const calls:any[]=[]; const redirects:string[]=[];let claims:any=managed?{auroraProfileVersion:1}:{};
   const user={emailVerified:false,getIdToken:async()=> 'synthetic-id-token'};
-  let signIn:any=async()=>({user}); let redemption:any={ok:true,json:async()=>({})}; let currentSessionResponse=sessionLoginResponse;
+  let signIn:any=async()=>({user}); let redemption:any={ok:true,json:async()=>({})};
+  let currentSessionResponses=Array.isArray(sessionLoginResponse)?[...sessionLoginResponse]:[sessionLoginResponse];
   const factors:any[]=[]; const winHandlers=new Map();
-  const sandbox={URL,URLSearchParams,history:{replaceState:()=>{}},document:{getElementById:el,createElement:()=>new Element()},window:{addEventListener:(n:string,h:any)=>{const previous=winHandlers.get(n);winHandlers.set(n,()=>{previous?.();h();});}},navigator:{},location:{replace:(path:string)=>redirects.push(path)},
-    fetch:async(url:string,options:any)=>{calls.push({name:'fetch',url,options});return url==='/__sessionLogin'?currentSessionResponse:url==='/api/user-profiles'?(typeof redemption==='function'?await redemption():redemption):{ok:true,json:async()=>({})};},
-    initializeApp:()=>({}),getAuth:()=>({}),setPersistence:async()=>{},inMemoryPersistence:{},
-    signInWithEmailAndPassword:async()=>signIn(),getIdTokenResult:async()=>({claims}),signOut:async()=>{calls.push({name:'signOut'});},
-    sendPasswordResetEmail:async()=>{calls.push({name:'reset'});},sendEmailVerification:async()=>{calls.push({name:'verify'});},reload:async()=>{},
+  const sandbox={URL,URLSearchParams,history:{replaceState:()=>{}},document:{getElementById:el,createElement:()=>new Element()},window:{addEventListener:(n:string,h:any)=>{const previous=winHandlers.get(n);winHandlers.set(n,()=>{previous?.();h();});}},navigator:{},
+    location:{origin:'https://auroranexus.com.br',hostname:'auroranexus.com.br',pathname:'/portal',search:'',replace:(path:string)=>redirects.push(path)},
+    fetch:async(url:string,options:any)=>{calls.push({name:'fetch',url,options});if(url==='/__sessionLogin'){const value=currentSessionResponses.length>1?currentSessionResponses.shift():currentSessionResponses[0];return typeof value==='function'?await value():value;}return url==='/api/user-profiles'?(typeof redemption==='function'?await redemption():redemption):{ok:true,status:200,json:async()=>({})};},
+    initializeApp:()=>({}),getAuth:()=>({languageCode:null}),setPersistence:async()=>{},inMemoryPersistence:{},
+    signInWithEmailAndPassword:async(_auth:any,email:string)=>{calls.push({name:'passwordSignIn',email});return signIn();},getIdTokenResult:async()=>({claims}),signOut:async()=>{calls.push({name:'signOut'});},
+    sendPasswordResetEmail:async(_auth:any,email:string)=>{calls.push({name:'reset',email});},sendEmailVerification:async()=>{calls.push({name:'verify'});},reload:async()=>{},
     multiFactor:()=>({enrolledFactors:factors,getSession:async()=>({}),enroll:async()=>{calls.push({name:'enroll'});}}),
     getMultiFactorResolver:()=>({hints:[{factorId:'totp',uid:'synthetic-factor'}],resolveSignIn:async()=>{claims={...claims,firebase:{sign_in_second_factor:'totp'}};return {user};}}),
     TotpMultiFactorGenerator:{FACTOR_ID:'totp',assertionForSignIn:()=>({}),assertionForEnrollment:()=>({}),generateSecret:async()=>({secretKey:'SYNTHETIC-NOT-A-SECRET'})}};
@@ -31,7 +33,7 @@ async function fixture(managed=true, sessionLoginResponse:any={ok:true,json:asyn
   const withoutImports=script.replace(/^import[\s\S]*?from 'https:\/\/[^']+';\n/gm,'');
   assert.ok(executable); const context=createContext(sandbox);
   await new Script('(async()=>{'+withoutImports+'})()').runInContext(context);
-  return {el,calls,redirects,user,factors,winHandlers,claims:(value:any)=>{claims=value;},sessionResponse:(value:any)=>{currentSessionResponse=value;},redemption:(value:any)=>{redemption=value;},signIn:(fn:any)=>{signIn=fn;},async click(id:string){await el(id).handlers.get('click')();},async submit(){await el('login-form').handlers.get('submit')({preventDefault(){}});}};
+  return {el,calls,redirects,user,factors,winHandlers,claims:(value:any)=>{claims=value;},sessionResponse:(value:any)=>{currentSessionResponses=[value];},redemption:(value:any)=>{redemption=value;},signIn:(fn:any)=>{signIn=fn;},async click(id:string){await el(id).handlers.get('click')();},async submit(){await el('login-form').handlers.get('submit')({preventDefault(){}});}};
 }
 
 test('managed first access does not issue app session or send verification before user action',async()=>{
@@ -69,6 +71,22 @@ test('MFA success separates second-factor errors from authorization provisioning
   f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();await f.click('mfa-submit');
   assert.equal(f.el('mfa-status').textContent,'Conta autenticada, mas ainda sem vínculo operacional provisionado na organização.');
   assert.equal(f.redirects.length,0);
+});
+
+test('login normalizes email identity before Firebase authentication',async()=>{
+  const f=await fixture(false);f.el('email').value='  USER@Example.Invalid  ';f.el('password').value='synthetic-password';await f.submit();
+  const call=f.calls.find(c=>c.name==='passwordSignIn');assert.equal(call.email,'user@example.invalid');
+});
+
+test('session exchange retries one transient server failure and then continues',async()=>{
+  const f=await fixture(false,[{ok:false,status:503,json:async()=>({code:'TEMPORARY'})},{ok:true,status:204,json:async()=>({})}]);
+  f.el('email').value='user@example.invalid';f.el('password').value='synthetic-password';await f.submit();
+  assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,2);assert.deepEqual(f.redirects,['/portal']);
+});
+
+test('password recovery normalizes email and suppresses immediate duplicate requests',async()=>{
+  const f=await fixture(false);f.el('recovery-email').value='  USER@Example.Invalid  ';await f.click('reset-password');await f.click('reset-password');
+  assert.equal(f.calls.filter(c=>c.name==='reset').length,1);assert.equal(f.calls.find(c=>c.name==='reset').email,'user@example.invalid');
 });
 
 test('admin profile shell script parses; unprivileged or first-factor sessions get no profile controls',()=>{
