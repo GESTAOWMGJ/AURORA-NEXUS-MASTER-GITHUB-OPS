@@ -87,7 +87,7 @@ class HmlShadowUpdateTests(unittest.TestCase):
             org['fields']['organicSectors']['arrayValue']['values'] = [{'stringValue': s} for s in sectors]
             self.assertFalse(self.accepted(org, 'SHADOW_UPDATE'))
 
-    def test_canonical_hml_request_derives_exact_release_evidence_and_promotes(self):
+    def test_canonical_hml_request_derives_exact_release_evidence_without_approval_bypass(self):
         request_workflow = yaml.load(REQUEST_WORKFLOW.read_text(encoding='utf-8'), Loader=yaml.BaseLoader)
         permissions = request_workflow['permissions']
         self.assertEqual(permissions['contents'], 'read')
@@ -96,7 +96,7 @@ class HmlShadowUpdateTests(unittest.TestCase):
         dispatch = request_workflow['jobs']['dispatch']['steps']
         resolve = next(step['run'] for step in dispatch if step.get('name') == 'Resolve exact CI and merged review evidence')
         promote = next(step['run'] for step in dispatch
-                       if step.get('name') == 'Prepare protected owner-origin deployment at exact main SHA')
+                       if step.get('name') == 'Prepare independent-review deployment at exact main SHA')
         for required in [
             'head_sha == $sha',
             'head_branch == "main"',
@@ -114,13 +114,16 @@ class HmlShadowUpdateTests(unittest.TestCase):
             'active_release_review_mode:$mode',
             'active_release_previous_sha256:$previous',
             'expected_main_sha:$sha',
-            'OWNER_ORIGIN_DISPATCH_REQUIRED',
+            'INDEPENDENT_GITHUB_REVIEW_REQUIRED',
         ]:
             self.assertIn(required, promote)
         self.assertNotIn('gh workflow run deploy-aurora-firebase.yml', promote)
+        self.assertIn('test "$review_mode" = "GITHUB_PULL_REQUEST_REVIEW"', promote)
+        self.assertIn('.activeReleaseReviewMode == "GITHUB_PULL_REQUEST_REVIEW"',
+                      next(s['run'] for s in dispatch if s.get('name') == 'Validate exact authorized request'))
         request = json.loads(REQUEST_FILE.read_text(encoding='utf-8'))
         self.assertIs(request['publishActiveRelease'], True)
-        self.assertEqual(request['activeReleaseReviewMode'], 'OWNER_DEPLOYMENT_APPROVAL')
+        self.assertEqual(request['activeReleaseReviewMode'], 'GITHUB_PULL_REQUEST_REVIEW')
         self.assertTrue(request['activeReleasePreviousSha256'] == 'NONE'
                         or re.fullmatch(r'[a-f0-9]{64}', request['activeReleasePreviousSha256']))
         self.assertIs(request['sourceMutation'], False)
