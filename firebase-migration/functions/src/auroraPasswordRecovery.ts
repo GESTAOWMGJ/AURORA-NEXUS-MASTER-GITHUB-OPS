@@ -22,8 +22,17 @@ export function passwordRecoveryMarkup(): string {
 // Uses the login client's auth/element/form variables; no application API receives a password or action code.
 export function passwordRecoveryClient(): string {
   return `
-let recoveryCode = null, recoveryBusy = false;
+let recoveryCode = null, recoveryBusy = false, recoveryCooldownUntil = 0;
 const recoveryStatus = element('recovery-status');
+const normalizeRecoveryEmail = value => String(value || '').trim().toLowerCase();
+const validRecoveryEmail = value => value.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+const genericRecoveryMessage = 'Se o e-mail estiver autorizado, as instruções de redefinição serão enviadas.';
+const recoveryHosts = new Set([
+  String(location.hostname || '').toLowerCase(),
+  'auroranexus.com.br',
+  'wmgj-hml-jfn-20260927.web.app',
+  'wmgj-hml-jfn-20260927.firebaseapp.com'
+]);
 function clearRecovery() {
   recoveryCode = null;
   for (const id of ['recovery-link','recovery-new-password','recovery-confirm-password']) element(id).value = '';
@@ -32,14 +41,15 @@ function clearRecovery() {
 function showRecovery() {
   form.hidden = true; element('mfa-panel').hidden = true;
   element('password-recovery-panel').hidden = false;
-  element('recovery-email').value = element('email').value.trim();
+  element('recovery-email').value = normalizeRecoveryEmail(element('email').value);
 }
 function actionCodeFromLink(value) {
   const link = new URL(value);
-  if (link.protocol !== 'https:' || link.searchParams.get('mode') !== 'resetPassword') throw new Error('INVALID_RECOVERY_LINK');
-  const code = link.searchParams.get('oobCode');
-  if (!code || code.length > 2048) throw new Error('INVALID_RECOVERY_LINK');
-  return code;
+  const modes = link.searchParams.getAll('mode'), codes = link.searchParams.getAll('oobCode');
+  if (link.protocol !== 'https:' || !recoveryHosts.has(link.hostname.toLowerCase())
+      || modes.length !== 1 || modes[0] !== 'resetPassword' || codes.length !== 1
+      || !/^[A-Za-z0-9_-]{1,2048}$/.test(codes[0] || '')) throw new Error('INVALID_RECOVERY_LINK');
+  return codes[0];
 }
 async function validateRecoveryCode(code) {
   if (!auth || recoveryBusy) return;
@@ -58,12 +68,28 @@ element('mfa-recovery-help').addEventListener('click', () => {
   element('mfa-status').textContent = 'Se perdeu todos os autenticadores, solicite recuperação ao administrador autorizado. A troca de senha não remove o segundo fator.';
 });
 element('reset-password').addEventListener('click', async () => {
-  const email = element('recovery-email').value.trim();
-  if (!email || !email.includes('@')) { recoveryStatus.textContent = 'Informe o e-mail autorizado.'; return; }
+  const email = normalizeRecoveryEmail(element('recovery-email').value);
+  element('recovery-email').value = email;
+  if (!validRecoveryEmail(email)) { recoveryStatus.textContent = 'Informe um e-mail válido.'; return; }
   if (!auth || recoveryBusy) return;
+  if (Date.now() < recoveryCooldownUntil) { recoveryStatus.textContent = genericRecoveryMessage; return; }
   recoveryBusy = true; const button = element('reset-password'); button.disabled = true; clearRecovery();
-  try { await sendPasswordResetEmail(auth, email); } catch { /* Same response: no account enumeration. */ }
-  finally { recoveryStatus.textContent = 'Se o e-mail estiver autorizado, as instruções de redefinição serão enviadas.'; button.disabled = false; recoveryBusy = false; }
+  try {
+    await sendPasswordResetEmail(auth, email);
+    recoveryCooldownUntil = Date.now() + 60 * 1000;
+    recoveryStatus.textContent = genericRecoveryMessage;
+  } catch (error) {
+    if (error?.code === 'auth/network-request-failed' || error?.code === 'auth/internal-error') {
+      recoveryCooldownUntil = Date.now() + 15 * 1000;
+      recoveryStatus.textContent = 'Serviço de recuperação temporariamente indisponível. Aguarde e tente novamente.';
+    } else if (error?.code === 'auth/too-many-requests') {
+      recoveryCooldownUntil = Date.now() + 60 * 1000;
+      recoveryStatus.textContent = 'Muitas solicitações em sequência. Aguarde antes de tentar novamente.';
+    } else {
+      recoveryCooldownUntil = Date.now() + 60 * 1000;
+      recoveryStatus.textContent = genericRecoveryMessage;
+    }
+  } finally { button.disabled = false; recoveryBusy = false; }
 });
 element('verify-recovery-link').addEventListener('click', async () => {
   let code;
