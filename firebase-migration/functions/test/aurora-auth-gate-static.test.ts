@@ -24,9 +24,20 @@ test("private login exposes reset without account enumeration", () => {
   assert.match(source, /passwordRecoveryClient\(\)/);
 });
 
-test("reset action requires a syntactically plausible email before Firebase call", () => {
-  assert.match(recovery, /!email \|\| !email\.includes\('@'\)/);
-  assert.match(recovery, /Informe o e-mail autorizado\./);
+test("reset action normalizes identity, validates syntax and throttles duplicates", () => {
+  assert.match(recovery, /normalizeRecoveryEmail/);
+  assert.match(recovery, /validRecoveryEmail/);
+  assert.match(recovery, /recoveryCooldownUntil/);
+  assert.match(recovery, /Date\.now\(\) < recoveryCooldownUntil/);
+  assert.match(recovery, /Informe um e-mail válido\./);
+});
+
+test("recovery links are HTTPS, host-bound and require one valid reset code", () => {
+  assert.match(recovery, /recoveryHosts/);
+  assert.match(recovery, /link\.protocol !== 'https:'/);
+  assert.match(recovery, /modes\.length !== 1/);
+  assert.match(recovery, /codes\.length !== 1/);
+  assert.match(recovery, /\^\[A-Za-z0-9_-\]\{1,2048\}\$/);
 });
 
 test("account security is rendered only after current membership and gets a session-bound logout token", () => {
