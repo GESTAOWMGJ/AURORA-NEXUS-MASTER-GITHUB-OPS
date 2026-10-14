@@ -27,7 +27,7 @@ async function fixture(managed=true, sessionLoginResponse:any={ok:true,status:20
     verifyPasswordResetCode:async(_auth:any,code:string)=>{calls.push({name:'recoveryVerify',code});return 'synthetic@example.invalid';},confirmPasswordReset:async()=>{},
     sendPasswordResetEmail:async(_auth:any,email:string)=>{calls.push({name:'reset',email});},sendEmailVerification:async()=>{calls.push({name:'verify'});},reload:async()=>{},
     multiFactor:()=>({enrolledFactors:factors,getSession:async()=>({}),enroll:async()=>{calls.push({name:'enroll'});}}),
-    getMultiFactorResolver:()=>({hints:[{factorId:'totp',uid:'synthetic-factor'}],resolveSignIn:async()=>{claims={...claims,firebase:{sign_in_second_factor:'totp'}};return {user};}}),
+    getMultiFactorResolver:()=>({hints:[{factorId:'totp',uid:'synthetic-factor'}],resolveSignIn:async()=>{calls.push({name:'mfaResolve'});claims={...claims,firebase:{sign_in_second_factor:'totp'}};return {user};}}),
     TotpMultiFactorGenerator:{FACTOR_ID:'totp',assertionForSignIn:()=>({}),assertionForEnrollment:()=>({}),generateSecret:async()=>({secretKey:'SYNTHETIC-NOT-A-SECRET'})}};
   const executable=ts.transpileModule(script,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
   // Strip only static SDK imports; all behavior below is the emitted product code.
@@ -106,10 +106,18 @@ test('exhausted session 5xx retries report temporary outage rather than invalid 
   const mfa=await fixture(true,[outage,outage]);
   mfa.user.emailVerified=true;
   mfa.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});
-  await mfa.submit();await mfa.click('mfa-submit');
+  await mfa.submit();mfa.el('mfa-code').value='123456';await mfa.click('mfa-submit');
   assert.equal(mfa.calls.filter(c=>c.url==='/__sessionLogin').length,2);
   assert.match(mfa.el('mfa-status').textContent,/sessão está temporariamente indisponível/);
+  assert.equal(mfa.el('mfa-code').value,'');
   assert.equal(mfa.redirects.length,0);
+  assert.equal(mfa.calls.filter(c=>c.name==='mfaResolve').length,1);
+  // Retry must use the Firebase-authenticated user already in memory, not replay TOTP.
+  mfa.sessionResponse({ok:true,status:204,json:async()=>({})});
+  await mfa.click('mfa-submit');
+  assert.equal(mfa.calls.filter(c=>c.name==='mfaResolve').length,1);
+  assert.equal(mfa.calls.filter(c=>c.url==='/__sessionLogin').length,3);
+  assert.deepEqual(mfa.redirects,['/portal']);
 });
 
 test('authorization denial is terminal and never retried as a transient network failure',async()=>{
