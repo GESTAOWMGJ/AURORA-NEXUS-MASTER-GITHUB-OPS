@@ -14,6 +14,7 @@ const requiredFiles = [
   "firebase-migration/policy/autonomous-bugfix-realtime-audit-v1.json",
   "firebase-migration/policy/certification-readiness-v1.json",
   "firebase-migration/policy/cloud-failsafe-robot-operation-v1.json",
+  "firebase-migration/policy/credential-continuity-v1.json",
   "firebase-migration/policy/development-deliverable-v1.json",
   "firebase-migration/policy/digital-security-certification-layer-v1.json",
   "firebase-migration/policy/intrinsic-cloud-ai-operational-learning-v1.json",
@@ -54,6 +55,7 @@ const securityBaseline = readText("firebase-migration/policy/security-baseline-v
 const resolutivePolicy = readText("firebase-migration/policy/resolutive-algorithm-policy-v1.json");
 const bugfixPolicy = readText("firebase-migration/policy/autonomous-bugfix-realtime-audit-v1.json");
 const cloudFailsafePolicy = readText("firebase-migration/policy/cloud-failsafe-robot-operation-v1.json");
+const credentialPolicy = readText("firebase-migration/policy/credential-continuity-v1.json");
 const learningPolicy = readText("firebase-migration/policy/intrinsic-cloud-ai-operational-learning-v1.json");
 const deliverablePolicy = readText("firebase-migration/policy/development-deliverable-v1.json");
 const hardeningPolicy = readText("firebase-migration/policy/operational-delivery-hardening-v1.json");
@@ -61,7 +63,7 @@ const unificationPolicy = readText("firebase-migration/policy/platform-unificati
 const manifest = readText("firebase-migration/policy/manifest.json");
 const orchestrator = readText("scripts/aurora/windows_online_robot_orchestrator.js");
 const unificationRobot = readText("scripts/aurora/platform_unification_robot.js");
-const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy, bugfixPolicy, cloudFailsafePolicy, learningPolicy, deliverablePolicy, hardeningPolicy, unificationPolicy, manifest].join("\n");
+const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy, bugfixPolicy, cloudFailsafePolicy, credentialPolicy, learningPolicy, deliverablePolicy, hardeningPolicy, unificationPolicy, manifest].join("\n");
 
 const policyChecks = [
   {
@@ -98,6 +100,17 @@ const policyChecks = [
       && deliverablePolicy.includes("onePlatformUnificationRobot")
       && orchestrator.includes("platform-unification-robot")
       && unificationRobot.includes("AURORA_PLATFORM_UNIFICATION_ROBOT")
+  },
+  {
+    id: "credential-continuity-one-identity-plane",
+    ok: credentialPolicy.includes("AURORA-CREDENTIAL-CONTINUITY-001")
+      && credentialPolicy.includes('"singleCanonicalIdentityPlane": true')
+      && credentialPolicy.includes('"channelsAreTransportNotIdentityProviders": true')
+      && credentialPolicy.includes('"clientCredentialStorageForbidden": true')
+      && credentialPolicy.includes('"passwordResetMustNotRemoveMfa": true')
+      && credentialPolicy.includes('"onboardingCredentialMustNotBeReplayedAfterUncertainConsumption": true')
+      && manifest.includes("credential-continuity-v1.json")
+      && deliverablePolicy.includes("credentialContinuityMustPassBeforePromotion")
   },
   {
     id: "no-premature-certification-claim",
@@ -193,7 +206,7 @@ const passed = fileChecks.every((check) => check.ok) && policyChecks.every((chec
 
 console.log(JSON.stringify({
   gate: "AURORA_CERTIFICATION_SECURITY_GATE",
-  version: "1.9.0",
+  version: "1.10.0",
   passed,
   activeDeliverable: "2026.10.07-dev.2",
   evidenceState: "POLICY_VALIDATION_ONLY",
