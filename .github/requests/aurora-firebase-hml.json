@@ -8,8 +8,8 @@
   "productionMutation": false,
   "clinicalSensitiveEnabled": false,
   "requestedAt": "2026-10-13",
-  "requestReason": "OWNER_AUTHORIZED_MASTER_LEARNING_RELEASE_WITH_OWNER_ORIGIN_20261013",
+  "requestReason": "HML_INDEPENDENT_HUMAN_REVIEW_TRANSITION_20261014_NO_R029_EXTENSION",
   "publishActiveRelease": true,
-  "activeReleaseReviewMode": "OWNER_DEPLOYMENT_APPROVAL",
+  "activeReleaseReviewMode": "GITHUB_PULL_REQUEST_REVIEW",
   "activeReleasePreviousSha256": "a71a53a3cfa56005b30b793defe73be188d9a4a079f199974b390826ba7d58f5"
 }
