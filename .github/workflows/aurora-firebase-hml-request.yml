@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   dispatch:
-    name: Validate request and dispatch protected HML workflow
+    name: Validate request and prepare protected HML workflow
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -47,7 +47,7 @@ jobs:
             .productionMutation == false and
             .clinicalSensitiveEnabled == false and
             .publishActiveRelease == true and
-            .activeReleaseReviewMode == "OWNER_DEPLOYMENT_APPROVAL" and
+            .activeReleaseReviewMode == "GITHUB_PULL_REQUEST_REVIEW" and
             (.activeReleasePreviousSha256 == "NONE" or
              (.activeReleasePreviousSha256 | test("^[a-f0-9]{64}$"))) and
             (.expectedSourceSha | test("^[a-f0-9]{40}$"))
@@ -103,7 +103,7 @@ jobs:
           echo "AURORA_HML_EXACT_CI_RUN_ID=$ci_run_id"
           echo "AURORA_HML_EXACT_REVIEW_PR=$review_pr"
 
-      - name: Prepare protected owner-origin deployment at exact main SHA
+      - name: Prepare independent-review deployment at exact main SHA
         env:
           GH_TOKEN: ${{ github.token }}
           REQUEST_FILE: .github/requests/aurora-firebase-hml.json
@@ -114,14 +114,14 @@ jobs:
           project_id="$(jq -r '.projectId' "$REQUEST_FILE")"
           previous_sha256="$(jq -r '.activeReleasePreviousSha256' "$REQUEST_FILE")"
           review_mode="$(jq -r '.activeReleaseReviewMode' "$REQUEST_FILE")"
-          test "$review_mode" = "OWNER_DEPLOYMENT_APPROVAL"
-          # GITHUB_TOKEN dispatch creates a bot-origin child run. The publisher
-          # requires the verified owner's actor, triggering_actor and approval.
-          # Prepare the inputs; the authorized owner session starts that run.
+          test "$review_mode" = "GITHUB_PULL_REQUEST_REVIEW"
+          # A request is not a GitHub human review. Do not auto-dispatch the
+          # publisher: an independent reviewer must approve the exact PR head.
+          # The publisher verifies this review again before an atomic pin.
           jq -nc --arg project "$project_id" --arg sha "$GITHUB_SHA" \
             --arg ci "$CI_RUN_ID" --arg pr "$REVIEW_PR" --arg mode "$review_mode" \
             --arg previous "$previous_sha256" \
-            '{state:"OWNER_ORIGIN_DISPATCH_REQUIRED",workflow:"deploy-aurora-firebase.yml",ref:"main",
+            '{state:"INDEPENDENT_GITHUB_REVIEW_REQUIRED",workflow:"deploy-aurora-firebase.yml",ref:"main",
               inputs:{project_id:$project,deploy_confirmation:"DEPLOY_HOMOLOGATION",deployment_mode:"SHADOW_UPDATE",
                 expected_main_sha:$sha,publish_active_release:"true",active_release_ci_run_id:$ci,
                 active_release_review_pr:$pr,active_release_review_mode:$mode,
