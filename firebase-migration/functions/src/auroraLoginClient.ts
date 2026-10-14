@@ -14,6 +14,11 @@ const entryPath = ['/setup','/account-security'].includes(location.pathname) ? l
 const element = id => document.getElementById(id);
 const form = element('login-form'), status = element('status'), submit = element('submit');
 const normalizeIdentityEmail = value => String(value || '').trim().toLowerCase();
+// Capture and remove action material before the first asynchronous Firebase initialization.
+const recoveryQueryAtEntry = String(location.search || '');
+const recoveryEntryParams = new URLSearchParams(recoveryQueryAtEntry);
+const recoveryQueryPresent = recoveryEntryParams.has('oobCode') || recoveryEntryParams.getAll('mode').includes('resetPassword');
+if (recoveryQueryPresent) history.replaceState(null, '', location.pathname);
 let auth, resolver = null, setupUser = null, totpSecret = null;
 let onboardingUser = null, onboardingRetrySession = false;
 const clearSetup = () => { totpSecret = null; element('enrollment-key').textContent = ''; element('enrollment-code').value = ''; };
@@ -40,7 +45,10 @@ async function createSession(user) {
       throw new Error('SESSION_TEMPORARY_UNAVAILABLE');
     }
     if (response.ok) break;
-    if (response.status >= 500 && attempt === 0) continue;
+    if (response.status >= 500) {
+      if (attempt === 0) continue;
+      throw new Error('SESSION_TEMPORARY_UNAVAILABLE');
+    }
     let code = 'SESSION_DENIED';
     try { code = (await response.json())?.code || code; } catch { /* Keep a generic, non-sensitive denial. */ }
     throw new Error(code);
@@ -103,6 +111,8 @@ form.addEventListener('submit', async event => {
       for (const hint of hints) { const option = document.createElement('option'); option.value = hint.uid; option.textContent = hint.displayName || 'Autenticador'; element('mfa-factor').appendChild(option); }
       if (hints.length) { form.hidden = true; element('mfa-panel').hidden = false; return; }
       status.textContent = 'O segundo fator cadastrado não é suportado neste ambiente.';
+    } else if (error?.message === 'SESSION_TEMPORARY_UNAVAILABLE') {
+      status.textContent = accessIssueMessage(error);
     } else if (error?.code === 'auth/network-request-failed') {
       status.textContent = 'Falha de conexão. Verifique a internet e tente novamente.';
     } else if (error?.code === 'auth/too-many-requests') {
