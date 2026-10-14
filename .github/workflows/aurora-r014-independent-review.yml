@@ -1,0 +1,110 @@
+name: AURORA R014 Independent Review
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+# Read-only. No checkout of untrusted PR code, no deployment and no publication.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: aurora-r014-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  independent-review:
+    name: Independent exact-head review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify independent user approval on the exact current HEAD
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          node <<'NODE'
+          'use strict';
+          const repo = process.env.REPOSITORY || '';
+          const token = process.env.GH_TOKEN || '';
+          const number = Number(process.env.PR_NUMBER);
+          const allowable = new Set(['write','maintain','admin']);
+          function guard(ok, message) { if (!ok) throw new Error(message); }
+          async function api(endpoint, allow404=false) {
+            const response = await fetch('https://api.github.com' + endpoint, {
+              headers: {
+                'Accept':'application/vnd.github+json',
+                'Authorization':'Bearer ' + token,
+                'X-GitHub-Api-Version':'2022-11-28',
+                'User-Agent':'aurora-r014-review-gate'
+              },
+              signal: AbortSignal.timeout(12000)
+            });
+            if (allow404 && response.status === 404) return null;
+            guard(response.ok, 'GITHUB_REVIEW_API_UNAVAILABLE HTTP_' + response.status + ' endpoint=' + endpoint);
+            return response.json();
+          }
+          async function getAllReviews(path) {
+            const all = [];
+            let complete = false;
+            for (let page = 1; page <= 50; page++) {
+              const data = await api(path + '?per_page=100&page=' + page);
+              guard(Array.isArray(data), 'REVIEWS_RESPONSE_INVALID');
+              all.push(...data);
+              if (data.length < 100) { complete = true; break; }
+            }
+            guard(complete, 'REVIEWS_PAGINATION_INCOMPLETE');
+            return all;
+          }
+          async function main() {
+            guard(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo), 'REPOSITORY_INVALID');
+            guard(token.length > 0, 'GITHUB_TOKEN_MISSING');
+            guard(Number.isSafeInteger(number) && number > 0, 'PR_NUMBER_INVALID');
+            const path = '/repos/' + repo + '/pulls/' + number;
+            const pr = await api(path);
+            guard(pr.number === number && pr.state === 'open' && !pr.draft, 'PR_NOT_OPEN_AND_READY');
+            guard(pr.base?.ref === 'main' && pr.base?.repo?.full_name === repo, 'PR_BASE_NOT_CANONICAL_MAIN');
+            const sha = pr.head?.sha;
+            guard(typeof sha === 'string' && /^[a-f0-9]{40}$/.test(sha), 'HEAD_SHA_INVALID');
+            guard(pr.user?.id && pr.user?.login, 'PR_AUTHOR_UNKNOWN');
+            const reviews = await getAllReviews(path + '/reviews');
+            const effective = new Map();
+            reviews.sort((a,b) =>
+              String(a.submitted_at || '').localeCompare(String(b.submitted_at || '')) ||
+              Number(a.id || 0)-Number(b.id || 0));
+            for (const r of reviews) {
+              if (!r.user?.id || !['APPROVED','CHANGES_REQUESTED','DISMISSED'].includes(r.state)) continue;
+              effective.set(r.user.id, r);
+            }
+            guard(![...effective.values()].some(r => r.state === 'CHANGES_REQUESTED'),
+              'CHANGES_REQUESTED_ACTIVE');
+            const candidates = [...effective.values()].filter(r =>
+              r.state === 'APPROVED' &&
+              r.commit_id === sha &&
+              r.user?.type === 'User' &&
+              r.user.id !== pr.user.id &&
+              r.user.login !== pr.user.login);
+            guard(candidates.length > 0, 'PENDING_INDEPENDENT_REVIEW_AT_HEAD');
+            const accepted = [];
+            for (const review of candidates) {
+              const login = encodeURIComponent(review.user.login);
+              const access = await api('/repos/' + repo + '/collaborators/' + login + '/permission', true);
+              if (access && allowable.has(access.permission)) accepted.push(review);
+            }
+            guard(accepted.length > 0, 'NO_ELIGIBLE_INDEPENDENT_REVIEWER');
+            const finalPr = await api(path);
+            guard(finalPr.head?.sha === sha && finalPr.state === 'open', 'HEAD_CHANGED_DURING_VERIFICATION');
+            console.log('INDEPENDENT_EXACT_HEAD_REVIEW_OK sha=' + sha +
+              ' reviewer=' + accepted.map(r => r.user.login + ':' + r.id).join(',') +
+              ' reviews=' + reviews.length + ' pr=' + number);
+          }
+          main().catch(error => {
+            console.error('::error::AURORA_R014_BLOCKED ' + error.message);
+            process.exitCode = 1;
+          });
+          NODE
