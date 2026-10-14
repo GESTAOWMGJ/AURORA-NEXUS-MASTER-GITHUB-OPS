@@ -48,10 +48,10 @@ sleep() { :; }
             result,outputs=self.execute(status=status);self.assertEqual(result.returncode,51)
             self.assertEqual(outputs,'')
 
-    def test_owner_inputs_are_prepared_without_bot_dispatch_or_new_secret(self):
+    def test_independent_review_inputs_require_human_approval_without_dispatch(self):
         workflow=load_workflow(WORKFLOWS/'aurora-firebase-hml-request.yml')
         script=next(s['run'] for s in workflow['jobs']['dispatch']['steps']
-                    if s.get('name')=='Prepare protected owner-origin deployment at exact main SHA')
+                    if s.get('name')=='Prepare independent-review deployment at exact main SHA')
         self.assertNotIn('gh workflow run',script)
         env=dict(os.environ,REQUEST_FILE=str(WORKFLOWS.parent/'requests/aurora-firebase-hml.json'),
                  GITHUB_SHA=SHA,CI_RUN_ID='42',REVIEW_PR='247')
@@ -59,11 +59,11 @@ sleep() { :; }
         result=subprocess.run(['bash','--noprofile','--norc','-c',script],env=env,capture_output=True,text=True,timeout=10)
         self.assertEqual(result.returncode,0,result.stderr)
         receipt=json.loads(result.stdout)
-        self.assertEqual(receipt['state'],'OWNER_ORIGIN_DISPATCH_REQUIRED')
+        self.assertEqual(receipt['state'],'INDEPENDENT_GITHUB_REVIEW_REQUIRED')
         self.assertEqual(receipt['inputs']['expected_main_sha'],SHA)
         self.assertEqual(receipt['inputs']['active_release_ci_run_id'],'42')
         self.assertEqual(receipt['inputs']['active_release_review_pr'],'247')
-        self.assertEqual(receipt['inputs']['active_release_review_mode'],'OWNER_DEPLOYMENT_APPROVAL')
+        self.assertEqual(receipt['inputs']['active_release_review_mode'],'GITHUB_PULL_REQUEST_REVIEW')
         for sha,event in [('b'*40,'push'),(SHA,'workflow_dispatch')]:
             result,outputs=self.execute(sha=sha,event=event);self.assertEqual(result.returncode,52)
             self.assertEqual(outputs,'')
