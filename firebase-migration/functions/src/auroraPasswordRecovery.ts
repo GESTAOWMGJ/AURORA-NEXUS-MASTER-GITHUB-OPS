@@ -87,7 +87,7 @@ element('reset-password').addEventListener('click', async () => {
       recoveryStatus.textContent = 'Serviço de recuperação temporariamente indisponível. Aguarde e tente novamente.';
     } else if (error?.code === 'auth/too-many-requests') {
       recoveryCooldownUntil = Date.now() + 60 * 1000;
-      recoveryStatus.textContent = 'Muitas solicitações em sequência. Aguarde antes de tentar novamente.';
+      recoveryStatus.textContent = genericRecoveryMessage;
     } else {
       recoveryCooldownUntil = Date.now() + 60 * 1000;
       recoveryStatus.textContent = genericRecoveryMessage;
@@ -123,13 +123,16 @@ element('recovery-back').addEventListener('click', () => {
   clearRecovery(); element('password-recovery-panel').hidden = true; form.hidden = false;
 });
 window.addEventListener('pagehide', clearRecovery);
-const recoveryParams = new URLSearchParams(location.search || '');
-if (recoveryParams.get('mode') === 'resetPassword') {
-  const code = recoveryParams.get('oobCode');
-  history.replaceState(null, '', location.pathname);
+if (recoveryQueryPresent) {
   showRecovery();
-  if (code && code.length <= 2048) await validateRecoveryCode(code);
-  else recoveryStatus.textContent = 'Link inválido. Solicite outro link de recuperação.';
+  try {
+    // Use the same strict parser for pasted links and direct action URLs.
+    const code = actionCodeFromLink(location.origin + location.pathname + recoveryQueryAtEntry);
+    await validateRecoveryCode(code);
+  } catch {
+    clearRecovery();
+    recoveryStatus.textContent = 'Link inválido. Solicite outro link de recuperação.';
+  }
 }
 `;
 }
