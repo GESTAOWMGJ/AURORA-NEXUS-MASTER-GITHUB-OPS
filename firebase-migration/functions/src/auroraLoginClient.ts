@@ -13,6 +13,7 @@ const orgId = ${JSON.stringify(orgId)};
 const entryPath = ['/setup','/account-security'].includes(location.pathname) ? location.pathname : ${JSON.stringify(entryPath)};
 const element = id => document.getElementById(id);
 const form = element('login-form'), status = element('status'), submit = element('submit');
+const normalizeIdentityEmail = value => String(value || '').trim().toLowerCase();
 let auth, resolver = null, setupUser = null, totpSecret = null;
 let onboardingUser = null, onboardingRetrySession = false;
 const clearSetup = () => { totpSecret = null; element('enrollment-key').textContent = ''; element('enrollment-code').value = ''; };
@@ -21,17 +22,30 @@ try {
   const config = await fetch('/__/firebase/init.json', {cache:'no-store'});
   if (!config.ok) throw new Error('CONFIG_UNAVAILABLE');
   auth = getAuth(initializeApp(await config.json()));
+  auth.languageCode = 'pt-BR';
   await setPersistence(auth, inMemoryPersistence);
 } catch { status.textContent = 'Acesso temporariamente indisponível. Tente novamente mais tarde.'; submit.disabled = true; }
 ${webUpdateClient()}
 async function createSession(user) {
   const idToken = await user.getIdToken(true);
-  const response = await fetch('/__sessionLogin', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ idToken, orgId })});
-  if (!response.ok) {
+  let response = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      response = await fetch('/__sessionLogin', {
+        method:'POST', headers:{'Content-Type':'application/json'}, cache:'no-store',
+        body:JSON.stringify({ idToken, orgId })
+      });
+    } catch {
+      if (attempt === 0) continue;
+      throw new Error('SESSION_TEMPORARY_UNAVAILABLE');
+    }
+    if (response.ok) break;
+    if (response.status >= 500 && attempt === 0) continue;
     let code = 'SESSION_DENIED';
     try { code = (await response.json())?.code || code; } catch { /* Keep a generic, non-sensitive denial. */ }
     throw new Error(code);
   }
+  if (!response?.ok) throw new Error('SESSION_TEMPORARY_UNAVAILABLE');
   clearSetup(); await signOut(auth); location.replace(entryPath);
 }
 function accessIssueMessage(error) {
@@ -40,6 +54,7 @@ function accessIssueMessage(error) {
   if (code === 'MEMBERSHIP_NOT_PROVISIONED') return 'Conta autenticada, mas ainda sem vínculo operacional provisionado na organização.';
   if (code === 'COMPANY_ACCESS_DENIED') return 'Conta autenticada, mas não autorizada para a empresa selecionada.';
   if (code === 'SESSION_DENIED' || code === 'INVALID_LOGIN') return 'Segundo fator aceito, mas a sessão privada foi negada pela autorização do ambiente.';
+  if (code === 'SESSION_TEMPORARY_UNAVAILABLE') return 'A autenticação foi aceita, mas o serviço de sessão está temporariamente indisponível. Tente novamente.';
   return 'Segundo fator inválido ou expirado. Gere um novo código no autenticador e tente novamente.';
 }
 async function completeLogin(user) {
@@ -75,7 +90,9 @@ async function completeLogin(user) {
 form.addEventListener('submit', async event => {
   event.preventDefault(); if (!auth) return; submit.disabled = true; status.textContent = 'Validando acesso...';
   try {
-    const credential = await signInWithEmailAndPassword(auth, element('email').value.trim(), element('password').value);
+    const email = normalizeIdentityEmail(element('email').value);
+    element('email').value = email;
+    const credential = await signInWithEmailAndPassword(auth, email, element('password').value);
     element('password').value = ''; await completeLogin(credential.user);
   } catch (error) {
     element('password').value = '';
@@ -86,7 +103,13 @@ form.addEventListener('submit', async event => {
       for (const hint of hints) { const option = document.createElement('option'); option.value = hint.uid; option.textContent = hint.displayName || 'Autenticador'; element('mfa-factor').appendChild(option); }
       if (hints.length) { form.hidden = true; element('mfa-panel').hidden = false; return; }
       status.textContent = 'O segundo fator cadastrado não é suportado neste ambiente.';
-    } else { status.textContent = 'Acesso não autorizado. Confira seu cadastro e a empresa selecionada.'; }
+    } else if (error?.code === 'auth/network-request-failed') {
+      status.textContent = 'Falha de conexão. Verifique a internet e tente novamente.';
+    } else if (error?.code === 'auth/too-many-requests') {
+      status.textContent = 'Muitas tentativas em sequência. Aguarde alguns instantes e tente novamente.';
+    } else {
+      status.textContent = 'Acesso não autorizado. Confira seu cadastro e a empresa selecionada.';
+    }
     submit.disabled = false;
   }
 });
