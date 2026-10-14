@@ -132,6 +132,9 @@ if (recoveryQueryPresent) {
   } catch {
     clearRecovery();
     recoveryStatus.textContent = 'Link inválido. Solicite outro link de recuperação.';
+  } finally {
+    // The one-use URL is no longer needed after Firebase validates its action code.
+    recoveryQueryAtEntry = '';
   }
 }
 `;
