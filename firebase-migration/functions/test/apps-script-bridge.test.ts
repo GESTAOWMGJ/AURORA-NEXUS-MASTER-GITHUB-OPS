@@ -367,6 +367,31 @@ test('replay keys are stable, corrected amounts change version hash and missing 
   assert.equal(run().sent,2);assert.equal(run().sent,2);
   assert.equal(events[0].entityKey,events[2].entityKey);assert.equal(events[0].idempotencyKey,events[2].idempotencyKey);
   assert.notEqual(events[0].source.contentHash,events[0].metadata.sourceRowHash);
+  assert.equal(events[0].record.sourceRowHash,events[0].metadata.sourceRowHash);
+  assert.match(events[0].record.sourceRowHash,/^[a-f0-9]{64}$/);
   rows[0][1]='101';run();assert.equal(events[0].entityKey,events[4].entityKey);assert.notEqual(events[0].source.contentHash,events[4].source.contentHash);
   props.clear();failure=true;assert.equal(run().errors,1);assert.equal(props.size,0);
+});
+
+test('monthly summary identity survives producer sorting and requires competence',()=>{
+  const c=appsScriptContext() as any, sheet='19_RESUMO_FINANCEIRO_MENSAL';
+  const key=(month:string,row:number)=>c.wmgjFirestoreEntityKey_(sheet,{competencia:month},row);
+  assert.equal(key('2026-10',2),key('2026-10',3));
+  assert.notEqual(key('2026-09',2),key('2026-10',2));
+  assert.throws(()=>key('',2),/SUMMARY_COMPETENCE_REQUIRED/);
+});
+
+test('extractor TIPO and VALOR preserve directional and unclassified evidence',()=>{
+  const c=appsScriptContext() as any, sheet='18_LANCAMENTOS_FINANCEIROS_EXTRAIDOS';
+  for(const [direction,field] of [['CREDITO','creditCents'],['DEBITO','debitCents']]) {
+    const r=financialRow(c,sheet,{TIPO:direction,VALOR:'123,45'});
+    assert.equal(r[field],12345);assert.equal(r.extractedAmountCents,12345);
+    assert.equal(r.fieldOrigins[field].columns.join(','),'tipo,valor');
+    assert.equal(r.aggregationRole,'CONTROL_ONLY');
+  }
+  const unknown=financialRow(c,sheet,{TIPO:'INDEFINIDO',VALOR:'123,45'});
+  assert.equal(unknown.creditCents,null);assert.equal(unknown.debitCents,null);
+  assert.equal(unknown.extractedAmountCents,12345);
+  assert.throws(()=>financialRow(c,sheet,{TIPO:'CREDITO',VALOR:'100',CREDITO:'99'}),/MONEY_FIELD_CONFLICT/);
+  assert.throws(()=>financialRow(c,sheet,{TIPO:'DEBITO',VALOR:'-100'}),/EXTRACTED_AMOUNT_NEGATIVE/);
 });

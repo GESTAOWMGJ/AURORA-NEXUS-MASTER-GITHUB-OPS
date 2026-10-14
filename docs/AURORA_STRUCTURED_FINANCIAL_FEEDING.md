@@ -25,7 +25,7 @@ ela não representa o próximo crédito bancário e não pode usar emissão como
 | Contrato/regra vigente | evidência privada da organização | competência da prestação, cláusula, versão/hash e condições; emissão, crédito e SLA não são vencimento |
 
 Cada entidade conserva `source.parentId/sourceId/fileName`, hash do conteúdo
-materializado e `metadata.sourceRowHash` do texto original. `fieldOrigins`
+materializado e `record.sourceRowHash` (também espelhado em metadata) do texto original. `fieldOrigins`
 identifica as colunas monetárias. Branco vira null explícito, inclusive para
 revogar um valor anterior durante merge; zero conhecido permanece zero.
 Valor fiscal emitido não comprova saldo em aberto. `receivableCents=null`
@@ -38,7 +38,12 @@ exige resolução documentada, nunca rolagem automática de calendário.
 
 A identidade de NFS-e continua sua chave de acesso. Registros sem identidade
 forte preservam a posição na fonte congelada; não reordenar fontes durante backfill.
-Nas abas 18/19, documento compartilhado não é chave única do lançamento.
+Na aba 18, documento compartilhado não é chave única do lançamento.
+A aba 19 usa competência validada como identidade, pois seu produtor reordena
+as linhas. Ausência posterior de uma competência não autoriza apagamento: o
+resumo histórico CONTROL_ONLY permanece sujeito à conferência da fonte atual.
+O extrator alternativo TIPO/VALOR preserva o valor e deriva crédito/débito apenas
+para direção explícita; conflitos monetários interrompem a linha.
 Correção de adaptador altera hash materializado e chave idempotente versionada,
 mantendo entidade e revisão imutável existentes. Repetição idêntica conserva chave.
 Não aumentar artificialmente sourceVersion nem apagar recibos históricos.

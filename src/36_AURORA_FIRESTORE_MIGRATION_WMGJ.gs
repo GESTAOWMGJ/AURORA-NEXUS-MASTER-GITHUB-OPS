@@ -32,7 +32,7 @@ function wmgjFirestoreMigrationMap_() {
     // Extraction and monthly aggregation are evidence, never a second bank ledger.
     '18_LANCAMENTOS_FINANCEIROS_EXTRAIDOS': {
       entityType: 'sourceDocument', sensitivity: 'RESTRICTED', financialAdapter: 'EXTRACTED_MOVEMENT',
-      moneyFields: { creditCents: ['credito'], debitCents: ['debito'] }
+      moneyFields: { creditCents: ['credito'], debitCents: ['debito'], extractedAmountCents: ['valor'] }
     },
     '19_RESUMO_FINANCEIRO_MENSAL': {
       entityType: 'sourceDocument', sensitivity: 'RESTRICTED', financialAdapter: 'CASH_SUMMARY',
@@ -159,7 +159,12 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
       var record = config.bankStatementAdapter
         ? wmgjFirestoreBankStatementRecord_(headers, rawValues[offset], row, sourceRecord, rowHash)
         : wmgjFirestoreAddCanonicalMoney_(headers, rawValues[offset], row, sourceRecord, config.moneyFields || {});
-      if (config.financialAdapter) record = wmgjFirestoreFinancialRecord_(record, config, headers);
+      if (config.financialAdapter) {
+        record = wmgjFirestoreFinancialRecord_(record, config, headers);
+        // record is persisted in both current entities and immutable versions;
+        // event metadata alone is not retained by the ingestion backend.
+        record.sourceRowHash = rowHash;
+      }
       // Raw row hash remains separately auditable. The materialized content hash
       // includes the adapter result so a mapping fix becomes a revision, not a
       // false duplicate. Entity identity and immutable backend history stay intact.
@@ -406,6 +411,18 @@ function wmgjFirestoreFinancialRecord_(record, config, headers) {
     if (output[field] === undefined) output[field] = null;
     output.fieldOrigins[field] = { columns: columns, state: output[field] === null ? 'MISSING_VALUE' : 'SOURCE_REPORTED' };
   });
+  if (config.financialAdapter === 'EXTRACTED_MOVEMENT' && output.extractedAmountCents !== null) {
+    var direction = String(record.tipo || '').trim().toUpperCase();
+    var directedField = direction === 'CREDITO' ? 'creditCents' : direction === 'DEBITO' ? 'debitCents' : null;
+    if (directedField) {
+      if (output.extractedAmountCents < 0) throw new Error('EXTRACTED_AMOUNT_NEGATIVE');
+      if (output[directedField] !== null && output[directedField] !== output.extractedAmountCents) {
+        throw new Error('MONEY_FIELD_CONFLICT:' + directedField);
+      }
+      output[directedField] = output.extractedAmountCents;
+      output.fieldOrigins[directedField] = { columns: ['tipo', 'valor'], state: 'SOURCE_REPORTED' };
+    }
+  }
   output.originDocumentRef = record.link_drive || record.id_drive || null;
   output.invoiceNumber = record.numero_nf || record.nf_relacionada || null;
   output.sourceReconciliationStatus = record.status_conciliacao || record.status_extracao || record.status || null;
@@ -491,7 +508,12 @@ function wmgjFirestoreClinicalHeaders_(headers) {
 function wmgjFirestoreEntityKey_(sheetName, record, rowNumber) {
   // Several extracted movements can share the same originating PDF/Drive ID.
   // Their document reference is evidence, never their transaction identity.
-  if (sheetName === '18_LANCAMENTOS_FINANCEIROS_EXTRAIDOS' || sheetName === '19_RESUMO_FINANCEIRO_MENSAL') {
+  if (sheetName === '19_RESUMO_FINANCEIRO_MENSAL') {
+    var competence = wmgjFirestoreCompetencia_(record.competencia);
+    if (!competence) throw new Error('SUMMARY_COMPETENCE_REQUIRED');
+    return sheetName + ':competence:' + competence;
+  }
+  if (sheetName === '18_LANCAMENTOS_FINANCEIROS_EXTRAIDOS') {
     return sheetName + ':legacy-row:' + rowNumber;
   }
   var strongCandidates = [
