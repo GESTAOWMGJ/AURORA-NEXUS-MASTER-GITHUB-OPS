@@ -206,3 +206,21 @@ test("lançamento financeiro aberto sem natureza conhecida bloqueia cobertura em
   assert.equal(result.amounts.upcomingPayablesCents, null);
   assert.equal(result.canApproveDistribution, false);
 });
+
+test('explicit unknown receivable never falls back to invoice gross',()=>{
+  const r=buildLayFinancialStatus({orgId:'wmgj',competence:'2026-09',closing,
+    financialEntries:[{workflowState:'VALIDATED',kind:'PAYABLE',amountCents:100,dueDate:'2026-10-20'}],taxObligations:[],
+    invoices:[{workflowState:'VALIDATED',status:'OPEN',totalCents:90000,receivableCents:null,dueDate:'2026-10-20'}]}) as any;
+  assert.equal(r.counts.invalidOpenReceivables,1);assert.equal(r.amounts.receivableUntilCurrentDueCents,null);assert.equal(r.canApproveDistribution,false);
+});
+test('control summaries and replaced invoices cannot create obligations',()=>{
+  const r=buildLayFinancialStatus({orgId:'wmgj',competence:'2026-09',closing,
+    financialEntries:[{workflowState:'VALIDATED',aggregationRole:'CONTROL_ONLY',grossRevenueCents:100000}],taxObligations:[],
+    invoices:[{workflowState:'VALIDATED',status:'SUPERSEDED',totalCents:100000}]}) as any;
+  assert.equal(r.counts.invalidOpenPayables,0);assert.equal(r.counts.invalidOpenReceivables,0);assert.equal(r.dueDates.currentDueDate,null);
+});
+test('missing closing retains evidence diagnostics without manufacturing a closing',()=>{
+  const r=buildLayFinancialStatus({orgId:'wmgj',competence:'2026-09',closing:null,financialEntries:[],taxObligations:[],
+    invoices:[{financialMappingVersion:'v1.2',receivableState:'PENDING_RECONCILIATION',totalCents:10000}]}) as any;
+  assert.equal(r.state,'NO_CLOSING');assert.equal(r.sourceDiagnostics.invoiceRecords,1);assert.equal(r.sourceDiagnostics.pendingReceivableEvidence,1);assert.deepEqual(r.amounts,{});
+});

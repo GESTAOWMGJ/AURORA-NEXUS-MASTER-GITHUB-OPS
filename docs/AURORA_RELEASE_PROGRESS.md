@@ -103,3 +103,11 @@ UNVERIFIED e `allClientsSynchronized=false`; não criam executor ou auto-instala
 Esta candidata ainda está NOT_DEPLOYED, sem CI/publicação v2 ou recibo instalado.
 Contrato, autoridade existente, testes e rollback em
 `AURORA_ACTIVE_RELEASE_COMPONENTS_V2.md`. R029 conserva prazo e escopo originais.
+
+### 14/10/2026 — alimentação financeira estruturada
+
+Candidata sobre `2bc6e6a`: aliases de cabeçalhos reais, abas 18/19 como evidências
+de controle, origem por campo, replay versionado, preservação de null e exclusão
+de notas substituídas. Distingue saldo a receber de bruto e prazos a pagar de
+emissão/crédito. Não altera fechamentos. CI, publicação e ingestão real possuem
+gates independentes. Ver `AURORA_STRUCTURED_FINANCIAL_FEEDING.md`.

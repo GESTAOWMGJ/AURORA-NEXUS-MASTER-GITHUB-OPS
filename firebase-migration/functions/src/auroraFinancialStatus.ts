@@ -89,6 +89,7 @@ function isoDateOnly(value: unknown): string | null {
 }
 
 function dueDate(record: Record<string, unknown>): string | null {
+  if (record.financialMappingVersion && (record.dueDateState !== "VERIFIED" || !record.dueDateEvidenceRef)) return null;
   for (const key of ["dueDate", "due_date", "data_vencimento", "dueAt"]) {
     const parsed = isoDateOnly(record[key]);
     if (parsed) return parsed;
@@ -143,6 +144,7 @@ function payableRows(
   const rows: DatedAmount[] = [];
   let invalidOpenRecords = 0;
   const add = (record: Record<string, unknown>, forcedExpense: boolean) => {
+    if (record.aggregationRole === "CONTROL_ONLY" || record.aggregationRole === "HISTORY_ONLY") return;
     if (!isValidated(record) || PAYABLE_CLOSED.has(statusOf(record))) return;
     if (!forcedExpense && !explicitExpense(record)) {
       const declaredKind = normalized(record.kind ?? record.type ?? record.category ?? record.nature ?? record.natureza);
@@ -167,9 +169,17 @@ function receivableRows(invoices: Array<Record<string, unknown>>): DatedCollecti
   const rows: DatedAmount[] = [];
   let invalidOpenRecords = 0;
   for (const record of invoices) {
+    if (record.aggregationRole === "HISTORY_ONLY" || ["SUPERSEDED", "SUBSTITUIDA"].includes(statusOf(record))) continue;
+    if (record.financialMappingVersion && record.receivableState !== "VERIFIED") {
+      invalidOpenRecords += 1;
+      continue;
+    }
     if (!isValidated(record) || RECEIVABLE_CLOSED.has(statusOf(record))) continue;
     const date = dueDate(record);
-    const cents = firstCents(record, ["receivableCents", "receivable_cents", "totalCents", "total_cents", "amountCents", "amount_cents", "grossAmountCents", "valorCentavos", "valor_total", "valor_nf", "valor_nota", "valor_nfs_e", "valor_nfse"]);
+    // An explicit unknown outstanding balance must not fall back to invoice gross.
+    const cents = "receivableCents" in record ? safeCents(record.receivableCents)
+      : firstCents(record, ["receivable_cents", "totalCents", "total_cents", "amountCents", "amount_cents", "grossAmountCents", "valorCentavos"]);
+    if (cents === 0) continue;
     if (!date || cents === null) {
       invalidOpenRecords += 1;
       continue;
@@ -227,6 +237,17 @@ export function buildLayFinancialStatus(input: {
 }): Record<string, unknown> {
   const now = input.now ?? new Date();
   const today = localDateOnly(now);
+  const sourceDiagnostics = {
+    invoiceRecords: input.invoices.length,
+    financialEntryRecords: input.financialEntries.length,
+    taxObligationRecords: input.taxObligations.length,
+    noClosing: !input.closing,
+    // These cards are payable deadlines, not invoice issue/settlement dates.
+    deadlineBasis: "PAYABLES",
+    pendingReceivableEvidence: input.invoices.filter(record => record.financialMappingVersion
+      && record.aggregationRole !== "HISTORY_ONLY" && record.receivableState !== "VERIFIED").length,
+    importedControlRecords: input.financialEntries.filter(record => record.aggregationRole === "CONTROL_ONLY").length
+  };
   if (!input.closing) {
     return {
       schemaVersion: 1,
@@ -236,6 +257,7 @@ export function buildLayFinancialStatus(input: {
       generatedAt: now.toISOString(),
       amounts: {},
       dueDates: {},
+      sourceDiagnostics,
       canApproveDistribution: false,
       decision: null,
       sourceComplete: input.sourceComplete !== false,
@@ -329,6 +351,7 @@ export function buildLayFinancialStatus(input: {
       ? Number(input.currentDecision.revision)
       : 0,
     sourceComplete,
+    sourceDiagnostics,
     governance: {
       absenceIsZero: false,
       approvalMovesMoney: false,

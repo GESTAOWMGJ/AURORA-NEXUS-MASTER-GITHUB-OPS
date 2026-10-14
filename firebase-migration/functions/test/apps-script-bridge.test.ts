@@ -323,3 +323,75 @@ test("actor do Apps Script é pseudonimizado antes do evento", () => {
   assert.match(actorId, /^apps-script:[a-f0-9]{32}$/);
   assert.doesNotMatch(actorId, /auditor|example/i);
 });
+
+function financialRow(c:any, sheet:string, values:Record<string,string>) {
+  const cfg=c.wmgjFirestoreMigrationMap_()[sheet], headers=Object.keys(values), row=Object.values(values);
+  return c.wmgjFirestoreFinancialRecord_(c.wmgjFirestoreAddCanonicalMoney_(headers,row,row,c.wmgjFirestoreRowObject_(headers,row),cfg.moneyFields),cfg,headers);
+}
+test('real headers preserve absent values, zero and reported settlement',()=>{
+  const c=appsScriptContext() as any;
+  const r=financialRow(c,'05_FINANCEIRO_MENSAL',{RECEITA_BRUTA_NFS:'123,45',RECEBIDO_CONCILIADO:'',EM_ABERTO:'0',STATUS_CONCILIACAO:'CONCILIADO'});
+  assert.equal(r.grossRevenueCents,12345);assert.equal(r.receivedAmountCents,null);assert.equal(r.outstandingAmountCents,0);
+  assert.equal(r.aggregationRole,'CONTROL_ONLY');assert.equal(r.settlementEvidenceState,'PENDING_BANK_EVIDENCE');
+});
+test('billing never infers due date or receipt from issue date, narrative or invalid status',()=>{
+  const c=appsScriptContext() as any;
+  const values={CHAVE_ACESSO:'synthetic-invoice',VALOR_SERVICO:'150,00',VALOR_LIQUIDO:'145,00',DATA_EMISSAO:'13/10/2026',OBS_AUDITORIA:'Recebida em 14/10/2026',ID_DRIVE:'synthetic-doc',STATUS_EXTRACAO:'VALIDA_REPROCESSADA'};
+  const r=financialRow(c,'06_NFS_E',values);
+  assert.equal(r.totalCents,15000);assert.equal(r.netAmountCents,14500);assert.equal(r.receivableCents,null);assert.equal(r.dueDate,null);
+  assert.equal(c.wmgjFirestoreFinancialWorkflow_(r,{financialAdapter:'INVOICE'}).state,'VALIDATED');
+  for(const status of ['INVALIDA','SUBSTITUIDA_PELA_NF7','CANCELADA','VALIDA_SUBSTITUIDA']) {
+    const pending=financialRow(c,'06_NFS_E',{...values,STATUS_EXTRACAO:status});
+    assert.equal(c.wmgjFirestoreFinancialWorkflow_(pending,{financialAdapter:'INVOICE'}).state,'PENDING_HUMAN_REVIEW');
+  }
+});
+test('extractions and aggregates are control documents, never duplicate bank transactions',()=>{
+  const c=appsScriptContext() as any;
+  for(const name of ['18_LANCAMENTOS_FINANCEIROS_EXTRAIDOS','19_RESUMO_FINANCEIRO_MENSAL']) {
+    const cfg=c.wmgjFirestoreMigrationMap_()[name];assert.equal(cfg.entityType,'sourceDocument');
+    const r=financialRow(c,name,{CREDITO:'100',TOTAL_CREDITOS:'100',STATUS:'CONCILIADO'});
+    assert.equal(r.aggregationRole,'CONTROL_ONLY');assert.equal(c.wmgjFirestoreFinancialWorkflow_(r,cfg).state,'PENDING_HUMAN_REVIEW');
+  }
+});
+test('replay keys are stable, corrected amounts change version hash and missing receipts preserve checkpoint',()=>{
+  const c=appsScriptContext() as any, props=new Map<string,string>(), events:any[]=[];
+  c.PropertiesService={getScriptProperties:()=>({getProperty:(k:string)=>props.get(k)||null,setProperty:(k:string,v:string)=>props.set(k,v)})};
+  c.wmgjFirestoreLog_=()=>{};c.wmgjFirestoreActorId_=()=> 'synthetic-actor';
+  let failure=false;
+  c.wmgjFirestoreEnviarEvento_=(event:any)=>{events.push(event);return failure&&events.length%2===1?{ok:false}:{ok:true,accepted:true}};
+  const headers=['CHAVE_ACESSO','VALOR_SERVICO','COMPETENCIA_ASSISTENCIAL','STATUS_EXTRACAO','ID_DRIVE'];
+  const rows=[['synthetic-a','100','2026-10','VALIDA','synthetic-doc'],['synthetic-b','200','2026-10','VALIDA','synthetic-doc']];
+  const sheet={getLastRow:()=>3,getLastColumn:()=>headers.length,getRange:(row:number,_col:number,count:number)=>({getDisplayValues:()=>row===1?[headers]:rows.slice(row-2,row-2+count),getValues:()=>rows.slice(row-2,row-2+count)})};
+  const ss={getId:()=> 'synthetic-sheet',getSheetByName:()=>sheet};
+  const run=()=>c.wmgjFirestoreMigrarAba_(ss,'06_NFS_E',c.wmgjFirestoreMigrationMap_()['06_NFS_E'],2,{orgId:'tenant-a',dryRun:false});
+  assert.equal(run().sent,2);assert.equal(run().sent,2);
+  assert.equal(events[0].entityKey,events[2].entityKey);assert.equal(events[0].idempotencyKey,events[2].idempotencyKey);
+  assert.notEqual(events[0].source.contentHash,events[0].metadata.sourceRowHash);
+  assert.equal(events[0].record.sourceRowHash,events[0].metadata.sourceRowHash);
+  assert.match(events[0].record.sourceRowHash,/^[a-f0-9]{64}$/);
+  rows[0][1]='101';run();assert.equal(events[0].entityKey,events[4].entityKey);assert.notEqual(events[0].source.contentHash,events[4].source.contentHash);
+  props.clear();failure=true;assert.equal(run().errors,1);assert.equal(props.size,0);
+});
+
+test('monthly summary identity survives producer sorting and requires competence',()=>{
+  const c=appsScriptContext() as any, sheet='19_RESUMO_FINANCEIRO_MENSAL';
+  const key=(month:string,row:number)=>c.wmgjFirestoreEntityKey_(sheet,{competencia:month},row);
+  assert.equal(key('2026-10',2),key('2026-10',3));
+  assert.notEqual(key('2026-09',2),key('2026-10',2));
+  assert.throws(()=>key('',2),/SUMMARY_COMPETENCE_REQUIRED/);
+});
+
+test('extractor TIPO and VALOR preserve directional and unclassified evidence',()=>{
+  const c=appsScriptContext() as any, sheet='18_LANCAMENTOS_FINANCEIROS_EXTRAIDOS';
+  for(const [direction,field] of [['CREDITO','creditCents'],['DEBITO','debitCents']]) {
+    const r=financialRow(c,sheet,{TIPO:direction,VALOR:'123,45'});
+    assert.equal(r[field],12345);assert.equal(r.extractedAmountCents,12345);
+    assert.equal(r.fieldOrigins[field].columns.join(','),'tipo,valor');
+    assert.equal(r.aggregationRole,'CONTROL_ONLY');
+  }
+  const unknown=financialRow(c,sheet,{TIPO:'INDEFINIDO',VALOR:'123,45'});
+  assert.equal(unknown.creditCents,null);assert.equal(unknown.debitCents,null);
+  assert.equal(unknown.extractedAmountCents,12345);
+  assert.throws(()=>financialRow(c,sheet,{TIPO:'CREDITO',VALOR:'100',CREDITO:'99'}),/MONEY_FIELD_CONFLICT/);
+  assert.throws(()=>financialRow(c,sheet,{TIPO:'DEBITO',VALOR:'-100'}),/EXTRACTED_AMOUNT_NEGATIVE/);
+});
