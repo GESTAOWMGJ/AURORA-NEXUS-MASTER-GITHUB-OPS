@@ -120,6 +120,21 @@ test('exhausted session 5xx retries report temporary outage rather than invalid 
   assert.deepEqual(mfa.redirects,['/portal']);
 });
 
+test('verified MFA survives a Firebase token-refresh network outage without replaying the factor',async()=>{
+  const f=await fixture(true);f.user.emailVerified=true;
+  let tokenCalls=0;
+  f.user.getIdToken=async()=>{if(tokenCalls++===0)throw {code:'auth/network-request-failed'};return 'synthetic-id-token';};
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});
+  await f.submit();await f.click('mfa-submit');
+  assert.match(f.el('mfa-status').textContent,/Falha de conexão/);
+  assert.equal(f.calls.filter(c=>c.name==='mfaResolve').length,1);
+  assert.equal(f.redirects.length,0);
+  await f.click('mfa-submit');
+  assert.equal(f.calls.filter(c=>c.name==='mfaResolve').length,1);
+  assert.equal(tokenCalls,2);
+  assert.deepEqual(f.redirects,['/portal']);
+});
+
 test('authorization denial is terminal and never retried as a transient network failure',async()=>{
   const denied=await fixture(false,{ok:false,status:403,json:async()=>({code:'COMPANY_ACCESS_DENIED'})});
   await denied.submit();
