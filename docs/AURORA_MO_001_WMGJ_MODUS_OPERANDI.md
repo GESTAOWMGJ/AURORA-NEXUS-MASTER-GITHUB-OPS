@@ -761,3 +761,15 @@ Registro nativo, Release Cockpit e seção IA Master representam a capacidade; s
 presença não comprova dispositivo conectado, integração autenticada ou deploy.
 Instalação, teste físico e publicação exigem evidências separadas por SHA.
 Procedimento e limites: `desktop/ia-master/README.md`.
+
+## Alimentação financeira estruturada — 14/10/2026
+
+Desafio: fontes tabulares existentes não viravam fatos financeiros completos.
+Aliases divergentes e abas fora do mapa foram comprovados no bridge. Capacidade
+abstrata incorporada ao registro nativo: resumo e extração são controles, NFS-e
+é faturamento, recebimento exige banco, saldo desconhecido não herda bruto, prazo
+exige contrato aplicável. Correção de mapeamento deve produzir revisão da mesma
+entidade; mesmo replay conserva chave e recibo. Fechamentos não são reescritos.
+Implementação e testes têm provas próprias; ingestão real, implantação e adoção
+pelo Xeon permanecem PENDING até recibos. Contrato de campos, gates e rollback:
+`docs/AURORA_STRUCTURED_FINANCIAL_FEEDING.md`.

@@ -331,3 +331,13 @@ test("mapa operacional preserva os módulos Aurora Nexus 2.3.0", () => {
   assert.deepEqual(AURORA_MODULES[0], ["M01", "Ingestão e Proveniência Documental"]);
   assert.deepEqual(AURORA_MODULES[9], ["M10", "Trilha de Auditoria e Integridade"]);
 });
+
+test('superseded invoices are audit history, not additional billing',()=>{
+  const projection=buildProjection(source({invoices:[
+    {workflowState:'VALIDATED',totalCents:10000,competence:'2026-09',aggregationRole:'HISTORY_ONLY'},
+    {workflowState:'VALIDATED',totalCents:10000,competence:'2026-09',status:'SUPERSEDED'},
+    {workflowState:'VALIDATED',totalCents:10000,competence:'2026-09',status:'ISSUED_UNRECONCILED'}
+  ]}),new Date('2026-10-14T00:00:00Z'),context) as any;
+  assert.equal(projection.financialCents.invoicedCents,10000);
+  assert.equal(projection.financialCents.receivedCents,null);
+});

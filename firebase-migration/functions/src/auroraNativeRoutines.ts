@@ -66,6 +66,21 @@ export function nativeRoutineSummary(): Record<string, unknown> {
     },
     routines: AURORA_NATIVE_ROUTINES,
     counts,
+    structuredFinancialIngestionPolicy: {
+      routineId: "AURORA-REV-SAN-001",
+      executor: "EXISTING_SHEETS_BRIDGE",
+      state: "IMPLEMENTED_PENDING_RUNTIME_VALIDATION",
+      source: "docs/AURORA_STRUCTURED_FINANCIAL_FEEDING.md",
+      billingIsReceipt: false,
+      extractedMovementIsBankEvidence: false,
+      summaryIsAdditionalTransaction: false,
+      unknownBalanceFallsBackToInvoiceGross: false,
+      issueDateIsDueDate: false,
+      immutableRevisionsRequired: true,
+      privateContractRulesCrossTenants: false,
+      schedulerCreated: false,
+      monthlyClosingMutation: false
+    },
     releaseConvergencePolicy: {
       routineId: "AURORA-CANONICAL-RELEASE-001",
       version: 2,

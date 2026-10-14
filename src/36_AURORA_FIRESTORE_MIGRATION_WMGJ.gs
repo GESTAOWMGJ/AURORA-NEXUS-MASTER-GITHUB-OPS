@@ -4,7 +4,7 @@
  * Checkpoint só avança quando DRY_RUN=false e o endpoint aceita/identifica duplicata.
  */
 
-var WMGJ_FIRESTORE_MIGRATION_VERSION = 'v1.1.0-continuous-versioning';
+var WMGJ_FIRESTORE_MIGRATION_VERSION = 'v1.2.0-structured-financial';
 var WMGJ_FIRESTORE_MONEY_NORMALIZATION_VERSION = 'brl-cents-v1';
 
 function wmgjFirestoreMigrationMap_() {
@@ -17,16 +17,26 @@ function wmgjFirestoreMigrationMap_() {
       moneyFields: { amountCents: ['valor', 'valor_total', 'custo', 'despesa'] }
     },
     '05_FINANCEIRO_MENSAL': {
-      entityType: 'financialEntry', sensitivity: 'RESTRICTED',
+      entityType: 'financialEntry', sensitivity: 'RESTRICTED', financialAdapter: 'MONTHLY_SUMMARY',
       moneyFields: {
-        grossRevenueCents: ['receita_bruta'], receivedAmountCents: ['recebido', 'valor_recebido'],
+        grossRevenueCents: ['receita_bruta_nfs', 'receita_bruta'], receivedAmountCents: ['recebido_conciliado', 'recebido', 'valor_recebido'],
         outstandingAmountCents: ['em_aberto', 'valor_em_aberto'], expenseAmountCents: ['despesa', 'despesas'],
         resultAmountCents: ['resultado']
       }
     },
     '06_NFS_E': {
-      entityType: 'invoice', sensitivity: 'RESTRICTED',
-      moneyFields: { totalCents: ['valor_total', 'valor_nf', 'valor_nota', 'valor_nfs_e', 'valor_nfse', 'valor'] }
+      entityType: 'invoice', sensitivity: 'RESTRICTED', financialAdapter: 'INVOICE',
+      moneyFields: { totalCents: ['valor_servico', 'valor_total', 'valor_nf', 'valor_nota', 'valor_nfs_e', 'valor_nfse', 'valor'],
+        netAmountCents: ['valor_liquido'], taxAmountCents: ['iss_apurado'], receivableCents: ['saldo_receber_comprovado'] }
+    },
+    // Extraction and monthly aggregation are evidence, never a second bank ledger.
+    '18_LANCAMENTOS_FINANCEIROS_EXTRAIDOS': {
+      entityType: 'sourceDocument', sensitivity: 'RESTRICTED', financialAdapter: 'EXTRACTED_MOVEMENT',
+      moneyFields: { creditCents: ['credito'], debitCents: ['debito'] }
+    },
+    '19_RESUMO_FINANCEIRO_MENSAL': {
+      entityType: 'sourceDocument', sensitivity: 'RESTRICTED', financialAdapter: 'CASH_SUMMARY',
+      moneyFields: { creditCents: ['total_creditos'], debitCents: ['total_debitos'], resultAmountCents: ['resultado_liquido'], reviewAmountCents: ['valor_indefinido'] }
     },
     '07_ESCALA': { entityType: 'shift', sensitivity: 'RESTRICTED' },
     '07_IMPOSTOS': {
@@ -149,6 +159,12 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
       var record = config.bankStatementAdapter
         ? wmgjFirestoreBankStatementRecord_(headers, rawValues[offset], row, sourceRecord, rowHash)
         : wmgjFirestoreAddCanonicalMoney_(headers, rawValues[offset], row, sourceRecord, config.moneyFields || {});
+      if (config.financialAdapter) record = wmgjFirestoreFinancialRecord_(record, config, headers);
+      // Raw row hash remains separately auditable. The materialized content hash
+      // includes the adapter result so a mapping fix becomes a revision, not a
+      // false duplicate. Entity identity and immutable backend history stay intact.
+      var contentHash = config.financialAdapter
+        ? wmgjFirestoreHashString_(JSON.stringify(record)) : rowHash;
       var entityKey = wmgjFirestoreEntityKey_(sheetName, record, rowNumber);
       var legacyStatus = String(
         record.status ||
@@ -160,6 +176,7 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
         ''
       );
       var workflow = wmgjFirestoreWorkflowFromLegacy_(legacyStatus, config.entityType);
+      if (config.financialAdapter) workflow = wmgjFirestoreFinancialWorkflow_(record, config);
       var occurredAt = new Date();
       var event = {
         schemaVersion: 1,
@@ -171,7 +188,7 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
         // envia a versão-fonte 1 e o hash do conteúdo; o backend AURORA mantém
         // a revisão canônica monotônica e imutável da entidade.
         sourceVersion: 1,
-        idempotencyKey: [bridgeConfig.orgId, 'SHEETS', ss.getId(), sheetName, rowNumber, rowHash].join(':'),
+        idempotencyKey: [bridgeConfig.orgId, 'SHEETS', ss.getId(), sheetName, rowNumber, contentHash, WMGJ_FIRESTORE_MIGRATION_VERSION].join(':'),
         entityType: config.entityType,
         entityKey: entityKey,
         actor: {
@@ -184,8 +201,8 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
           sourceId: [ss.getId(), sheetName, rowNumber].join(':'),
           parentId: ss.getId(),
           fileName: sheetName + '!A' + rowNumber,
-          contentHash: rowHash,
-          hashMethod: 'row_sha256'
+          contentHash: contentHash,
+          hashMethod: config.financialAdapter ? 'content_sha256' : 'row_sha256'
         },
         workflowState: workflow.state,
         reviewState: workflow.review,
@@ -199,12 +216,14 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
           moneyNormalizationVersion: WMGJ_FIRESTORE_MONEY_NORMALIZATION_VERSION,
           sourceSheet: sheetName,
           sourceRow: rowNumber,
+          sourceRowHash: rowHash,
           nonDestructive: true
         }
       };
       var response = wmgjFirestoreEnviarEvento_(event);
       planned++;
       if (bridgeConfig.dryRun) return;
+      if (!response.ok || !(response.accepted || response.duplicate)) throw new Error('MIGRATION_RECEIPT_REQUIRED');
       if (response.accepted) sent++;
       if (response.duplicate) duplicates++;
       if (response.ok && (response.accepted || response.duplicate)) {
@@ -372,6 +391,67 @@ function wmgjFirestoreNormalizeHeader_(header, index) {
   return key || 'col_' + (index + 1);
 }
 
+/** Mapping only: no reconciliation, payment, closing or contract decision. */
+function wmgjFirestoreFinancialRecord_(record, config, headers) {
+  var output = Object.assign({}, record);
+  var normalizedHeaders = headers.map(wmgjFirestoreNormalizeHeader_);
+  output.financialMappingVersion = WMGJ_FIRESTORE_MIGRATION_VERSION;
+  output.financialRecordRole = config.financialAdapter;
+  output.fieldOrigins = {};
+  Object.keys(config.moneyFields || {}).forEach(function(field) {
+    var columns = config.moneyFields[field].filter(function(name) {
+      return normalizedHeaders.indexOf(name) >= 0;
+    });
+    // Explicit null also revokes a former value under Firestore merge semantics.
+    if (output[field] === undefined) output[field] = null;
+    output.fieldOrigins[field] = { columns: columns, state: output[field] === null ? 'MISSING_VALUE' : 'SOURCE_REPORTED' };
+  });
+  output.originDocumentRef = record.link_drive || record.id_drive || null;
+  output.invoiceNumber = record.numero_nf || record.nf_relacionada || null;
+  output.sourceReconciliationStatus = record.status_conciliacao || record.status_extracao || record.status || null;
+  output.settlementEvidenceState = 'PENDING_BANK_EVIDENCE';
+  // Neither issue date, movement date nor SLA is a contractual due date.
+  output.dueDate = null;
+  output.dueDateEvidenceRef = null;
+  output.dueDateState = 'MISSING_CONTRACT_EVIDENCE';
+  output.fieldOrigins.dueDate = { columns: [], state: output.dueDateState };
+  if (config.financialAdapter === 'MONTHLY_SUMMARY') {
+    output.kind = 'FINANCIAL_SUMMARY';
+    output.status = 'REPORTED_SUMMARY';
+    output.aggregationRole = 'CONTROL_ONLY';
+  } else if (config.financialAdapter === 'INVOICE') {
+    var state = String(record.status_extracao || '').toUpperCase();
+    output.kind = 'INVOICE';
+    output.status = /SUBSTITUIDA|CANCELAD|ANULAD/.test(state) ? 'SUPERSEDED' : 'ISSUED_UNRECONCILED';
+    output.aggregationRole = output.status === 'SUPERSEDED' ? 'HISTORY_ONLY' : 'BILLING_ONLY';
+    output.receivableState = 'PENDING_RECONCILIATION';
+    // A source-reported balance remains available for audit, not a receivable
+    // until its evidence is verified in the existing reconciliation workflow.
+    output.reportedReceivableCents = output.receivableCents;
+    output.receivableCents = null;
+  } else {
+    output.kind = config.financialAdapter;
+    output.category = 'financial';
+    output.status = 'PENDING_EVIDENCE';
+    output.aggregationRole = 'CONTROL_ONLY';
+    output.nativeReady = false;
+    output.sourceIndependent = false;
+    output.documentFragility = 'MISSING_CANONICAL_FIELDS';
+  }
+  return output;
+}
+
+function wmgjFirestoreFinancialWorkflow_(record, config) {
+  // Status text containing VALID (e.g. INVALIDA) is not validation.
+  if (config.financialAdapter === 'INVOICE' && record.status !== 'SUPERSEDED'
+      && /^VALIDA(?:_|$)/.test(String(record.status_extracao || '').toUpperCase())
+      && Number.isSafeInteger(record.totalCents) && record.totalCents >= 0
+      && record.originDocumentRef && record.chave_acesso) {
+    return { state: 'VALIDATED', review: 'NOT_REQUIRED', risk: 'LOW' };
+  }
+  return { state: 'PENDING_HUMAN_REVIEW', review: 'PENDING', risk: 'MEDIUM' };
+}
+
 function wmgjFirestoreClinicalHeaders_(headers) {
   var exactBlocked = {
     'data_nascimento': true,
@@ -409,6 +489,11 @@ function wmgjFirestoreClinicalHeaders_(headers) {
 }
 
 function wmgjFirestoreEntityKey_(sheetName, record, rowNumber) {
+  // Several extracted movements can share the same originating PDF/Drive ID.
+  // Their document reference is evidence, never their transaction identity.
+  if (sheetName === '18_LANCAMENTOS_FINANCEIROS_EXTRAIDOS' || sheetName === '19_RESUMO_FINANCEIRO_MENSAL') {
+    return sheetName + ':legacy-row:' + rowNumber;
+  }
   var strongCandidates = [
     record.chave_acesso,
     record.id_operacao,
