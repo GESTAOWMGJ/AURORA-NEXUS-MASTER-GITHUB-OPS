@@ -19,10 +19,10 @@ const recoveryQueryAtEntry = String(location.search || '');
 const recoveryEntryParams = new URLSearchParams(recoveryQueryAtEntry);
 const recoveryQueryPresent = recoveryEntryParams.has('oobCode') || recoveryEntryParams.getAll('mode').includes('resetPassword');
 if (recoveryQueryPresent) history.replaceState(null, '', location.pathname);
-let auth, resolver = null, setupUser = null, totpSecret = null;
+let auth, resolver = null, setupUser = null, totpSecret = null, mfaSessionRetryUser = null;
 let onboardingUser = null, onboardingRetrySession = false;
 const clearSetup = () => { totpSecret = null; element('enrollment-key').textContent = ''; element('enrollment-code').value = ''; };
-window.addEventListener('pagehide', () => { clearSetup(); onboardingUser = null; onboardingRetrySession = false; const input = element('registration-password'); if (input) input.value = ''; });
+window.addEventListener('pagehide', () => { clearSetup(); mfaSessionRetryUser = null; onboardingUser = null; onboardingRetrySession = false; const input = element('registration-password'); if (input) input.value = ''; });
 try {
   const config = await fetch('/__/firebase/init.json', {cache:'no-store'});
   if (!config.ok) throw new Error('CONFIG_UNAVAILABLE');
@@ -96,7 +96,7 @@ async function completeLogin(user) {
   }
 }
 form.addEventListener('submit', async event => {
-  event.preventDefault(); if (!auth) return; submit.disabled = true; status.textContent = 'Validando acesso...';
+  event.preventDefault(); if (!auth) return; mfaSessionRetryUser = null; submit.disabled = true; status.textContent = 'Validando acesso...';
   try {
     const email = normalizeIdentityEmail(element('email').value);
     element('email').value = email;
@@ -126,12 +126,21 @@ form.addEventListener('submit', async event => {
 element('mfa-submit').addEventListener('click', async () => {
   const button = element('mfa-submit'); button.disabled = true;
   try {
-    if (!resolver) throw new Error('MFA_REQUIRED');
-    const assertion = TotpMultiFactorGenerator.assertionForSignIn(element('mfa-factor').value, element('mfa-code').value.trim());
-    const credential = await resolver.resolveSignIn(assertion);
-    element('mfa-code').value = ''; await completeLogin(credential.user);
+    if (!resolver && !mfaSessionRetryUser) throw new Error('MFA_REQUIRED');
+    // A verified second factor may be reused in memory solely to recheck an unavailable app session.
+    // Firebase and the server still validate a fresh token and current organization membership.
+    const user = mfaSessionRetryUser || (await resolver.resolveSignIn(
+      TotpMultiFactorGenerator.assertionForSignIn(element('mfa-factor').value, element('mfa-code').value.trim())
+    )).user;
+    try {
+      await completeLogin(user);
+      mfaSessionRetryUser = null;
+    } catch (error) {
+      mfaSessionRetryUser = error?.message === 'SESSION_TEMPORARY_UNAVAILABLE' ? user : null;
+      throw error;
+    }
   } catch (error) { element('mfa-status').textContent = accessIssueMessage(error); }
-  finally { button.disabled = false; }
+  finally { element('mfa-code').value = ''; button.disabled = false; }
 });
 element('onboarding-submit')?.addEventListener('click', async () => {
   const button = element('onboarding-submit'); button.disabled = true;
