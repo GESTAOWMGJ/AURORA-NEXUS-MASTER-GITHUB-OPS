@@ -19,7 +19,7 @@ import { setupPage } from "./auroraSetup.js";
 import { loginClient } from "./auroraLoginClient.js";
 import { passwordRecoveryMarkup } from "./auroraPasswordRecovery.js";
 import { accountSecurityPage } from "./auroraAccountSecurity.js";
-import { auroraDesignStyles } from "./auroraDesignSystem.js";
+import { auroraDesignStyles, auroraIdentityMark } from "./auroraDesignSystem.js";
 import { CANONICAL_PORTAL_PATH, companyEntry, companyEntryAllowsMember, companyEntryPath, companyManifest, isCompanySlug, portalManifest, userFacingEntryPath } from "./auroraTenantEntry.js";
 
 const AURORA_NEXUS_ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
@@ -93,7 +93,7 @@ function setSecurityHeaders(res: { set(name: string, value: string): unknown }, 
   );
 }
 
-function loginPage(message = "Acesso privado. Entre com usuário autorizado.", entryOrg: string | null = null): string {
+function loginPage(message = "Use o e-mail e a senha da sua conta para continuar.", entryOrg: string | null = null): string {
   const entryPath = entryOrg ? companyEntryPath(entryOrg) : "/";
   const manifestPath = entryOrg ? `${entryPath}/manifest.webmanifest` : "/manifest.webmanifest";
   return `<!doctype html>
@@ -101,7 +101,8 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado.", e
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#06191e">
+  <meta http-equiv="Content-Security-Policy" content="form-action 'none'">
+  <meta name="theme-color" content="#073b4c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Aurora Nexus">
@@ -118,6 +119,9 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado.", e
     h2 { font-family:'Source Serif 4',Georgia,serif; font-weight:600; font-size:21px; line-height:1.25; margin:0 0 12px; }
     p { margin:0 0 22px; color:var(--muted); line-height:1.55; }
     label { display:block; margin:14px 0 6px; color:var(--text); font-size:13px; font-weight:650; }
+    .auth-option { display:flex; align-items:flex-start; gap:10px; padding:12px; margin:18px 0 0; border:1px solid var(--line); border-radius:8px; cursor:pointer; font-size:13px; }
+    .auth-option input[type=checkbox] { width:18px; height:18px; min-height:18px; margin:3px 0 0; flex:0 0 18px; }
+    .auth-option small { display:block; margin-top:3px; color:var(--muted); font-size:12px; font-weight:400; line-height:1.5; }
     input, select { width:100%; min-height:46px; padding:12px 14px; border-radius:8px; border:1px solid #b8c7c3; background:#fff; color:var(--text); font:inherit; font-size:16px; }
     input:focus { border-color:var(--gold); box-shadow:0 0 0 3px rgba(198,164,93,.18); }
     button { width:100%; min-height:46px; margin-top:18px; border:1px solid var(--ink); border-radius:8px; padding:13px 16px; background:var(--ink); color:#fffdf8; font-weight:750; cursor:pointer; font-size:15px; }
@@ -134,30 +138,33 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado.", e
   </style>
 </head>
 <body>
-  <main>
-    <p class="eyebrow">Aurora Nexus</p>
-    <h1>${entryOrg ? escapeHtml(entryOrg.toUpperCase()) : "Ambiente privado"}</h1>
-    <p>${escapeHtml(message)}</p>
-    <form id="login-form" autocomplete="on">
+  <main class="access-card" aria-labelledby="access-title">
+    ${auroraIdentityMark()}
+    <h1 id="access-title">${entryOrg ? escapeHtml(entryOrg.toUpperCase()) : "Entre no Aurora"}</h1>
+    <p id="access-message">${escapeHtml(message)}</p>
+    <form id="login-form" autocomplete="on" aria-describedby="access-message">
       <label for="email">E-mail</label>
       <input id="email" name="email" type="email" autocomplete="username" required>
       <label for="password">Senha</label>
       <input id="password" name="password" type="password" autocomplete="current-password" required>
-      <label><input id="secure-setup" type="checkbox" style="width:auto"> Configurar segundo fator neste acesso</label>
+      <label class="auth-option"><input id="secure-setup" type="checkbox" aria-describedby="secure-setup-help"><span>Configurar meu primeiro acesso<small id="secure-setup-help">Use para confirmar seu e-mail e cadastrar o aplicativo autenticador.</small></span></label>
       <button id="submit" type="submit">Entrar</button>
       <button id="open-password-recovery" class="secondary" type="button">Esqueci minha senha</button>
       <p class="fineprint"><a href="/account-security">Senha e autenticador da minha conta</a></p>
-      <div id="status" class="status" aria-live="polite"></div>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
     </form>
-    <section id="mfa-panel" hidden>
-      <p>Esta conta exige um segundo fator TOTP. Confirme o fator cadastrado antes de criar a sessão privada.</p>
-      <label for="mfa-factor">Fator</label>
+    <section id="mfa-panel" hidden aria-labelledby="mfa-title">
+      <h2 id="mfa-title">Confirme seu acesso</h2>
+      <p id="mfa-help">Abra o aplicativo autenticador cadastrado na sua conta e informe o código atual.</p>
+      <form id="mfa-form">
+      <label for="mfa-factor">Autenticador cadastrado</label>
       <select id="mfa-factor"></select>
       <label for="mfa-code">Código temporário</label>
-      <input id="mfa-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,8}" maxlength="8">
-      <button id="mfa-submit" type="button">Confirmar segundo fator</button>
+      <input id="mfa-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,8}" maxlength="8" aria-describedby="mfa-help mfa-status">
+      <button id="mfa-submit" type="submit">Confirmar segundo fator</button>
       <button id="mfa-recovery-help" class="secondary" type="button">Perdi meu autenticador</button>
-      <div id="mfa-status" class="status" aria-live="polite"></div>
+      </form>
+      <div id="mfa-status" class="status" role="status" aria-live="polite"></div>
     </section>
     <section id="activation-panel" hidden>
       <h2>Ative seu acesso seguro</h2>
@@ -174,7 +181,7 @@ function loginPage(message = "Acesso privado. Entre com usuário autorizado.", e
       <div id="onboarding-status" class="status" aria-live="polite"></div>
     </section>
     ${passwordRecoveryMarkup()}
-    <div class="fineprint">Sem demonstração pública. Acesso restrito a usuários previamente autorizados.</div>
+    <div class="fineprint">Seu acesso é individual e precisa estar autorizado pela sua empresa.</div>
   </main>
   <script type="module">${loginClient(entryOrg)}</script>
 </body>

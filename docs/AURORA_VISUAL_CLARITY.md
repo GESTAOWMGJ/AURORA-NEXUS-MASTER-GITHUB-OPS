@@ -33,9 +33,10 @@ a ação de tentar a consulta novamente permanece no tratamento existente.
 
 ## Evidência e limites
 
-Verificação local: compilação TypeScript e 55 testes de frontend, runtime do
-cliente, apresentação financeira, ingestão e configuração da automação passaram.
-O smoke visual usou exclusivamente valores sintéticos, em 1440 × 1000 e
+Histórico da primeira fase: compilação TypeScript e 55 testes de frontend,
+runtime do cliente, apresentação financeira, ingestão e configuração da automação
+passaram. Esse total pertence à fase anterior, não à suíte mais recente.
+O smoke visual dessa fase usou exclusivamente valores sintéticos, em 1440 × 1000 e
 390 × 844. Os valores de exemplo não comprovam faturamento, saldo ou implantação
 WMGJ. CI deve ser conferido no SHA final do PR; teste local não o substitui.
 O harness de runtime reconhece tags de script sem diferenciar maiúsculas e
@@ -44,6 +45,52 @@ minúsculas; a regressão confirma bootstrap, navegação e limpeza após HTTP 4
 Estado deste registro: `IMPLEMENTED` e `TESTED` localmente. Não constitui recibo
 de publicação, instalação, autenticação real ou ingestão no ambiente hospedado.
 Validação autenticada de CSRF/ingestão após implantação permanece independente.
+
+## Continuação de 15/10/2026 — candidata em revisão
+
+O acesso, a segurança da própria conta e os downloads passam a usar a mesma
+marca visível, com o ícone existente `/aurora-icon.svg`, títulos serifados e
+tokens de creme, petróleo e ouro. A apresentação não cria outra identidade de
+aplicativo nem muda permissões, credenciais ou destinos de download.
+
+A confirmação do segundo fator passa por um formulário com um único handler de
+`submit`, permitindo o envio por Enter e impedindo confirmações concorrentes.
+A ajuda sobre perda do autenticador permanece uma ação separada. Foco e
+descrições acessíveis acompanham o código do autenticador e, na recuperação,
+o e-mail, a nova senha após validação do link e o retorno ao acesso. Respostas
+atrasadas respeitam o foco escolhido pelo usuário e o ciclo de saída/retorno da
+página; a abertura automática de um link não força foco. As regras de senha,
+segundo fator, sessão e recuperação existentes permanecem exigidas.
+
+A página de acesso inclui a metapolítica CSP `form-action 'none'`, restringindo
+o envio HTML nativo quando o módulo JavaScript ainda não iniciou ou falhou.
+As chamadas autorizadas continuam nos handlers existentes. No Chrome, o formulário válido sem módulo JavaScript não navegou nem
+acrescentou os campos à URL após clicar em Entrar, em uma prévia inerte local.
+
+No Master, o progresso visual e o resumo legível apresentam os passos e recibos
+disponíveis, mantendo os detalhes técnicos nas opções avançadas. O CTA de
+pareamento sem código orienta a preencher o campo, sem iniciar uma consulta de
+rede. A conexão e cada avanço continuam dependendo do resultado confirmado.
+O histórico sem recibo detalhado explica a ausência sem invalidar a etapa
+registrada. Conferir diferenças em PROPOSED mostra caminhos e hashes sem
+registrar uma transição de estado; preparo e publicação exigem o recibo de
+verificação vinculado à proposta.
+
+Após essas correções, a suíte combinada registrou 161 testes: 160 passaram,
+nenhum falhou e um foi pulado no Windows por indisponibilidade de symlink.
+A compilação passou. O log local está preservado na entrega; CI deve ser
+conferida no SHA final do PR, separadamente.
+
+No Chrome, a verificação visual dos renderizadores reais confirmou o ícone no
+acesso, a tela de segundo fator sem overflow em largura de 1225 px e o foco em
+`mfa-code`. Acesso e Master também foram conferidos em 320 px, sem overflow horizontal;
+o Master foi renderizado em 1440 × 1000. O fallback sem módulo JavaScript foi
+observado como descrito acima. A confirmação fictícia pelo botão acionou o
+resolver uma vez e mostrou o erro esperado da simulação. O envio por Enter
+está coberto nos testes do handler, mas o smoke nativo de teclado não foi
+confirmado pela automação do navegador. Essas observações não comprovam
+autenticação real, instalação, publicação ou uso de dados operacionais. O
+PR #265 permanece draft; CI, smoke final e promoção têm recibos próprios.
 
 ## Reversão
 

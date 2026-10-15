@@ -8,32 +8,40 @@ import { auroraProtectedShell } from '../src/auroraFrontend.js';
 const script=loginClient('synthetic-company');
 class Element {
   value='';textContent='';hidden=false;disabled=false;checked=false;children:Element[]=[]; handlers=new Map<string,any>();
+  parentElement:Element|null=null; cssHidden=false; ownerDocument?:{activeElement:Element|null};
   addEventListener(event:string,handler:any){this.handlers.set(event,handler);}
   replaceChildren(){this.children=[];}
-  appendChild(child:Element){this.children.push(child);}
+  appendChild(child:Element){child.parentElement=this;this.children.push(child);}
+  closest(selector:string):Element|null{for(let node:Element|null=this;node;node=node.parentElement)if(selector==='[hidden]'&&node.hidden)return node;return null;}
+  getClientRects():object[]{return this.hidden||this.cssHidden||this.parentElement?.getClientRects().length===0?[]:[{}];}
+  focus(){if(!this.disabled&&this.getClientRects().length&&this.ownerDocument)this.ownerDocument.activeElement=this;}
 }
 async function fixture(managed=true, sessionLoginResponse:any={ok:true,status:204,json:async()=>({})}) {
-  const elements=new Map<string,Element>();const el=(id:string)=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id)!;};
+  const document={activeElement:null as Element|null,body:new Element(),getElementById:(id:string)=>el(id),createElement:()=>new Element()};
+  const parents:Record<string,string>={email:'login-form',password:'login-form',submit:'login-form','open-password-recovery':'login-form','mfa-form':'mfa-panel','mfa-code':'mfa-form','mfa-factor':'mfa-form','mfa-submit':'mfa-form','recovery-email':'password-recovery-panel','recovery-link':'password-recovery-panel','verify-recovery-link':'password-recovery-panel','recovery-back':'password-recovery-panel','new-password-form':'password-recovery-panel','recovery-new-password':'new-password-form','recovery-confirm-password':'new-password-form'};
+  const elements=new Map<string,Element>();const el=(id:string):Element=>{if(!elements.has(id)){const node=new Element();node.ownerDocument=document;elements.set(id,node);if(parents[id])node.parentElement=el(parents[id]);}return elements.get(id)!;};
+  for(const id of ['mfa-panel','activation-panel','onboarding-panel','password-recovery-panel','new-password-form','totp-setup','enrollment-input'])el(id).hidden=true;
   const calls:any[]=[]; const redirects:string[]=[];let claims:any=managed?{auroraProfileVersion:1}:{};
   const user={emailVerified:false,getIdToken:async()=> 'synthetic-id-token'};
   let signIn:any=async()=>({user}); let redemption:any={ok:true,json:async()=>({})};
   let currentSessionResponses=Array.isArray(sessionLoginResponse)?[...sessionLoginResponse]:[sessionLoginResponse];
   const factors:any[]=[]; const winHandlers=new Map();
-  const sandbox={URL,URLSearchParams,history:{replaceState:()=>{}},document:{getElementById:el,createElement:()=>new Element()},window:{addEventListener:(n:string,h:any)=>{const previous=winHandlers.get(n);winHandlers.set(n,()=>{previous?.();h();});}},navigator:{},
+  const sandbox={URL,URLSearchParams,history:{replaceState:()=>{}},document,window:{addEventListener:(n:string,h:any)=>{const previous=winHandlers.get(n);winHandlers.set(n,()=>{previous?.();h();});}},navigator:{},
     location:{origin:'https://auroranexus.com.br',hostname:'auroranexus.com.br',pathname:'/portal',search:'',replace:(path:string)=>redirects.push(path)},
     fetch:async(url:string,options:any)=>{calls.push({name:'fetch',url,options});if(url==='/__sessionLogin'){const value=currentSessionResponses.length>1?currentSessionResponses.shift():currentSessionResponses[0];return typeof value==='function'?await value():value;}return url==='/api/user-profiles'?(typeof redemption==='function'?await redemption():redemption):{ok:true,status:200,json:async()=>({})};},
     initializeApp:()=>({}),getAuth:()=>({languageCode:null}),setPersistence:async()=>{},inMemoryPersistence:{},
     signInWithEmailAndPassword:async(_auth:any,email:string)=>{calls.push({name:'passwordSignIn',email});return signIn();},getIdTokenResult:async()=>({claims}),signOut:async()=>{calls.push({name:'signOut'});},
     sendPasswordResetEmail:async(_auth:any,email:string)=>{calls.push({name:'reset',email});},sendEmailVerification:async()=>{calls.push({name:'verify'});},reload:async()=>{},
     multiFactor:()=>({enrolledFactors:factors,getSession:async()=>({}),enroll:async()=>{calls.push({name:'enroll'});}}),
-    getMultiFactorResolver:()=>({hints:[{factorId:'totp',uid:'synthetic-factor'}],resolveSignIn:async()=>{claims={...claims,firebase:{sign_in_second_factor:'totp'}};return {user};}}),
+    getMultiFactorResolver:()=>({hints:[{factorId:'totp',uid:'synthetic-factor'}],resolveSignIn:async()=>{calls.push({name:'resolveMfa'});const credential=await resolveMfa();claims={...claims,firebase:{sign_in_second_factor:'totp'}};return credential;}}),
     TotpMultiFactorGenerator:{FACTOR_ID:'totp',assertionForSignIn:()=>({}),assertionForEnrollment:()=>({}),generateSecret:async()=>({secretKey:'SYNTHETIC-NOT-A-SECRET'})}};
+  let resolveMfa:any=async()=>({user});
   const executable=ts.transpileModule(script,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
   // Strip only static SDK imports; all behavior below is the emitted product code.
   const withoutImports=script.replace(/^import[\s\S]*?from 'https:\/\/[^']+';\n/gm,'');
   assert.ok(executable); const context=createContext(sandbox);
   await new Script('(async()=>{'+withoutImports+'})()').runInContext(context);
-  return {el,calls,redirects,user,factors,winHandlers,claims:(value:any)=>{claims=value;},sessionResponse:(value:any)=>{currentSessionResponses=[value];},redemption:(value:any)=>{redemption=value;},signIn:(fn:any)=>{signIn=fn;},async click(id:string){await el(id).handlers.get('click')();},async submit(){await el('login-form').handlers.get('submit')({preventDefault(){}});}};
+  return {el,document,calls,redirects,user,factors,winHandlers,claims:(value:any)=>{claims=value;},sessionResponse:(value:any)=>{currentSessionResponses=[value];},redemption:(value:any)=>{redemption=value;},signIn:(fn:any)=>{signIn=fn;},resolveMfa:(fn:any)=>{resolveMfa=fn;},async click(id:string){el(id).focus();await el(id).handlers.get('click')();},async submit(){await el('login-form').handlers.get('submit')({preventDefault(){}});},async submitMfa(){let prevented=false;await el('mfa-form').handlers.get('submit')({preventDefault(){prevented=true;}});assert.equal(prevented,true);}};
 }
 
 test('managed first access does not issue app session or send verification before user action',async()=>{
@@ -47,7 +55,8 @@ test('enrollment clears secret and requires a fresh MFA login before issuing app
   const f=await fixture();f.user.emailVerified=true;await f.submit();await f.click('start-totp');
   assert.equal(f.el('enrollment-key').textContent,'SYNTHETIC-NOT-A-SECRET');await f.click('enroll-totp');
   assert.equal(f.el('enrollment-key').textContent,'');assert.equal(f.calls.some(c=>c.url==='/__sessionLogin'),false);
-  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();await f.click('mfa-submit');
+  assert.equal(f.document.activeElement,f.el('password'));
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();await f.submitMfa();
   const session=f.calls.find(c=>c.url==='/__sessionLogin');assert.ok(session);
   assert.deepEqual(JSON.parse(session.options.body),{idToken:'synthetic-id-token',orgId:'synthetic-company'});
   assert.deepEqual(f.redirects,['/portal']);
@@ -68,9 +77,43 @@ test('page exit clears enrollment material; bad credentials never display provid
 test('MFA success separates second-factor errors from authorization provisioning gaps',async()=>{
   const response={ok:false,json:async()=>({code:'MEMBERSHIP_NOT_PROVISIONED'})};
   const f=await fixture(true,response);f.user.emailVerified=true;
-  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();await f.click('mfa-submit');
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();await f.submitMfa();
   assert.equal(f.el('mfa-status').textContent,'Conta autenticada, mas ainda sem vínculo operacional provisionado na organização.');
   assert.equal(f.redirects.length,0);
+});
+
+test('password submission reveals and focuses the MFA code without issuing an app session',async()=>{
+  const f=await fixture();f.el('email').value='synthetic@example.invalid';f.el('password').value='synthetic-password';f.el('password').focus();
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();
+  assert.equal(f.el('login-form').hidden,true);assert.equal(f.el('mfa-panel').hidden,false);
+  assert.equal(f.document.activeElement,f.el('mfa-code'));assert.equal(f.el('password').value,'');
+  assert.equal(f.calls.some(c=>c.url==='/__sessionLogin'),false);
+  assert.equal(f.el('mfa-submit').handlers.has('click'),false);
+});
+
+test('MFA form submission preserves invalid-code retry and accepts only one concurrent confirmation',async()=>{
+  const f=await fixture();f.user.emailVerified=true;
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();f.el('mfa-code').value='123456';
+  f.resolveMfa(async()=>{throw Error('synthetic-provider-detail');});await f.submitMfa();
+  assert.equal(f.el('mfa-submit').disabled,false);assert.equal(f.el('mfa-code').value,'123456');
+  assert.match(f.el('mfa-status').textContent,/Segundo fator inválido ou expirado/);
+  assert.equal(f.calls.some(c=>c.url==='/__sessionLogin'),false);
+  let resolve!:(value:any)=>void;const pending=new Promise(r=>{resolve=r;});f.resolveMfa(()=>pending);
+  const first=f.submitMfa();assert.equal(f.el('mfa-submit').disabled,true);await f.submitMfa();
+  assert.equal(f.calls.filter(c=>c.name==='resolveMfa').length,2);
+  resolve({user:f.user});await first;
+  assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,1);
+  assert.equal(f.el('mfa-code').value,'');assert.deepEqual(f.redirects,['/portal']);
+});
+
+test('late MFA response does not take focus away from an explicitly opened recovery flow',async()=>{
+  const f=await fixture();let reject!:(error:any)=>void;
+  f.signIn(()=>new Promise((_resolve,rejected)=>{reject=rejected;}));f.el('password').focus();
+  const login=f.submit();await f.click('open-password-recovery');
+  assert.equal(f.document.activeElement,f.el('recovery-email'));
+  reject({code:'auth/multi-factor-auth-required'});await login;
+  assert.equal(f.document.activeElement,f.el('recovery-email'));
+  assert.equal(f.calls.some(c=>c.url==='/__sessionLogin'),false);
 });
 
 test('login normalizes email identity before Firebase authentication',async()=>{

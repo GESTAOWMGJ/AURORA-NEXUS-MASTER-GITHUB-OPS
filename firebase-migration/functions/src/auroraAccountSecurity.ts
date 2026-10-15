@@ -1,6 +1,6 @@
 import type { AuroraMember } from "./auroraAccess.js";
 import { accountSecurityClient } from "./auroraAccountSecurityClient.js";
-import { auroraDesignStyles } from "./auroraDesignSystem.js";
+import { auroraDesignStyles, auroraIdentityMark } from "./auroraDesignSystem.js";
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -13,7 +13,7 @@ export function accountSecurityPage(member: AuroraMember, logoutCsrf: string): s
 <title>Aurora Nexus | Segurança da conta</title><style>
 ${auroraDesignStyles()}
 :root{--cream:var(--bg);--petrol:var(--ink)}body{margin:0;background:radial-gradient(ellipse at top left,#e8eee5,transparent 60%),var(--cream);color:var(--text);line-height:1.6}main{max-width:800px;margin:auto;padding:40px 20px}.eyebrow{font-size:12px;letter-spacing:.16em;color:#81632e;font-weight:750}section{background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--gold);border-radius:12px;padding:26px;margin:20px 0;box-shadow:var(--shadow)}h1{font:400 42px/1.12 'Source Serif 4',Georgia,serif;letter-spacing:-.025em;margin:12px 0 18px}h2{font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:23px;margin-top:0}label{display:block;margin:14px 0 6px;font-size:14px;font-weight:650}input,select{width:100%;min-height:46px;padding:12px;background:#fff;color:var(--petrol);border:1px solid #a6b1ad;border-radius:8px;font:inherit}input[readonly]{background:var(--panel2)}button,a{display:inline-block;min-height:46px;margin-top:14px;padding:11px 16px;background:var(--petrol);color:#fffdf8;border:1px solid var(--petrol);border-radius:8px;font:inherit;font-weight:650;cursor:pointer;text-decoration:none}button.secondary,a{background:transparent;color:var(--petrol);border-color:#a6b1ad}button:hover:not(:disabled),a:hover{filter:brightness(1.08)}button:disabled{opacity:.55;cursor:wait}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:3px solid var(--info);outline-offset:3px}small{color:var(--muted)}code{display:block;overflow-wrap:anywhere;padding:12px;background:var(--panel2);border:1px solid var(--line);border-radius:8px}#security-status{min-height:24px;padding:14px 16px;border-left:3px solid var(--gold);background:var(--panel2);color:#62491d}[hidden]{display:none!important}@media(max-width:520px){main{padding:26px 16px}section{padding:20px}h1{font-size:34px}button,a{width:100%;text-align:center}}
-</style></head><body><main><p class="eyebrow">AURORA NEXUS · SUA CONTA</p><h1>Senha e autenticador</h1>
+</style></head><body><main>${auroraIdentityMark()}<p class="eyebrow">SUA CONTA</p><h1>Senha e autenticador</h1>
 <p>Estas ações alteram somente sua própria conta. Confirme sua senha e o código atual para continuar. A autenticação em dois fatores permanece obrigatória.</p>
 <p id="security-status" role="status" aria-live="polite">Confirme sua identidade para habilitar as alterações.</p>
 <section aria-labelledby="security-auth-title"><h2 id="security-auth-title">1. Confirmar identidade</h2><form id="security-auth-form">

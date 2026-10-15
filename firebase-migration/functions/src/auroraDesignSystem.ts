@@ -1,4 +1,8 @@
 /** Aurora editorial identity. Semantic colors qualify evidence, never fabricate it. */
+export function auroraIdentityMark(): string {
+  return '<div class="entry-brand"><img src="/aurora-icon.svg" alt="" width="44" height="44"><div><span class="entry-brand-name">Aurora Nexus</span><small>Clareza para decidir</small></div></div>';
+}
+
 export function auroraDesignStyles(): string {
   return `
 @font-face{font-family:'Source Serif 4';src:url('/assets/fonts/source-serif-4-regular.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
@@ -31,6 +35,10 @@ label{display:grid;gap:7px;font-size:14px;color:var(--text)}
 .brand img{width:42px;height:42px;border-radius:10px}
 .brand-name{font-family:'Source Serif 4',Georgia,serif;font-size:23px;line-height:1.1;font-weight:600;letter-spacing:.01em}
 .brand small{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.18em;color:#d4b774;margin-top:4px}
+.entry-brand{display:flex;align-items:center;gap:12px;margin-bottom:26px}
+.entry-brand img{width:44px;height:44px;flex:0 0 44px;border-radius:10px}
+.entry-brand-name{display:block;font:600 25px/1.15 'Source Serif 4',Georgia,serif;color:var(--ink)}
+.entry-brand small{display:block;color:#81632e;font-size:10px;letter-spacing:.14em;text-transform:uppercase;margin-top:5px}
 .identity{display:flex;align-items:center;gap:12px;font-size:13px;color:#d7e2e0}
 .session-role{display:block;color:#d4b774;font-size:11px}
 .btn{display:inline-flex;justify-content:center;align-items:center;gap:8px;min-height:44px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink);padding:10px 16px;font-weight:600;text-decoration:none;cursor:pointer;line-height:1.25;transition:background .15s,border-color .15s}
@@ -158,6 +166,18 @@ main{padding:34px 40px 50px;max-width:1600px;width:100%;min-width:0}
 .studio-columns{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr);gap:20px}
 .studio-steps{display:flex;flex-wrap:wrap;gap:10px;padding:0;list-style:none}
 .studio-steps li{background:#efe8da;border-radius:99px;padding:8px 12px;font-size:12px}
+.studio-steps li[data-step-state=current]{background:var(--ink);color:var(--bg);box-shadow:inset 0 -2px 0 var(--gold);font-weight:700}
+.studio-steps li[data-step-state=complete]{background:#eaf1e7;color:var(--ok)}
+.studio-steps li[data-step-state=blocked]{background:#f4ead8;color:#62471e;border:1px solid #d4bd8e}
+.master-onboarding{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 22px;margin-bottom:20px;background:var(--panel2);border-left:3px solid var(--gold);border-radius:0 12px 12px 0}
+.master-onboarding p{margin:4px 0 0;color:var(--muted);font-size:14px}
+.master-onboarding .btn{flex-shrink:0}
+.master-validation-summary{border:1px solid var(--line);border-left:3px solid var(--gold);border-radius:0 10px 10px 0;background:var(--panel);padding:16px 18px;margin:16px 0}
+.master-validation-summary[data-tone=ok]{border-left-color:var(--ok)}
+.master-validation-summary[data-tone=warn]{border-left-color:var(--warn)}
+.master-validation-summary[data-tone=danger]{border-left-color:var(--danger)}
+.master-validation-heading{display:block;font-weight:700;color:var(--ink)}
+.master-validation-detail{margin:6px 0 0;color:var(--muted);font-size:14px}
 .studio-diff{font:12px/1.6 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;padding:16px;background:#eae7df;border-radius:10px;max-height:450px;overflow:auto}
 .studio-status{color:var(--muted);font-size:13px}
 
@@ -180,6 +200,7 @@ main{padding:28px}
 .quick-link{padding:14px}
 .implant-strip{grid-template-columns:repeat(2,minmax(0,1fr))}
 .studio-columns{grid-template-columns:1fr}
+.master-onboarding{align-items:flex-start;flex-direction:column;gap:12px}
 }
 
 @media(max-width:800px){.top{height:72px;padding:12px 18px}
