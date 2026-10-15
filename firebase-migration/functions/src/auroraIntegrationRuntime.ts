@@ -19,7 +19,7 @@ import {
   type IntegrationScope
 } from "./auroraIntegrationCredential.js";
 import { auroraDb } from "./firebase.js";
-import { canonicalIntegrationDocument, parseIntegrationDocumentPayload } from "./auroraIntegrationDocument.js";
+import { acquisitionEvidenceHash, canonicalIntegrationDocument, integrationDocumentVersionDecision, parseIntegrationDocumentPayload } from "./auroraIntegrationDocument.js";
 import { loadInstallationReadiness, refreshProjection } from "./auroraRuntime.js";
 import { immutableEntityVersionId, nextCanonicalEntityRevision, persistedDocumentHash,
   mergedDocumentForAudit, stableValue } from "./auroraCanonicalVersions.js";
@@ -437,22 +437,16 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
       return {kind:"DUPLICATE" as const,documentId:String(idemSnap.data()?.documentId || canonical.id)};
     }
     const current=currentSnap.exists ? currentSnap.data() ?? {} : null;
-    const currentVersion=current?.sourceVersion;
-    if (typeof currentVersion === "number") {
-      if (payload.sourceVersion < currentVersion) return {kind:"ERROR" as const,code:"SOURCE_VERSION_REGRESSION"};
-      if (payload.sourceVersion === currentVersion) {
-        if (current?.canonicalSnapshotHash !== canonical.canonicalSnapshotHash
-          || current.workflowState !== payload.workflowState
-          || timestampIso(current.occurredAt) !== new Date(payload.occurredAt).toISOString()
-          || (current.integration?.payloadHash !== undefined && current.integration.payloadHash !== bodyHash)) {
-          return {kind:"ERROR" as const,code:"SOURCE_VERSION_CONFLICT"};
-        }
+    const versionDecision=integrationDocumentVersionDecision(current,payload,canonical.canonicalSnapshotHash,bodyHash,timestampIso(current?.occurredAt));
+    if (versionDecision !== 'UPDATE') {
+      if (versionDecision === 'DUPLICATE') {
         tx.create(idemRef,{
           bodyHash,documentId:docRef.id,keyId:principal.keyId,
           createdAt:FieldValue.serverTimestamp()
         });
         return {kind:"DUPLICATE" as const,documentId:docRef.id};
       }
+      return {kind:'ERROR' as const,code:versionDecision};
     }
 
     const facts=canonical.facts as Record<string,unknown>;
@@ -485,7 +479,12 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
         system:payload.sourceSystem,
         sourceId:`external:${canonical.sourceIdHash.slice(0,32)}`,
         contentHash:canonical.canonicalSnapshotHash,
-        hashMethod:"canonical_structured_sha256"
+        hashMethod:"canonical_structured_sha256",
+        // The byte hash attests the client-observed acquired representation;
+        // contentHash above remains the canonical facts hash for compatibility.
+        acquisition:payload.sourceEvidence ?? null,
+        acquisitionHash:payload.sourceEvidence ? acquisitionEvidenceHash(payload.sourceEvidence) : null,
+        acquisitionAuthority:payload.sourceEvidence ? 'AUTHENTICATED_CLIENT_OBSERVATION_NOT_PROVIDER_SIGNATURE' : null
       },
       integration:{
         keyId:principal.keyId,
@@ -545,7 +544,7 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
   });
 
   if (result.kind === "ERROR") {
-    const status=["IDEMPOTENCY_CONFLICT","SOURCE_VERSION_REGRESSION","SOURCE_VERSION_CONFLICT"].includes(result.code)?409:412;
+    const status=["IDEMPOTENCY_CONFLICT","SOURCE_VERSION_REGRESSION","SOURCE_VERSION_CONFLICT","SOURCE_ACQUISITION_REGRESSION","SOURCE_ACQUISITION_CONFLICT"].includes(result.code)?409:412;
     res.status(status).json({ok:false,code:result.code});
     return;
   }
@@ -567,6 +566,7 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
     nativeReady:payload.nativeReady,
     sourceVersion:payload.sourceVersion,
     canonicalSnapshotHash:canonical.canonicalSnapshotHash,
+    ...(payload.sourceEvidence ? {sourceEvidenceHash:acquisitionEvidenceHash(payload.sourceEvidence)} : {}),
     installation:await loadInstallationReadiness(principal.orgId, canonical.id)
   });
 });

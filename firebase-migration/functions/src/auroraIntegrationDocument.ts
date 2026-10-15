@@ -22,6 +22,30 @@ export type IntegrationDocumentPayload = {
   missingFieldsCount: number;
   nativeReady: boolean;
   sourceIndependent: boolean;
+  sourceEvidence?: DocumentAcquisitionEvidence;
+};
+
+export type DocumentAcquisitionEvidence = {
+  schemaVersion: "aurora.document.acquisition.v1";
+  provider: "GOOGLE_DRIVE";
+  sourceObjectIdHash: string;
+  observedVersion: string;
+  sourceMimeType: string;
+  acquiredMimeType: string;
+  representation: "ORIGINAL_BYTES" | "GOOGLE_SHEETS_CSV_EXPORT";
+  byteSha256: string;
+  byteLength: number;
+  extraction: {
+    method: "AURORA_CANONICAL_JSON" | "AURORA_CANONICAL_CSV" | "AURORA_CANONICAL_XLSX";
+    version: "1.0.0";
+    status: "COMPLETE";
+    coverage: "EXPORTED_REPRESENTATION_ONLY";
+    textFormat: "CANONICAL_RECORD_JSON";
+    textSha256: string;
+    rowFactsSha256: string;
+    rowIndex: number;
+    rowCount: number;
+  };
 };
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$/;
@@ -32,8 +56,58 @@ const FRAGILITY = new Set(["NONE", "DEGRADED_EXTRACTION", "LOW_CONFIDENCE", "MIS
 const ALLOWED_KEYS = new Set([
   "sourceSystem", "externalDocumentId", "sourceVersion", "occurredAt", "documentType",
   "competence", "amountCents", "count", "workflowState", "slaDueAt",
-  "documentFragility", "missingFieldsCount", "nativeReady", "sourceIndependent"
+  "documentFragility", "missingFieldsCount", "nativeReady", "sourceIndependent", "sourceEvidence"
 ]);
+
+const ACQUISITION_MIMES: Record<string, string> = {
+  "application/json": "AURORA_CANONICAL_JSON",
+  "text/csv": "AURORA_CANONICAL_CSV",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "AURORA_CANONICAL_XLSX",
+  "application/vnd.google-apps.spreadsheet": "AURORA_CANONICAL_CSV"
+};
+const HASH_RE = /^[a-f0-9]{64}$/;
+
+function exactKeys(value: unknown, keys: string[]): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).length === keys.length && Object.keys(value).every(key => keys.includes(key));
+}
+
+function sortedValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortedValue);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, sortedValue(item)]));
+  return value;
+}
+
+export function acquisitionEvidenceHash(evidence: DocumentAcquisitionEvidence): string {
+  return createHash("sha256").update(JSON.stringify(sortedValue(evidence))).digest("hex");
+}
+
+export function canonicalRecordText(payload: IntegrationDocumentPayload): string {
+  return JSON.stringify(Object.fromEntries(Object.entries(payload).filter(([key]) => key !== 'sourceEvidence').sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)));
+}
+
+export function parseDocumentAcquisitionEvidence(value: unknown, payload: IntegrationDocumentPayload): DocumentAcquisitionEvidence | null {
+  if (!exactKeys(value, ['schemaVersion','provider','sourceObjectIdHash','observedVersion','sourceMimeType','acquiredMimeType','representation','byteSha256','byteLength','extraction'])
+      || !exactKeys(value.extraction, ['method','version','status','coverage','textFormat','textSha256','rowFactsSha256','rowIndex','rowCount'])) return null;
+  const raw = value, extraction = raw.extraction as Record<string, unknown>;
+  if (raw.schemaVersion !== 'aurora.document.acquisition.v1' || raw.provider !== 'GOOGLE_DRIVE'
+      || typeof raw.sourceObjectIdHash !== 'string' || !HASH_RE.test(raw.sourceObjectIdHash)
+      || typeof raw.observedVersion !== 'string' || !/^[1-9][0-9]{0,31}$/.test(raw.observedVersion)
+      || typeof raw.sourceMimeType !== 'string' || !Object.hasOwn(ACQUISITION_MIMES,raw.sourceMimeType)
+      || typeof raw.byteSha256 !== 'string' || !HASH_RE.test(raw.byteSha256)
+      || !Number.isSafeInteger(raw.byteLength) || Number(raw.byteLength) < 1 || Number(raw.byteLength) > 1048576
+      || extraction.version !== '1.0.0' || extraction.status !== 'COMPLETE'
+      || extraction.coverage !== 'EXPORTED_REPRESENTATION_ONLY' || extraction.textFormat !== 'CANONICAL_RECORD_JSON'
+      || !Number.isSafeInteger(extraction.rowCount) || Number(extraction.rowCount) < 1 || Number(extraction.rowCount) > 20
+      || !Number.isSafeInteger(extraction.rowIndex) || Number(extraction.rowIndex) < 0 || Number(extraction.rowIndex) >= Number(extraction.rowCount)) return null;
+  const sheets = raw.sourceMimeType === 'application/vnd.google-apps.spreadsheet';
+  const recordHash = createHash('sha256').update(canonicalRecordText(payload)).digest('hex');
+  if (raw.acquiredMimeType !== (sheets ? 'text/csv' : raw.sourceMimeType)
+      || raw.representation !== (sheets ? 'GOOGLE_SHEETS_CSV_EXPORT' : 'ORIGINAL_BYTES')
+      || extraction.method !== ACQUISITION_MIMES[raw.sourceMimeType]
+      || extraction.textSha256 !== recordHash || extraction.rowFactsSha256 !== recordHash) return null;
+  return sortedValue(raw) as DocumentAcquisitionEvidence;
+}
 
 function isoDate(value: unknown): string | null {
   if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) return null;
@@ -88,7 +162,7 @@ export function parseIntegrationDocumentPayload(value: unknown): IntegrationDocu
   );
   if (raw.nativeReady && !requiredFactsPresent) return null;
 
-  return {
+  const payload: IntegrationDocumentPayload = {
     sourceSystem: sourceSystem as IntegrationDocumentPayload["sourceSystem"],
     externalDocumentId,
     sourceVersion: Number(sourceVersion),
@@ -104,6 +178,46 @@ export function parseIntegrationDocumentPayload(value: unknown): IntegrationDocu
     nativeReady: raw.nativeReady,
     sourceIndependent: raw.sourceIndependent
   };
+  if (Object.hasOwn(raw, 'sourceEvidence')) {
+    const evidence = parseDocumentAcquisitionEvidence(raw.sourceEvidence, payload);
+    if (!evidence) return null;
+    payload.sourceEvidence = evidence;
+  }
+  return payload;
+}
+
+/** Acquisition revisions use the existing entity revision, never pretend a
+ * changed Drive version is a financial sourceVersion supplied inside a file. */
+export function acquisitionVersionDecision(current: Record<string, any> | null, payload: IntegrationDocumentPayload): string | null {
+  const previous = current?.source?.acquisition as DocumentAcquisitionEvidence | undefined;
+  const next = payload.sourceEvidence;
+  if (!previous) return null;
+  if (!next || previous.provider !== next.provider || previous.sourceObjectIdHash !== next.sourceObjectIdHash
+      || previous.sourceMimeType !== next.sourceMimeType || previous.representation !== next.representation) return 'SOURCE_ACQUISITION_CONFLICT';
+  if (typeof previous.observedVersion !== 'string' || !/^[1-9][0-9]{0,31}$/.test(previous.observedVersion)) return 'SOURCE_ACQUISITION_CONFLICT';
+  if (BigInt(next.observedVersion) < BigInt(previous.observedVersion)) return 'SOURCE_ACQUISITION_REGRESSION';
+  if (next.observedVersion === previous.observedVersion && acquisitionEvidenceHash(next) !== acquisitionEvidenceHash(previous)) return 'SOURCE_ACQUISITION_CONFLICT';
+  return null;
+}
+
+export function integrationDocumentVersionDecision(
+  current: Record<string, any> | null, payload: IntegrationDocumentPayload,
+  canonicalSnapshotHash: string, bodyHash: string, currentOccurredAt: string | null
+): string {
+  const currentVersion = current?.sourceVersion;
+  if (typeof currentVersion === 'number' && payload.sourceVersion < currentVersion) return 'SOURCE_VERSION_REGRESSION';
+  const acquisitionConflict = acquisitionVersionDecision(current, payload);
+  if (acquisitionConflict) return acquisitionConflict;
+  if (typeof currentVersion !== 'number' || payload.sourceVersion > currentVersion) return 'UPDATE';
+  if (current?.canonicalSnapshotHash !== canonicalSnapshotHash || current.workflowState !== payload.workflowState
+      || currentOccurredAt !== payload.occurredAt) return 'SOURCE_VERSION_CONFLICT';
+  if (current.integration?.payloadHash === bodyHash) return 'DUPLICATE';
+  // New acquisition evidence advances only its own existing entity revision.
+  // Canonical facts/workflow/time must still match this financial sourceVersion.
+  if (payload.sourceEvidence && (!current.source?.acquisition
+      || BigInt(payload.sourceEvidence.observedVersion) > BigInt(current.source.acquisition.observedVersion))) return 'UPDATE';
+  if (current.integration?.payloadHash === undefined) return 'DUPLICATE';
+  return 'SOURCE_VERSION_CONFLICT';
 }
 
 export function canonicalIntegrationDocument(

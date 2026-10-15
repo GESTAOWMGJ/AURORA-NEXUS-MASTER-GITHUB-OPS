@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "aurora.document.acquisition.synthetic-fixture.v1",
+  "rawUtf8": "{\"sourceSystem\": \"ERP\", \"externalDocumentId\": \"synthetic-export-001\", \"sourceVersion\": 1, \"occurredAt\": \"2026-01-01T00:00:00Z\", \"documentType\": \"FINANCIAL\", \"competence\": \"2026-01\", \"amountCents\": 12345, \"count\": null, \"workflowState\": \"PENDING_HUMAN_REVIEW\", \"slaDueAt\": null, \"documentFragility\": \"NONE\", \"missingFieldsCount\": 0, \"nativeReady\": true, \"sourceIndependent\": true}",
+  "payload": {
+    "sourceSystem": "ERP",
+    "externalDocumentId": "synthetic-export-001",
+    "sourceVersion": 1,
+    "occurredAt": "2026-01-01T00:00:00.000Z",
+    "documentType": "FINANCIAL",
+    "competence": "2026-01",
+    "amountCents": 12345,
+    "count": null,
+    "workflowState": "PENDING_HUMAN_REVIEW",
+    "slaDueAt": null,
+    "documentFragility": "NONE",
+    "missingFieldsCount": 0,
+    "nativeReady": true,
+    "sourceIndependent": true,
+    "sourceEvidence": {
+      "schemaVersion": "aurora.document.acquisition.v1",
+      "provider": "GOOGLE_DRIVE",
+      "sourceObjectIdHash": "748b9509c628635cce94ba7d5dc4777a565192547e620272792acb114c14047e",
+      "observedVersion": "11",
+      "sourceMimeType": "application/json",
+      "acquiredMimeType": "application/json",
+      "representation": "ORIGINAL_BYTES",
+      "byteSha256": "2ab94b83898521d13d266919ccea66b775601d23456434b48edd9fa87c4c5b72",
+      "byteLength": 379,
+      "extraction": {
+        "method": "AURORA_CANONICAL_JSON",
+        "version": "1.0.0",
+        "status": "COMPLETE",
+        "coverage": "EXPORTED_REPRESENTATION_ONLY",
+        "textFormat": "CANONICAL_RECORD_JSON",
+        "textSha256": "25f65f053bea7e6f1df30e7335f06df7cb4c4bd9b5ae96ea2017ebb21cee4f56",
+        "rowFactsSha256": "25f65f053bea7e6f1df30e7335f06df7cb4c4bd9b5ae96ea2017ebb21cee4f56",
+        "rowIndex": 0,
+        "rowCount": 1
+      }
+    }
+  },
+  "sourceEvidenceHash": "ae3285028d0a7ed1c6e64b34eb4796293bd9c77b333199f0924d4ea9de67c019",
+  "canonicalSnapshotHash": "493c13aebca51cb7f6b34c471d5c031fc4fc5b0d648fe82ff81ec103eef3e4c4"
+}

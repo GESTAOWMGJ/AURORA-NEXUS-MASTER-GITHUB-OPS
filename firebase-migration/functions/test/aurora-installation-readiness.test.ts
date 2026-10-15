@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {installationReadiness, readInstallationReadiness} from '../src/auroraInstallationReadiness.ts';
 import {immutableEntityVersionId,persistedDocumentHash} from '../src/auroraCanonicalVersions.ts';
+import fs from 'node:fs';
+import {acquisitionEvidenceHash} from '../src/auroraIntegrationDocument.ts';
 const org='synthetic', id='a'.repeat(48), hash='b'.repeat(64);
 const checkpoint={orgId:org,state:'HEALTHY',lastDocumentId:id};
 const document={orgId:org,entityType:'sourceDocument',entityKey:'DRIVE:synthetic',revision:1,
@@ -89,4 +91,30 @@ test('path injection in stored checkpoints/readback cannot reach another tenant'
       :{...checkpoint,lastDocumentId:'../../other',lastEntityId:'../../other'};
   });
   assert.equal(paths.length,4);assert.ok(paths.every(path=>path.startsWith(`organizations/${org}/`)));
+});
+
+test('acquisition acknowledgement is read from the exact persisted immutable processing revision',()=>{
+  const fixture=JSON.parse(fs.readFileSync('../../aurora-coletor/tests/fixtures/document-acquisition-v1.json','utf8'));
+  const acquisition=structuredClone(fixture.payload.sourceEvidence);
+  const first={...document,source:{...document.source,acquisition,acquisitionHash:acquisitionEvidenceHash(acquisition)}};
+  const proof=installationReadiness(org,checkpoint,first,projection,versionOf(first));
+  assert.equal(proof.firstIngestionVerified,true);assert.equal(proof.sourceEvidenceHash,fixture.sourceEvidenceHash);
+  const nextAcquisition={...acquisition,observedVersion:'12'};
+  const next={...first,revision:2,source:{...first.source,acquisition:nextAcquisition,acquisitionHash:acquisitionEvidenceHash(nextAcquisition)}};
+  const nextVersionId=immutableEntityVersionId('sourceDocument',next.entityKey,2);
+  const projected={...projection,integrationReadback:[{...projection.integrationReadback[0],revision:2,versionId:nextVersionId}]};
+  const current=installationReadiness(org,checkpoint,next,projected,versionOf(next));
+  assert.equal(current.firstIngestionVerified,true);assert.equal(current.canonicalSnapshotHash,proof.canonicalSnapshotHash);
+  assert.equal(current.sourceVersion,proof.sourceVersion);assert.notEqual(current.sourceEvidenceHash,proof.sourceEvidenceHash);
+  assert.equal(current.sourceEvidenceHash,next.source.acquisitionHash);
+  assert.equal(installationReadiness(org,checkpoint,next,projected,versionOf(first)).firstIngestionVerified,false);
+});
+
+test('a matching document/version snapshot cannot attest a tampered acquisition hash',()=>{
+  const fixture=JSON.parse(fs.readFileSync('../../aurora-coletor/tests/fixtures/document-acquisition-v1.json','utf8'));
+  for(const acquisitionHash of [null,'invalid','f'.repeat(64)]){
+    const next={...document,source:{...document.source,acquisition:fixture.payload.sourceEvidence,acquisitionHash}};
+    assert.equal(installationReadiness(org,checkpoint,next,projection,versionOf(next)).state,'PENDING_CANONICAL_DATA');
+  }
+  assert.equal(Object.hasOwn(installationReadiness(org,checkpoint,document,projection,version),'sourceEvidenceHash'),false);
 });

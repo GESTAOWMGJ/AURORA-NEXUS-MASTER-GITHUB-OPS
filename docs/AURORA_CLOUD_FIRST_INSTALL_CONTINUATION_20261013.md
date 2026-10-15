@@ -188,6 +188,70 @@ consentimento OAuth, extração de documentos comuns ou ingestão global. A ado�
 exige CI na fonte final, promoção assinada e execução real pelo mesmo instalador.
 Rollback usa o pacote anterior e os backups existentes; nenhum dado-fonte é apagado.
 
+## Aquisição documental estruturada — candidato de 15/10/2026
+
+Incremento delimitado do mesmo agente: componente Windows Integration 1.0.6 e
+clientAgent 1.0.4, preservando checkpoints anteriores. O OAuth 1.0.5 não comprovava
+aquisição de bytes. Este incremento acrescenta `aurora.document.acquisition.v1`
+opcional ao contrato da API existente, sem alterar o payload legado sem prova.
+O registro nativo `cloudIntakePolicy.documentAcquisitionEvidence` expõe a
+capacidade e seus limites; não concede acesso nem cria executor ou banco.
+
+O adaptador Drive seleciona parser pelo MIME informado pelo provedor, sem confiar
+no nome. Suporta JSON canônico, CSV com cabeçalhos canônicos e XLSX canônico de
+uma aba. Google Sheets usa a exportação CSV da primeira aba; não são bytes
+nativos do workbook e a exportação não comprova cobertura de todas as abas.
+O download/export é somente leitura, limitado a 1 MiB, com os limites menores
+dos parsers JSON/CSV preservados, TLS e rejeição de redirecionamento existentes.
+A versão opaca numérica do mesmo objeto é observada na listagem e novamente
+após adquirir os bytes. Mudança de versão/MIME/identidade deixa pendência.
+
+Cada registro materializado mantém os fatos estruturados úteis já aceitos pela
+API, com hash do objeto opaco, versão observada, MIME da fonte/representação,
+SHA-256 e tamanho dos bytes adquiridos, extrator/método/versionamento, posição e
+contagem dos registros. `textFormat=CANONICAL_RECORD_JSON` e `textSha256` referem-se
+apenas à representação JSON normalizada daquele registro, nunca ao texto integral
+do documento. `rowFactsSha256` vincula a prova aos mesmos 14 campos normalizados.
+O servidor valida esse vínculo e devolve o hash da prova persistida; o cliente
+exige esse reconhecimento além dos recibos de processamento existentes.
+O hash também é relido da versão imutável atual na prova de processamento;
+recibo antigo com fatos iguais não pode substituí-lo pelo de outra aquisição.
+Metadados declarados pelo cliente autenticado não são assinatura do Google nem
+recomputação do hash de arquivo pelo servidor, que não recebe os bytes originais.
+
+`canonicalSnapshotHash` e `source.contentHash` legados continuam sendo hashes dos
+fatos, com `hashMethod=canonical_structured_sha256`. O SHA-256 dos bytes fica em
+`source.acquisition.byteSha256`, com seu hash de prova separado. A evidência entra
+na mesma transação `sourceDocuments/entityVersions/apiIdempotency/auditEvents` e
+checkpoint existentes. Nova versão observada do mesmo objeto com os mesmos fatos
+pode acrescentar revisão imutável, sem inventar novo `sourceVersion` financeiro.
+Mesma versão observada com prova diferente, regressão ou troca de objeto são
+conflitos. Mudança de fatos continua exigindo evolução do `sourceVersion` declarado
+na fonte. Repetição exata permanece idempotente. Documento que já tem prova de
+aquisição não pode perdê-la silenciosamente numa atualização sem essa prova.
+
+Formato não extraído conserva identidade opaca, MIME e versão na tabela `intake`
+do SQLite já existente, sem nome, caminho, texto bruto ou segredo. A página não
+avança até processar todos os registros e resolver essas identidades/versões.
+Desaparecimento do arquivo ou nova versão não encerram pendência antiga. Somente
+todos os registros da mesma versão com recibos confirmados podem resolvê-la;
+a resolução preserva hashes e referências dos recibos. Adaptadores legados que
+possuem apenas contagem mantêm uma barreira agregada explícita, sem inventar IDs.
+Contagens de pendência em cursores legados são preservadas nessa mesma fila antes
+de uma nova travessia; exigem reconciliação e não podem sumir com o rescan.
+
+Google Docs, PDF/OCR, documentos livres, pastas filhas, exportação de todas as
+abas e extração semântica financeira continuam pendentes. O extrator Apps Script
+existente permanece `LEGACY_MIRRORED`; nenhum fallback regex vira fato financeiro.
+Não se persistem texto clínico nem documentos reais por este candidato. Testes
+sintéticos de bytes, paridade Python/TypeScript e retomada da fila não comprovam
+consentimento, Drive real, transação em HML ou instalação atualizada. Os gates de
+processamento, replay e automação da instalação permanecem obrigatórios.
+
+Rollback preserva a fila e o histórico. Agente antigo não entende as barreiras
+novas; portanto não pode ser usado para declarar instalação/ingestão concluída
+enquanto houver pendências documentais sem reconciliação explícita.
+
 ## Evidências separadas desta sessão
 
 - PR #244 integrado em `067aecf1`; P2 de recibo de domínio resolvido.

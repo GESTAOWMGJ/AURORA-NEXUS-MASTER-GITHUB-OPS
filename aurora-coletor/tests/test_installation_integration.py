@@ -26,6 +26,9 @@ REQUIRED=('processingVerified','receiptPersisted','replayVerified','automationCo
 def accepted_response(payload,duplicate=False,configured=True,method='API_TOKEN'):
     result=processed_response(payload,duplicate=duplicate)
     proof=result['installation']
+    if 'sourceEvidence' in payload:
+        result['sourceEvidenceHash']=sync.source_evidence_hash(payload['sourceEvidence'])
+        proof['sourceEvidenceHash']=result['sourceEvidenceHash']
     ready=bool(duplicate and configured)
     proof['acceptance']={
         'schemaVersion':'aurora.installation.acceptance.v1','orgId':ORG,'canonicalOrigin':ORIGIN,
@@ -292,11 +295,13 @@ class SourceContinuationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp);config=self.config(base,cloud=True);target=base/'agent'
             installer.install(target,config)
-            provider_api=Mock(side_effect=[{'files':[{'id':'synthetic-file','name':'canonical.csv'}]},csv_bytes(fixture())])
+            item={'id':'synthetic-file','mimeType':'text/csv','version':'7'}
+            provider_api=Mock(side_effect=[{'files':[item]},csv_bytes(fixture()),dict(item)])
             def source_pull(source,environment,cursor):
                 return providers.pull(source,provider_api,environment,cursor=cursor)
             result=installer.continue_installation(target,{'AURORA_APP_TOKEN':'synthetic','AURORA_GOOGLE_TOKEN':'synthetic-oauth'},CanonicalTransport(),source_pull)
-            self.assertTrue(result['installationComplete']);self.assertEqual(provider_api.call_count,2)
+            self.assertTrue(result['installationComplete']);self.assertEqual(provider_api.call_count,3)
+            self.assertIn('?alt=media',provider_api.call_args_list[1].args[0])
             readiness=result['integrationReadiness']
             self.assertEqual(readiness['sourceModesVerifiedThisRun'],['CLOUD_OAUTH'])
             self.assertFalse(readiness['oauthEnrollmentOrRefreshPerformed'])

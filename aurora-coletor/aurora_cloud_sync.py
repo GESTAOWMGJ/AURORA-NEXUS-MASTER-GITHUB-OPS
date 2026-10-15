@@ -16,6 +16,13 @@ FIELDS = ('sourceSystem externalDocumentId sourceVersion occurredAt documentType
           'amountCents count workflowState slaDueAt documentFragility missingFieldsCount '
           'nativeReady sourceIndependent').split()
 MAX_BYTES = 16384
+ACQUISITION_SCHEMA = 'aurora.document.acquisition.v1'
+ACQUISITION_MIMES = {
+    'application/json': ('.json', 'AURORA_CANONICAL_JSON'),
+    'text/csv': ('.csv', 'AURORA_CANONICAL_CSV'),
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ('.xlsx', 'AURORA_CANONICAL_XLSX'),
+    'application/vnd.google-apps.spreadsheet': ('.csv', 'AURORA_CANONICAL_CSV'),
+}
 
 
 class SyncError(ValueError):
@@ -39,7 +46,7 @@ def timestamp(value):
 
 
 def validate_payload(raw):
-    if not isinstance(raw, dict) or set(raw) != set(FIELDS):
+    if not isinstance(raw, dict) or set(raw) not in (set(FIELDS), set(FIELDS) | {'sourceEvidence'}):
         raise SyncError('STRUCTURED_SCHEMA_REQUIRED')
     p = {key: raw[key] for key in FIELDS}
     enums = {
@@ -80,7 +87,48 @@ def validate_payload(raw):
             raise SyncError('CANONICAL_FACTS_INCOMPLETE')
         if p['documentType'] == 'PRODUCTION' and (p['competence'] is None or p['count'] is None):
             raise SyncError('CANONICAL_FACTS_INCOMPLETE')
+    if 'sourceEvidence' in raw:
+        p['sourceEvidence'] = validate_source_evidence(raw['sourceEvidence'], p)
     return p
+
+
+def record_text(payload):
+    """A canonical record representation, never the full original document text."""
+    return json.dumps({key: payload[key] for key in sorted(FIELDS)}, separators=(',', ':'), ensure_ascii=True, allow_nan=False)
+
+
+def source_evidence_hash(evidence):
+    return digest(json.dumps(evidence, sort_keys=True, separators=(',', ':'), ensure_ascii=True, allow_nan=False))
+
+
+def validate_source_evidence(raw, payload):
+    keys = {'schemaVersion', 'provider', 'sourceObjectIdHash', 'observedVersion', 'sourceMimeType',
+            'acquiredMimeType', 'representation', 'byteSha256', 'byteLength', 'extraction'}
+    extraction_keys = {'method', 'version', 'status', 'coverage', 'textFormat', 'textSha256',
+                       'rowFactsSha256', 'rowIndex', 'rowCount'}
+    if not isinstance(raw, dict) or set(raw) != keys or not isinstance(raw.get('extraction'), dict) or set(raw['extraction']) != extraction_keys:
+        raise SyncError('SOURCE_ACQUISITION_PROOF_INVALID')
+    source_mime = raw['sourceMimeType']; extraction = raw['extraction']
+    if (raw['schemaVersion'] != ACQUISITION_SCHEMA or raw['provider'] != 'GOOGLE_DRIVE'
+            or not isinstance(raw['sourceObjectIdHash'], str) or not re.fullmatch(r'[a-f0-9]{64}', raw['sourceObjectIdHash'])
+            or not isinstance(raw['observedVersion'], str) or not re.fullmatch(r'[1-9][0-9]{0,31}', raw['observedVersion'])
+            or not isinstance(source_mime, str) or source_mime not in ACQUISITION_MIMES
+            or not isinstance(raw['byteSha256'], str) or not re.fullmatch(r'[a-f0-9]{64}', raw['byteSha256'])
+            or type(raw['byteLength']) is not int or not 1 <= raw['byteLength'] <= 1048576
+            or extraction['version'] != '1.0.0' or extraction['status'] != 'COMPLETE'
+            or extraction['coverage'] != 'EXPORTED_REPRESENTATION_ONLY'
+            or extraction['textFormat'] != 'CANONICAL_RECORD_JSON'
+            or type(extraction['rowCount']) is not int or not 1 <= extraction['rowCount'] <= 20
+            or type(extraction['rowIndex']) is not int or not 0 <= extraction['rowIndex'] < extraction['rowCount']):
+        raise SyncError('SOURCE_ACQUISITION_PROOF_INVALID')
+    sheets = source_mime == 'application/vnd.google-apps.spreadsheet'
+    if (raw['acquiredMimeType'] != ('text/csv' if sheets else source_mime)
+            or raw['representation'] != ('GOOGLE_SHEETS_CSV_EXPORT' if sheets else 'ORIGINAL_BYTES')
+            or extraction['method'] != ACQUISITION_MIMES[source_mime][1]
+            or extraction['textSha256'] != digest(record_text(payload))
+            or extraction['rowFactsSha256'] != extraction['textSha256']):
+        raise SyncError('SOURCE_ACQUISITION_BINDING_MISMATCH')
+    return {**raw, 'extraction': dict(extraction)}
 
 
 
@@ -129,7 +177,8 @@ def processing_proof(payload, org, installation):
             or installation['sourceVersion'] != payload['sourceVersion']
             or type(revision) is not int or not 1 <= revision <= 9007199254740991
             or installation.get('versionId') != expected_version_id
-            or installation.get('canonicalSnapshotHash') != canonical_snapshot_hash(payload)):
+            or installation.get('canonicalSnapshotHash') != canonical_snapshot_hash(payload)
+            or 'sourceEvidence' in payload and installation.get('sourceEvidenceHash') != source_evidence_hash(payload['sourceEvidence'])):
         raise SyncError('CLOUD_PROCESSING_PROOF_MISMATCH')
     try:
         verified_at = timestamp(installation.get('verifiedAt'))
@@ -141,6 +190,7 @@ def processing_proof(payload, org, installation):
             'documentId': source_hash[:48], 'sourceSystem': payload['sourceSystem'],
             'sourceVersion': payload['sourceVersion'], 'revision': revision,
             'versionId': expected_version_id, 'canonicalSnapshotHash': canonical_snapshot_hash(payload),
+            **({'sourceEvidenceHash':source_evidence_hash(payload['sourceEvidence'])} if 'sourceEvidence' in payload else {}),
             'verifiedAt': verified_at}
 
 
@@ -287,6 +337,11 @@ def synchronize(raw, origin, org, token=None, send=False, transport=request_json
         if key in result and (type(result[key]) is not type(expected) or result[key] != expected):
             raise SyncError('CLOUD_RECEIPT_MISMATCH')
     proof = processing_proof(payload, org, result.get('installation'))
+    if 'sourceEvidence' in payload:
+        expected_evidence_hash=source_evidence_hash(payload['sourceEvidence'])
+        if result.get('sourceEvidenceHash') != expected_evidence_hash:
+            raise SyncError('CLOUD_ACQUISITION_PROOF_MISMATCH')
+        receipt['sourceEvidenceHash']=expected_evidence_hash
     if proof['firstIngestionVerified'] and ('sourceVersion' not in result or 'canonicalSnapshotHash' not in result):
         raise SyncError('CLOUD_PROCESSING_PROOF_MISMATCH')
     receipt.update(status='DUPLICATE' if result['duplicate'] else 'ACCEPTED', cloudReceiptVerified=True,

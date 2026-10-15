@@ -1,6 +1,7 @@
 import { immutableEntityVersionId, persistedDocumentHash } from './auroraCanonicalVersions.js';
 import { isOperationalRecord } from './auroraEngine.js';
 import { readInstallationAcceptance, type InstallationAcceptance } from './auroraInstallationAcceptance.js';
+import { acquisitionEvidenceHash } from './auroraIntegrationDocument.js';
 
 type RecordData = Record<string, any>;
 export type InstallationReadiness = {
@@ -14,6 +15,7 @@ export type InstallationReadiness = {
   canonicalSnapshotHash: string | null;
   sourceSystem: string | null;
   verifiedAt: string | null;
+  sourceEvidenceHash?: string;
   acceptance?: InstallationAcceptance;
 };
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{48}$/.test(value);
@@ -44,6 +46,10 @@ export function installationReadiness(orgId: string, checkpoint: RecordData | nu
     || version.snapshot?.canonicalSnapshotHash !== document.canonicalSnapshotHash
     || version.afterHash !== persistedDocumentHash(null, version.snapshot)
     || version.afterHash !== persistedDocumentHash(null, document)) return pending('PENDING_CANONICAL_DATA');
+  const acquisition=document.source?.acquisition;
+  const sourceEvidenceHash=acquisition ? document.source.acquisitionHash : null;
+  if (acquisition && (typeof sourceEvidenceHash !== 'string' || !/^[a-f0-9]{64}$/.test(sourceEvidenceHash)
+      || acquisitionEvidenceHash(acquisition) !== sourceEvidenceHash)) return pending('PENDING_CANONICAL_DATA');
   const proof = Array.isArray(projection?.integrationReadback)
     && projection.integrationReadback.some((item: RecordData) => item.documentId === id
       && item.sourceVersion === document.sourceVersion && item.revision === document.revision
@@ -65,6 +71,7 @@ export function installationReadiness(orgId: string, checkpoint: RecordData | nu
   return {state:'FIRST_INGESTION_VERIFIED', firstIngestionVerified:true, operationalComplete,
     documentId:id, sourceVersion:document.sourceVersion, revision:document.revision, versionId,
     canonicalSnapshotHash:document.canonicalSnapshotHash, sourceSystem:document.source.system,
+    ...(sourceEvidenceHash ? {sourceEvidenceHash} : {}),
     verifiedAt:date.toISOString()};
 }
 

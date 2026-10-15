@@ -24,7 +24,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from urllib import request, parse, error
 
-from aurora_cloud_sync import validate_payload, SyncError, unique_object, FIELDS
+from aurora_cloud_sync import validate_payload, SyncError, unique_object, FIELDS, ACQUISITION_SCHEMA, ACQUISITION_MIMES, record_text, digest
 import client_secret_store as secret_store
 
 MAX_EXPORT_BYTES = 16384
@@ -409,6 +409,65 @@ def page_token(value):
     return value
 
 
+def drive_pending(folder, item, code):
+    # Names/paths and free text never enter the local queue or reports.
+    file_id = identifier(item.get('id'))
+    version = item.get('version')
+    mime = item.get('mimeType')
+    return {'schemaVersion': 'aurora.document.acquisition.pending.v1', 'provider': 'GOOGLE_DRIVE',
+            'sourceObjectIdHash': digest('drive-v1:' + folder + ':' + file_id),
+            'observedVersion': version if isinstance(version, str) and re.fullmatch(r'[1-9][0-9]{0,31}', version) else None,
+            'sourceMimeType': mime if isinstance(mime, str) and re.fullmatch(r'[a-z0-9.+-]+/[a-z0-9.+-]{1,160}', mime) else 'application/octet-stream',
+            'status': 'PENDING_EXTRACTION', 'code': code}
+
+
+def drive_documents(folder, item, token, transport):
+    """Materialize canonical facts with a client-observed byte acquisition proof.
+
+    Sheets CSV is only Google's exported first sheet; never native workbook bytes
+    or evidence that every sheet/row of the source workbook was acquired.
+    """
+    version = item.get('version'); mime = item.get('mimeType'); file_id = identifier(item.get('id'))
+    if (not isinstance(version, str) or not re.fullmatch(r'[1-9][0-9]{0,31}', version)
+            or not isinstance(mime, str) or mime not in ACQUISITION_MIMES):
+        return [], drive_pending(folder, item, 'REVIEWED_MIME_AND_VERSION_REQUIRED')
+    sheets = mime == 'application/vnd.google-apps.spreadsheet'
+    prefix = 'https://www.googleapis.com/drive/v3/files/' + file_id
+    url = prefix + ('/export?mimeType=text%2Fcsv' if sheets else '?alt=media')
+    try:
+        raw = transport(url, token, True)
+        if not isinstance(raw, bytes) or not raw or len(raw) > MAX_PROVIDER_BYTES:
+            raise SyncError('BOUNDED_ACQUIRED_BYTES_REQUIRED')
+        # Provider version is observed on both sides of acquisition. This is not
+        # a provider signature or a transactional native-document snapshot.
+        after = transport(prefix + '?fields=id%2CmimeType%2Cversion', token)
+        if not isinstance(after, dict) or any(after.get(key) != item.get(key) for key in ('id', 'mimeType', 'version')):
+            raise SyncError('SOURCE_CHANGED_DURING_ACQUISITION')
+        rows = exports(raw, 'representation' + ACQUISITION_MIMES[mime][0])
+        if any('sourceEvidence' in row for row in rows):
+            raise SyncError('NESTED_SOURCE_ACQUISITION_REJECTED')
+    except ProviderAuthenticationError:
+        raise
+    except SyncError as exc:
+        # Retain an exact, non-narrative reason; never exception content from a file.
+        known = {'SOURCE_CHANGED_DURING_ACQUISITION', 'BOUNDED_ACQUIRED_BYTES_REQUIRED', 'PROVIDER_UNAVAILABLE', 'PROVIDER_RESPONSE_TOO_LARGE'}
+        return [], drive_pending(folder, item, str(exc) if str(exc) in known else 'CANONICAL_EXTRACTION_REQUIRED')
+    result = []
+    for index, row in enumerate(rows):
+        text_hash = digest(record_text(row))
+        proof = {'schemaVersion': ACQUISITION_SCHEMA, 'provider': 'GOOGLE_DRIVE',
+                 'sourceObjectIdHash': digest('drive-v1:' + folder + ':' + file_id), 'observedVersion': version,
+                 'sourceMimeType': mime, 'acquiredMimeType': 'text/csv' if sheets else mime,
+                 'representation': 'GOOGLE_SHEETS_CSV_EXPORT' if sheets else 'ORIGINAL_BYTES',
+                 'byteSha256': hashlib.sha256(raw).hexdigest(), 'byteLength': len(raw),
+                 'extraction': {'method': ACQUISITION_MIMES[mime][1], 'version': '1.0.0', 'status': 'COMPLETE',
+                                'coverage': 'EXPORTED_REPRESENTATION_ONLY', 'textFormat': 'CANONICAL_RECORD_JSON',
+                                'textSha256': text_hash, 'rowFactsSha256': text_hash,
+                                'rowIndex': index, 'rowCount': len(rows)}}
+        result.append(validate_payload({**row, 'sourceEvidence': proof}))
+    return result, None
+
+
 def pull(source, transport=api, environment=os.environ, imap_factory=imaplib.IMAP4_SSL, cursor=None, oauth_access_token=None):
     provider=source.get('provider')
     if provider not in PROVIDERS:raise SyncError('PROVIDER_NOT_SUPPORTED')
@@ -425,18 +484,21 @@ def pull(source, transport=api, environment=os.environ, imap_factory=imaplib.IMA
     else:
         if oauth_access_token is not None:raise SyncError('GOOGLE_OAUTH_CONFIGURATION_REQUIRED')
         token=token_for(source,environment)
-    rows=[]; pending=0;next_cursor=None
+    rows=[]; pending=0;next_cursor=None;pending_documents=[]
     if provider=='GOOGLE_DRIVE':
         folder=identifier(source.get('folderId'))
-        params={'q':"'"+folder+"' in parents and trashed = false",'pageSize':MAX_ITEMS,'fields':'files(id,name,mimeType),nextPageToken'}
+        params={'q':"'"+folder+"' in parents and trashed = false",'pageSize':MAX_ITEMS,'fields':'files(id,mimeType,version),nextPageToken'}
         if cursor is not None:params['pageToken']=page_token(cursor)
         query=parse.urlencode(params)
         result=transport('https://www.googleapis.com/drive/v3/files?'+query,token)
-        for item in result.get('files',[])[:MAX_ITEMS]:
-            if str(item.get('name','')).lower().endswith(EXPORT_SUFFIXES):
-                raw=transport('https://www.googleapis.com/drive/v3/files/'+identifier(item.get('id'))+'?alt=media',token,True)
-                rows.extend(exports(raw, item['name']))
-            else:pending+=1
+        if not isinstance(result,dict):raise SyncError('BOUNDED_PROVIDER_PAGE_REQUIRED')
+        files = result.get('files', [])
+        if not isinstance(files, list) or len(files) > MAX_ITEMS or any(not isinstance(item, dict) for item in files):
+            raise SyncError('BOUNDED_PROVIDER_PAGE_REQUIRED')
+        for item in files:
+            parsed, unresolved = drive_documents(folder, item, token, transport)
+            rows.extend(parsed)
+            if unresolved is not None: pending_documents.append(unresolved); pending += 1
         next_cursor=page_token(result.get('nextPageToken'))
         limited=next_cursor is not None
     elif provider=='GMAIL':
@@ -536,4 +598,5 @@ def pull(source, transport=api, environment=os.environ, imap_factory=imaplib.IMA
             except Exception:pass
     if len(rows)>MAX_ITEMS:raise SyncError('PROVIDER_EXPORT_LIMIT')
     if next_cursor is not None and next_cursor==cursor:raise SyncError('PROVIDER_CURSOR_NOT_ADVANCING')
-    return {'documents':rows,'pendingExtraction':pending,'coverageLimited':limited,'nextCursor':next_cursor}
+    return {'documents':rows,'pendingExtraction':pending,'pendingDocuments':pending_documents,
+            'coverageLimited':limited,'nextCursor':next_cursor}
