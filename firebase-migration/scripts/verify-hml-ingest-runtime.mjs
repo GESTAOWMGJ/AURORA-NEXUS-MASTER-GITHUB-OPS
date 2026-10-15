@@ -17,7 +17,7 @@ const revision = value => {
   return value;
 };
 
-function functionMetadata(fn) {
+function functionMetadata(fn, mode) {
   requireThat(fn?.name === `projects/${PROJECT}/locations/${REGION}/functions/${NAME}`
     && fn.state === 'ACTIVE' && fn.buildConfig?.entryPoint === NAME && fn.buildConfig.runtime === 'nodejs22',
   'HML_INGEST_FUNCTION_IDENTITY_CONFLICT');
@@ -28,14 +28,17 @@ function functionMetadata(fn) {
   const secrets = config.secretEnvironmentVariables;
   requireThat(Array.isArray(secrets) && secrets.length === 1 && secrets[0].key === SECRET
     && secrets[0].secret === SECRET && secrets[0].projectId === PROJECT
-    && String(secrets[0].version) === '3', 'HML_INGEST_EXISTING_SECRET_BINDING_REQUIRED');
+    // Owner-approved HML sourceDocument scope: accept the old binding only as
+    // a pre-deploy baseline. A completed deployment must bind immutable v4.
+    && (String(secrets[0].version) === '4' || (mode === 'before' && String(secrets[0].version) === '3')),
+  'HML_INGEST_EXISTING_SECRET_BINDING_REQUIRED');
   const source = fn.buildConfig.source?.storageSource;
   requireThat(source?.bucket === 'gcf-v2-sources-299889357292-southamerica-east1'
     && source.object === 'ingestWmgjEvent/function-source.zip' && /^[1-9][0-9]{0,25}$/.test(String(source.generation || ''))
     && /^projects\/[a-z0-9-]+\/locations\/[a-z0-9-]+\/builds\/[a-f0-9-]{36}$/.test(fn.buildConfig.build || '')
     && Number.isFinite(Date.parse(fn.updateTime)), 'HML_INGEST_BUILD_METADATA_REQUIRED');
   return {name: NAME, state: 'ACTIVE', runtime: 'nodejs22', serviceAccount: ACCOUNT,
-    ingress: 'ALLOW_ALL', secretName: SECRET, secretVersion: '3', revision: revision(config.revision),
+    ingress: 'ALLOW_ALL', secretName: SECRET, secretVersion: String(secrets[0].version), revision: revision(config.revision),
     updateTime: fn.updateTime, build: fn.buildConfig.build,
     source: {bucket: source.bucket, object: source.object, generation: String(source.generation)}};
 }
@@ -76,8 +79,9 @@ function iamMetadata(policy) {
   return {unconditionalPublicInvoker: true, bindingSha256: hash(normalized)};
 }
 
-export function normalizeIngestMetadata(fn, service, policy) {
-  const metadata = functionMetadata(fn);
+export function normalizeIngestMetadata(fn, service, policy, mode = 'after') {
+  requireThat(['before', 'after'].includes(mode), 'HML_INGEST_SECRET_TRANSITION_REJECTED');
+  const metadata = functionMetadata(fn, mode);
   return {function: metadata, route: serviceMetadata(service, metadata.revision), iam: iamMetadata(policy)};
 }
 
@@ -86,6 +90,9 @@ export function verifyIngestDeployment(before, after, context) {
     'HML_INGEST_DEPLOY_CONTEXT_REQUIRED');
   requireThat(after?.function && before?.function && after.iam?.bindingSha256 === before.iam?.bindingSha256,
     'HML_INGEST_IAM_CHANGED');
+  requireThat(['3', '4'].includes(before.function.secretVersion) && after.function.secretVersion === '4'
+    && before.function.secretName === SECRET && after.function.secretName === SECRET,
+  'HML_INGEST_SECRET_TRANSITION_REJECTED');
   requireThat(Date.parse(after.function.updateTime) >= Date.parse(context.startedAt)
     && Date.parse(after.function.updateTime) > Date.parse(before.function.updateTime)
     && after.function.build !== before.function.build
@@ -93,7 +100,8 @@ export function verifyIngestDeployment(before, after, context) {
     && after.function.revision !== before.function.revision,
   'HML_INGEST_DEPLOY_NOT_OBSERVED');
   return {schemaVersion: 1, code: 'HML_INGEST_RUNTIME_METADATA_VERIFIED', requestedSourceSha: context.sourceSha,
-    metadata: after, backendRuntimeSourceShaVerified: false, requestProcessingVerified: false,
+    metadata: after, secretBindingTransition: {from: before.function.secretVersion, to: '4'},
+    backendRuntimeSourceShaVerified: false, requestProcessingVerified: false,
     limitation: 'PROVIDER_BUILD_SOURCE_AND_ROUTE_METADATA_ONLY_NOT_RUNTIME_BYTE_OR_INGESTION_PROOF'};
 }
 
@@ -103,7 +111,7 @@ const publicCodes = new Set(['HML_INGEST_REVISION_INVALID', 'HML_INGEST_FUNCTION
   'HML_INGEST_IAM_READ_REQUIRED', 'HML_INGEST_EXISTING_PUBLIC_INVOKER_REQUIRED', 'HML_INGEST_DEPLOY_CONTEXT_REQUIRED',
   'HML_INGEST_IAM_CHANGED', 'HML_INGEST_DEPLOY_NOT_OBSERVED', 'HML_INGEST_PROTECTED_CONTEXT_REQUIRED',
   'HML_INGEST_METADATA_READ_FAILED', 'HML_INGEST_METADATA_INVALID', 'HML_INGEST_BASELINE_CONTEXT_CONFLICT',
-  'HML_INGEST_RUNTIME_METADATA_VERIFIED', 'HML_INGEST_BASELINE_RETAINED']);
+  'HML_INGEST_RUNTIME_METADATA_VERIFIED', 'HML_INGEST_BASELINE_RETAINED', 'HML_INGEST_SECRET_TRANSITION_REJECTED']);
 
 export function runIngestMetadataCheck(mode, env, {readJson, readFile = readFileSync,
   save = (path, value) => writeFileSync(path, JSON.stringify(value, null, 2) + '\n', {flag: 'wx', mode: 0o600}),
@@ -127,7 +135,7 @@ export function runIngestMetadataCheck(mode, env, {readJson, readFile = readFile
   const service = readJson(['run', 'services', 'describe', SERVICE, '--project', PROJECT, '--region', REGION,
     '--format=json(metadata.name,metadata.generation,metadata.annotations,spec.traffic,status.observedGeneration,status.conditions,status.latestCreatedRevisionName,status.latestReadyRevisionName,status.traffic)']);
   const policy = readJson(['run', 'services', 'get-iam-policy', SERVICE, '--project', PROJECT, '--region', REGION, '--format=json(bindings)']);
-  const metadata = normalizeIngestMetadata(fn, service, policy);
+  const metadata = normalizeIngestMetadata(fn, service, policy, mode);
   const result = mode === 'before'
     ? {schemaVersion: 1, code: 'HML_INGEST_BASELINE_RETAINED', context, capturedAt: now(), metadata}
     : verifyIngestDeployment(baseline.metadata, metadata, {...context, startedAt: baseline.capturedAt});

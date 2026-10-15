@@ -1,6 +1,16 @@
 # AURORA NEXUS — progresso até a versão vendável
 
-## Release train
+## Incremento HML documental — 15/10/2026
+
+Na baseline `c7c234cae263a4c2cb4fa854a5fa26a4ab0b3509`, o teste real isolado
+extraiu quatro formatos, mas a persistência foi recusada por escopo HMAC.
+O titular aprovou somente `sourceDocument` na versão protegida 4 até 00h de
+16/10 em Brasília. O candidato exige a transição 3 → 4 ou 4 → 4 no runtime,
+preservando IAM, conta e rota; deploy e repetição real seguem pendentes de prova.
+[Decisão, testes e recuperação](AURORA_HML_DOCUMENT_SCOPE_20261015.md).
+Este incremento não declara ingestão global, ativação de pasta real nem beta completa.
+
+## Release train histórico
 
 - Produto: **1.0.0-rc.1**
 - Política operacional: **2.3.0**

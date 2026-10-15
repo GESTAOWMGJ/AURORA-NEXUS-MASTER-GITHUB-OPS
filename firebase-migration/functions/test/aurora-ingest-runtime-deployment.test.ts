@@ -14,21 +14,54 @@ function fixture(next=false) {
         source:{storageSource:{bucket:'gcf-v2-sources-299889357292-southamerica-east1',object:'ingestWmgjEvent/function-source.zip',generation:next?'1791040123753410':'1791040123753409'}}},
       serviceConfig:{service:`projects/${project}/locations/${region}/services/ingestwmgjevent`,revision,
         serviceAccountEmail:'299889357292-compute@developer.gserviceaccount.com',ingressSettings:'ALLOW_ALL',
-        secretEnvironmentVariables:[{key:'WMGJ_INGEST_HMAC_KEYRING',secret:'WMGJ_INGEST_HMAC_KEYRING',projectId:project,version:'3'}]}},
+        secretEnvironmentVariables:[{key:'WMGJ_INGEST_HMAC_KEYRING',secret:'WMGJ_INGEST_HMAC_KEYRING',projectId:project,version:next?'4':'3'}]}},
     service:{metadata:{name:'ingestwmgjevent',generation:'2',annotations:{'run.googleapis.com/ingress':'all','run.googleapis.com/ingress-status':'all'}},spec:{traffic:[{latestRevision:true,percent:100}]},
       status:{observedGeneration:2,conditions:[{type:'Ready',status:'True'}],latestCreatedRevisionName:revision,
         latestReadyRevisionName:revision,traffic:[{revisionName:revision,latestRevision:true,percent:100}]}},
     policy:{bindings:[{role:'roles/run.invoker',members:['allUsers']}]} as any
   };
 }
-const normalized=(f=fixture())=>normalizeIngestMetadata(f.fn,f.service,f.policy);
+const normalized=(f=fixture(), mode='before')=>normalizeIngestMetadata(f.fn,f.service,f.policy,mode);
 
 test('provider build/revision convergence is verified separately from runtime byte or processing proof',()=>{
   const result=verifyIngestDeployment(normalized(),normalized(fixture(true)),{sourceSha,startedAt:start});
   assert.equal(result.code,'HML_INGEST_RUNTIME_METADATA_VERIFIED');
   assert.equal(result.backendRuntimeSourceShaVerified,false);
   assert.equal(result.requestProcessingVerified,false);
-  assert.equal(result.metadata.function.secretVersion,'3');
+  assert.equal(result.metadata.function.secretVersion,'4');
+  assert.deepEqual(result.secretBindingTransition,{from:'3',to:'4'});
+});
+
+test('only the approved immutable 3-to-4 or 4-to-4 binding can complete deployment',()=>{
+  const current=fixture();current.fn.serviceConfig.secretEnvironmentVariables[0].version='4';
+  const next=normalized(fixture(true),'after');
+  assert.deepEqual(verifyIngestDeployment(normalized(current),next,{sourceSha,startedAt:start})
+    .secretBindingTransition,{from:'4',to:'4'});
+  assert.throws(()=>normalizeIngestMetadata(fixture().fn,fixture().service,fixture().policy),/SECRET_BINDING_REQUIRED/);
+  for(const version of ['2','5','latest','*']) {
+    const f=fixture();f.fn.serviceConfig.secretEnvironmentVariables[0].version=version;
+    for(const mode of ['before','after']) assert.throws(()=>normalized(f,mode),/SECRET_BINDING_REQUIRED/);
+  }
+  assert.throws(()=>normalized(fixture(true),'arbitrary'),/SECRET_TRANSITION_REJECTED/);
+  const oldAfter=normalized(fixture(true));oldAfter.function.secretVersion='3';
+  assert.throws(()=>verifyIngestDeployment(normalized(),oldAfter,{sourceSha,startedAt:start}),/SECRET_TRANSITION_REJECTED/);
+  const invalidBefore=normalized();invalidBefore.function.secretVersion='5';
+  assert.throws(()=>verifyIngestDeployment(invalidBefore,next,{sourceSha,startedAt:start}),/SECRET_TRANSITION_REJECTED/);
+});
+
+test('after-mode cannot persist old runtime binding as successful deployment evidence',()=>{
+  const env={GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS',GITHUB_REF:'refs/heads/main',
+    GITHUB_SHA:sourceSha,GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'1',PROJECT_ID:project,RUNNER_TEMP:'.'};
+  const context={sourceSha,runId:'123',runAttempt:'1'};
+  const f=fixture(true);f.fn.serviceConfig.secretEnvironmentVariables[0].version='3';
+  let writes=0;
+  const deps={readJson:(args:string[])=>args[0]==='functions'?f.fn:args.includes('get-iam-policy')?f.policy:f.service,
+    readFile:()=>JSON.stringify({context,capturedAt:start,metadata:normalized()}),save:()=>{writes++;}};
+  assert.throws(()=>runIngestMetadataCheck('after',env,deps),/SECRET_BINDING_REQUIRED/);
+  assert.equal(writes,0);
+  f.fn.serviceConfig.secretEnvironmentVariables[0].version='4';
+  assert.equal(runIngestMetadataCheck('after',env,deps).code,'HML_INGEST_RUNTIME_METADATA_VERIFIED');
+  assert.equal(writes,1);
 });
 for(const [name,mutate] of [
   ['wrong function',(f:any)=>f.fn.name+='other'],
@@ -48,7 +81,8 @@ for(const [name,mutate] of [
 ] as const) test(`metadata guard rejects ${name}`,()=>{const f=fixture(true);mutate(f);assert.throws(()=>normalized(f));});
 
 test('unchanged old function and changed IAM cannot be described as the new deployed runtime',()=>{
-  assert.throws(()=>verifyIngestDeployment(normalized(),normalized(),{sourceSha,startedAt:start}),/DEPLOY_NOT_OBSERVED/);
+  const unchanged=normalized(fixture(true),'after');
+  assert.throws(()=>verifyIngestDeployment(unchanged,unchanged,{sourceSha,startedAt:start}),/DEPLOY_NOT_OBSERVED/);
   const f=fixture(true);f.policy.bindings.push({role:'roles/run.invoker',members:['user:other@example.test']});
   assert.throws(()=>verifyIngestDeployment(normalized(),normalized(f),{sourceSha,startedAt:start}),/IAM_CHANGED/);
   const before=normalized(), after=normalized(fixture(true));after.function.updateTime='2026-10-15T04:29:59Z';
