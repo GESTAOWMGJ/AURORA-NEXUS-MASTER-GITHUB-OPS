@@ -563,7 +563,7 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         manifests.mkdir(parents=True)
         f.manifest_path = manifests / 'windowsIntegration-manifest.json'
         f.win_manifest = {'schemaVersion': 1, 'platform': 'windows', 'component': 'AURORA_WINDOWS_INTEGRATION',
-                          'version': '1.0.3', 'sourceSha': source,
+                          'version': '1.0.4', 'sourceSha': source,
                           'files': {name: release.digest(value) for name, value in self.asset_bytes.items()}}
         f.manifest_path.write_bytes(self.encode(f.win_manifest))
         archive = io.BytesIO()
@@ -592,7 +592,7 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         for name, pin in f.env['certificate']['components'].items():
             pin['sourceSha'] = source
             if name == 'windowsIntegration':
-                pin['version'] = '1.0.3'
+                pin['version'] = '1.0.4'
         f.resign(f.env)
         f.cert_sha = release.digest(release.signing_bytes(f.env['certificate']))
         suffix = '1' if source == self.old_source else '2'
@@ -871,7 +871,7 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         self.assertEqual(len(self.f.transport.posts), 2)
         metadata = json.loads(self.manifest.read_bytes())
         self.assertEqual(metadata['reviewedMainSha'], self.new_source)
-        self.assertEqual(metadata['integrationComponent']['version'], '1.0.3')
+        self.assertEqual(metadata['integrationComponent']['version'], '1.0.4')
         self.assertEqual(json.loads(self.f.active.read_bytes())['receipt']['status'], 'DUPLICATE')
         self.assertEqual((Path(result['rollbackBackup']) / 'before-manifest.json').read_bytes(), self.snapshots['manifest'])
         self.assertNotIn('SYNTHETIC_PROCESS_ONLY', output.getvalue())
@@ -958,6 +958,78 @@ class SignedPublishedContinuityTests(unittest.TestCase):
             predecessor.revalidate()
         self.assertEqual(backup.read_bytes(), b'new writer')
         self.assert_original()
+
+
+class ManualReadbackCallerTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.root = self.base / 'AuroraNexus'
+        self.input = self.base / 'approved-manual.json'
+        self.input.write_text(json.dumps({
+            'sourceSystem': 'ERP', 'externalDocumentId': 'synthetic-manual-caller',
+            'sourceVersion': 1, 'occurredAt': '2026-10-15T00:00:00Z',
+            'documentType': 'OTHER', 'competence': None, 'amountCents': None,
+            'count': None, 'workflowState': 'VALIDATED', 'slaDueAt': None,
+            'nativeReady': True, 'sourceIndependent': True,
+            'documentFragility': 'NONE', 'missingFieldsCount': 0,
+        }), encoding='utf-8')
+        self.eligible = {'eligible': True, 'method': 'MANUAL', 'installationComplete': False,
+                         'documentReplayPerformedByInstaller': False, 'checkpointChanged': False}
+
+    def verify(self, method='MANUAL', **options):
+        return installer.verify_installation_integration(self.root, self.input,
+            'synthetic-org', 'https://auroranexus.com.br', method, **options)
+
+    def test_manual_readback_does_not_create_an_operational_checkpoint(self):
+        before = self.input.read_bytes()
+        with patch.object(installer.integration_deployment, 'integrate_installation',
+                          return_value=self.eligible) as integrate:
+            result = self.verify()
+        self.assertEqual(result, self.eligible)
+        self.assertIsNone(integrate.call_args.args[3])
+        self.assertEqual(integrate.call_args.kwargs['method'], 'MANUAL')
+        self.assertFalse(self.root.exists())
+        self.assertEqual(self.input.read_bytes(), before)
+
+    def test_existing_ia_anchor_and_checkpoint_remain_unchanged_on_manual_readback(self):
+        state = self.root / 'integration/state'
+        anchor = state / 'ia-master/installation.json'
+        anchor.parent.mkdir(parents=True)
+        anchor.write_bytes(b'{"existingAnchor":"preserve"}')
+        checkpoint = state / 'integration-setup.json'
+        checkpoint.write_bytes(b'{"existingCheckpoint":"preserve"}')
+        before = {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
+        with patch.object(installer.integration_deployment, 'integrate_installation',
+                          return_value=self.eligible):
+            self.verify()
+        self.assertEqual(before, {p.relative_to(self.root): p.read_bytes()
+                                 for p in self.root.rglob('*') if p.is_file()})
+
+    def test_manual_readback_failure_does_not_stage_or_promote_the_client(self):
+        with patch.object(installer.integration_deployment, 'integrate_installation',
+                          side_effect=ValueError('AUTHORITATIVE_MANUAL_RECEIPT_REQUIRED')):
+            with self.assertRaisesRegex(ValueError, 'AUTHORITATIVE_MANUAL_RECEIPT_REQUIRED'):
+                self.verify()
+        self.assertFalse(self.root.exists())
+
+    def test_manual_readback_cannot_execute_a_checkpoint_transition(self):
+        with patch.object(installer.integration_deployment, 'integrate_installation') as integrate:
+            with self.assertRaisesRegex(ValueError, 'SEPARATE_CHECKPOINT_TRANSITION_REQUIRED'):
+                self.verify(transition_plan_path=self.base / 'not-read.json')
+        integrate.assert_not_called()
+        self.assertFalse(self.root.exists())
+
+    def test_api_writing_path_still_requires_a_transition_for_existing_ia_anchor(self):
+        anchor = self.root / 'integration/state/ia-master/installation.json'
+        anchor.parent.mkdir(parents=True)
+        anchor.write_bytes(b'{"existingAnchor":"preserve"}')
+        with patch.object(installer.integration_deployment, 'integrate_installation') as integrate:
+            with self.assertRaisesRegex(ValueError, 'EXPLICIT_CHECKPOINT_TRANSITION_REQUIRED'):
+                self.verify(method='API_TOKEN')
+        integrate.assert_not_called()
+        self.assertEqual(anchor.read_bytes(), b'{"existingAnchor":"preserve"}')
 
 
 if __name__ == '__main__':

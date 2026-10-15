@@ -77,6 +77,10 @@ test("instalação canônica é governada e está presente na projeção, sem no
   assert.equal(cloud.completedSourcesRequireFreshInstallationRevalidation, true);
   assert.equal(cloud.differentProviderPageCountsMustRemainResumable, true);
   assert.equal(cloud.pendingExtractionBlocksCompletion, true);
+  assert.equal(cloud.manualInstallationVerification, "EXISTING_CANONICAL_RECEIPT_TWO_AUTHENTICATED_READS");
+  assert.equal(cloud.manualInputProofScope, "DOCUMENT_IDENTITY_VERSION_AND_CANONICAL_FACTS");
+  assert.equal(cloud.manualInstallerReplaysDocument, false);
+  assert.equal(cloud.manualInstallerWritesSharedCheckpoint, false);
   assert.equal(cloud.firstDocumentEqualsFullIngestion, false);
   assert.equal(cloud.permissionsGranted, false);
   assert.equal(cloud.schedulerCreated, false);

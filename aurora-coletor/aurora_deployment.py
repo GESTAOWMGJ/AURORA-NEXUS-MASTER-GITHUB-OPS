@@ -21,8 +21,8 @@ import time
 
 import aurora_cloud_sync as sync
 
-VERSION = '1.0.3'
-CHECKPOINT_VERSIONS = ('1.0.0', '1.0.1', '1.0.2', VERSION)
+VERSION = '1.0.4'
+CHECKPOINT_VERSIONS = ('1.0.0', '1.0.1', '1.0.2', '1.0.3', VERSION)
 SCHEMA = 'aurora.install.integration.v1'
 STATE_NAME = 'integration-setup.json'
 ASSETS = ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
@@ -210,12 +210,59 @@ def run(raw, origin, org, state_dir, token=None, connect=False, send=False,
         return result
 
 
+def _read_manual_installation(raw, origin, org, token, transport):
+    """Read an existing manual receipt twice; never import, replay or write a checkpoint."""
+    payload = sync.validate_payload(raw)
+    preview = sync.synchronize(payload, origin, org)
+    if not isinstance(token, str) or not token or any(character.isspace() for character in token):
+        raise sync.SyncError('INTEGRATION_CREDENTIAL_REQUIRED')
+    url = sync.origin_url(origin) + '/api/integration/ping?documentId=' + preview['documentId']
+    previous_binding = None
+    for _ in range(2):
+        status, response = transport(url, token)
+        if (status != 200 or not isinstance(response, dict) or response.get('ok') is not True
+                or response.get('orgId') != org or response.get('service') != 'aurora-nexus-integration'
+                or not isinstance(response.get('keyId'), str)
+                or not re.fullmatch(r'ik_[a-f0-9]{16}', response['keyId'])):
+            raise sync.SyncError('AUTHENTICATED_ORGANIZATION_MISMATCH')
+        installation = response.get('installation')
+        proof = sync.processing_proof(payload, org, installation)
+        if proof.get('firstIngestionVerified') is not True:
+            raise sync.SyncError('AUTHENTICATED_PROCESSING_REQUIRED')
+        acceptance = sync.installation_acceptance(payload, org, installation.get('acceptance'), proof)
+        if (not isinstance(acceptance, dict) or acceptance.get('eligible') is not True
+                or acceptance.get('method') != 'MANUAL'
+                or acceptance['acquisitionModes']['MANUAL'] != 'CANONICAL_PIPELINE_VERIFIED'
+                or not all(acceptance.get(key) is True for key in
+                           ('processingVerified', 'receiptPersisted', 'replayVerified',
+                            'automationConfigured', 'automationVerified'))):
+            raise sync.SyncError('AUTHORITATIVE_AUTOMATION_INTEGRATION_REQUIRED')
+        # Server observation times may advance. The authenticated reader, exact
+        # revision and persisted receipt/configuration must remain unchanged.
+        binding = sync.digest(json.dumps({
+            'readerKeyId': response['keyId'],
+            'processing': {key: value for key, value in proof.items() if key != 'verifiedAt'},
+            'acceptance': {key: value for key, value in acceptance.items() if key != 'verifiedAt'},
+        }, sort_keys=True, separators=(',', ':'), allow_nan=False))
+        if previous_binding is not None and binding != previous_binding:
+            raise sync.SyncError('MANUAL_INSTALLATION_READBACK_CHANGED')
+        previous_binding = binding
+    return {**acceptance, 'installationComplete': False,
+            'targetBinding': sync.digest(sync.origin_url(origin) + ':' + org),
+            'sampleKey': preview['idempotencyKey'], 'checkpointChanged': False,
+            'proofScope': 'AUTHENTICATED_MANUAL_RECEIPT_READBACK',
+            'replayPersistedVerified': True, 'documentReplayPerformedByInstaller': False,
+            'globalIngestionVerified': False, 'sourceAcquisitionCertified': False}
+
+
 def integrate_installation(raw, origin, org, state_dir, token=None, method='API_TOKEN', transport=sync.request_json):
     """Current authenticated processing + replay gate; cloud/local require their real source adapter."""
     if method not in ('API_TOKEN', 'MANUAL'):
         raise sync.SyncError('REAL_SOURCE_ADAPTER_REQUIRED')
     if sync.origin_url(origin)!='https://auroranexus.com.br':
         raise sync.SyncError('CANONICAL_INSTALLATION_ORIGIN_REQUIRED')
+    if method == 'MANUAL':
+        return _read_manual_installation(raw, origin, org, token, transport)
     first = run(raw, origin, org, state_dir, token=token, send=True, transport=transport)
     if (first.get('connectionVerified') is not True or first.get('receiptVerifiedThisRun') is not True
             or first.get('processingVerifiedThisRun') is not True):

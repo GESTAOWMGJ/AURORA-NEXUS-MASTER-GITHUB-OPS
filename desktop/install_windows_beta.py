@@ -711,6 +711,12 @@ def verify_installation_integration(root, input_path, org, origin, method, agent
     raw = read_json(input_path)
     # Validate the exact approved sample/target before staging any private checkpoint.
     integration_deployment.sync.synchronize(raw, origin, org)
+    if method == 'MANUAL':
+        # The personal web session owns the import and replay. This path only
+        # revalidates its canonical receipt, so it must not touch the shared
+        # operational checkpoint or the IA Master installation anchor.
+        return integration_deployment.integrate_installation(raw, origin, org, None,
+            token=os.environ.get('AURORA_INTEGRATION_TOKEN'), method='MANUAL')
     state = deployment_safe_path(root / "integration/state")
     if transition_plan_path:
         plan = read_json(transition_plan_path)

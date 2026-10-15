@@ -56,6 +56,34 @@ Renovação OAuth automatizada, extração de todos os formatos e testes reais d
 provedores permanecem dependências abertas. Não há criação de identidade/chave de
 terceiros apenas pelo código nem transmissão sem credencial própria válida.
 
+## Continuidade MANUAL do instalador — candidato de 15/10/2026
+
+A rotina existente `AURORA-INSTALL-INTEGRATION-001` reaproveita a importação
+manual feita pelo usuário no portal canônico, com login/MFA e configuração
+autorizada. O componente de integração avança para 1.0.4, preservando a leitura
+dos checkpoints 1.0.0 a 1.0.3. Para instalar por `--integration-method MANUAL`, usar o mesmo JSON
+administrativo já importado e uma credencial de integração vigente com
+`integration.read`, no ambiente protegido do processo.
+
+O instalador consulta duas vezes o recibo do documento exato pela rota existente
+`GET /api/integration/ping?documentId=...`. Confere organização, processamento,
+versão, fatos e hash canônicos, recibo, replay persistido e configuração vigente,
+exigindo método MANUAL nas duas respostas. Divergência desses vínculos ou revogação
+bloqueia a instalação. O endpoint não atesta igualdade de campos do JSON que não
+integram a projeção canônica. A releitura
+não transmite o documento, não configura automação e não copia cookies, sessão ou
+código MFA. O replay pertence à operação manual realizada no portal; a saída
+explicita que o instalador não o executou.
+
+Esse caminho não escreve no checkpoint compartilhado nem na âncora da IA Master.
+A trilha API_TOKEN conserva os requisitos de transição explícita antes de escrita.
+Falha de autorização ou prova continua bloqueando a promoção do cliente.
+
+Código e testes sintéticos desse candidato não comprovam instalação distribuída,
+consentimento OAuth, extração de documentos comuns ou ingestão global. A adoção
+exige CI na fonte final, promoção assinada e execução real pelo mesmo instalador.
+Rollback usa o pacote anterior e os backups existentes; nenhum dado-fonte é apagado.
+
 ## Evidências separadas desta sessão
 
 - PR #244 integrado em `067aecf1`; P2 de recibo de domínio resolvido.
