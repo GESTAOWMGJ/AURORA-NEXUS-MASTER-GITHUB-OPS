@@ -39,7 +39,8 @@ export function publicAutomationConfiguration(value:unknown) {
 /** Uses the existing organization, credential and installation checkpoint, in one transaction.
  * Configuration authorizes this server pipeline; it never attests a watcher or provider login. */
 export async function configureCanonicalAutomation(actor: AuroraMember, body: unknown, tx: {
-  read(path: string): Promise<Data | null>; merge(path: string, data: Data): void; timestamp: unknown;
+  read(path: string): Promise<Data | null>; merge(path: string, data: Data): void;
+  create(path:string,data:Data):void; timestamp: unknown;
 }) {
   if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(actor.orgId) || !canImportNativeDocuments(actor) || !uid(actor.uid)) throw Error('MFA_AND_INTEGRATION_ADMIN_REQUIRED');
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw Error('INVALID_AUTOMATION_CONFIGURATION');
@@ -69,6 +70,15 @@ export async function configureCanonicalAutomation(actor: AuroraMember, body: un
   const binding = semanticBinding({orgId:actor.orgId, method:input.method, keyId,
     sourceSystem:input.sourceSystem, enabled:input.enabled, revision:currentRevision + 1, configuredBy:actor.uid});
   const configurationHash = digest(binding);
+  const auditPath = `${base}/auditEvents/automation-binding-${configurationHash}`;
+  if(await tx.read(auditPath)) throw Error('AUTOMATION_CONFIGURATION_CONFLICT');
+  // The audit is create-only and commits in the same transaction as the CAS
+  // binding; retries cannot overwrite or erase the preceding configuration.
+  tx.create(auditPath,{orgId:actor.orgId,action:'AUTOMATION_BINDING_CONFIGURED',type:'AUTOMATION_BINDING_CONFIGURED',
+    actorUid:actor.uid,actorRole:member!.role,method:input.method,keyId,sourceSystem:input.sourceSystem,
+    previousConfigurationHash:previous?.configurationHash ?? null,configurationHash,
+    previousRevision:currentRevision,revision:binding.revision,enabled:input.enabled,
+    automationScope:'AURORA_CANONICAL_PIPELINE',occurredAt:tx.timestamp,sanitized:true,sensitivity:'INTERNAL'});
   tx.merge(path, {orgId:actor.orgId, automation:{...binding, configurationHash, configuredAt:tx.timestamp}});
   return {orgId:actor.orgId, method:input.method, configurationHash, revision:binding.revision,
     configured:true, automationScope:'AURORA_CANONICAL_PIPELINE', providerAccessVerified:false,

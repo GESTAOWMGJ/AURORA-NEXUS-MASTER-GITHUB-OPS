@@ -1,52 +1,94 @@
-name: iOS starter workflow
+name: Validate native iOS candidate
 
 on:
   push:
-    branches: [ "main" ]
-    paths:
-      - "ios/**"
-      - "**/*.xcodeproj/**"
-      - "**/*.xcworkspace/**"
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
     paths:
-      - "ios/**"
-      - "**/*.xcodeproj/**"
-      - "**/*.xcworkspace/**"
+      - 'desktop/ios/**'
+      - 'firebase-migration/functions/src/auroraReleaseStatus.ts'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: aurora-ios-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    name: Build and Test default scheme using any available iPhone simulator
+    name: Unsigned native iOS build and synthetic simulator test
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: macos-latest
-
+    timeout-minutes: 25
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set Default Scheme
+      - name: Checkout exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Test source-bound configuration and Foundation contract
         run: |
-          scheme_list=$(xcodebuild -list -json | tr -d "\n")
-          default=$(echo $scheme_list | ruby -e "require 'json'; puts JSON.parse(STDIN.gets)['project']['targets'][0]")
-          echo $default | cat >default
-          echo Using default scheme: $default
-      - name: Build
+          set -euo pipefail
+          python3 -m unittest discover -s desktop/ios -p test_configure.py -v
+          swift run --package-path desktop/ios --scratch-path "${RUNNER_TEMP}/aurora-ios-core" AuroraIOSChecks
+          swift test --package-path desktop/ios --scratch-path "${RUNNER_TEMP}/aurora-ios-core"
+      - name: Configure unsigned candidate without Apple identity claims
         env:
-          scheme: ${{ 'default' }}
-          platform: ${{ 'iOS Simulator' }}
+          AURORA_IOS_BUNDLE_IDENTIFIER: ${{ vars.AURORA_IOS_BUNDLE_IDENTIFIER }}
         run: |
-          # xcrun xctrace returns via stderr, not the expected stdout (see https://developer.apple.com/forums/thread/663959)
-          device=`xcrun xctrace list devices 2>&1 | grep -oE 'iPhone.*?[^\(]+' | head -1 | awk '{$1=$1;print}' | sed -e "s/ Simulator$//"`
-          if [ $scheme = default ]; then scheme=$(cat default); fi
-          if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then filetype_parameter="workspace" && file_to_build="`ls -A | grep -i \\.xcworkspace\$`"; else filetype_parameter="project" && file_to_build="`ls -A | grep -i \\.xcodeproj\$`"; fi
-          file_to_build=`echo $file_to_build | awk '{$1=$1;print}'`
-          xcodebuild build-for-testing -scheme "$scheme" -"$filetype_parameter" "$file_to_build" -destination "platform=$platform,name=$device"
-      - name: Test
-        env:
-          scheme: ${{ 'default' }}
-          platform: ${{ 'iOS Simulator' }}
+          set -euo pipefail
+          if [[ -n "${AURORA_IOS_BUNDLE_IDENTIFIER}" ]]; then
+            python3 desktop/ios/configure.py --bundle-identifier "${AURORA_IOS_BUNDLE_IDENTIFIER}" --build-number "${GITHUB_RUN_NUMBER}"
+          else
+            python3 desktop/ios/configure.py --unsigned-test-identity --build-number "${GITHUB_RUN_NUMBER}"
+          fi
+          plutil -lint desktop/ios/Generated/AuroraNexus.xcodeproj/project.pbxproj
+          xcodebuild -list -project desktop/ios/Generated/AuroraNexus.xcodeproj
+      - name: Select available iPhone simulator
         run: |
-          # xcrun xctrace returns via stderr, not the expected stdout (see https://developer.apple.com/forums/thread/663959)
-          device=`xcrun xctrace list devices 2>&1 | grep -oE 'iPhone.*?[^\(]+' | head -1 | awk '{$1=$1;print}' | sed -e "s/ Simulator$//"`
-          if [ $scheme = default ]; then scheme=$(cat default); fi
-          if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then filetype_parameter="workspace" && file_to_build="`ls -A | grep -i \\.xcworkspace\$`"; else filetype_parameter="project" && file_to_build="`ls -A | grep -i \\.xcodeproj\$`"; fi
-          file_to_build=`echo $file_to_build | awk '{$1=$1;print}'`
-          xcodebuild test-without-building -scheme "$scheme" -"$filetype_parameter" "$file_to_build" -destination "platform=$platform,name=$device"
+          set -euo pipefail
+          xcrun simctl list devices available --json > "${RUNNER_TEMP}/aurora-ios-simulators.json"
+          python3 - <<'PY'
+          import json, os, pathlib
+          data = json.loads((pathlib.Path(os.environ['RUNNER_TEMP']) / 'aurora-ios-simulators.json').read_text())
+          devices = [device for runtime, rows in data['devices'].items() if '.iOS-' in runtime
+                     for device in rows if device.get('isAvailable') is True and device['name'].startswith('iPhone')]
+          if not devices:
+              raise SystemExit('No available iPhone simulator; no native build claim is possible')
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('AURORA_IOS_SIMULATOR_ID=' + devices[0]['udid'] + '\n')
+          PY
+      - name: Build unsigned app and simulator tests
+        run: |
+          set -euo pipefail
+          xcodebuild build-for-testing -project desktop/ios/Generated/AuroraNexus.xcodeproj -scheme AuroraNexus \
+            -destination "platform=iOS Simulator,id=${AURORA_IOS_SIMULATOR_ID}" \
+            -derivedDataPath "${RUNNER_TEMP}/aurora-ios-app" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+      - name: Test native center without network login or private data
+        run: |
+          set -euo pipefail
+          xcodebuild test-without-building -project desktop/ios/Generated/AuroraNexus.xcodeproj -scheme AuroraNexus \
+            -destination "platform=iOS Simulator,id=${AURORA_IOS_SIMULATOR_ID}" \
+            -derivedDataPath "${RUNNER_TEMP}/aurora-ios-app" \
+            -resultBundlePath "${RUNNER_TEMP}/aurora-ios-synthetic.xcresult" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+      - name: Retain unsigned simulator candidate and provenance
+        run: |
+          set -euo pipefail
+          ditto -c -k --keepParent "${RUNNER_TEMP}/aurora-ios-app/Build/Products/Debug-iphonesimulator/AuroraNexus.app" \
+            "${RUNNER_TEMP}/AuroraNexus-unsigned-simulator.zip"
+          shasum -a 256 "${RUNNER_TEMP}/AuroraNexus-unsigned-simulator.zip" > "${RUNNER_TEMP}/ios-simulator-SHA256SUMS"
+      - name: Upload unsigned simulator candidate and test evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ios-simulator-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/AuroraNexus-unsigned-simulator.zip
+            ${{ runner.temp }}/ios-simulator-SHA256SUMS
+            desktop/ios/Generated/BuildProvenance.json
+            ${{ runner.temp }}/aurora-ios-synthetic.xcresult
+          if-no-files-found: error
+          retention-days: 14

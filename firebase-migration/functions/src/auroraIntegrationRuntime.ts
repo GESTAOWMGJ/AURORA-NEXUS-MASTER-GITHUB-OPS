@@ -168,6 +168,7 @@ export const auroraNexusIntegrationKeys = onRequest(
       try {
         const configured=await auroraDb.runTransaction(async tx => configureCanonicalAutomation(member,req.body,{
           read:async path => {const value=await tx.get(auroraDb.doc(path));return value.exists ? value.data() ?? null : null;},
+          create:(path,data)=>{tx.create(auroraDb.doc(path),data);},
           merge:(path,data)=>{tx.set(auroraDb.doc(path),data,{merge:true});}, timestamp:FieldValue.serverTimestamp()
         }));
         res.status(200).json({ok:true,...configured});

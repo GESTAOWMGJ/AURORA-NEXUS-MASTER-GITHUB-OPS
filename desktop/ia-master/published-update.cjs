@@ -326,10 +326,115 @@ function initialBaseline(layout, expectedOrg) {
   const identity = identitySnapshot(layout);
   demand(identity.checkpoint === layout.expectedCheckpointSha256
     && readRegularFile(path.join(layout.stateDir, 'organization.txt'), 256).toString('utf8').trim() === expectedOrg, 'INSTALLED_ORGANIZATION_CONFLICT');
-  return { treeSha256: treeDigest(layout.packageDir), metadataSha256: digest(metadataBytes), metadataBytes, identity };
+  return { sourceSha: BOOTSTRAP_SOURCE, manifestSha256: BOOTSTRAP_MANIFEST,
+    treeSha256: treeDigest(layout.packageDir), metadataSha256: digest(metadataBytes), metadataBytes, identity,
+    previousRelease: { kind: 'REVIEWED_BOOTSTRAP', sourceSha: BOOTSTRAP_SOURCE, manifestSha256: BOOTSTRAP_MANIFEST,
+      treeSha256: treeDigest(layout.packageDir), metadataSha256: digest(metadataBytes) } };
 }
-function runManager(layout, operation) {
+function ownedAttempt(layout, directory) {
+  const attempt = noLinks(directory);
+  demand(path.dirname(attempt) === path.join(layout.runtimeRoot, 'installation-rollbacks')
+    && /^published-[a-f0-9-]{36}$/.test(path.basename(attempt)), 'PRIOR_SIGNED_APPLICATION_REQUIRED');
+  return attempt;
+}
+function journalTarget(layout, attempt, journal, trust) {
+  demand(journal.schemaVersion === 'aurora.published.activation.v2' && path.basename(attempt) === 'published-' + journal.id
+    && journal.packageDir === layout.packageDir && journal.stateDir === layout.stateDir && journal.helperPath === layout.helperPath
+    && journal.trustedPublicKeySha256 === trust?.publicKeySha256 && hex(journal.sourceSha, 40)
+    && [journal.previousTreeSha256, journal.nextTreeSha256, journal.previousMetadataSha256, journal.nextMetadataSha256,
+      journal.manifestSha256, journal.certificateSha256].every(value => hex(value, 64)), 'SIGNED_LINEAGE_JOURNAL_REQUIRED');
+  // A historical signature proves the bytes of the predecessor, never its currentness.
+  const candidate = verifyCandidate(journal.acceptedEnvelope, trust, journal.sourceSha);
+  demand(candidate.completeSignedSet && candidate.certificateSha256 === journal.certificateSha256
+    && candidate.certificate.components.iaMaster.manifestSha256 === journal.manifestSha256,
+    'SIGNED_LINEAGE_CERTIFICATE_CONFLICT');
+  return candidate;
+}
+function previousRelease(layout, attempt, journal, trust, seen = new Set()) {
+  if (journal.schemaVersion === 'aurora.published.activation.v1') {
+    // Legacy recovery remains limited to its reviewed bootstrap. A hash-only v1
+    // COMPLETED journal is never a signed predecessor for another update.
+    return { kind: 'REVIEWED_BOOTSTRAP', sourceSha: BOOTSTRAP_SOURCE, manifestSha256: BOOTSTRAP_MANIFEST,
+      treeSha256: journal.previousTreeSha256, metadataSha256: journal.previousMetadataSha256 };
+  }
+  journalTarget(layout, attempt, journal, trust);
+  const previous = journal.previousRelease;
+  const common = ['kind', 'sourceSha', 'manifestSha256', 'treeSha256', 'metadataSha256'];
+  demand(exact(previous, previous?.kind === 'SIGNED_COMPLETED'
+    ? [...common, 'attemptDirectory', 'journalSha256', 'certificateSha256'] : common)
+    && hex(previous.sourceSha, 40) && [previous.manifestSha256, previous.treeSha256, previous.metadataSha256].every(value => hex(value, 64))
+    && previous.treeSha256 === journal.previousTreeSha256 && previous.metadataSha256 === journal.previousMetadataSha256,
+    'SIGNED_LINEAGE_PREDECESSOR_CONFLICT');
+  if (previous.kind === 'REVIEWED_BOOTSTRAP') {
+    demand(previous.sourceSha === BOOTSTRAP_SOURCE && previous.manifestSha256 === BOOTSTRAP_MANIFEST,
+      'SIGNED_LINEAGE_BOOTSTRAP_CONFLICT');
+  } else {
+    demand(previous.kind === 'SIGNED_COMPLETED' && hex(previous.journalSha256, 64) && hex(previous.certificateSha256, 64),
+      'SIGNED_LINEAGE_PREDECESSOR_CONFLICT');
+    const priorAttempt = ownedAttempt(layout, previous.attemptDirectory);
+    demand(!seen.has(priorAttempt) && seen.size < 64 && priorAttempt !== attempt, 'SIGNED_LINEAGE_CYCLE_OR_LIMIT');
+    const priorBytes = readRegularFile(path.join(priorAttempt, 'journal.json'), 65536);
+    demand(digest(priorBytes) === previous.journalSha256, 'SIGNED_LINEAGE_RECORD_CHANGED');
+    const prior = JSON.parse(priorBytes);
+    demand(prior.phase === 'COMPLETED' && prior.sourceSha === previous.sourceSha && prior.manifestSha256 === previous.manifestSha256
+      && prior.nextTreeSha256 === previous.treeSha256 && prior.nextMetadataSha256 === previous.metadataSha256
+      && prior.certificateSha256 === previous.certificateSha256 && canonical(prior.identity) === canonical(journal.identity),
+      'SIGNED_LINEAGE_PREDECESSOR_CONFLICT');
+    seen.add(priorAttempt);
+    previousRelease(layout, priorAttempt, prior, trust, seen);
+  }
+  return previous;
+}
+function inspectPreviousPackage(previous, directory, candidate) {
+  if (previous.kind === 'REVIEWED_BOOTSTRAP') {
+    const bytes = readRegularFile(path.join(directory, 'manifest.json'), 65536);
+    demand(digest(bytes) === BOOTSTRAP_MANIFEST, 'SIGNED_LINEAGE_BOOTSTRAP_CONFLICT');
+    const manifest = JSON.parse(bytes), files = packageFiles(directory);
+    demand(Object.keys(manifest.files || {}).length === 26 && Object.keys(files).length === 27,
+      'SIGNED_LINEAGE_BOOTSTRAP_CONFLICT');
+    for (const [name, expected] of Object.entries(manifest.files)) demand(safeName(name) && hex(expected, 64)
+      && files[name] && digest(files[name]) === expected, 'SIGNED_LINEAGE_PREDECESSOR_BYTES_CHANGED');
+  } else {
+    const checked = inspectPackage(candidate, 'iaMaster', directory, readRegularFile(path.join(directory, 'manifest.json'), 65536));
+    demand(checked.manifestSha256 === previous.manifestSha256, 'SIGNED_LINEAGE_PREDECESSOR_BYTES_CHANGED');
+  }
+  demand(treeDigest(directory) === previous.treeSha256, 'SIGNED_LINEAGE_PREDECESSOR_BYTES_CHANGED');
+}
+function signedBaseline(layout, expectedOrg, trust, retry = false) {
+  const metadataBytes = readRegularFile(layout.installation, 65536), metadata = JSON.parse(metadataBytes);
+  const attempt = ownedAttempt(layout, metadata.rollbackPath), journalBytes = readRegularFile(path.join(attempt, 'journal.json'), 65536);
+  const journal = JSON.parse(journalBytes), candidate = journalTarget(layout, attempt, journal, trust);
+  demand(journal.phase === 'COMPLETED' && metadata.organization === expectedOrg && metadata.sourceRevision === journal.sourceSha
+    && metadata.version === '1.1.0' && metadata.binding === '127.0.0.1' && metadata.externalAiEnabled === false
+    && metadata.existingClientPreserved === true && metadata.publishedCertificateSha256 === candidate.certificateSha256
+    && metadata.signedComponentManifestSha256 === journal.manifestSha256 && digest(metadataBytes) === journal.nextMetadataSha256
+    && (digest(metadataBytes) === layout.expectedInstallationSha256 || (retry && journal.previousMetadataSha256 === layout.expectedInstallationSha256))
+    && journal.identity?.checkpoint === layout.expectedCheckpointSha256 && journal.runtimeProof?.localProcessesVerified === true
+    && journal.runtimeProof.modelAvailable === true && journal.runtimeProof.sourceSha === journal.sourceSha
+    && journal.runtimeProof.manifestSha256 === journal.manifestSha256, 'PRIOR_SIGNED_APPLICATION_CONFLICT');
+  const checked = inspectPackage(candidate, 'iaMaster', layout.packageDir, readRegularFile(path.join(layout.packageDir, 'manifest.json'), 65536));
+  demand(checked.treeSha256 === journal.nextTreeSha256, 'PRIOR_SIGNED_APPLICATION_CHANGED');
+  const predecessor = previousRelease(layout, attempt, journal, trust, new Set([attempt]));
+  // Preserve and check the rollback material which linked this completed update.
+  demand(hashFile(path.join(attempt, 'metadata.previous'), 65536) === predecessor.metadataSha256, 'SIGNED_LINEAGE_RECORD_CHANGED');
+  const previousCandidate = predecessor.kind === 'SIGNED_COMPLETED'
+    ? journalTarget(layout, predecessor.attemptDirectory, JSON.parse(readRegularFile(path.join(predecessor.attemptDirectory, 'journal.json'), 65536)), trust) : null;
+  inspectPreviousPackage(predecessor, path.join(attempt, 'component.previous'), previousCandidate);
+  unchangedIdentity(layout, journal.identity);
+  demand(readRegularFile(path.join(layout.stateDir, 'organization.txt'), 256).toString('utf8').trim() === expectedOrg, 'INSTALLED_ORGANIZATION_CONFLICT');
+  return {sourceSha:journal.sourceSha,manifestSha256:journal.manifestSha256,treeSha256:checked.treeSha256,
+    metadataSha256:digest(metadataBytes),metadataBytes,identity:journal.identity,journal,
+    previousRelease:{kind:'SIGNED_COMPLETED',sourceSha:journal.sourceSha,manifestSha256:journal.manifestSha256,
+      treeSha256:checked.treeSha256,metadataSha256:digest(metadataBytes),attemptDirectory:attempt,
+      journalSha256:digest(journalBytes),certificateSha256:journal.certificateSha256}};
+}
+function installedBaseline(layout, expectedOrg, trust) {
+  return hashFile(path.join(layout.packageDir, 'manifest.json'), 65536) === BOOTSTRAP_MANIFEST
+    ? initialBaseline(layout, expectedOrg) : signedBaseline(layout, expectedOrg, trust);
+}
+function runManager(layout, operation, activePin) {
   helperAndNode(layout);
+  if (activePin) requireActive(activePin);
   try { childProcess.execFileSync(layout.nodeExecutable, [layout.helperPath, operation], {
     cwd: layout.runtimeRoot, env: cleanEnvironment(), windowsHide: true, timeout: 30000, maxBuffer: 32768, stdio: ['ignore', 'pipe', 'pipe'] }); }
   catch { throw Error('OWNED_MANAGER_OPERATION_FAILED'); }
@@ -423,15 +528,19 @@ function restoreMetadata(layout, journal, previousBytes) {
   catch { throw Error('ROLLBACK_METADATA_CHANGED'); }
   demand(hashFile(layout.installation, 65536) === journal.previousMetadataSha256, 'ROLLBACK_METADATA_CHANGED');
 }
-async function rollbackOwned(layout, attempt, journal) {
+async function rollbackOwned(layout, attempt, journal, trust) {
   helperAndNode(layout); ownership(layout); unchangedIdentity(layout, journal.identity);
+  const predecessor = previousRelease(layout, attempt, journal, trust);
   const backup = path.join(attempt, 'component.previous'), metadata = readRegularFile(path.join(attempt, 'metadata.previous'), 65536);
   const current = fs.existsSync(layout.packageDir) ? treeDigest(layout.packageDir) : null;
   demand(current === journal.previousTreeSha256 || current === journal.nextTreeSha256 || current === null, 'ROLLBACK_COMPONENT_CHANGED');
   const restored = current === journal.previousTreeSha256 && !fs.existsSync(backup);
   const previous = restored ? layout.packageDir : backup;
+  const previousCandidate = predecessor.kind === 'SIGNED_COMPLETED'
+    ? journalTarget(layout, predecessor.attemptDirectory, JSON.parse(readRegularFile(path.join(predecessor.attemptDirectory, 'journal.json'), 65536)), trust) : null;
+  inspectPreviousPackage(predecessor, previous, previousCandidate);
   demand(treeDigest(previous) === journal.previousTreeSha256
-    && hashFile(path.join(previous, 'manifest.json'), 65536) === BOOTSTRAP_MANIFEST, 'ROLLBACK_PACKAGE_INTEGRITY_FAILED');
+    && hashFile(path.join(previous, 'manifest.json'), 65536) === predecessor.manifestSha256, 'ROLLBACK_PACKAGE_INTEGRITY_FAILED');
   if (listeners(layout).length) runManager(layout, 'stop');
   demand(listeners(layout).length === 0, 'ROLLBACK_LISTENERS_NOT_STOPPED');
   if (current !== journal.previousTreeSha256) {
@@ -441,46 +550,46 @@ async function rollbackOwned(layout, attempt, journal) {
   let metadataRestored = false;
   try { restoreMetadata(layout, journal, metadata); metadataRestored = true; } catch { /* Runtime recovery remains independent. */ }
   runManager(layout, 'start');
-  const proof = await runtimeProof(layout, BOOTSTRAP_SOURCE, BOOTSTRAP_MANIFEST);
+  const proof = await runtimeProof(layout, predecessor.sourceSha, predecessor.manifestSha256);
   unchangedIdentity(layout, journal.identity);
   demand(metadataRestored, 'ROLLBACK_METADATA_INCOMPLETE');
   return proof;
+}
+async function refreshBoundPin(bearer, trust, expectedSourceSha, expectedOrg, originalCertificateSha256) {
+  const pin = await readActivePin(bearer, trust, expectedSourceSha, expectedOrg);
+  demand(requireActive(pin).candidate.certificateSha256 === originalCertificateSha256, 'CANONICAL_POINTER_CHANGED');
+  return pin;
 }
 async function activateCore({ mode, pin, bearer, trust, expectedSourceSha, expectedOrg, layout: rawLayout,
   packageDirectory, manifestBytes, stageDirectory }, operation) {
   demand(mode === 'activate', 'EXPLICIT_ACTIVATION_REQUIRED');
   const current = requireActive(pin), layout = layoutShape(rawLayout);
   demand(pin.orgId === expectedOrg && current.candidate.certificate.sourceSha === expectedSourceSha, 'ACTIVE_PIN_IDENTITY_CONFLICT');
+  const refresh = () => refreshBoundPin(bearer, trust, expectedSourceSha, expectedOrg, operation.certificateSha256);
   ownership(layout); helperAndNode(layout);
   const checked = inspectPackage(current.candidate, 'iaMaster', packageDirectory, manifestBytes);
   if (hashFile(path.join(layout.packageDir, 'manifest.json'), 65536) === checked.manifestSha256) {
-    const metadataBytes = readRegularFile(layout.installation, 65536), metadata = JSON.parse(metadataBytes);
-    const attempt = noLinks(metadata.rollbackPath);
-    demand(path.dirname(attempt) === path.join(layout.runtimeRoot, 'installation-rollbacks')
-      && /^published-[a-f0-9-]{36}$/.test(path.basename(attempt)), 'PRIOR_SIGNED_APPLICATION_REQUIRED');
-    const journal = JSON.parse(readRegularFile(path.join(attempt, 'journal.json'), 32768));
-    demand(journal.schemaVersion === 'aurora.published.activation.v1' && journal.phase === 'COMPLETED'
-      && path.basename(attempt) === 'published-' + journal.id && journal.packageDir === layout.packageDir
-      && journal.stateDir === layout.stateDir && journal.helperPath === layout.helperPath && journal.sourceSha === expectedSourceSha
-      && journal.certificateSha256 === current.candidate.certificateSha256 && journal.manifestSha256 === checked.manifestSha256
-      && journal.previousMetadataSha256 === layout.expectedInstallationSha256 && journal.nextMetadataSha256 === digest(metadataBytes)
-      && journal.nextTreeSha256 === treeDigest(layout.packageDir) && journal.nextTreeSha256 === checked.treeSha256
-      && journal.identity?.checkpoint === layout.expectedCheckpointSha256 && metadata.organization === expectedOrg
-      && metadata.sourceRevision === expectedSourceSha && metadata.signedComponentManifestSha256 === checked.manifestSha256,
-      'PRIOR_SIGNED_APPLICATION_CONFLICT');
+    const accepted = signedBaseline(layout, expectedOrg, trust, true), journal = accepted.journal;
+    demand(journal.sourceSha === expectedSourceSha && journal.certificateSha256 === current.candidate.certificateSha256
+      && journal.manifestSha256 === checked.manifestSha256 && journal.nextTreeSha256 === checked.treeSha256, 'PRIOR_SIGNED_APPLICATION_CONFLICT');
     unchangedIdentity(layout, journal.identity);
     const proof = await runtimeProof(layout, expectedSourceSha, checked.manifestSha256);
-    const fresh = await readActivePin(bearer, trust, expectedSourceSha, expectedOrg);
+    demand(treeDigest(layout.packageDir) === journal.nextTreeSha256 && hashFile(layout.installation, 65536) === journal.nextMetadataSha256,
+      'PRIOR_SIGNED_APPLICATION_CHANGED');
+    ownership(layout); helperAndNode(layout); unchangedIdentity(layout, journal.identity);
+    // Native ownership/listener checks may take longer than the pin lease. A new
+    // nonce/TLS/signature read follows them; the original certificate still binds it.
+    const fresh = await refresh();
     demand(requireActive(fresh).candidate.certificateSha256 === journal.certificateSha256
       && treeDigest(layout.packageDir) === journal.nextTreeSha256 && hashFile(layout.installation, 65536) === journal.nextMetadataSha256,
       'PRIOR_SIGNED_APPLICATION_CHANGED');
-    ownership(layout); helperAndNode(layout); unchangedIdentity(layout, journal.identity); requireActive(fresh);
+    unchangedIdentity(layout, journal.identity); requireActive(fresh);
     operation.finished = true;
     return { status: 'SIGNED_LOCAL_COMPONENT_ALREADY_APPLIED', sourceSha: expectedSourceSha,
       manifestSha256: checked.manifestSha256, localProcessesVerified: proof.localProcessesVerified,
       identityAndCheckpointPreserved: true, allClientsSynchronized: false, cloudReceiptVerified: false };
   }
-  const baseline = initialBaseline(layout, expectedOrg);
+  const baseline = installedBaseline(layout, expectedOrg, trust);
   demand(checked.version === '1.1.0'
     && digest(checked.files['manage.cjs']) === hashFile(path.join(layout.packageDir, 'manage.cjs'), 65536)
     && digest(checked.files['knowledge-registry.cjs']) === hashFile(path.join(layout.packageDir, 'knowledge-registry.cjs'), 65536),
@@ -497,52 +606,75 @@ async function activateCore({ mode, pin, bearer, trust, expectedSourceSha, expec
   demand(path.parse(stagePackage).root.toLowerCase() === path.parse(layout.packageDir).root.toLowerCase()
     && !path.resolve(stageDirectory).startsWith(layout.stateDir + path.sep)
     && !layout.stateDir.startsWith(path.resolve(stageDirectory) + path.sep), 'PRIVATE_SAME_VOLUME_STAGE_REQUIRED');
-  const fresh = await readActivePin(bearer, trust, expectedSourceSha, expectedOrg);
-  demand(requireActive(fresh).candidate.certificateSha256 === current.candidate.certificateSha256, 'CANONICAL_POINTER_CHANGED');
-  ownership(layout); helperAndNode(layout); initialBaseline(layout, expectedOrg);
+  ownership(layout); helperAndNode(layout);
+  const recheckedBaseline = installedBaseline(layout, expectedOrg, trust);
+  demand(canonical(recheckedBaseline.previousRelease) === canonical(baseline.previousRelease), 'INSTALLED_BASELINE_CHANGED');
+  let fresh = await refresh();
   const id = operation.id, attempts = path.join(layout.runtimeRoot, 'installation-rollbacks');
   noLinks(attempts, true); fs.mkdirSync(attempts, { recursive: true, mode: 0o700 });
   const attempt = path.join(attempts, 'published-' + id); fs.mkdirSync(attempt, { mode: 0o700 });
   const journalPath = path.join(attempt, 'journal.json');
   const previousMetadata = JSON.parse(baseline.metadataBytes.toString('utf8'));
   const nextMetadata = Buffer.from(JSON.stringify({ ...previousMetadata, sourceRevision: expectedSourceSha,
-    version: checked.version, previousSourceRevision: BOOTSTRAP_SOURCE, rollbackPath: attempt,
+    version: checked.version, previousSourceRevision: baseline.sourceSha, rollbackPath: attempt,
     publishedCertificateSha256: fresh.certificateSha256, signedComponentManifestSha256: checked.manifestSha256,
     runtimeAcceptance: 'NOT_VERIFIED' }, null, 2) + '\n');
-  const journal = { schemaVersion: 'aurora.published.activation.v1', id, phase: 'PREPARED', packageDir: layout.packageDir,
+  const journal = { schemaVersion: 'aurora.published.activation.v2', id, phase: 'PREPARED', packageDir: layout.packageDir,
     stateDir: layout.stateDir, helperPath: layout.helperPath, previousTreeSha256: baseline.treeSha256,
     nextTreeSha256: checked.treeSha256, previousMetadataSha256: baseline.metadataSha256,
     nextMetadataSha256: digest(nextMetadata), identity: baseline.identity, sourceSha: expectedSourceSha,
-    certificateSha256: fresh.certificateSha256, manifestSha256: checked.manifestSha256, allClientsSynchronized: false };
+    certificateSha256: fresh.certificateSha256, manifestSha256: checked.manifestSha256, allClientsSynchronized: false,
+    acceptedEnvelope: structuredClone(requireActive(fresh).envelope), trustedPublicKeySha256: trust.publicKeySha256,
+    previousRelease: baseline.previousRelease };
   durable(path.join(attempt, 'metadata.previous'), baseline.metadataBytes);
   saveJournal(journalPath, journal);
   let stopAttempted = false, packageMoved = false;
   try {
-    await runtimeProof(layout, BOOTSTRAP_SOURCE, BOOTSTRAP_MANIFEST);
-    requireActive(fresh); helperAndNode(layout); unchangedIdentity(layout, baseline.identity); ownership(layout); stageOwnership(reviewedStage);
+    await runtimeProof(layout, baseline.sourceSha, baseline.manifestSha256);
+    helperAndNode(layout); unchangedIdentity(layout, baseline.identity); ownership(layout); stageOwnership(reviewedStage);
     demand(treeDigest(layout.packageDir) === baseline.treeSha256
       && hashFile(layout.installation, 65536) === baseline.metadataSha256, 'INSTALLED_BASELINE_CHANGED');
-    stopAttempted = true; operation.started = true; runManager(layout, 'stop');
+    previousRelease(layout, attempt, journal, trust);
+    fresh = await refresh();
+    demand(treeDigest(layout.packageDir) === baseline.treeSha256 && hashFile(layout.installation, 65536) === baseline.metadataSha256,
+      'INSTALLED_BASELINE_CHANGED');
+    unchangedIdentity(layout, baseline.identity); requireActive(fresh);
+    stopAttempted = true; operation.started = true; runManager(layout, 'stop', fresh);
     demand(listeners(layout).length === 0, 'OWNED_RUNTIME_NOT_STOPPED');
     demand(treeDigest(layout.packageDir) === baseline.treeSha256 && treeDigest(stagePackage) === checked.treeSha256, 'PACKAGE_CAS_CONFLICT');
+    fresh = await refresh();
+    demand(treeDigest(layout.packageDir) === baseline.treeSha256 && treeDigest(stagePackage) === checked.treeSha256
+      && hashFile(layout.installation, 65536) === baseline.metadataSha256, 'PACKAGE_CAS_CONFLICT');
     requireActive(fresh);
     packageMoved = true; fs.renameSync(layout.packageDir, path.join(attempt, 'component.previous'));
     journal.phase = 'BASELINE_MOVED'; saveJournal(journalPath, journal);
+    fresh = await refresh();
+    demand(!fs.existsSync(layout.packageDir) && treeDigest(stagePackage) === checked.treeSha256, 'PACKAGE_CAS_CONFLICT');
+    requireActive(fresh);
     fs.renameSync(stagePackage, layout.packageDir);
     journal.phase = 'CANDIDATE_INSTALLED'; saveJournal(journalPath, journal);
-    requireActive(fresh);
+    fresh = await refresh();
+    demand(treeDigest(layout.packageDir) === checked.treeSha256, 'PACKAGE_CAS_CONFLICT'); requireActive(fresh);
     compareMetadata(layout, baseline.metadataSha256, nextMetadata, id);
     journal.phase = 'METADATA_COMMITTED'; saveJournal(journalPath, journal);
-    runManager(layout, 'start');
+    fresh = await refresh();
+    demand(treeDigest(layout.packageDir) === checked.treeSha256 && hashFile(layout.installation, 65536) === journal.nextMetadataSha256,
+      'APPLICATION_READBACK_FAILED');
+    unchangedIdentity(layout, baseline.identity); requireActive(fresh);
+    runManager(layout, 'start', fresh);
     const proof = await runtimeProof(layout, expectedSourceSha, checked.manifestSha256);
     demand(treeDigest(layout.packageDir) === checked.treeSha256
       && hashFile(layout.installation, 65536) === journal.nextMetadataSha256, 'APPLICATION_READBACK_FAILED');
-    unchangedIdentity(layout, baseline.identity); helperAndNode(layout);
-    const finalPin = await readActivePin(bearer, trust, expectedSourceSha, expectedOrg);
-    demand(requireActive(finalPin).candidate.certificateSha256 === fresh.certificateSha256, 'CANONICAL_POINTER_CHANGED');
+    unchangedIdentity(layout, baseline.identity); ownership(layout); helperAndNode(layout);
     demand(treeDigest(layout.packageDir) === checked.treeSha256 && hashFile(layout.installation, 65536) === journal.nextMetadataSha256,
       'APPLICATION_READBACK_FAILED');
-    unchangedIdentity(layout, baseline.identity); ownership(layout); helperAndNode(layout); requireActive(finalPin);
+    // Refresh last, after the potentially slow native final checks, before the
+    // durable acceptance write. Expiry is never stretched to cover those checks.
+    const finalPin = await refresh();
+    previousRelease(layout, attempt, journal, trust);
+    demand(treeDigest(layout.packageDir) === checked.treeSha256 && hashFile(layout.installation, 65536) === journal.nextMetadataSha256,
+      'APPLICATION_READBACK_FAILED');
+    unchangedIdentity(layout, baseline.identity); requireActive(finalPin);
     journal.phase = 'COMPLETED'; journal.runtimeProof = proof; saveJournal(journalPath, journal); operation.finished = true;
     return { status: 'SIGNED_LOCAL_COMPONENT_APPLIED', sourceSha: expectedSourceSha, manifestSha256: checked.manifestSha256,
       attempt, localProcessesVerified: true, identityAndCheckpointPreserved: true, allClientsSynchronized: false, cloudReceiptVerified: false };
@@ -550,8 +682,12 @@ async function activateCore({ mode, pin, bearer, trust, expectedSourceSha, expec
     journal.phase = 'FAILED_ROLLBACK_UNVERIFIED';
     journal.failureCode = /^[A-Z0-9_]+$/.test(error.message) ? error.message : 'LOCAL_APPLICATION_FAILED';
     try {
-      if (packageMoved) journal.rollbackProof = await rollbackOwned(layout, attempt, journal);
-      else if (stopAttempted) { runManager(layout, 'start'); journal.rollbackProof = await runtimeProof(layout, BOOTSTRAP_SOURCE, BOOTSTRAP_MANIFEST); }
+      if (packageMoved) journal.rollbackProof = await rollbackOwned(layout, attempt, journal, trust);
+      else if (stopAttempted) {
+        demand(treeDigest(layout.packageDir) === baseline.treeSha256 && hashFile(layout.installation, 65536) === baseline.metadataSha256,
+          'ROLLBACK_COMPONENT_CHANGED');
+        runManager(layout, 'start'); journal.rollbackProof = await runtimeProof(layout, baseline.sourceSha, baseline.manifestSha256);
+      }
       journal.phase = stopAttempted ? 'ROLLED_BACK_LOCAL_PREVIOUS' : 'PREPARED_NOT_APPLIED';
       operation.finished = true;
     } catch { journal.rollbackIncomplete = true; }
@@ -561,34 +697,36 @@ async function activateCore({ mode, pin, bearer, trust, expectedSourceSha, expec
 }
 async function activatePublished(options) {
   demand(options?.mode === 'activate', 'EXPLICIT_ACTIVATION_REQUIRED');
-  requireActive(options.pin);
+  const original = requireActive(options.pin);
   const layout = layoutShape(options.layout); ownership(layout); helperAndNode(layout);
   const lock = path.join(layout.runtimeRoot, 'published-update.lock');
   noLinks(lock, true);
-  const operation = { id: crypto.randomUUID(), started: false, finished: false };
+  const operation = { id: crypto.randomUUID(), started: false, finished: false, certificateSha256: original.candidate.certificateSha256 };
+  const fresh = await refreshBoundPin(options.bearer, options.trust, options.expectedSourceSha, options.expectedOrg, operation.certificateSha256);
   const lockBytes = Buffer.from(JSON.stringify({ schemaVersion: 'aurora.published.lock.v1', id: operation.id, pid: process.pid }) + '\n');
   try { durable(lock, lockBytes); } catch { throw Error('LOCAL_UPDATE_BUSY_OR_INTERRUPTED'); }
-  try { return await activateCore(options, operation); }
+  try { return await activateCore({ ...options, pin: fresh }, operation); }
   finally {
     if ((!operation.started || operation.finished) && fs.existsSync(lock) && hashFile(lock, 4096) === digest(lockBytes)) fs.unlinkSync(lock);
   }
 }
-async function recoverPublished({ mode, layout: rawLayout, attemptDirectory }) {
+async function recoverPublished({ mode, layout: rawLayout, attemptDirectory, trust }) {
   demand(mode === 'recover', 'EXPLICIT_RECOVERY_REQUIRED');
   const layout = layoutShape(rawLayout), attempt = noLinks(attemptDirectory);
   demand(path.dirname(attempt) === path.join(layout.runtimeRoot, 'installation-rollbacks')
     && /^published-[a-f0-9-]{36}$/.test(path.basename(attempt)), 'OWNED_RECOVERY_PATH_REQUIRED');
-  const journal = JSON.parse(readRegularFile(path.join(attempt, 'journal.json'), 32768));
+  const journal = JSON.parse(readRegularFile(path.join(attempt, 'journal.json'), 65536));
   const lock = path.join(layout.runtimeRoot, 'published-update.lock');
   if (!fs.existsSync(lock)) {
-    demand(journal.schemaVersion === 'aurora.published.activation.v1' && path.basename(attempt) === 'published-' + journal.id
+    demand(['aurora.published.activation.v1','aurora.published.activation.v2'].includes(journal.schemaVersion) && path.basename(attempt) === 'published-' + journal.id
       && journal.phase === 'ROLLED_BACK_LOCAL_PREVIOUS' && journal.packageDir === layout.packageDir
       && journal.stateDir === layout.stateDir && journal.helperPath === layout.helperPath, 'RECOVERY_LOCK_REQUIRED');
     ownership(layout); helperAndNode(layout); unchangedIdentity(layout, journal.identity);
+    const predecessor = previousRelease(layout, attempt, journal, trust);
     demand(treeDigest(layout.packageDir) === journal.previousTreeSha256
-      && hashFile(path.join(layout.packageDir, 'manifest.json'), 65536) === BOOTSTRAP_MANIFEST
+      && hashFile(path.join(layout.packageDir, 'manifest.json'), 65536) === predecessor.manifestSha256
       && hashFile(layout.installation, 65536) === journal.previousMetadataSha256, 'RECOVERED_BYTES_CHANGED');
-    await runtimeProof(layout, BOOTSTRAP_SOURCE, BOOTSTRAP_MANIFEST);
+    await runtimeProof(layout, predecessor.sourceSha, predecessor.manifestSha256);
     return { status: 'ROLLED_BACK_LOCAL_PREVIOUS', alreadyRecovered: true, allClientsSynchronized: false, cloudReceiptVerified: false };
   }
   const lockBytes = readRegularFile(lock, 4096);
@@ -598,14 +736,14 @@ async function recoverPublished({ mode, layout: rawLayout, attemptDirectory }) {
   let live = true;
   try { process.kill(lockValue.pid, 0); } catch (error) { live = error.code !== 'ESRCH'; }
   demand(!live, 'RECOVERY_OWNER_PROCESS_STILL_RUNNING');
-  demand(journal.schemaVersion === 'aurora.published.activation.v1' && path.basename(attempt) === 'published-' + journal.id
+  demand(['aurora.published.activation.v1','aurora.published.activation.v2'].includes(journal.schemaVersion) && path.basename(attempt) === 'published-' + journal.id
     && journal.packageDir === layout.packageDir && journal.stateDir === layout.stateDir && journal.helperPath === layout.helperPath
     && ['PREPARED', 'BASELINE_MOVED', 'CANDIDATE_INSTALLED', 'METADATA_COMMITTED', 'COMPLETED', 'FAILED_ROLLBACK_UNVERIFIED', 'ROLLED_BACK_LOCAL_PREVIOUS'].includes(journal.phase)
     && [journal.previousTreeSha256, journal.nextTreeSha256, journal.previousMetadataSha256, journal.nextMetadataSha256].every(value => hex(value, 64)), 'RECOVERY_JOURNAL_CONFLICT');
   const metadataHash = fs.existsSync(layout.installation) ? hashFile(layout.installation, 65536) : null;
   demand(metadataHash === null || metadataHash === journal.previousMetadataSha256 || metadataHash === journal.nextMetadataSha256,
     'RECOVERY_METADATA_CHANGED');
-  const proof = await rollbackOwned(layout, attempt, journal);
+  const proof = await rollbackOwned(layout, attempt, journal, trust);
   journal.phase = 'ROLLED_BACK_LOCAL_PREVIOUS'; journal.rollbackProof = proof;
   saveJournal(path.join(attempt, 'journal.json'), journal);
   demand(hashFile(lock, 4096) === digest(lockBytes), 'RECOVERY_LOCK_CHANGED'); fs.unlinkSync(lock);
@@ -620,7 +758,7 @@ async function runCli(argv = [], environment = process.env) {
   const options = JSON.parse(readRegularFile(noLinks(filename), 65536));
   const common = ['trust', 'expectedSourceSha', 'expectedOrg'];
   const packageKeys = ['packageDirectory', 'manifestPath', 'stageDirectory'];
-  const keys = operation === '--recover' ? ['layout', 'attemptDirectory']
+  const keys = operation === '--recover' ? ['layout', 'attemptDirectory', ...(Object.hasOwn(options, 'trust') ? ['trust'] : [])]
     : [...common, ...(operation === '--read-active' ? [] : packageKeys), ...(operation === '--activate' ? ['layout'] : [])];
   demand(exact(options, keys), 'PUBLIC_REVIEWED_OPTIONS_REQUIRED');
   if (operation === '--recover') return recoverPublished({ mode: 'recover', ...options });

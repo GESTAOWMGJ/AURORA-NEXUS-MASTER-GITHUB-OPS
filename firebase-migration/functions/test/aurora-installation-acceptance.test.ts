@@ -19,14 +19,21 @@ function fixture(manual=false){
     [`${base}/apiIdempotency/${receiptId}`,receipt],
     [`${base}/integrationCredentials/${keyId}`,{orgId:org,keyId,createdBy:actor.uid,active:true,
       scopes:['integration.read','documents.ingest'],expiresAt:{toDate:()=>new Date('2099-01-01T00:00:00Z')}}]]);
-  const paths:string[]=[],writes:string[]=[];
+  const paths:string[]=[],writes:string[]=[],auditPaths:string[]=[];
   const read=async(path:string)=>{paths.push(path);return state.get(path)??null;};
-  const configure=(patch:any={},caller=actor)=>configureCanonicalAutomation(caller,{action:'CONFIGURE_AUTOMATION',
-    method:manual?'MANUAL':'API_TOKEN',...(!manual?{keyId}:{}),sourceSystem:'ERP',enabled:true,expectedRevision:0,...patch},
-    {read,merge:(path,data)=>{writes.push(path);state.set(path,{...state.get(path),...data});},timestamp:'2026-10-14T11:00:01.000Z'});
+  const configure=async(patch:any={},caller=actor)=>{
+    const pending:{path:string;data:any;create:boolean}[]=[];
+    const result=await configureCanonicalAutomation(caller,{action:'CONFIGURE_AUTOMATION',
+      method:manual?'MANUAL':'API_TOKEN',...(!manual?{keyId}:{}),sourceSystem:'ERP',enabled:true,expectedRevision:0,...patch},
+      {read,merge:(path,data)=>{pending.push({path,data,create:false});},
+        create:(path,data)=>{if(state.has(path))throw Error('ALREADY_EXISTS');pending.push({path,data,create:true});},timestamp:'2026-10-14T11:00:01.000Z'});
+    for(const write of pending){if(write.create){auditPaths.push(write.path);state.set(write.path,write.data);}
+      else {writes.push(write.path);state.set(write.path,{...state.get(write.path),...write.data});}}
+    return result;
+  };
   const assess=()=>readInstallationAcceptance(org,processing,document,version,state.get(`${base}/runtimeCheckpoints/installation`)??null,read,now);
   const replay=()=>{const patch=integrationReplayPatch(org,{orgId:org,keyId,name:'synthetic'},receipt,document,version,bodyHash,documentId,'2026-10-14T11:00:02.000Z');assert.ok(patch);Object.assign(receipt,patch);};
-  return {keyId,receiptId,processing,document,version,receipt,state,paths,writes,read,configure,assess,replay};
+  return {keyId,receiptId,processing,document,version,receipt,state,paths,writes,auditPaths,read,configure,assess,replay};
 }
 test('configuration alone, ping, processing and a cached first receipt cannot finish installation',async()=>{
   const f=fixture();assert.equal((await f.assess()).state,'PENDING_REPLAY');await f.configure();
@@ -61,6 +68,19 @@ test('configuration projections expose only bounded public metadata; corrupted C
   assert.equal(publicAutomationConfiguration({...binding,sourceSystem:{secret:'NEVER'}}),null);
   binding.sourceSystem='MV';await assert.rejects(f.configure({expectedRevision:1}),/CONFIGURATION_CONFLICT/);
   assert.equal(f.writes.length,1);
+});
+test('configuration CAS appends immutable atomic audit history, preserving prior binding identity',async()=>{
+  const f=fixture(),first=await f.configure(),firstAudit=f.state.get(f.auditPaths[0]);
+  assert.equal(f.auditPaths.length,1);assert.equal(firstAudit.configurationHash,first.configurationHash);
+  assert.equal(firstAudit.previousConfigurationHash,null);assert.equal(firstAudit.revision,1);
+  const before=JSON.stringify(firstAudit),second=await f.configure({expectedRevision:1,enabled:false});
+  assert.equal(f.auditPaths.length,2);assert.equal(JSON.stringify(f.state.get(f.auditPaths[0])),before);
+  const next=f.state.get(f.auditPaths[1]);assert.equal(next.previousConfigurationHash,first.configurationHash);
+  assert.equal(next.configurationHash,second.configurationHash);assert.equal(next.previousRevision,1);assert.equal(next.revision,2);
+  assert.equal(next.orgId,org);assert.equal(next.actorUid,actor.uid);assert.equal(next.sanitized,true);
+  assert.doesNotMatch(JSON.stringify(next),/bearer|tokenHash|apiKey/);
+  await assert.rejects(f.configure({expectedRevision:1}),/CONFIGURATION_CONFLICT/);
+  assert.equal(f.auditPaths.length,2);assert.equal(f.writes.length,2);
 });
 test('receipt and replay must bind the same tenant, key, payload, document and immutable revision',async()=>{
   for(const [field,value] of Object.entries({orgId:'other-org',keyId:'ik_'+'1'.repeat(16),bodyHash:'0'.repeat(64),

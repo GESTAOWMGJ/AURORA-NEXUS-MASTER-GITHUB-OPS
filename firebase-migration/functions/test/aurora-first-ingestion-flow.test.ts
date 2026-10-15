@@ -84,6 +84,7 @@ test('committed ingest resumes projection with the same key and one source effec
  };
  assert.equal((await configure()).status,200);
  assert.equal((await configure()).status,409); // Stale configuration CAS cannot silently rebind.
+ assert.equal([...state.values()].filter(row=>row.action==='AUTOMATION_BINDING_CONFIGURED').length,1);
  const configured=await call();assert.equal(configured.result.installation.acceptance.eligible,true);
  assert.equal(configured.result.installation.acceptance.method,'API_TOKEN');
  assert.equal(configured.result.installation.acceptance.providerAccessVerified,false);
@@ -132,6 +133,7 @@ test('committed ingest resumes projection with the same key and one source effec
  assert.equal(nativeReplay.result.installation.acceptance.eligible,false);
  assert.equal(nativeReplay.result.installation.acceptance.method,'MANUAL');
  const manualConfig=await configure('MANUAL');assert.equal(manualConfig.status,200);
+ assert.equal([...state.values()].filter(row=>row.action==='AUTOMATION_BINDING_CONFIGURED').length,2);
  const manualReady=await nativeCall();assert.equal(manualReady.result.installation.acceptance.eligible,true);
  assert.equal(manualReady.result.installation.acceptance.localCollectionVerified,false);
  assert.equal(manualReady.result.installation.acceptance.acquisitionModes.CLOUD_OAUTH,'PENDING_ADAPTER_EVIDENCE');

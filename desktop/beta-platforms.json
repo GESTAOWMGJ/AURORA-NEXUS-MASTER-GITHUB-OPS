@@ -36,6 +36,9 @@
   "ios": {
     "type": "EXISTING_PWA",
     "requestedDistribution": "NATIVE_TESTFLIGHT_APP_STORE",
+    "nativeCandidateSource": "desktop/ios",
+    "nativeCandidateWorkflow": ".github/workflows/ios.yml",
+    "nativeCandidateDistribution": "UNSIGNED_SIMULATOR_ONLY_PENDING_CI",
     "nativeDeliveryStatus": "PENDING_BUILD_SIGNING_AND_DEVICE_ACCEPTANCE",
     "nativeAppStoreBuild": false,
     "deviceTest": "PENDING",
