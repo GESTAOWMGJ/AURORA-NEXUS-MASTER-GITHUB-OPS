@@ -6,14 +6,20 @@ import { iaMasterClient } from '../src/auroraIaMasterClient.js';
 
 const member = {orgId:'synthetic-company',role:'org_admin',allFacilities:true,mfaVerified:true};
 const token = 'S'.repeat(43), ticket = 'T'.repeat(43), fingerprint='f'.repeat(64), taskId='c'.repeat(32);
+const staticVerification = () => ({recipeId:'SYNTAX_AND_DIFF_V1',state:'STATIC_CHECKS_PASSED',proposalFingerprint:fingerprint,
+  checks:[{check:'GIT_DIFF_CHECK',passed:true}],arbitraryCodeExecuted:false,projectTests:'NOT_EXECUTED_RUNNER_NOT_IMPLEMENTED',ci:'NOT_CONFIGURED',deploy:'NOT_PERFORMED'});
 class Element {
   value=''; textContent=''; hidden=false; disabled=false; checked=false; className=''; type='';
-  href='';
+  href=''; open=false; focused=false; scrollCalls:any[]=[]; attributes=new Map<string,string>();
   children:Element[]=[]; handlers=new Map<string,any>();
   addEventListener(name:string,handler:any){this.handlers.set(name,handler);}
   replaceChildren(){this.children=[];this.textContent='';}
   appendChild(child:Element){this.children.push(child);}
-  removeAttribute(name:string){if(name==='href')this.href='';}
+  setAttribute(name:string,value:string){this.attributes.set(name,String(value));}
+  getAttribute(name:string){return this.attributes.get(name)??null;}
+  removeAttribute(name:string){this.attributes.delete(name);if(name==='href')this.href='';}
+  focus(){this.focused=true;}
+  scrollIntoView(options:any){this.scrollCalls.push(options);}
   querySelectorAll(){const found:Element[]=[];const walk=(node:Element)=>{for(const child of node.children){if(child.type==='checkbox'&&child.checked&&!child.disabled)found.push(child);walk(child);}};walk(this);return found;}
 }
 
@@ -26,7 +32,7 @@ function fixture(origin='https://auroranexus.com.br') {
   let capabilities:any={externalAiEnabled:false,repository:{state:'AVAILABLE',projectId:'synthetic-project'},operations:{
     history:'IMPLEMENTED',context:'IMPLEMENTED',proposal:'LOCAL_MODEL_REQUIRED',manualProposal:'IMPLEMENTED',
     diff:'IMPLEMENTED',validate:'IMPLEMENTED',stage:'IMPLEMENTED',verify:'STATIC_SYNTAX_AND_DIFF_ONLY',prepare:'LOCAL_BRANCH_ONLY'}};
-  let task:any={id:taskId,orgId:member.orgId,projectId:'synthetic-project',version:1,state:'CONTEXT_BOUND',summary:'Mudança sintética'};
+  let task:any={id:taskId,orgId:member.orgId,projectId:'synthetic-project',version:1,state:'CONTEXT_BOUND',summary:'Mudança sintética',baseRevision:'b'.repeat(40)};
   let taskList:any[]=[];
   let overrides=new Map<string,any>();
   const reply=(data:any,statusCode=200,contentType='application/json')=>({ok:statusCode>=200&&statusCode<300,status:statusCode,headers:{get:()=>contentType},json:async()=>data});
@@ -48,15 +54,19 @@ function fixture(origin='https://auroranexus.com.br') {
         return reply({tasks:taskList});
       }
       if(route==='/api/studio/tasks/'+task.id)return reply({task});
-      if(route.endsWith('/diff'))return reply({taskId:task.id,version:task.version,diff:'--- before\n+++ after\n+synthetic change',validation:{proposalFingerprint:fingerprint}});
+      const validation={state:'VALIDATED',pathsVerified:true,hashesVerified:true,testsExecuted:false,baseRevision:task.baseRevision,proposalFingerprint:fingerprint};
+      if(route.endsWith('/diff'))return reply({taskId:task.id,version:task.version,diff:'--- before\n+++ after\n+synthetic change',validation});
       const operation=route.split('/').pop()!;
       const states:any={propose:'PROPOSED',proposal:'PROPOSED',validate:'VALIDATED',stage:'PATCH_STAGED',verify:'STATIC_CHECKS_PASSED',prepare:'VERSION_PREPARED'};
       if(states[operation]){
         const payload=JSON.parse(options.body);assert.equal(payload.expectedVersion,task.version);
-        task={...task,version:task.version+1,state:states[operation],proposalFingerprint:fingerprint};taskList=[{...task}];
-        return reply({task,validation:operation==='validate'?{valid:true}:undefined,
-          verification:operation==='verify'?{state:'STATIC_CHECKS_PASSED',projectTestRunner:'NOT_IMPLEMENTED'}:undefined,
-          preparedVersion:operation==='prepare'?{branch:'refs/heads/aurora-studio/'+task.id,commit:'a'.repeat(40)}:undefined});
+        task={...task,version:task.version+1,state:states[operation],proposalFingerprint:fingerprint};
+        if(operation==='verify')task.verification=staticVerification();
+        if(operation==='prepare')task.preparedVersion={state:'PREPARED_LOCAL_ONLY',branch:'refs/heads/aurora-studio/'+task.id,commit:'a'.repeat(40),tree:'d'.repeat(40),baseRevision:task.baseRevision,proposalFingerprint:fingerprint,pushed:false,deployed:false};
+        taskList=[{...task}];
+        return reply({task,validation:operation==='validate'?validation:undefined,
+          verification:operation==='verify'?task.verification:undefined,
+          preparedVersion:operation==='prepare'?task.preparedVersion:undefined});
       }
       if(route==='/api/improve')return reply({state:'PROPOSAL_ONLY',applied:false,externalAiCalls:0,proposal:{text:'Proposta sintética para revisão.'}});
       if(route==='/api/native')return reply({authority:'LOCAL_UNVERIFIED_PREVIEW',cloudSyncVerified:false,externalAiCalls:0,master:{state:'ATTENTION'}});
@@ -245,7 +255,7 @@ function publicationReceipt(overrides:any={}){
 }
 async function preparedPublisherFixture(){
   const f=fixture();f.capabilities(publisherCapabilities());f.task({schemaVersion:'aurora.master.studio.v1',state:'VERSION_PREPARED',version:9,baseRevision:preparedBase,proposalFingerprint:fingerprint,
-    verification:{state:'STATIC_CHECKS_PASSED',proposalFingerprint:fingerprint,arbitraryCodeExecuted:false},
+    verification:staticVerification(),
     preparedVersion:{state:'PREPARED_LOCAL_ONLY',commit:preparedHead,tree:preparedTree,baseRevision:preparedBase,proposalFingerprint:fingerprint,branch:'refs/heads/aurora-studio/'+taskId,pushed:false,deployed:false}});
   await f.connect();await f.el('master-history-list').children[0].handlers.get('click')();return f;
 }
@@ -350,4 +360,132 @@ test('scrolling context, diff and receipts are reachable by keyboard with a desc
   const html=iaMasterSection(member);
   for(const id of ['master-context-output','master-diff-output','master-validation-output','master-publication-output'])assert.match(html,new RegExp('id="'+id+'" tabindex="0" aria-label="[^"]+"'));
   assert.match(html,/#ia-master \.studio-diff:focus-visible/);
+});
+
+test('connection entry opens pairing and focuses its ticket without probing the local service',async()=>{
+  const f=fixture();assert.equal(f.calls.length,0);assert.equal(f.el('master-onboarding').hidden,false);
+  await f.click('master-pair-open');
+  assert.equal(f.el('master-pair-details').open,true);assert.equal(f.el('master-pair-ticket').focused,true);
+  assert.equal(f.el('master-pair-details').scrollCalls.length,1);assert.equal(f.el('master-pair-details').scrollCalls[0].block,'start');assert.equal(f.el('master-pair-details').scrollCalls[0].behavior,'auto');assert.equal(f.calls.length,0);
+  await f.connect();assert.equal(f.el('master-onboarding').hidden,true);assert.equal(f.el('master-pair-open').disabled,true);
+  const denied=fixture('https://untrusted.example.invalid');await denied.click('master-pair-open');
+  assert.equal(denied.el('master-pair-details').open,false);assert.equal(denied.el('master-pair-ticket').focused,false);assert.equal(denied.calls.length,0);
+});
+
+test('long proposal announces pending work and advances only after the confirmed response',async()=>{
+  const f=fixture();await f.connect();await f.createTask();let finish:any;
+  f.override('/api/studio/tasks/'+taskId+'/propose',()=>new Promise(resolve=>{finish=resolve;}));
+  const pending=f.click('master-task-propose');await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.el('master-workflow').getAttribute('aria-busy'),'true');
+  assert.match(f.el('master-studio-status').textContent,/Gerando a proposta no modelo local/);
+  assert.equal(f.el('master-step-proposal').getAttribute('data-step-state'),'current');
+  assert.equal(f.el('master-step-proposal').getAttribute('aria-current'),'step');
+  assert.notEqual(f.el('master-step-review').getAttribute('data-step-state'),'complete');
+  finish(f.reply({task:{...f.currentTask(),version:2,state:'PROPOSED',proposalFingerprint:fingerprint}}));await pending;
+  assert.equal(f.el('master-workflow').getAttribute('aria-busy'),'false');
+  assert.equal(f.el('master-step-proposal').getAttribute('data-step-state'),'complete');
+  assert.equal(f.el('master-step-review').getAttribute('aria-current'),'step');
+  assert.match(f.el('master-studio-status').textContent,/Proposta gerada/);
+  assert.doesNotMatch(f.el('master-validation-heading').textContent,/concluída/);
+});
+
+test('proposal failure clears busy feedback without marking an unreceived proposal complete',async()=>{
+  const f=fixture();await f.connect();await f.createTask();
+  f.override('/api/studio/tasks/'+taskId+'/propose',()=>{throw Error('LOCAL_MODEL_UNAVAILABLE');});
+  await f.click('master-task-propose');
+  assert.equal(f.el('master-workflow').getAttribute('aria-busy'),'false');
+  assert.match(f.el('master-studio-status').textContent,/modelo local está indisponível/);
+  assert.notEqual(f.el('master-step-proposal').getAttribute('data-step-state'),'complete');
+  assert.notEqual(f.el('master-step-check').getAttribute('data-step-state'),'complete');
+});
+
+test('session end clears busy immediately and a late proposal cannot repopulate progress',async()=>{
+  const f=fixture();await f.connect();await f.createTask();let finish:any;
+  f.override('/api/studio/tasks/'+taskId+'/propose',()=>new Promise(resolve=>{finish=resolve;}));
+  const pending=f.click('master-task-propose');await new Promise(resolve=>setImmediate(resolve));
+  f.windowHandlers.get('aurora:session-ended')();
+  assert.equal(f.el('master-workflow').getAttribute('aria-busy'),'false');
+  assert.equal(f.el('master-step-request').getAttribute('data-step-state'),'blocked');
+  finish(f.reply({task:{...f.currentTask(),version:2,state:'PROPOSED',proposalFingerprint:fingerprint}}));await pending;
+  assert.match(f.el('master-studio-status').textContent,/Sessão local removida/);
+  for(const name of ['request','proposal','review','check','version','publication'])assert.notEqual(f.el('master-step-'+name).getAttribute('data-step-state'),'complete');
+  assert.equal(f.el('master-workflow').getAttribute('aria-busy'),'false');
+});
+
+test('verification has a plain-language summary and keeps the original JSON in a closed technical disclosure',async()=>{
+  const html=iaMasterSection(member);
+  assert.match(html,/<div id="master-workflow" aria-busy="false">/);
+  assert.match(html,/<p id="master-studio-status"[^>]*role="status" aria-live="polite"/);
+  assert.match(html,/<details class="disclosure" id="master-validation-technical"><summary>Recibo técnico/);
+  assert.ok(html.indexOf('id="master-validation-summary"')<html.indexOf('id="master-validation-output"'));
+  const f=fixture();await f.connect();await f.createTask();await f.click('master-task-propose');await f.click('master-diff');await f.click('master-validate');
+  assert.match(f.el('master-validation-heading').textContent,/Proposta validada/);
+  assert.notEqual(f.el('master-step-check').getAttribute('data-step-state'),'complete');
+  await f.click('master-stage');await f.click('master-verify');
+  assert.equal(f.el('master-validation-summary').getAttribute('data-tone'),'ok');
+  assert.equal(f.el('master-validation-heading').textContent,'Verificação estática concluída.');
+  assert.match(f.el('master-validation-detail').textContent,/testes gerais do projeto não foram executados/);
+  assert.match(f.el('master-validation-output').textContent,/"recipeId": "SYNTAX_AND_DIFF_V1"/);
+  assert.equal(f.el('master-step-check').getAttribute('data-step-state'),'complete');
+  assert.equal(f.el('master-step-version').getAttribute('aria-current'),'step');
+});
+
+test('a success state without its bound validation evidence stays pending in the summary and steps',async()=>{
+  const f=fixture();await f.connect();await f.createTask();await f.click('master-task-propose');
+  f.override('/api/studio/tasks/'+taskId+'/validate',f.reply({task:{...f.currentTask(),version:f.currentTask().version+1,state:'VALIDATED'},validation:{state:'VALIDATED'}}));
+  await f.click('master-validate');
+  assert.equal(f.el('master-validation-summary').getAttribute('data-tone'),'warn');
+  assert.match(f.el('master-validation-heading').textContent,/ainda não está comprovada/);
+  assert.equal(f.el('master-step-review').getAttribute('data-step-state'),'blocked');
+  assert.match(f.el('master-studio-status').textContent,/comprovação da validação ainda está incompleta/);
+  assert.equal(f.el('master-workflow').getAttribute('aria-busy'),'false');
+});
+
+test('missing, incomplete, failed or foreign verification cannot mark checks complete or enable preparation',async()=>{
+  for(const evidence of [undefined,{}, {state:'STATIC_CHECKS_PASSED'}, {...staticVerification(),proposalFingerprint:'a'.repeat(64)}, {...staticVerification(),checks:[]}, {...staticVerification(),checks:[{check:'GIT_DIFF_CHECK',passed:false}]}, {...staticVerification(),checks:'invalid'}, {...staticVerification(),projectTests:'PASSED'}]){
+    const f=fixture();await f.connect();await f.createTask();await f.click('master-task-propose');await f.click('master-diff');await f.click('master-validate');await f.click('master-stage');
+    const current=f.currentTask();
+    f.override('/api/studio/tasks/'+taskId+'/verify',f.reply({task:{...current,version:current.version+1,state:'STATIC_CHECKS_PASSED',verification:evidence},verification:evidence}));
+    await f.click('master-verify');f.el('master-apply-confirm').checked=true;await f.el('master-apply-confirm').handlers.get('change')();
+    assert.notEqual(f.el('master-validation-summary').getAttribute('data-tone'),'ok');
+    assert.notEqual(f.el('master-step-check').getAttribute('data-step-state'),'complete');
+    assert.notEqual(f.el('master-step-version').getAttribute('data-step-state'),'complete');
+    assert.equal(f.el('master-prepare').disabled,true);assert.equal(f.el('master-apply-confirm').disabled,true);assert.equal(f.el('master-workflow').getAttribute('aria-busy'),'false');
+    assert.doesNotMatch(f.el('master-studio-status').textContent,/Verificação estática concluída/);
+  }
+});
+
+test('a complete diff receipt confirms paths and hashes without registering the validation transition',async()=>{
+  const f=fixture();await f.connect();await f.createTask();await f.click('master-task-propose');
+  const version=f.currentTask().version;await f.click('master-diff');
+  assert.equal(f.currentTask().state,'PROPOSED');assert.equal(f.currentTask().version,version);
+  assert.equal(f.el('master-validation-summary').getAttribute('data-tone'),'neutral');
+  assert.equal(f.el('master-validation-heading').textContent,'Caminhos e hashes conferidos para revisão.');
+  assert.match(f.el('master-validation-detail').textContent,/Validar proposta.*registrar a etapa/);
+  assert.doesNotMatch(f.el('master-validation-heading').textContent+f.el('master-validation-detail').textContent,/incomplet|inválid|não está comprovada/);
+  assert.equal(f.el('master-step-review').getAttribute('data-step-state'),'current');
+  assert.equal(f.el('master-stage').disabled,true);assert.equal(f.el('master-verify').disabled,true);assert.equal(f.el('master-prepare').disabled,true);
+  assert.equal(f.calls.some(call=>call.route.endsWith('/validate')||call.route.endsWith('/stage')),false);
+});
+
+test('reopened validated and staged tasks explain the omitted historical receipt without regressing confirmed progress',async()=>{
+  for(const state of ['VALIDATED','PATCH_STAGED']){
+    const f=fixture();f.task({state,version:4,proposalFingerprint:fingerprint});await f.connect();
+    await f.el('master-history-list').children[0].handlers.get('click')();
+    assert.equal(f.el('master-validation-summary').getAttribute('data-tone'),'neutral');
+    assert.equal(f.el('master-validation-heading').textContent,'Etapa registrada no histórico.');
+    assert.match(f.el('master-validation-detail').textContent,/recibo detalhado de validação não veio no histórico.*Conferir diferenças/);
+    assert.doesNotMatch(f.el('master-validation-detail').textContent,/incomplet|inválid|não confirma/);
+    assert.equal(f.el('master-step-review').getAttribute('data-step-state'),'complete');
+    assert.equal(f.el('master-step-check').getAttribute('data-step-state'),'current');
+    assert.equal(f.el(state==='VALIDATED'?'master-stage':'master-verify').disabled,false);
+    assert.equal(f.el('master-prepare').disabled,true);assert.equal(f.el('master-publish-draft').disabled,true);
+    assert.equal(f.calls.some(call=>call.route.endsWith('/diff')),false);
+    await f.click('master-diff');
+    assert.equal(f.el('master-validation-summary').getAttribute('data-tone'),'ok');
+    assert.match(f.el('master-validation-heading').textContent,/Proposta validada/);
+    assert.equal(f.currentTask().state,state);assert.equal(f.currentTask().version,4);
+    assert.equal(f.calls.filter(call=>call.route.endsWith('/diff')).length,1);
+    assert.equal(f.calls.some(call=>call.options.method==='POST'&&/\/(validate|stage|verify|prepare)$/.test(call.route)),false);
+  }
 });

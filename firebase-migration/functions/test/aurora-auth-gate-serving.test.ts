@@ -3,6 +3,8 @@ import fs from "node:fs";
 import vm from "node:vm";
 import test from "node:test";
 import ts from "typescript";
+import { auroraIdentityMark } from "../src/auroraDesignSystem.js";
+import { fixtureDom } from "./aurora-browser-dom.fixture.js";
 // Preserve the native .mjs import when the functions tsconfig targets CommonJS.
 const importEsm = new Function("url", "return import(url)") as (url: string) => Promise<any>;
 const parser = importEsm(new URL("../../scripts/check-canonical-preflight.mjs", import.meta.url).href);
@@ -40,7 +42,7 @@ function fixture(ready?: string, member: any = null) {
     "./auroraLoginClient.js": { loginClient: () => "" },
     "./auroraPasswordRecovery.js": { passwordRecoveryMarkup: () => "" },
     "./auroraAccountSecurity.js": { accountSecurityPage: () => "synthetic-security" },
-    "./auroraDesignSystem.js": { auroraDesignStyles: () => "" },
+    "./auroraDesignSystem.js": { auroraDesignStyles: () => "", auroraIdentityMark },
     "./auroraTenantEntry.js": {
       CANONICAL_PORTAL_PATH: "/portal",
       companyEntry: (path: string) => path === "/empresa/other" ? { orgId: "other", path } : null,
@@ -116,6 +118,25 @@ test("explicit canonical readiness redirects technical hosts to the exact HTTPS 
   const canonical = await fixture("true").request("auroraNexusAuthGate", "/portal", "auroranexus.com.br");
   assert.equal(canonical.status, 200);
   assert.ok(hasUsableLoginForm(canonical.body));
+});
+
+test("served second-factor controls share the submit form and retain separate recovery and descriptions", async () => {
+  const response = await fixture().request("auroraNexusAuthGate", "/portal", "auroranexus.com.br");
+  const { document } = fixtureDom(response.body);
+  const form = document.getElementById("mfa-form")!;
+  for (const id of ["mfa-factor", "mfa-code", "mfa-submit", "mfa-recovery-help"]) {
+    assert.equal(document.getElementById(id)!.closest("form"), form);
+  }
+  assert.equal(document.getElementById("mfa-submit")!.getAttribute("type"), "submit");
+  assert.equal(document.getElementById("mfa-recovery-help")!.getAttribute("type"), "button");
+  const code = document.getElementById("mfa-code")!;
+  assert.equal(code.getAttribute("required"), "");
+  assert.equal(code.getAttribute("pattern"), "[0-9]{6,8}");
+  for (const id of code.getAttribute("aria-describedby")!.split(/\s+/)) assert.ok(document.getElementById(id));
+  assert.equal(document.getElementById("mfa-panel")!.getAttribute("hidden"), "");
+  assert.match(response.body, /<meta http-equiv="Content-Security-Policy" content="form-action 'none'">/);
+  assert.equal(response.status, 200);
+  assertStandardHeaders(response.headers);
 });
 
 test("login and session method denials retain the restricted CSP", async () => {

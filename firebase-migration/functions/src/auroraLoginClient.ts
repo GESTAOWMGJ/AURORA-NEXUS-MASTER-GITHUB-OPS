@@ -49,6 +49,7 @@ async function createSession(user) {
   clearSetup(); await signOut(auth); location.replace(entryPath);
 }
 function accessIssueMessage(error) {
+  if (error?.code === 'auth/network-request-failed') return 'Não foi possível confirmar o acesso. Confira a conexão e tente novamente.';
   const code = error?.message || error?.code || '';
   if (code === 'EMAIL_NOT_ALLOWED') return 'E-mail autenticado, mas fora da lista autorizada deste ambiente.';
   if (code === 'MEMBERSHIP_NOT_PROVISIONED') return 'Conta autenticada, mas ainda sem vínculo operacional provisionado na organização.';
@@ -89,6 +90,7 @@ async function completeLogin(user) {
 }
 form.addEventListener('submit', async event => {
   event.preventDefault(); if (!auth) return; submit.disabled = true; status.textContent = 'Validando acesso...';
+  const previousFocus = captureAuthFocus();
   try {
     const email = normalizeIdentityEmail(element('email').value);
     element('email').value = email;
@@ -101,7 +103,7 @@ form.addEventListener('submit', async event => {
       const hints = resolver.hints.filter(h => h.factorId === TotpMultiFactorGenerator.FACTOR_ID);
       element('mfa-factor').replaceChildren();
       for (const hint of hints) { const option = document.createElement('option'); option.value = hint.uid; option.textContent = hint.displayName || 'Autenticador'; element('mfa-factor').appendChild(option); }
-      if (hints.length) { form.hidden = true; element('mfa-panel').hidden = false; return; }
+      if (hints.length) { form.hidden = true; element('mfa-panel').hidden = false; focusVisibleAuthField('mfa-code', previousFocus); return; }
       status.textContent = 'O segundo fator cadastrado não é suportado neste ambiente.';
     } else if (error?.code === 'auth/network-request-failed') {
       status.textContent = 'Falha de conexão. Verifique a internet e tente novamente.';
@@ -113,8 +115,9 @@ form.addEventListener('submit', async event => {
     submit.disabled = false;
   }
 });
-element('mfa-submit').addEventListener('click', async () => {
-  const button = element('mfa-submit'); button.disabled = true;
+element('mfa-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = element('mfa-submit'); if (button.disabled) return; button.disabled = true;
   try {
     if (!resolver) throw new Error('MFA_REQUIRED');
     const assertion = TotpMultiFactorGenerator.assertionForSignIn(element('mfa-factor').value, element('mfa-code').value.trim());
@@ -122,6 +125,12 @@ element('mfa-submit').addEventListener('click', async () => {
     element('mfa-code').value = ''; await completeLogin(credential.user);
   } catch (error) { element('mfa-status').textContent = accessIssueMessage(error); }
   finally { button.disabled = false; }
+});
+element('mfa-code').addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  if (event.repeat || element('mfa-submit').disabled) return;
+  element('mfa-form').requestSubmit();
 });
 element('onboarding-submit')?.addEventListener('click', async () => {
   const button = element('onboarding-submit'); button.disabled = true;
@@ -167,6 +176,7 @@ element('start-totp').addEventListener('click', async () => {
 });
 element('enroll-totp').addEventListener('click', async () => {
   const button = element('enroll-totp'); button.disabled = true;
+  const previousFocus = captureAuthFocus();
   try {
     if (!setupUser || !totpSecret) throw new Error('SETUP_REQUIRED');
     const assertion = TotpMultiFactorGenerator.assertionForEnrollment(totpSecret, element('enrollment-code').value.trim());
@@ -174,6 +184,7 @@ element('enroll-totp').addEventListener('click', async () => {
     clearSetup(); setupUser = null; await signOut(auth);
     element('activation-panel').hidden = true; form.hidden = false; submit.disabled = false;
     status.textContent = 'Segundo fator cadastrado. Entre novamente com sua senha e o código do autenticador.';
+    focusVisibleAuthField('password', previousFocus);
   } catch { element('activation-status').textContent = 'Não foi possível confirmar. Verifique o código ou entre novamente para reiniciar a configuração.'; }
   finally { button.disabled = false; }
 });
