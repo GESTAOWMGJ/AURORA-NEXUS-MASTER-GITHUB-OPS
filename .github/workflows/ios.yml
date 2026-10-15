@@ -32,7 +32,7 @@ jobs:
       - name: Test source-bound configuration and Foundation contract
         run: |
           set -euo pipefail
-          python3 -m unittest discover -s desktop/ios -p test_configure.py -v
+          python3 -m unittest discover -s desktop/ios -p 'test_*.py' -v
           swift run --package-path desktop/ios --scratch-path "${RUNNER_TEMP}/aurora-ios-core" AuroraIOSChecks
           swift test --package-path desktop/ios --scratch-path "${RUNNER_TEMP}/aurora-ios-core"
       - name: Configure unsigned candidate without Apple identity claims

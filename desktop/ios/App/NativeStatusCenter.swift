@@ -21,7 +21,9 @@ struct NativeStatusCenter: View {
                         LabeledContent("Fonte do build", value: String(build.sourceSha.prefix(12)))
                         Text(build.releaseId).font(.caption).textSelection(.enabled)
                             .accessibilityIdentifier("native-release-id")
-                        Text("Sem assinatura Apple e sem aceite nativo. A fonte do build não comprova a referência vigente.")
+                        Text(build.signingStatus == "UNSIGNED"
+                             ? "Sem assinatura Apple e sem aceite nativo. A fonte do build não comprova a referência vigente."
+                             : "Candidata para assinatura Apple. Assinatura, processamento no TestFlight e aceite exigem recibos externos; não são atestados por esta tela.")
                             .font(.caption)
                     } else {
                         Text("Proveniência indisponível ou inválida. Não tratar esta candidata como release oficial.")
