@@ -666,6 +666,8 @@ jobs:
           DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
           SMOKE_UID: ${{ vars.FIREBASE_HML_SMOKE_UID }}
           SMOKE_EMAIL: ${{ vars.FIREBASE_HML_SMOKE_EMAIL }}
+          PUBLISH_ACTIVE_RELEASE: ${{ inputs.publish_active_release }}
+          RELEASE_PREVIOUS_SHA256: ${{ inputs.active_release_previous_sha256 }}
         run: |
           set -euo pipefail
           [[ "$SMOKE_UID" =~ ^[A-Za-z0-9_-]{6,128}$ ]]
@@ -781,13 +783,11 @@ jobs:
             .member.email == $email
           ' "$bootstrap_response" >/dev/null
           expected_product_version="$(node -p "require('./firebase-migration/functions/lib/auroraReleaseStatus.js').AURORA_PRODUCT_VERSION")"
-          if ! jq -e --arg version "$expected_product_version" '
-            .release.productVersion == $version and
-            (.release.engineeringReadinessPercent | type) == "number"
-          ' "$bootstrap_response" >/dev/null; then
-            echo "::error::AUTH_SMOKE_RELEASE_VERSION_MISMATCH"
-            exit 97
-          fi
+          node firebase-migration/scripts/verify-deployment-bootstrap.mjs \
+            --bootstrap "$bootstrap_response" --source-sha "$GITHUB_SHA" \
+            --engineering-version "$expected_product_version" \
+            --publish-active-release "$PUBLISH_ACTIVE_RELEASE" \
+            --previous-sha256 "$RELEASE_PREVIOUS_SHA256"
           native_status="$(curl --silent --show-error --max-time 30 \
             -H 'Accept: application/json' \
             --cookie "$cookie_jar" \
@@ -874,13 +874,12 @@ jobs:
               --cookie "$smoke_dir/canonical-cookies.txt" -H 'Accept: application/json' \
               --output "$smoke_dir/canonical-bootstrap.json" \
               'https://auroranexus.com.br/api/bootstrap'
-            jq -e --arg sha "$GITHUB_SHA" '
-              .ok == true and .organization.id == "wmgj" and
-              .canonicalVersion.runtimeBuild.sourceSha == $sha and
-              .canonicalVersion.runtimeBuild.fileIntegrityVerified == true and
-              .canonicalVersion.runtimeBuildWeb.sourceSha == $sha and
-              .canonicalVersion.runtimeBuildWeb.fileIntegrityVerified == true
-            ' "$smoke_dir/canonical-bootstrap.json" >/dev/null
+            jq -e '.ok == true and .organization.id == "wmgj"' "$smoke_dir/canonical-bootstrap.json" >/dev/null
+            node firebase-migration/scripts/verify-deployment-bootstrap.mjs \
+              --bootstrap "$smoke_dir/canonical-bootstrap.json" --source-sha "$GITHUB_SHA" \
+              --engineering-version "$expected_product_version" \
+              --publish-active-release "$PUBLISH_ACTIVE_RELEASE" \
+              --previous-sha256 "$RELEASE_PREVIOUS_SHA256"
             jq '{sourceSha:.canonicalVersion.runtimeBuild.sourceSha,
               serverManifestSha256:.canonicalVersion.runtimeBuild.manifestSha256,
               webManifestSha256:.canonicalVersion.runtimeBuildWeb.manifestSha256}' \
