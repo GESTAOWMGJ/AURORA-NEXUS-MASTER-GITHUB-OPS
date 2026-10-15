@@ -2,8 +2,10 @@
 
 O titular solicitou iOS nativo por TestFlight/App Store e informou que não existe
 app na App Store. Este diretório prepara uma aplicação SwiftUI/WebKit própria;
-não registra identidade Apple, não assina nem publica uma IPA. O app Mac escolhido
-e o ponteiro Q não são alterados.
+o fluxo padrão não registra identidade Apple, não assina nem publica uma IPA.
+A preparação opt-in de distribuição está em [AppStore/README.md](AppStore/README.md),
+com entradas revisadas, archive/export local e validação de recibos separados.
+O app Mac escolhido e o ponteiro Q não são alterados.
 
 O Portal mantém a interface canônica em https://auroranexus.com.br/portal.
 Firebase Authentication, autorização organizacional e MFA continuam no contexto
@@ -28,8 +30,10 @@ nenhuma adaptação de callback/provedor ou exceção de navegação foi inventa
 
 A configuração deriva releaseId/versão/SHA da mesma fonte. A identidade local
 de teste é explicitamente sintética e unsigned; uma bundle ID configurada ainda
-não equivale a registro Apple. Nenhum Team ID, provisioning profile, entitlement,
-Apple login ou credencial de assinatura é criado/inspecionado.
+não equivale a registro Apple. No fluxo unsigned, nenhum Team ID, provisioning profile, entitlement,
+Apple login ou credencial de assinatura é criado/inspecionado. O fluxo de
+distribuição lê somente a configuração pública revisada e o perfil explicitamente
+fornecido; não descobre contas, não instala certificados e não concede capacidades.
 
 Após commitar a fonte iOS e a versão canônica, execute
 `python3 desktop/ios/configure.py --unsigned-test-identity` na raiz para gerar o
@@ -60,3 +64,18 @@ pela regra 4.2 de funcionalidade mínima.
 Fontes oficiais: [WKWebView](https://developer.apple.com/documentation/webkit/wkwebview),
 [WKWebsiteDataStore](https://developer.apple.com/documentation/webkit/wkwebsitedatastore)
 e [App Review Guidelines](https://developer.apple.com/app-store/review/guidelines/).
+
+## Distribuição opt-in — candidata de 15/10/2026
+
+`distribution.py` acrescenta uma etapa separada de preparo e, sob execução explícita
+em Mac autorizado, archive/export manual. A configuração `AppStore/identity.json`
+permanece sem identidade Apple comprovada e bloqueia a execução normal.
+O caminho requer SHA revisado, fonte limpa, perfil App Store, certificado e ícone
+aprovados por SHA-256 e decisão de export compliance. Não inclui upload automático.
+
+O build de simulador continua unsigned e o workflow executa todos os testes Python.
+A proveniência de distribuição é uma solicitação de assinatura, não um atestado
+de assinatura/loja. O recibo do IPA assinado só é produzido após verificação real.
+Metadados pt-BR, requisitos visuais, intervenção do Account Holder e sequência
+TestFlight/App Review estão documentados no pacote AppStore. Não há link de app
+publicado inventado nem substituição do iOS por PWA.

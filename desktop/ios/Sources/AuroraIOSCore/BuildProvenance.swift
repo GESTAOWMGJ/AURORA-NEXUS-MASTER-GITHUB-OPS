@@ -30,11 +30,18 @@ public struct BuildProvenance: Codable, Equatable {
             options: .regularExpression) != nil
         let bundle = value.bundleIdentifier.range(
             of: #"^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+){2,}$"#, options: .regularExpression) != nil
+        let unsigned = value.distribution == "NATIVE_IOS_CANDIDATE" && value.signingStatus == "UNSIGNED"
+        let signingRequested = value.distribution == "APP_STORE_CANDIDATE"
+            && value.signingStatus == "APPLE_SIGNING_REQUESTED"
+            && value.bundleIdentityStatus == "CONFIGURED_UNVERIFIED_WITH_APPLE"
+            && !value.bundleIdentifier.hasPrefix("local.")
+            && !value.bundleIdentifier.hasPrefix("example.")
+            && !value.bundleIdentifier.hasPrefix("com.example.")
         guard value.schemaVersion == "aurora.ios.build.v1", source, version, bundle,
               value.releaseId == "aurora-" + value.productVersion + "-" + value.sourceSha,
               value.certificateSha256 == nil,
               ["UNSIGNED_TEST_IDENTITY", "CONFIGURED_UNVERIFIED_WITH_APPLE"].contains(value.bundleIdentityStatus),
-              value.distribution == "NATIVE_IOS_CANDIDATE", value.signingStatus == "UNSIGNED",
+              unsigned || signingRequested,
               value.nativeAcceptanceVerified == false
         else { throw NativeContractError.invalidBuildProvenance }
         return value

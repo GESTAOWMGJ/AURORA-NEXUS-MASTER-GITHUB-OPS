@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "aurora.ios.distribution.v1",
+  "bundleIdentifier": null,
+  "teamId": null,
+  "appIdPrefix": null,
+  "appStoreAppId": null,
+  "profileUuid": null,
+  "distributionCertificateSha256": null,
+  "approvedIconSha256": null,
+  "exportComplianceReviewed": false,
+  "usesNonExemptEncryption": null
+}
