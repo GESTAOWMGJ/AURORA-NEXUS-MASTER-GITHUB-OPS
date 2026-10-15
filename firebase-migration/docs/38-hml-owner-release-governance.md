@@ -2,7 +2,9 @@
 
 Em 08/10/2026, o titular declarou ter realizado a revisão das quatro candidatas e do gateway, aceitou especificamente R029 no escopo e prazo existentes e autorizou integração, publicação e promoção HML. A decisão sanitizada e versionada está em [hml-owner-release-approval-v1.json](../policy/hml-owner-release-approval-v1.json).
 
-Em 12/10/2026, o titular reafirmou: “Revisão humana APROVADA E REALIZADA !!! das quatro candidatas e do gateway, com decisão específica de R029.” A reafirmação fica anexada à decisão original de 08/10, sem substituir sua identidade, ampliar as cabeças revisadas ou prorrogar R029. O vencimento permanece `2026-10-15T03:00:00.000Z`, ao encerrar 14/10 em `America/Sao_Paulo`.
+Em 12/10/2026, o titular reafirmou: “Revisão humana APROVADA E REALIZADA !!! das quatro candidatas e do gateway, com decisão específica de R029.” Essa reafirmação fica preservada na decisão original de 08/10, sem substituir sua identidade, ampliar as cabeças revisadas ou estender naquele momento o prazo original `2026-10-15T03:00:00.000Z`.
+
+Em 14/10/2026, por nova autorização direta, o titular renovou expressamente HML/R029 até 00:00 de 16/10/2026 em Brasília (`2026-10-16T03:00:00.000Z`), com revisão até 15/10. Aceitou os 11 riscos residuais (7 altos, 4 moderados, zero crítico) no mesmo escopo HML, para recuperação/publicação da beta e testes sintéticos Windows/nuvem. A política registra predecessor e novo prazo na reafirmação `AURORA-HML-OWNER-RENEWAL-20261014`. Produção e dados clínicos permanecem excluídos; aprovação real do futuro run, CI, smokes, assinatura e CAS continuam obrigatórios. Não há alegação de nova revisão humana integral ou independente da main posterior.
 
 | Objeto revisado | Identidade exata |
 |---|---|
@@ -17,7 +19,7 @@ Em 12/10/2026, o titular reafirmou: “Revisão humana APROVADA E REALIZADA !!! 
 
 O gateway v5 é um incremento técnico posterior, fonte `46fa11c7d4be68893a616530509872254ef809e6`, deploy `appgdep_6ac74c3ecd8081919043fc4bf3e2da37` concluído em 08/10/2026 às 07:54:57 UTC, com 22 cenários isolados e 8 GETs anônimos compilados aprovados conforme evidência técnica registrada pelo executor. Esse resultado não amplia retroativamente o escopo da revisão humana de `d94f2c93` nem comprova uma sessão pessoal/MFA.
 
-O caminho padrão `GITHUB_PULL_REQUEST_REVIEW` preserva a exigência de review humano aprovado, no head exato, por pessoa distinta do autor. O modo opcional `OWNER_DEPLOYMENT_APPROVAL` permite a governança pelo titular somente no projeto `wmgj-hml-jfn-20260927`, ambiente `firebase-homologation`, branch `main`, até a revisão de 14/10/2026 em São Paulo. Ele exige:
+O caminho padrão `GITHUB_PULL_REQUEST_REVIEW` preserva a exigência de review humano aprovado, no head exato, por pessoa distinta do autor. O modo opcional `OWNER_DEPLOYMENT_APPROVAL` permite a governança pelo titular somente no projeto `wmgj-hml-jfn-20260927`, ambiente `firebase-homologation`, branch `main`, até o prazo expressamente renovado acima. Ele exige:
 
 - PR integrado cujo merge commit seja o SHA exato promovido, main atual e CI/checks exatos aprovados;
 - actor e triggering actor GitHub do titular, ambos do tipo User, e identidade do runner correspondente;

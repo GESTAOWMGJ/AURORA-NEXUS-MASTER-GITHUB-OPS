@@ -13,7 +13,9 @@ on:
       - 'scripts/tests/test_hml_dispatch_ci.py'
       - 'scripts/tests/check_canonical_preflight.test.mjs'
       - 'scripts/tests/promote_hml_authgate_traffic.test.mjs'
+      - 'scripts/tests/promote_hml_integration_ping_traffic.test.mjs'
       - 'firebase-migration/scripts/promote-hml-authgate-traffic.mjs'
+      - 'firebase-migration/scripts/promote-hml-integration-ping-traffic.mjs'
       - 'firebase-migration/scripts/check-canonical-preflight.mjs'
       - 'firebase-migration/scripts/hml_gate_readonly.py'
       - 'firebase-migration/scripts/hml_cli_access.py'
@@ -31,7 +33,9 @@ on:
       - 'scripts/tests/test_hml_dispatch_ci.py'
       - 'scripts/tests/check_canonical_preflight.test.mjs'
       - 'scripts/tests/promote_hml_authgate_traffic.test.mjs'
+      - 'scripts/tests/promote_hml_integration_ping_traffic.test.mjs'
       - 'firebase-migration/scripts/promote-hml-authgate-traffic.mjs'
+      - 'firebase-migration/scripts/promote-hml-integration-ping-traffic.mjs'
       - 'firebase-migration/scripts/check-canonical-preflight.mjs'
       - 'firebase-migration/scripts/hml_gate_readonly.py'
       - 'firebase-migration/scripts/hml_cli_access.py'
@@ -82,3 +86,5 @@ jobs:
         run: node --test scripts/tests/check_canonical_preflight.test.mjs
       - name: Validate AuthGate traffic promotion and rollback offline
         run: node --test scripts/tests/promote_hml_authgate_traffic.test.mjs
+      - name: Validate IntegrationPing traffic promotion and owned rollback offline
+        run: node --test scripts/tests/promote_hml_integration_ping_traffic.test.mjs

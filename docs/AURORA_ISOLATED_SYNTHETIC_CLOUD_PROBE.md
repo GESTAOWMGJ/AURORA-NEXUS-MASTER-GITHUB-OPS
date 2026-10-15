@@ -32,6 +32,12 @@ imediatamente após extrair e antes do próximo efeito. O cleanup restrito dos I
 sintéticos já criados continua permitido após o prazo; resultado tardio não vira
 PASS.
 
+O prazo HML/R029 foi renovado expressamente pelo titular em 14/10, no mesmo
+escopo, até `2026-10-16T03:00:00.000Z` (16/10 00:00 em Brasília), conforme
+`hml-owner-release-approval-v1.json`. As constantes do probe e readback conservam
+esse hard cutoff; a autorização não se estende automaticamente nem libera
+produção, dados clínicos ou nova alegação de revisão independente.
+
 Cria uma nova pasta marcada e quatro arquivos novos: Google Doc, Google Sheets,
 texto e PDF exportado daquele Doc. Extratores existentes devem retornar conteúdo,
 método correto e o nonce; OCR/metadados falhos continuam FAIL/PENDING. Não chama

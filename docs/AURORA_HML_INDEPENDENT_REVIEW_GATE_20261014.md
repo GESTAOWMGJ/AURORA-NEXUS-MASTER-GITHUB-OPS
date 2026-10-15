@@ -10,7 +10,7 @@ Após o PR #254, a seleção canônica de revisão é `GITHUB_PULL_REQUEST_REVIE
 4. Antes de merge, verificar checks obrigatórios e política de proteção/ruleset da `main` configurada no próprio GitHub, com bloqueio a bypass indevido. Sem garantia efetiva do GitHub, não declarar proteção administrativa implantada.
 5. O merge exige validação expressa dos gates; este documento não autoriza merge automático. Depois, a publicação exige novamente PR/head exatos, CI push, ambiente HML protegido, deploy/smokes, Ed25519, predecessor vivo e CAS.
 6. Se o head mudar ou outra alteração entrar na `main`, repetir a reconciliação para a próxima candidata. A solicitação de 13/10 contém `expectedSourceSha` e predecessor históricos; não copiá-los cegamente.
-7. R029 não é prorrogada: revisão até 14/10/2026 e expiração original em 15/10/2026 00:00 America/Sao_Paulo (`2026-10-15T03:00:00.000Z`). Antes de usar ferramentas abrangidas após o vencimento, tratar os resíduos ou registrar deliberação específica por procedimento próprio, sem ampliação implícita.
+7. R029 não tem extensão automática. O prazo original (`2026-10-15T03:00:00.000Z`) foi renovado por deliberação humana direta em 14/10, registrada na política `AURORA-HML-OWNER-RENEWAL-20261014`: revisão até 15/10/2026 e expiração em 16/10/2026 00:00 America/Sao_Paulo (`2026-10-16T03:00:00.000Z`), com os mesmos 11 riscos (7 altos, 4 moderados, zero crítico) e escopo HML. Não equivale a nova revisão independente nem dispensa os gates técnicos e a aprovação real do run protegido.
 8. Escopo: exclusivamente HML `wmgj-hml-jfn-20260927`, ambiente `firebase-homologation`. Produção e `CLINICAL_SENSITIVE` permanecem excluídos.
 
 ## Evidência de aceite

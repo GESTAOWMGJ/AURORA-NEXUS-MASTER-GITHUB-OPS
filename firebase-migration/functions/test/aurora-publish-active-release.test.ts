@@ -180,15 +180,28 @@ test('HML owner mode consumes real deployment approval and preserves original ch
   assert.equal(verifyActiveReleaseEnvelope(f.envelope(),publicKey,{now:ownerNow}).status,'CANDIDATE_UNVERIFIED');
 });
 
-test('the 12 October reaffirmation preserves the original risk deadline and does not permit late promotion',async()=>{
+test('explicit owner renewal preserves earlier decisions and still rejects promotion at the new deadline',async()=>{
   assert.equal(ownerDecision.recordedOn,'2026-10-08');
-  assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-15T03:00:00.000Z');
-  assert.equal(ownerDecision.riskAcceptance.reviewBy,'2026-10-14');
+  assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-16T03:00:00.000Z');
+  assert.equal(ownerDecision.riskAcceptance.reviewBy,'2026-10-15');
   assert.equal(ownerDecision.reaffirmations[0].recordedOn,'2026-10-12');
   assert.equal(ownerDecision.reaffirmations[0].originalScopeUnchanged,true);
   assert.equal(ownerDecision.reaffirmations[0].riskReviewDeadlineExtended,false);
+  const renewal=ownerDecision.reaffirmations[1];
+  assert.equal(renewal.decisionId,'AURORA-HML-OWNER-RENEWAL-20261014');
+  assert.equal(renewal.approvalSource,'DIRECT_OWNER_CHAT');
+  assert.equal(renewal.previousValidUntilUtc,'2026-10-15T03:00:00.000Z');
+  assert.equal(renewal.validUntilUtc,ownerDecision.scope.validUntilUtc);
+  assert.equal(renewal.reviewBy,ownerDecision.riskAcceptance.reviewBy);
+  assert.equal(renewal.originalScopeUnchanged,true);assert.equal(renewal.riskReviewDeadlineExtended,true);
+  assert.equal(renewal.protectedRunOwnerApprovalStillRequired,true);
+  assert.equal(renewal.laterMainCodeReviewClaimed,false);assert.equal(renewal.independentGithubPullRequestReviewClaimed,false);
+  assert.equal(renewal.productionAuthorized,false);assert.equal(renewal.clinicalSensitiveAuthorized,false);
+  assert.deepEqual(renewal.residual,{critical:0,high:7,moderate:4,total:11});
   const current=ownerFixture();current.deps.now=()=>Date.parse('2026-10-12T18:00:00Z');
   await publishActiveRelease(current.env,current.deps);assert.equal(current.writes(),1);
+  const renewed=ownerFixture();renewed.deps.now=()=>Date.parse(renewal.previousValidUntilUtc);
+  await publishActiveRelease(renewed.env,renewed.deps);assert.equal(renewed.writes(),1);
   const expired=ownerFixture();expired.deps.now=()=>Date.parse(ownerDecision.scope.validUntilUtc);
   await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(expired.writes(),0);
 });

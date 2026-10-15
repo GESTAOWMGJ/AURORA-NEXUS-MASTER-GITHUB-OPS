@@ -44,7 +44,7 @@
 | R026 | Admin Master concentra privilégios | 3 | 5 | 15 | HIGH | MFA/audit required | break-glass, dual review, scoped admin operations | Governance | MEDIUM |
 | R027 | key rotation deixa versão antiga desativada cedo | 2 | 5 | 10 | HIGH | policy | verificar activeKeyVersion antes de disable | KMS Owner | LOW |
 | R028 | dado clínico enviado a IA externa | 2 | 5 | 10 | HIGH | clinical gate | DLP/schema block + provider contract/retention review | AI/Privacy | LOW |
-| R029 | advisories residuais nas ferramentas de teste de Security Rules | 3 | 4 | 12 | HIGH | dependências de desenvolvimento separadas, fixtures sintéticas, CI de validação sem credenciais ou deploy | exceção temporária SEC-EXC-TEST-20261007 aceita pelo titular somente para ferramentas de teste HML; corrigir upstream e revisar até 14/10/2026 | AppSec / Security Governance | LOW |
+| R029 | advisories residuais nas ferramentas de teste de Security Rules | 3 | 4 | 12 | HIGH | dependências de desenvolvimento separadas, fixtures sintéticas, CI de validação sem credenciais ou deploy | exceção temporária SEC-EXC-TEST-20261007 renovada expressamente pelo titular somente para ferramentas de teste HML; corrigir upstream e revisar até 15/10/2026 | AppSec / Security Governance | LOW |
 
 ## 3. Regras de tratamento
 
@@ -67,7 +67,8 @@ A matriz deve ser atualizada após: incidente, pentest, nova integração, alter
 - **Status:** `ACCEPTED_BY_OWNER_HML_TEST_TOOLS_ONLY`
 - **Responsável pelo aceite:** titular responsável, por autorização humana direta no chat em 08/10/2026; acompanhamento AppSec / Security Governance.
 - **Reafirmação:** revisão e decisão específica de R029 reiteradas pelo titular em 12/10/2026, preservando o escopo original e sem extensão de prazo.
-- **Revisão até:** 14/10/2026, no fuso `America/Sao_Paulo`.
+- **Renovação expressa:** em 14/10/2026, o titular renovou HML/R029 no mesmo escopo até 00:00 de 16/10/2026 em Brasília (`2026-10-16T03:00:00.000Z`), aceitando as 11 agregações residuais (7 HIGH, 4 MODERATE, 0 CRITICAL). A reafirmação de 12/10 e o prazo anterior permanecem no histórico da política; não se trata de extensão automática nem de nova revisão independente.
+- **Revisão até:** 15/10/2026, no fuso `America/Sao_Paulo`.
 
 **Escopo:** somente as ferramentas de teste em `firebase-migration/tests`, nas condições sintéticas de HML descritas abaixo. O titular declarou ter realizado a revisão das quatro candidatas e do gateway, aceitou especificamente R029 e autorizou integração/publicação HML. Este aceite não libera produção ou dado clínico sensível, não altera dependências e não remove os demais gates.
 

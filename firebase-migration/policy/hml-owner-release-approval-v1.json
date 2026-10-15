@@ -12,6 +12,25 @@
       "riskReviewDeadlineExtended": false,
       "laterMainCodeReviewClaimed": false,
       "independentGithubPullRequestReviewClaimed": false
+    },
+    {
+      "decisionId": "AURORA-HML-OWNER-RENEWAL-20261014",
+      "recordedOn": "2026-10-14",
+      "approvalSource": "DIRECT_OWNER_CHAT",
+      "statement": "Titular renovou expressamente a autorização HML e R029 até 00:00 de 16/10/2026 em Brasília, aceitando os 11 riscos residuais (7 altos, 4 moderados e zero crítico) para recuperar/publicar a beta e realizar testes sintéticos Windows/nuvem no mesmo escopo HML, sem produção ou dados clínicos.",
+      "originalScopeUnchanged": true,
+      "riskReviewDeadlineExtended": true,
+      "previousValidUntilUtc": "2026-10-15T03:00:00.000Z",
+      "validUntilUtc": "2026-10-16T03:00:00.000Z",
+      "previousReviewBy": "2026-10-14",
+      "reviewBy": "2026-10-15",
+      "timeZone": "America/Sao_Paulo",
+      "residual": { "critical": 0, "high": 7, "moderate": 4, "total": 11 },
+      "protectedRunOwnerApprovalStillRequired": true,
+      "laterMainCodeReviewClaimed": false,
+      "independentGithubPullRequestReviewClaimed": false,
+      "productionAuthorized": false,
+      "clinicalSensitiveAuthorized": false
     }
   ],
   "scope": {
@@ -19,7 +38,7 @@
     "projectId": "wmgj-hml-jfn-20260927",
     "environment": "firebase-homologation",
     "branch": "main",
-    "validUntilUtc": "2026-10-15T03:00:00.000Z"
+    "validUntilUtc": "2026-10-16T03:00:00.000Z"
   },
   "repositoryOwner": { "login": "GESTAOWMGJ", "id": 278915189 },
   "reviewedPullRequests": [
@@ -48,7 +67,7 @@
     "proposal": "SEC-EXC-TEST-20261007",
     "status": "ACCEPTED_BY_OWNER_HML_TEST_TOOLS_ONLY",
     "scope": "firebase-migration/tests development tools only",
-    "reviewBy": "2026-10-14",
+    "reviewBy": "2026-10-15",
     "timeZone": "America/Sao_Paulo",
     "residual": { "critical": 0, "high": 7, "moderate": 4, "total": 11 }
   },
