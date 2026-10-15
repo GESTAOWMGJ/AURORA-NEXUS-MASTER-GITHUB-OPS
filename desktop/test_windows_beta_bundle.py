@@ -41,7 +41,7 @@ class WindowsBetaBundleTests(unittest.TestCase):
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             integration = json.loads(result.stdout)
-            self.assertEqual(integration['version'], '1.0.4')
+            self.assertEqual(integration['version'], '1.0.6')
             component = state / 'integration' / integration['version']
             installed_manifest = json.loads((component / 'manifest.json').read_text())
             self.assertEqual(installed_manifest['version'], integration['version'])

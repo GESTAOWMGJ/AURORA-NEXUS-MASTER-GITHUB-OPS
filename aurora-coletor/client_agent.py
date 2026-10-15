@@ -19,11 +19,11 @@ import time
 
 import aurora_cloud_sync as sync
 from aurora_deployment import safe_path
-from provider_connectors import pull, exports, EXPORT_SUFFIXES, MAX_PROVIDER_BYTES
+from provider_connectors import pull, exports, EXPORT_SUFFIXES, MAX_PROVIDER_BYTES, google_oauth_context, google_oauth_resolve, ProviderAuthenticationError
 from client_secret_store import load as load_secret
 import published_release as release
 
-VERSION='1.0.2'
+VERSION='1.0.4'
 SCHEMA='aurora.client-agent.v1'
 MAX_ENTRIES=200
 SOURCE_PROOF_TTL_SECONDS=300
@@ -64,8 +64,9 @@ def validate(config):
             raise sync.SyncError('SOURCE_STATE_OVERLAP')
         checked.append(root)
     for source in providers:
-        if not isinstance(source,dict) or set(source)-{'provider','tokenEnv','folderId','labelId','host','user','folder'}:
+        if not isinstance(source,dict) or set(source)-{'provider','tokenEnv','folderId','labelId','host','user','folder','oauth'}:
             raise sync.SyncError('PROVIDER_CONFIG_INVALID')
+        if 'oauth' in source:google_oauth_context(source,org,config['instanceId'])
     return checked,state
 
 
@@ -141,7 +142,88 @@ def source_configuration_hash(config):
 
 def provider_page_hash(page):
     return sync.digest(json.dumps({'documents':sorted(sync.digest(json.dumps(row,sort_keys=True)) for row in page['documents']),
-        'pendingExtraction':page['pendingExtraction'],'nextCursor':page.get('nextCursor')},sort_keys=True))
+        'pendingExtraction':page['pendingExtraction'],'pendingDocuments':page.get('pendingDocuments',[]),
+        'nextCursor':page.get('nextCursor')},sort_keys=True))
+
+
+def retain_pending_documents(conn, config, key, page, cursor):
+    pending = page.get('pendingDocuments', [])
+    if (type(page.get('pendingExtraction')) is not int or not 0<=page['pendingExtraction']<=10000
+            or not isinstance(pending, list) or len(pending) > 20 or len(pending) > page['pendingExtraction']):
+        raise sync.SyncError('PENDING_DOCUMENT_IDENTITIES_REQUIRED')
+    for item in pending:
+        if (not isinstance(item, dict) or set(item) != {'schemaVersion','provider','sourceObjectIdHash','observedVersion','sourceMimeType','status','code'}
+                or item.get('schemaVersion') != 'aurora.document.acquisition.pending.v1' or item.get('provider') != 'GOOGLE_DRIVE'
+                or item.get('status') != 'PENDING_EXTRACTION'
+                or not isinstance(item.get('sourceObjectIdHash'),str) or not re.fullmatch(r'[a-f0-9]{64}',item['sourceObjectIdHash'])
+                or item.get('observedVersion') is not None and (not isinstance(item['observedVersion'],str) or not re.fullmatch(r'[1-9][0-9]{0,31}',item['observedVersion']))
+                or not isinstance(item.get('sourceMimeType'),str) or not re.fullmatch(r'[a-z0-9.+-]+/[a-z0-9.+-]{1,160}',item['sourceMimeType'])
+                or item.get('code') not in {'REVIEWED_MIME_AND_VERSION_REQUIRED','SOURCE_CHANGED_DURING_ACQUISITION','BOUNDED_ACQUIRED_BYTES_REQUIRED',
+                                           'PROVIDER_UNAVAILABLE','PROVIDER_RESPONSE_TOO_LARGE','CANONICAL_EXTRACTION_REQUIRED'}):
+            raise sync.SyncError('PENDING_DOCUMENT_IDENTITY_INVALID')
+        identity=sync.digest(config['org']+':'+key+':pending:'+item['sourceObjectIdHash']+':'+str(item['observedVersion']))
+        receipt=json.dumps({'sourceGroup':key,'acquisition':item},sort_keys=True)
+        # Same database/intake queue, no raw content, names, paths or new executor.
+        conn.execute('INSERT INTO intake VALUES (?, ?, 1, ?, 0) ON CONFLICT(hash) DO UPDATE SET state=excluded.state,receipt=excluded.receipt,attempts=intake.attempts+1',
+                     (identity,'PENDING_EXTRACTION',receipt))
+    unknown=page['pendingExtraction']-len(pending)
+    if unknown:
+        # Older adapters only report a count. Do not fabricate per-file identity
+        # or let disappearance erase their extraction barrier on a later run.
+        cursor_hash=sync.digest(json.dumps(cursor,sort_keys=True))
+        identity=sync.digest(config['org']+':'+key+':pending-aggregate:'+cursor_hash)
+        previous=conn.execute("SELECT receipt FROM intake WHERE hash=? AND state='PENDING_EXTRACTION_AGGREGATE'",(identity,)).fetchone()
+        if previous:
+            try:unknown=max(unknown,json.loads(previous[0])['pendingCount'])
+            except (ValueError,KeyError,TypeError):raise sync.SyncError('PENDING_DOCUMENT_STATE_INVALID') from None
+        receipt=json.dumps({'sourceGroup':key,'schemaVersion':'aurora.document.acquisition.pending-aggregate.v1',
+                            'requestCursorHash':cursor_hash,'pendingCount':unknown,'scope':'LEGACY_ADAPTER_WITHOUT_FILE_IDENTITIES'},sort_keys=True)
+        conn.execute('INSERT INTO intake VALUES (?, ?, 1, ?, 0) ON CONFLICT(hash) DO UPDATE SET receipt=excluded.receipt,attempts=intake.attempts+1',
+                     (identity,'PENDING_EXTRACTION_AGGREGATE',receipt))
+    conn.commit()
+
+
+def pending_document_rows(conn, key=None):
+    result=[]
+    for identity, receipt in conn.execute("SELECT hash,receipt FROM intake WHERE state='PENDING_EXTRACTION'"):
+        try: record=json.loads(receipt)
+        except (ValueError,TypeError): raise sync.SyncError('PENDING_DOCUMENT_STATE_INVALID') from None
+        if key is None or record.get('sourceGroup') == key: result.append((identity,record))
+    return result
+
+
+def pending_aggregate_count(conn, key=None):
+    count=0
+    for receipt, in conn.execute("SELECT receipt FROM intake WHERE state='PENDING_EXTRACTION_AGGREGATE'"):
+        try:record=json.loads(receipt)
+        except (ValueError,TypeError):raise sync.SyncError('PENDING_DOCUMENT_STATE_INVALID') from None
+        if type(record.get('pendingCount')) is not int or not 1<=record['pendingCount']<=10000:
+            raise sync.SyncError('PENDING_DOCUMENT_STATE_INVALID')
+        if key is None or record.get('sourceGroup')==key:count+=record['pendingCount']
+    return count
+
+
+def resolve_pending_documents(conn, org, key, documents):
+    # Only a complete processed representation of the very same object/version
+    # closes a retained pending item. Disappearance/new versions do not erase it.
+    completed={}
+    for row in documents:
+        evidence=row.get('sourceEvidence')
+        if evidence:
+            identity=sync.digest(org+':'+json.dumps(row,sort_keys=True,separators=(',',':')))
+            stored=conn.execute("SELECT receipt FROM intake WHERE hash=? AND state='PROCESSING_VERIFIED'",(identity,)).fetchone()
+            if not stored:continue
+            receipt=json.loads(stored[0]);proof=receipt.get('processing',{})
+            if receipt.get('sourceEvidenceHash')!=sync.source_evidence_hash(evidence) or proof.get('firstIngestionVerified') is not True:continue
+            group=(evidence['sourceObjectIdHash'],evidence['observedVersion'])
+            completed.setdefault(group,[]).append((evidence['extraction'],{
+                'sourceEvidenceHash':receipt['sourceEvidenceHash'],'documentId':receipt['documentId'],
+                **{name:proof[name] for name in ('versionId','revision','sourceVersion','canonicalSnapshotHash')}}))
+    for identity,record in pending_document_rows(conn,key):
+        item=record['acquisition']; rows=completed.get((item['sourceObjectIdHash'],item['observedVersion']),[])
+        if rows and all(row['rowCount']==len(rows) for row,receipt in rows) and {row['rowIndex'] for row,receipt in rows}==set(range(len(rows))):
+            record['resolution']={'state':'CANONICAL_PROCESSING_VERIFIED','records':[receipt for row,receipt in rows]}
+            conn.execute("UPDATE intake SET state='EXTRACTION_RESOLVED',receipt=? WHERE hash=?",(json.dumps(record,sort_keys=True),identity))
 
 
 def record_provider_page_proof(conn,key,cursor,page_hash,configuration_hash):
@@ -157,6 +239,13 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
     if verify_installation and sync.origin_url(config['origin'])!='https://auroranexus.com.br':
         raise sync.SyncError('CANONICAL_INSTALLATION_ORIGIN_REQUIRED')
     if (state/'disabled.json').exists():raise sync.SyncError('AGENT_DISABLED')
+    sources=config.get('providers',[])
+    if not roots and sources and all('oauth' in source and source['oauth']['clientId'] is None for source in sources):
+        return {'schemaVersion':SCHEMA,'componentVersion':VERSION,'orgId':config['org'],'state':'PENDING_CONFIGURATION',
+                'connectionVerified':False,'receiptsConfirmed':0,'fullSynchronizationVerified':False,
+                'providerPendingCodes':[{'provider':'GOOGLE_DRIVE','code':'GOOGLE_OAUTH_CONFIGURATION_REQUIRED'}],
+                'installationReadiness':{'status':'PENDING_CONFIGURATION','eligible':False,'installationComplete':False,
+                    'globalIngestionVerified':False,'oauthEnrollmentOrRefreshPerformed':False}}
     environment=dict(environment)
     aliases={config['tokenEnv']}
     for alias in aliases:
@@ -176,7 +265,7 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
         if source_configuration_hash(config)!=configuration_hash:raise sync.SyncError('SOURCE_CONFIGURATION_CHANGED_DURING_CYCLE')
         if (state/'disabled.json').exists():raise sync.SyncError('AGENT_DISABLED')
     conn=queue(state);accepted=0;verified=0;waiting=0;provider_states=[];provider_errors=[]
-    replays=0;fresh_processed=0;acceptances=[];source_modes=set();verified_source_groups=set()
+    replays=0;fresh_processed=0;acceptances=[];source_modes=set();verified_source_groups=set();oauth_refreshed=False
     source_access_at={};page_cursors={};page_hashes={};revalidations=set()
     try:
         conn.execute('CREATE TABLE IF NOT EXISTS binding (id INTEGER PRIMARY KEY, hash TEXT NOT NULL)')
@@ -190,6 +279,15 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
         conn.commit()
         sources=config.get('providers',[])
         ids=[sync.digest(config['org']+':'+json.dumps(source,sort_keys=True)) for source in sources]
+        checkpoints={key:conn.execute('SELECT cursor,completed,pending_extraction,pages FROM provider_pages WHERE id=?',(key,)).fetchone() for key in ids}
+        for key,checkpoint in checkpoints.items():
+            if checkpoint and checkpoint[2]:
+                # Older agents advanced past count-only extraction pendencies.
+                # Move that barrier into the same intake queue before a rescan
+                # can replace traversal metadata. This does not invent file IDs.
+                retain_pending_documents(conn,config,key,{'pendingExtraction':checkpoint[2]},
+                                         {'legacyTraversalCursorHash':sync.digest(checkpoint[0] or 'null')})
+                conn.execute('UPDATE provider_pages SET pending_extraction=0 WHERE id=?',(key,));conn.commit()
         checkpoints={key:conn.execute('SELECT cursor,completed,pending_extraction,pages FROM provider_pages WHERE id=?',(key,)).fetchone() for key in ids}
         # A completed traversal is rescanned next cycle to discover later arrivals/changes.
         # Canonical receipts and idempotency remain in the existing intake table.
@@ -213,6 +311,9 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                 provider_states.append({'provider':source['provider'],'state':'CONNECTION_PENDING'})
                 continue
             try:
+                oauth_context=google_oauth_context(source,config['org'],config['instanceId']) if 'oauth' in source else None
+                if oauth_context is not None and oauth_context['clientId'] is None:
+                    raise sync.SyncError('GOOGLE_OAUTH_CONFIGURATION_REQUIRED')
                 proof=conn.execute('SELECT request_cursor,page_hash,configuration_hash,checked_at FROM provider_page_proofs WHERE id=?',(key,)).fetchone()
                 inflight=conn.execute('SELECT hash FROM provider_inflight WHERE id=?',(key,)).fetchone()
                 age=time.time()-proof[3] if proof else None
@@ -230,7 +331,20 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                 revalidating=bool(verify_installation and checkpoint and checkpoint[1])
                 cursor=json.loads(checkpoint[0]) if checkpoint and checkpoint[0] is not None else None
                 if revalidating:cursor=json.loads(proof[0]) if proof[0] is not None else None
-                result=provider_pull(source,environment=environment,cursor=cursor)
+                if oauth_context is None:
+                    result=provider_pull(source,environment=environment,cursor=cursor)
+                else:
+                    access,oauth_proof=google_oauth_resolve(state,oauth_context)
+                    oauth_refreshed|=oauth_proof['refreshPerformedThisRun']
+                    current_source_authorization()
+                    try:result=provider_pull(source,environment={},cursor=cursor,oauth_access_token=access)
+                    except sync.SyncError as exc:
+                        if not isinstance(exc,ProviderAuthenticationError) or exc.status!=401:raise
+                        current_source_authorization()
+                        access,oauth_proof=google_oauth_resolve(state,oauth_context,force_refresh=True)
+                        oauth_refreshed|=oauth_proof['refreshPerformedThisRun']
+                        current_source_authorization()
+                        result=provider_pull(source,environment={},cursor=cursor,oauth_access_token=access)
                 current_source_authorization()
                 source_access_at[key]=time.time()
                 if len(result['documents'])>budget:raise sync.SyncError('PROVIDER_PAGE_BUDGET_EXCEEDED')
@@ -239,7 +353,12 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                 if revalidating and (result.get('nextCursor') is not None or result['coverageLimited'] or page_hash!=proof[1]):
                     raise sync.SyncError('PROVIDER_PAGE_CHANGED_RECONCILIATION_REQUIRED')
                 if inflight and inflight[0]!=page_hash:raise sync.SyncError('PROVIDER_PAGE_CHANGED_RECONCILIATION_REQUIRED')
-                conn.execute('INSERT OR IGNORE INTO provider_inflight VALUES (?,?)',(key,page_hash))
+                retain_pending_documents(conn,config,key,result,cursor)
+                # An extraction-pending page has no cursor-commit reservation.
+                # Existing canonical intake receipts remain idempotent; retained
+                # object/version identities prevent disappearance from closing it.
+                if not result['pendingExtraction'] and not pending_document_rows(conn,key) and not pending_aggregate_count(conn,key):
+                    conn.execute('INSERT OR IGNORE INTO provider_inflight VALUES (?,?)',(key,page_hash))
                 record_provider_page_proof(conn,key,cursor,page_hash,configuration_hash);conn.commit()
                 page_cursors[key]=cursor;page_hashes[key]=page_hash
                 if revalidating:revalidations.add(key)
@@ -276,10 +395,17 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                     state_name='PROCESSING_VERIFIED' if done else 'PROCESSING_PENDING'
                     conn.execute('UPDATE intake SET state=?,receipt=?,next_attempt=0 WHERE hash=?',(state_name,json.dumps({
                         'documentId':receipt['documentId'],'idempotencyKey':receipt['idempotencyKey'],
-                        'payloadSha256':receipt['payloadSha256'],'processing':receipt['processing']}),identity));conn.commit()
+                        'payloadSha256':receipt['payloadSha256'],'processing':receipt['processing'],
+                        **({'sourceEvidenceHash':receipt['sourceEvidenceHash']} if 'sourceEvidenceHash' in receipt else {})}),identity));conn.commit()
                     accepted+=1;verified+=int(done);waiting+=int(not done);page_done &= done
                 except (sync.SyncError,OSError):
                     conn.execute('UPDATE intake SET state=?,next_attempt=? WHERE hash=?',('RETRY',time.time()+min(3600,30*2**min(attempts-1,7)),identity));conn.commit();waiting+=1;page_done=False
+            if key and page_done:
+                resolve_pending_documents(conn,config['org'],key,documents)
+                # A processed file stays resolved even while another file holds
+                # this page's cursor. Closing SQLite must not roll it back.
+                conn.commit()
+                page_done=not page['pendingExtraction'] and not pending_document_rows(conn,key) and not pending_aggregate_count(conn,key)
             if key and page_done:
                 cursor=page.get('nextCursor')
                 if key not in revalidations:
@@ -288,8 +414,7 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                 record_provider_page_proof(conn,key,page_cursors[key],page_hashes[key],configuration_hash)
                 conn.execute('DELETE FROM provider_inflight WHERE id=?',(key,))
                 conn.commit()
-            elif key and key not in revalidations:
-                pending+=page['pendingExtraction']
+        pending+=len(pending_document_rows(conn))+pending_aggregate_count(conn)
         progress=[conn.execute('SELECT completed,pending_extraction,pages FROM provider_pages WHERE id=?',(key,)).fetchone() for key in ids]
         pending+=sum(row[1] for row in progress if row)
         complete=bool(ids) and all(row and row[0] for row in progress) and all(p['state']=='READ_CONFIRMED' for p in provider_states)
@@ -308,7 +433,7 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                'processingReceiptsVerifiedThisRun':fresh_processed,'idempotentReplaysVerifiedThisRun':replays,
                'automationScope':'AURORA_CANONICAL_PIPELINE','installationComplete':False,
                'proofScope':'DIRECT_ADAPTER_EXECUTION_THIS_RUN',
-               'globalIngestionVerified':False,'oauthEnrollmentOrRefreshPerformed':False}
+               'globalIngestionVerified':False,'oauthEnrollmentOrRefreshPerformed':oauth_refreshed}
     required_groups=set(ids)|({'LOCAL_ROOTS'} if roots else set())
     source_proofs_fresh=all(key in source_access_at and 0<=time.time()-source_access_at[key]<SOURCE_PROOF_TTL_SECONDS for key in required_groups)
     readiness.update(sourceProofsFreshThisRun=source_proofs_fresh,sourceProofTtlSeconds=SOURCE_PROOF_TTL_SECONDS)

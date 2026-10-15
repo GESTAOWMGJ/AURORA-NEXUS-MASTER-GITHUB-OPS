@@ -84,12 +84,14 @@ class CloudContinuationTests(unittest.TestCase):
             self.assertEqual(second['cloudPagesCommitted'],1);self.assertEqual(len(ledger),1)
             self.assertEqual([c.kwargs['cursor'] for c in provider.call_args_list],[None,None])
 
-    def test_unparsed_formats_survive_later_pages_and_block_completion_claim(self):
+    def test_legacy_pending_count_holds_cursor_and_survives_source_disappearance(self):
         with tempfile.TemporaryDirectory() as tmp:
             config=self.cloud_config(Path(tmp));provider=Mock(side_effect=[self.page(next_cursor='page-two',pending=2),self.page('synthetic-two')])
             agent.cycle(config,{'AURORA_APP_TOKEN':'synthetic-token'},self.transport(),provider)
             result=agent.cycle(config,{'AURORA_APP_TOKEN':'synthetic-token'},self.transport(),provider)
-            self.assertTrue(result['cloudEnumerationComplete']);self.assertEqual(result['pendingExtraction'],2)
+            self.assertFalse(result['cloudEnumerationComplete']);self.assertEqual(result['pendingExtraction'],2)
+            self.assertEqual(result['cloudPagesCommitted'],0)
+            self.assertEqual([call.kwargs['cursor'] for call in provider.call_args_list],[None,None])
             self.assertFalse(result['cloudSnapshotVerified'])
 
     def test_changed_inflight_page_or_tenant_does_not_silently_advance(self):

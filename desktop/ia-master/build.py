@@ -42,7 +42,7 @@ def build(output):
                  'firebase-migration/hosting/aurora-nexus/assets/fonts',
                  'docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md'], cwd=ROOT, text=True).strip())
     manifest = {'component': 'AURORA_IA_MASTER', 'version': '1.1.0', 'sourceRevision': revision,
-                'clientAgent': {'component':'AURORA_CLIENT_AGENT','version':'1.0.2','platforms':['windows','macos'],
+                'clientAgent': {'component':'AURORA_CLIENT_AGENT','version':'1.0.4','platforms':['windows','macos'],
                                 'configured':False,'sourceAuthorizationRequired':True,'providerConnectionsVerified':False},
                 'dirty': dirty, 'nodeMinimumMajor': 22, 'externalAiEnabled': False,
                 'files': {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()

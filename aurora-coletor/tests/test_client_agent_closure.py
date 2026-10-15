@@ -264,7 +264,7 @@ class ClientAgentClosureTests(unittest.TestCase):
                 if scenario=='pending':provider.pending['scope-a']=1
                 else:provider.empty.add('scope-a')
                 for _ in range(3):result=self.run_cycle(config,provider,transport);self.assert_pending(result)
-                self.assertEqual(result['cloudPagesCommitted'],3)
+                self.assertEqual(result['cloudPagesCommitted'],2 if scenario=='pending' else 3)
                 self.assertEqual(result['pendingExtraction'],1 if scenario=='pending' else 0)
 
     def test_interrupted_closure_before_or_after_remote_commit_reuses_same_keys(self):

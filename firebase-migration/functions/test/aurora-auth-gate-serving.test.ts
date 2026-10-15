@@ -18,13 +18,13 @@ const compiled = ts.transpileModule(source, {
 // No SDK initialization, credentials, network requests or storage writes occur.
 function fixture(ready?: string, member: any = null) {
   const exported: any = {};
-  const state = { privateShells: 0 };
+  const state = { privateShells: 0, sessionReads: 0, memberReads: 0, downloadReauthorized: null as any };
   const access = {
     CSRF_PURPOSES: { action: "action", refresh: "refresh", userProfile: "userProfile", integrationKey: "integrationKey", distributionApproval: "distributionApproval", logout: "logout" },
     SESSION_COOKIE_NAME: "aurora-session",
     csrfTokenForSession: () => "synthetic-csrf",
-    verifySession: async () => member ? { uid: "synthetic-user" } : null,
-    resolveMember: async () => member,
+    verifySession: async () => { state.sessionReads++; return member ? { uid: "synthetic-user" } : null; },
+    resolveMember: async () => { state.memberReads++; return member; },
     parseAllowedEmails: () => new Set(["synthetic@example.test"]),
     identityMayEnter: () => true,
     validCsrf: () => true
@@ -37,7 +37,8 @@ function fixture(ready?: string, member: any = null) {
     "./auroraFrontend.js": { auroraProtectedShell: () => { state.privateShells++; return "<nav></nav>Centro de gestão WMGJ"; } },
     "./auroraActiveReleaseRuntime.js": { readRuntimeActiveRelease: async () => ({ runtimeBuildWeb: {} }) },
     "./firebase.js": { auroraAuth: {} },
-    "./auroraDownloads.js": { servePrivateDownloads: async () => {} },
+    "./auroraDownloads.js": { servePrivateDownloads: async (_req:any,_res:any,_member:any,_root:any,unified:any) => { if(unified)state.downloadReauthorized=await unified.reauthorize(); } },
+    "./auroraUnifiedBetaDownload.js": { makeRuntimeUnifiedBetaReader: async () => async () => { throw Error('SYNTHETIC_READER_NOT_CONFIGURED'); } },
     "./auroraSetup.js": { setupPage: () => "synthetic-setup" },
     "./auroraLoginClient.js": { loginClient: () => "" },
     "./auroraPasswordRecovery.js": { passwordRecoveryMarkup: () => "" },
@@ -86,6 +87,14 @@ function assertStandardHeaders(headers: Record<string, string>) {
   assert.match(headers["content-security-policy"]!, /frame-ancestors 'none'/);
   assert.match(headers["content-security-policy"]!, /connect-src 'self' https:\/\/identitytoolkit.googleapis.com https:\/\/securetoken.googleapis.com/);
 }
+
+test('downloads receive live session and membership reauthorization from the real AuthGate',async()=>{
+  const member={uid:'synthetic-user',orgId:'synthetic',role:'org_admin',permissions:[]};
+  const current=fixture(undefined,member);
+  await current.request('auroraNexusAuthGate','/downloads','auroranexus.com.br');
+  assert.equal(current.state.sessionReads,2);assert.equal(current.state.memberReads,2);
+  assert.equal(current.state.downloadReauthorized,member);
+});
 
 test("technical login remains functional with canonical readiness absent or false", async () => {
   const { hasUsableLoginForm } = await parser;

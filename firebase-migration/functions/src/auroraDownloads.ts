@@ -2,8 +2,12 @@ import { auroraDesignStyles, auroraIdentityMark } from "./auroraDesignSystem.js"
 import { createHash } from 'node:crypto';
 import { readFile, lstat, realpath } from 'node:fs/promises';
 import { join, resolve, dirname } from 'node:path';
+import { UNIFIED_NAME } from './auroraUnifiedBetaArchive.js';
+import { UnifiedBetaBusyError, type CurrentUnifiedBeta } from './auroraUnifiedBetaDownload.js';
 
-type Member = { role: string; permissions: string[]; orgId: string };
+type Member = { role: string; permissions: string[]; orgId: string; uid?: string };
+type UnifiedAccess = { read:()=>Promise<CurrentUnifiedBeta>; reauthorize:()=>Promise<Member|null> };
+const canDownload=(member:Member|null):member is Member=>Boolean(member&&(['platform_admin','org_admin','director'].includes(member.role)||member.permissions.includes('downloads.hml.read')));
 type Entry = { name: string; label: string; platform: string; size: number; sha256: string; signed: boolean };
 const names = new Set(['AURORA-NEXUS-Mac-HML.zip', 'AURORA-NEXUS-Windows-x64-HML.exe', 'AURORA-NEXUS-Windows-Beta.zip', 'AURORA-NEXUS-Instalar.exe']);
 const portal = 'https://auroranexus.com.br/portal';
@@ -33,7 +37,7 @@ async function release(root: string) {
 }
 
 /** The wrapper verifies the current Firebase session and membership on EVERY request. */
-export async function servePrivateDownloads(req: { method: string; path: string }, res: any, member: Member | null, root = resolve(process.cwd(), 'private-downloads')): Promise<void> {
+export async function servePrivateDownloads(req: { method: string; path: string; query?:unknown }, res: any, member: Member | null, root = resolve(process.cwd(), 'private-downloads'), unified?:UnifiedAccess): Promise<void> {
   res.set('Cache-Control', 'private, no-store, max-age=0');
   res.set('Vary', 'Cookie');
   res.set('X-Content-Type-Options', 'nosniff');
@@ -46,16 +50,40 @@ export async function servePrivateDownloads(req: { method: string; path: string 
     else res.status(401).json({ code: 'AUTH_REQUIRED' });
     return;
   }
-  if (!['platform_admin','org_admin','director'].includes(member.role) && !member.permissions.includes('downloads.hml.read')) { res.status(403).json({ code: 'HML_DOWNLOAD_PERMISSION_REQUIRED' }); return; }
+  if (!canDownload(member)) { res.status(403).json({ code: 'HML_DOWNLOAD_PERMISSION_REQUIRED' }); return; }
   const listing = req.path === '/downloads' || req.path === '/downloads/';
   const match = /^\/downloads\/([A-Za-z0-9._-]+)$/.exec(req.path);
-  if (!listing && (!match || (!names.has(match[1] ?? '') && match[1] !== 'manifest.json'))) { res.status(404).json({ code: 'NOT_FOUND' }); return; }
+  if (!listing && (!match || (!names.has(match[1] ?? '') && match[1] !== 'manifest.json' && match[1]!==UNIFIED_NAME))) { res.status(404).json({ code: 'NOT_FOUND' }); return; }
+  const authorizeCurrent=async()=>{
+    const current=await unified!.reauthorize();
+    return canDownload(current)&&current.orgId===member.orgId&&current.uid===member.uid;
+  };
+  let lease:CurrentUnifiedBeta|undefined;
   try {
+    if(match?.[1]===UNIFIED_NAME){
+      if(!unified || req.query&&Object.keys(req.query).length){res.status(unified?400:503).json({code:unified?'INVALID_DOWNLOAD_QUERY':'RELEASE_NOT_READY'});return;}
+      const current=await unified.read();lease=current;
+      if(!await authorizeCurrent()){res.status(403).json({code:'HML_DOWNLOAD_PERMISSION_REQUIRED'});return;}
+      await current.assertCurrent(); // Final awaited guard: no await remains before the response.
+      res.set('Content-Disposition',`attachment; filename="${UNIFIED_NAME}"`);
+      res.set('Content-Length',String(current.bytes.length));res.set('Content-Type','application/zip');
+      res.set('X-Aurora-Source-Sha',current.sourceSha);res.set('X-Aurora-Certificate-Sha256',current.certificateSha256);res.set('X-Aurora-Archive-Sha256',current.sha256);
+      // Express send(Buffer) would synthesize an ETag. End directly after the
+      // explicit headers, so this private current-pointer response has no ETag.
+      res.status(200);res.end(req.method==='HEAD'?undefined:current.bytes);return;
+    }
+    // Acquire before the listing hashes any legacy binaries, too. A missing or
+    // busy current reference fails closed before that additional file work.
+    let current:CurrentUnifiedBeta|undefined;
+    if(listing&&unified){current=await unified.read();lease=current;}
     const manifest = await release(root);
     if (listing) {
-      const cards = manifest.files.map(item => `<article><h2>${escape(item.label)}</h2><p>${escape(manifest.version)} · ${(item.size/1024/1024).toFixed(2)} MB</p><a href="/downloads/${item.name}">Baixar instalador</a><p class="hash">SHA-256: ${item.sha256}</p></article>`).join('');
+      if(unified){if(!await authorizeCurrent()){res.status(403).json({code:'HML_DOWNLOAD_PERMISSION_REQUIRED'});return;}
+        if(current)await current.assertCurrent();}
+      const beta=current?`<article><h2>Beta One — entrega única</h2><p>Versão do produto ${escape(current.productVersion)} · ${(current.bytes.length/1024/1024).toFixed(2)} MB</p><a href="/downloads/${UNIFIED_NAME}">Baixar Beta One</a><p class="hash">Fonte: ${current.sourceSha}<br>Certificado Ed25519: ${current.certificateSha256}<br>SHA-256 do ZIP: ${current.sha256}</p><p>Pacote preparado; validações de distribuição em andamento. A assinatura do certificado não substitui assinatura de editor, aceite dos dispositivos ou ingestão validada. iOS nativo permanece pendente; o original Mac conserva sua identidade.</p></article>`:`<article><h2>Beta One — entrega única</h2><p>Aguardando referência atual, integridade dos payloads e disponibilidade comprovadas. Nenhum instalador individual abaixo é apresentado como a beta completa.</p></article>`;
+      const cards = manifest.files.map(item => `<article><h2>${escape(item.label)}</h2><p>Componente satélite ${escape(manifest.version)} · ${(item.size/1024/1024).toFixed(2)} MB</p><a href="/downloads/${item.name}">Baixar componente</a><p class="hash">SHA-256: ${item.sha256}</p></article>`).join('');
       const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AURORA NEXUS | Downloads privados</title><style>${auroraDesignStyles()}
-body{margin:0;background:var(--bg);color:var(--text)}main{max-width:1000px;margin:auto;padding:48px 24px}h1{font-family:'Source Serif 4',Georgia,serif;font-weight:400;font-size:clamp(30px,4vw,42px);letter-spacing:-.025em;line-height:1.15;margin:12px 0 20px}h2{font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:23px;line-height:1.25;margin:0 0 14px}.tag{color:#81632e;letter-spacing:.16em;font-size:11px;font-weight:700}section{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin:26px 0}article{padding:26px;border:1px solid var(--line);border-radius:16px;background:var(--panel);box-shadow:var(--shadow)}a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:11px 18px;background:var(--ink);border:1px solid var(--ink);color:#fffdf8;border-radius:9px;text-decoration:none;font-weight:650}a:hover{background:#105064}a:focus-visible{outline:3px solid var(--info);outline-offset:4px}.hash{font-size:12px;overflow-wrap:anywhere;color:var(--muted);line-height:1.6;margin-top:18px}.warning{padding:18px 20px;border:1px solid #d4bd8e;border-left:3px solid var(--gold);border-radius:0 10px 10px 0;background:var(--panel2);color:#62471e;line-height:1.65}.back{background:transparent;color:var(--ink);border-color:var(--line)}.back:hover{background:var(--panel2)}@media(max-width:520px){main{padding:28px 18px}article{padding:22px}.warning{padding:16px}}</style></head><body><main>${auroraIdentityMark()}<p class="tag">ACESSO RESTRITO</p><h1>Instalar o cliente do portal</h1><p class="warning">Homologação. Pacotes sem assinatura de editor e sem notarização Apple. Estes clientes abrem o portal canônico único; não contêm um sistema offline. A instalação não confirma disponibilidade ou implantação do servidor. Não desative proteções do sistema.</p><section>${cards}</section><p>A busca documental não é iniciada automaticamente. O recurso POSIX/macOS exige autorização própria; não está portado para Windows.</p><p><a class="back" href="/">Voltar à gestão</a></p></main></body></html>`;
+body{margin:0;background:var(--bg);color:var(--text)}main{max-width:1000px;margin:auto;padding:48px 24px}h1{font-family:'Source Serif 4',Georgia,serif;font-weight:400;font-size:clamp(30px,4vw,42px);letter-spacing:-.025em;line-height:1.15;margin:12px 0 20px}h2{font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:23px;line-height:1.25;margin:0 0 14px}.tag{color:#81632e;letter-spacing:.16em;font-size:11px;font-weight:700}section{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin:26px 0}article{padding:26px;border:1px solid var(--line);border-radius:16px;background:var(--panel);box-shadow:var(--shadow)}a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:11px 18px;background:var(--ink);border:1px solid var(--ink);color:#fffdf8;border-radius:9px;text-decoration:none;font-weight:650}a:hover{background:#105064}a:focus-visible{outline:3px solid var(--info);outline-offset:4px}.hash{font-size:12px;overflow-wrap:anywhere;color:var(--muted);line-height:1.6;margin-top:18px}.warning{padding:18px 20px;border:1px solid #d4bd8e;border-left:3px solid var(--gold);border-radius:0 10px 10px 0;background:var(--panel2);color:#62471e;line-height:1.65}.back{background:transparent;color:var(--ink);border-color:var(--line)}.back:hover{background:var(--panel2)}@media(max-width:520px){main{padding:28px 18px}article{padding:22px}.warning{padding:16px}}</style></head><body><main>${auroraIdentityMark()}<p class="tag">ACESSO RESTRITO</p><h1>Beta One do AURORA NEXUS</h1><p class="warning">Homologação. Pacotes sem assinatura de editor e sem notarização Apple. Estes clientes abrem o portal canônico único; não contêm um sistema offline. A instalação não confirma disponibilidade ou implantação do servidor. Não desative proteções do sistema.</p><section>${beta}</section><details><summary>Componentes individuais para suporte</summary><section>${cards}</section></details><p>Os componentes individuais preservam suas limitações históricas. Instalação e alimentação exigem consentimento e recibos próprios; baixar o arquivo não ativa coleta.</p><p><a class="back" href="/">Voltar à gestão</a></p></main></body></html>`;
       res.status(200).type('html').send(req.method === 'HEAD' ? '' : html); return;
     }
     if (match![1] === 'manifest.json') { res.status(200).json(manifest); return; }
@@ -67,7 +95,8 @@ body{margin:0;background:var(--bg);color:var(--text)}main{max-width:1000px;margi
     res.set('Content-Length', String(bytes.length));
     res.set('Content-Type', item.name.endsWith('.zip') ? 'application/zip' : 'application/octet-stream');
     res.status(200).send(req.method === 'HEAD' ? '' : bytes);
-  } catch {
-    res.status(503).json({ code: 'RELEASE_NOT_READY' });
-  }
+  } catch(error) {
+    if(error instanceof UnifiedBetaBusyError){res.set('Retry-After','1');res.status(503).json({code:'RELEASE_BUSY'});}
+    else res.status(503).json({ code: 'RELEASE_NOT_READY' });
+  } finally { lease?.release(); }
 }

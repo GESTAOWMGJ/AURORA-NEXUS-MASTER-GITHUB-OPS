@@ -52,9 +52,113 @@ implantação e teste real dos provedores continuam sendo evidências próprias.
    qualquer leitura da origem; teste real do conector, recibo e versão/hash processados.
 
 Adaptadores presentes e empacotados não significam que essas etapas ocorreram.
-Renovação OAuth automatizada, extração de todos os formatos e testes reais dos
-provedores permanecem dependências abertas. Não há criação de identidade/chave de
-terceiros apenas pelo código nem transmissão sem credencial própria válida.
+O incremento OAuth Google desktop abaixo oferece renovação protegida no código;
+configuração e consentimento reais continuam pendentes até comprovação própria.
+Renovação dos demais provedores e extração de todos os formatos permanecem
+dependências abertas. Não há criação de identidade/chave de terceiros apenas
+pelo código nem transmissão sem credencial própria válida.
+
+## OAuth Google desktop — candidato de 15/10/2026
+
+Baseline deste incremento: `6a21a03d616f5e7f3b89075f7854309d1bb5bbde`.
+O mesmo agente cliente passa para `1.0.3`; Windows Integration passa para
+`1.0.5`, preservando checkpoints `1.0.0` a `1.0.4`. O pacote mantém seus sete
+arquivos de integração e os 34 arquivos da IA Master. Não há outro executor,
+scheduler, banco ou ativação de fonte por este registro.
+
+Cada fonte Google Drive aceita uma destas configurações, mutuamente exclusivas:
+
+```json
+{"provider":"GOOGLE_DRIVE","folderId":"<pasta-autorizada>","tokenEnv":"<referencia-legada>"}
+```
+
+```json
+{
+  "provider": "GOOGLE_DRIVE",
+  "folderId": "<pasta-autorizada>",
+  "oauth": {
+    "schemaVersion": "aurora.google.oauth.source.v1",
+    "clientId": null,
+    "credentialRef": "AURORA_GOOGLE_OAUTH_<32_HEXADECIMAIS_MAIUSCULOS>",
+    "scopeProfile": "DRIVE_READONLY_EXISTING_FOLDER"
+  }
+}
+```
+
+O segundo exemplo é um modelo pendente, não uma configuração pronta para uso.
+`credentialRef` representa a referência gerada e vinculada à configuração da
+fonte, sem token no JSON. `google_oauth_credential_ref(org, instanceId, folderId)`
+calcula os 32 caracteres hexadecimais maiúsculos; um valor arbitrário não serve.
+`clientId` aceita `null` ou um identificador público;
+o operador deve fornecer o de um cliente OAuth Google do tipo Desktop. A
+validação do formato não comprova tipo, titularidade ou aprovação do cliente.
+Não há client secret empacotado,
+client ID universal fabricado nem herança de credenciais entre organizações ou
+dispositivos. Sem client ID, o diagnóstico é `PENDING_CONFIGURATION`: não abre
+navegador, não lê o segredo e não solicita a rede.
+
+Depois de preparar a configuração explícita no destino do agente existente,
+o operador pode consultar o estado ou iniciar o consentimento localmente:
+
+```text
+python aurora-coletor/install_client_agent.py --target <mesmo-destino> --google-oauth-status <indice-da-fonte>
+python aurora-coletor/install_client_agent.py --target <mesmo-destino> --authorize-google-drive <indice-da-fonte>
+```
+
+O índice começa em zero. Essas operações são exclusivas entre si e com
+instalação, continuação, inicialização, desativação ou configuração de segredos.
+O diagnóstico `PROTECTED_GRANT_PRESENT` comprova apenas presença de um registro
+protegido compatível; não comprova validade atual no Google, aquisição ou instalação.
+O consentimento é opt-in: navegador externo oficial do provedor, callback
+loopback local, state e PKCE S256. Código de autorização, verifier e state
+permanecem na memória durante a tentativa. Access token e refresh token são
+persistidos somente no mesmo bundle protegido pelo DPAPI do usuário atual no
+Windows ou pelo Keychain no macOS; o adaptador recebe o access token em memória.
+Não entram no JSON de configuração, recibo, log ou argumento de processo.
+O registro fechado usa Base64URL sem padding, no máximo 16.384 caracteres, dentro
+da proteção DPAPI/Keychain existente. Base64URL é codificação, não criptografia.
+Organização, instância, pasta, client ID, perfil e alias vinculam o registro;
+troca incompatível bloqueia. Renovação e CAS usam uma trava para o mesmo item
+protegido; no Mac a trava acompanha o escopo global do item Keychain.
+Não copiar sessão Aurora,
+cookies, senha, código MFA ou credencial entre dispositivos. Concessão negada,
+expirada ou revogada mantém pendência para nova autorização oficial.
+
+O perfil solicita `https://www.googleapis.com/auth/drive.readonly`. Esse escopo
+Google é amplo e classificado como restrito; não é um consentimento limitado
+àquela pasta. O Aurora aplica sua própria fronteira de pasta explícita em cada
+aquisição, sem ampliar a configuração automaticamente. `drive.file` seria um
+perfil alternativo e não está implementado: acesso a uma pasta escolhida não
+pode ser apresentado como prova de acesso aos filhos sem validação específica.
+A configuração e eventual verificação do aplicativo Google são dependências
+externas; nenhuma aprovação do provedor é inferida dos testes sintéticos.
+É necessário habilitar Drive API e cadastrar ou confirmar um cliente Desktop
+próprio do Aurora no projeto autorizado, com tela de consentimento e usuário de
+teste quando aplicável. A documentação Google marca `client_secret` como opcional
+nesse fluxo; este incremento não o recebe. Recusa do cliente permanece pendência
+de configuração, sem fallback para cliente web, clasp ou conector do Codex.
+Aplicativos External/Testing podem receber refresh token de sete dias; isso não
+é continuidade de distribuição comprovada. Referências oficiais:
+[OAuth desktop](https://developers.google.com/identity/protocols/oauth2/native-app),
+[escopos Drive](https://developers.google.com/workspace/drive/api/guides/api-specific-auth)
+e [expiração de refresh token](https://developers.google.com/identity/protocols/oauth2#expiration).
+
+O consentimento não instala nem ativa o agente. Renovar o access token permite
+tentar a aquisição no watch existente, mas `sourceReady` e o aceite da instalação
+continuam exigindo acesso fresco à fonte, todas as páginas autorizadas, ausência
+de extrações pendentes, processamento canônico, recibos persistidos, replay e
+configuração da automação vigente. Um refresh bem-sucedido não satisfaz esses
+gates. Não há ativação de tenant, alteração de IAM/backend ou fonte real neste
+incremento.
+
+O escopo é Google Drive em Windows/macOS. Não adiciona OAuth iOS, renovação de
+Gmail, Microsoft Mail ou IMAP, nem exportação de Google Docs/Sheets nativos ou
+extração de PDF no agente. Esses formatos continuam pendentes no agente quando
+não há adaptador existente compatível; o extrator Apps Script mantém seu estado
+`LEGACY_MIRRORED` e sua validação própria. O registro `cloudIntakePolicy` incorpora
+a capacidade abstrata e os limites no motor, sem declarar instalação plug and
+play comprovada. Código, testes sintéticos, CI no SHA final, promoção assinada,
+consentimento real e aceite de cada dispositivo permanecem provas separadas.
 
 ## Continuidade MANUAL do instalador — candidato de 15/10/2026
 
@@ -83,6 +187,70 @@ Código e testes sintéticos desse candidato não comprovam instalação distrib
 consentimento OAuth, extração de documentos comuns ou ingestão global. A adoção
 exige CI na fonte final, promoção assinada e execução real pelo mesmo instalador.
 Rollback usa o pacote anterior e os backups existentes; nenhum dado-fonte é apagado.
+
+## Aquisição documental estruturada — candidato de 15/10/2026
+
+Incremento delimitado do mesmo agente: componente Windows Integration 1.0.6 e
+clientAgent 1.0.4, preservando checkpoints anteriores. O OAuth 1.0.5 não comprovava
+aquisição de bytes. Este incremento acrescenta `aurora.document.acquisition.v1`
+opcional ao contrato da API existente, sem alterar o payload legado sem prova.
+O registro nativo `cloudIntakePolicy.documentAcquisitionEvidence` expõe a
+capacidade e seus limites; não concede acesso nem cria executor ou banco.
+
+O adaptador Drive seleciona parser pelo MIME informado pelo provedor, sem confiar
+no nome. Suporta JSON canônico, CSV com cabeçalhos canônicos e XLSX canônico de
+uma aba. Google Sheets usa a exportação CSV da primeira aba; não são bytes
+nativos do workbook e a exportação não comprova cobertura de todas as abas.
+O download/export é somente leitura, limitado a 1 MiB, com os limites menores
+dos parsers JSON/CSV preservados, TLS e rejeição de redirecionamento existentes.
+A versão opaca numérica do mesmo objeto é observada na listagem e novamente
+após adquirir os bytes. Mudança de versão/MIME/identidade deixa pendência.
+
+Cada registro materializado mantém os fatos estruturados úteis já aceitos pela
+API, com hash do objeto opaco, versão observada, MIME da fonte/representação,
+SHA-256 e tamanho dos bytes adquiridos, extrator/método/versionamento, posição e
+contagem dos registros. `textFormat=CANONICAL_RECORD_JSON` e `textSha256` referem-se
+apenas à representação JSON normalizada daquele registro, nunca ao texto integral
+do documento. `rowFactsSha256` vincula a prova aos mesmos 14 campos normalizados.
+O servidor valida esse vínculo e devolve o hash da prova persistida; o cliente
+exige esse reconhecimento além dos recibos de processamento existentes.
+O hash também é relido da versão imutável atual na prova de processamento;
+recibo antigo com fatos iguais não pode substituí-lo pelo de outra aquisição.
+Metadados declarados pelo cliente autenticado não são assinatura do Google nem
+recomputação do hash de arquivo pelo servidor, que não recebe os bytes originais.
+
+`canonicalSnapshotHash` e `source.contentHash` legados continuam sendo hashes dos
+fatos, com `hashMethod=canonical_structured_sha256`. O SHA-256 dos bytes fica em
+`source.acquisition.byteSha256`, com seu hash de prova separado. A evidência entra
+na mesma transação `sourceDocuments/entityVersions/apiIdempotency/auditEvents` e
+checkpoint existentes. Nova versão observada do mesmo objeto com os mesmos fatos
+pode acrescentar revisão imutável, sem inventar novo `sourceVersion` financeiro.
+Mesma versão observada com prova diferente, regressão ou troca de objeto são
+conflitos. Mudança de fatos continua exigindo evolução do `sourceVersion` declarado
+na fonte. Repetição exata permanece idempotente. Documento que já tem prova de
+aquisição não pode perdê-la silenciosamente numa atualização sem essa prova.
+
+Formato não extraído conserva identidade opaca, MIME e versão na tabela `intake`
+do SQLite já existente, sem nome, caminho, texto bruto ou segredo. A página não
+avança até processar todos os registros e resolver essas identidades/versões.
+Desaparecimento do arquivo ou nova versão não encerram pendência antiga. Somente
+todos os registros da mesma versão com recibos confirmados podem resolvê-la;
+a resolução preserva hashes e referências dos recibos. Adaptadores legados que
+possuem apenas contagem mantêm uma barreira agregada explícita, sem inventar IDs.
+Contagens de pendência em cursores legados são preservadas nessa mesma fila antes
+de uma nova travessia; exigem reconciliação e não podem sumir com o rescan.
+
+Google Docs, PDF/OCR, documentos livres, pastas filhas, exportação de todas as
+abas e extração semântica financeira continuam pendentes. O extrator Apps Script
+existente permanece `LEGACY_MIRRORED`; nenhum fallback regex vira fato financeiro.
+Não se persistem texto clínico nem documentos reais por este candidato. Testes
+sintéticos de bytes, paridade Python/TypeScript e retomada da fila não comprovam
+consentimento, Drive real, transação em HML ou instalação atualizada. Os gates de
+processamento, replay e automação da instalação permanecem obrigatórios.
+
+Rollback preserva a fila e o histórico. Agente antigo não entende as barreiras
+novas; portanto não pode ser usado para declarar instalação/ingestão concluída
+enquanto houver pendências documentais sem reconciliação explícita.
 
 ## Evidências separadas desta sessão
 

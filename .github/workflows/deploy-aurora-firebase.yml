@@ -116,6 +116,7 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -m pip install -r aurora-coletor/requirements-release-verification.txt
           bash firebase-migration/scripts/bootstrap-homologacao.sh
           npm --prefix firebase-migration/functions audit --omit=dev --audit-level=high
           cd firebase-migration/api
@@ -127,7 +128,6 @@ jobs:
       - name: Validate signed release desktop and Windows integration consumers
         run: |
           set -euo pipefail
-          python3 -m pip install -r aurora-coletor/requirements-release-verification.txt
           node --test desktop/ia-master/published-update.test.cjs
           python3 -m unittest discover -s aurora-coletor/tests -p test_published_release.py -v
       - name: Validate target and deployment scope
@@ -178,6 +178,9 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: firebase-migration/functions/package-lock.json
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5 pinned 2026-10-01
+        with:
+          python-version: "3.12"
       - name: Build exact commit before cloud authentication
         working-directory: firebase-migration/functions
         run: |
@@ -185,6 +188,7 @@ jobs:
           test "$(git -C ../.. rev-parse HEAD)" = "$GITHUB_SHA"
           npm ci
           npm run build
+          python3 -m pip install -r ../../aurora-coletor/requirements-release-verification.txt
           npm test
           npm audit --omit=dev --audit-level=high
       - name: Require canonical HTTPS and HML routing before cloud authentication
@@ -995,6 +999,9 @@ jobs:
             --candidate firebase-migration/functions/runtime-release/unified-beta-candidate.zip \
             --source-sha "$GITHUB_SHA" \
             --manifests-directory firebase-migration/functions/runtime-release)"
+          node firebase-migration/scripts/finalize-unified-beta.mjs --verify-candidate \
+            --candidate firebase-migration/functions/runtime-release/unified-beta-candidate.zip \
+            --source-sha "$GITHUB_SHA"
           printf '%s\n' "$verification"
           printf 'sha256=%s\n' "$(jq -r '.archiveSha256' <<<"$verification")" >> "$GITHUB_OUTPUT"
           fingerprint="$(node -e 'const {createPublicKey,createHash}=require("node:crypto"); const key=createPublicKey(process.env.AURORA_ACTIVE_RELEASE_PUBLIC_KEY); if(key.asymmetricKeyType!=="ed25519")throw Error("ED25519_PUBLIC_KEY_REQUIRED"); process.stdout.write(createHash("sha256").update(key.export({format:"der",type:"spki"})).digest("hex"));')"
@@ -1034,7 +1041,7 @@ jobs:
         run: |
           set -euo pipefail
           node firebase-migration/scripts/export-public-unified-release.mjs "$RUNNER_TEMP/unified-release-public"
-          python3 desktop/build_unified_beta.py finalize \
+          node firebase-migration/scripts/finalize-unified-beta.mjs \
             --candidate firebase-migration/functions/runtime-release/unified-beta-candidate.zip \
             --public-envelope "$RUNNER_TEMP/unified-release-public/release-envelope-signed.json" \
             --public-trust "$RUNNER_TEMP/unified-release-public/public-trust.json" \

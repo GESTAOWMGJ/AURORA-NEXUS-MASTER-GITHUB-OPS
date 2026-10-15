@@ -29,6 +29,9 @@ test('release convergence reuses the governed registry entry without asserting i
   assert.equal(policy.requiredSchema2Components.length,5);assert.equal(policy.fullSynchronizationInferredFromSignedCoverage,false);
   assert.equal(policy.nativeMacAcceptanceInferredFromSatellite,false);assert.equal(policy.allClientsSynchronized,false);
   assert.equal(policy.schedulerCreated,false);assert.equal(policy.automaticInstallationEnabled,false);assert.equal(policy.permissionsGranted,false);
+  assert.equal(policy.unifiedDownloadEndpoint,'/downloads/Aurora-Nexus-Beta-One.zip');
+  assert.equal(policy.unifiedDownloadState,'IMPLEMENTED_PENDING_RUNTIME_VALIDATION');
+  assert.equal(policy.artifactDownloadProvesDeviceAcceptance,false);
 });
 
 test("aprendizado orgânico promove capacidade, não dados entre clientes", () => {
@@ -81,6 +84,30 @@ test("instalação canônica é governada e está presente na projeção, sem no
   assert.equal(cloud.manualInputProofScope, "DOCUMENT_IDENTITY_VERSION_AND_CANONICAL_FACTS");
   assert.equal(cloud.manualInstallerReplaysDocument, false);
   assert.equal(cloud.manualInstallerWritesSharedCheckpoint, false);
+  assert.equal(cloud.version, "1.0.5");
+  assert.equal(cloud.documentAcquisitionEvidence.schema,"aurora.document.acquisition.v1");
+  assert.equal(cloud.documentAcquisitionEvidence.byteHashIsCanonicalFactsHash,false);
+  assert.equal(cloud.documentAcquisitionEvidence.pendingExtractionBlocksCursorAdvance,true);
+  assert.equal(cloud.documentAcquisitionEvidence.disappearanceResolvesPendingEvidence,false);
+  assert.equal(cloud.documentAcquisitionEvidence.sheetsExportProvesWholeWorkbook,false);
+  assert.equal(cloud.documentAcquisitionEvidence.globalDocumentIngestionVerified,false);
+  assert.equal(cloud.googleDesktopOAuth.sourceSchema, "aurora.google.oauth.source.v1");
+  assert.deepEqual(cloud.googleDesktopOAuth.platforms, ["windows", "macos"]);
+  assert.equal(cloud.googleDesktopOAuth.enrollment, "EXPLICIT_OPT_IN_EXTERNAL_BROWSER_LOOPBACK_PKCE_S256");
+  assert.equal(cloud.googleDesktopOAuth.publicDesktopClientIdRequired, true);
+  assert.equal(cloud.googleDesktopOAuth.missingClientIdState, "PENDING_CONFIGURATION");
+  assert.equal(cloud.googleDesktopOAuth.scopeProfile, "DRIVE_READONLY_EXISTING_FOLDER");
+  assert.equal(cloud.googleDesktopOAuth.googleScope, "https://www.googleapis.com/auth/drive.readonly");
+  assert.equal(cloud.googleDesktopOAuth.googleScopeRestrictsFolder, false);
+  assert.equal(cloud.googleDesktopOAuth.auroraFolderBoundaryRequired, true);
+  assert.equal(cloud.googleDesktopOAuth.refreshTokenStorage, "CURRENT_USER_DPAPI_OR_KEYCHAIN");
+  assert.equal(cloud.googleDesktopOAuth.accessTokenStorage, "CURRENT_USER_DPAPI_OR_KEYCHAIN_AND_PROCESS_MEMORY");
+  assert.equal(cloud.googleDesktopOAuth.authorizationCodeVerifierAndStateStorage, "PROCESS_MEMORY_ONLY");
+  assert.equal(cloud.googleDesktopOAuth.mutuallyExclusiveWithLegacyTokenEnv, true);
+  assert.equal(cloud.googleDesktopOAuth.sourceReadyRequiresFreshProviderAccessAndExistingReceiptGates, true);
+  for (const field of ["configurationOrConsentProvesIngestion", "driveFileProfileImplemented",
+    "otherProviderRenewalImplementedByThisIncrement", "iosEnrollmentImplemented", "runtimeEnrollmentVerified",
+    "permissionsGranted", "executorCreated"]) assert.equal(cloud.googleDesktopOAuth[field], false, field);
   assert.equal(cloud.firstDocumentEqualsFullIngestion, false);
   assert.equal(cloud.permissionsGranted, false);
   assert.equal(cloud.schedulerCreated, false);

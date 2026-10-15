@@ -42,6 +42,35 @@ o certificado público verificado à mesma candidata. A identidade comum é
 componentes preservam sua linhagem. Disponibilidade do ZIP e recibos de adoção
 são estados próprios: dispositivo offline permanece pendente.
 
+Incremento candidato de 15/10/2026: a rota privada fixa
+`/downloads/Aurora-Nexus-Beta-One.zip` usa a sessão, membership e permissão de
+downloads já existentes. Não consulta GitHub com segredo, não cria storage, banco,
+autoridade ou executor. O processo captura o candidato empacotado e exige os cinco
+manifestos/payloads correspondentes ao pin e ao runtime atuais. Chave pública vem
+da configuração independente do runtime; a chave incluída no pacote não é autoridade.
+Pin, candidato e permissão são revalidados também sob cache de uma única entrada.
+Há uma única operação de pacote em voo por processo, mantida até a checagem final
+e liberada também em erro. Concorrente recebe 503 com Retry-After, sem fila nem
+nova leitura de arquivos. O limite não altera a concorrência das rotas de login.
+
+Publisher e endpoint compartilham `auroraUnifiedBetaArchive.ts`; o comando
+`firebase-migration/scripts/finalize-unified-beta.mjs` é o finalizador oficial.
+O comando Python `finalize` apenas delega a ele e requer o build Functions atual.
+O candidato e o ZIP externo usam STORED e índice canônico para obter os mesmos bytes em CI e no endpoint, sem depender
+da versão de zlib. Isso altera tamanho/hash do arquivo externo; preserva os bytes
+e hashes dos payloads e os requisitos de aceite. `VERIFY.py` permanece compatível.
+Os hashes dos helpers README/VERIFY são fixados no código revisado; alteração dos
+helpers requer atualizar esses pins e suas regressões, nunca confiar no índice do ZIP.
+
+Perfil deliberadamente limitado aos caminhos ASCII dos pacotes atuais: ZIP32,
+arquivos regulares, sem extras/comentários/descritores, criptografia ou ZIP64;
+entrada pode usar STORED/DEFLATE. Limites: 16 MiB por ZIP, 8 MiB por arquivo,
+32 MiB expandidos e 2.048 entradas cumulativas incluindo arquivos aninhados.
+A rodada A27 mede cerca de 7,4 MB expandidos no ZIP externo. Crescimento acima dos
+limites fica indisponível até revisão, não reduz checagens. `complete=false` e os
+aceites Mac/iOS/Windows permanecem separados. Esta documentação não comprova deploy,
+disponibilidade HTTP ou atualização dos dispositivos.
+
 A instalação exige processamento autenticado, persistência do recibo, repetição
 idempotente e integração da automação comprovada no tenant. Login, ping, extração
 de arquivos do instalador ou saída zero do processo não bastam. Os métodos
