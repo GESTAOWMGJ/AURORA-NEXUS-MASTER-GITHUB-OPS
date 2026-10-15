@@ -1,0 +1,17 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { parseDashboard, monthInSaoPaulo, brl } from '../lib/contracts.mjs';
+import { demoDashboard } from '../lib/demo.mjs';
+const parse = data => parseDashboard(data, 'hospital-demo', '2026-08');
+test('DTO aceita contrato atual e preserva null', () => { const r = parse(demoDashboard()); assert.equal(r.snapshot.financial.reconciliationDifference, null); assert.equal(r.snapshot.audit.overdueActions, null); });
+test('DTO elimina extras e detalhes de fontes', () => { const d = demoDashboard(); d.snapshot.unexpected = 'discard'; d.snapshot.sources[0].detail = 'discard'; const r = parse(d); assert.equal(r.snapshot.unexpected, undefined); assert.equal(r.snapshot.sources[0].detail, undefined); });
+test('DTO rejeita outra instituição', () => { const d = demoDashboard(); d.snapshot.orgId = 'outra-org'; assert.throws(() => parse(d)); });
+test('DTO rejeita outra competência', () => { const d = demoDashboard(); d.snapshot.competence = '2026-09'; assert.throws(() => parse(d)); });
+test('DTO rejeita schema desconhecido', () => { const d = demoDashboard(); d.snapshot.schemaVersion = 2; assert.throws(() => parse(d)); });
+test('DTO rejeita número não finito', () => { const d = demoDashboard(); d.snapshot.financial.billedAmount = Infinity; assert.throws(() => parse(d)); });
+test('DTO não converte string financeira em número', () => { const d = demoDashboard(); d.snapshot.financial.billedAmount = '1000'; assert.throws(() => parse(d)); });
+test('DTO não converte chave ausente em zero', () => { const d = demoDashboard(); delete d.snapshot.financial.receivedAmount; assert.throws(() => parse(d)); });
+test('DTO distingue zero de ausente', () => { const d = demoDashboard(); d.snapshot.financial.receivedAmount = 0; assert.equal(parse(d).snapshot.financial.receivedAmount, 0); assert.equal(brl(null), 'Não informado'); assert.notEqual(brl(0), 'Não informado'); });
+test('DTO rejeita snapshot de unidade em consulta organizacional', () => { const d = demoDashboard(); d.snapshot.facilityId = 'unidade-restrita'; assert.throws(() => parse(d)); });
+test('DTO sanitizado pode ser validado novamente no cliente', () => { const d = parse(demoDashboard()); assert.deepEqual(parse(d), d); });
+test('virada do mês considera America/Sao_Paulo', () => { assert.equal(monthInSaoPaulo(new Date('2026-09-01T01:00:00Z')), '2026-08'); });

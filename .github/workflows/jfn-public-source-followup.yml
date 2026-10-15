@@ -1,0 +1,107 @@
+name: JFN public source follow-up and backend validation
+on:
+  push:
+    branches: [feat/jfn-next-firebase-20260909]
+    paths: ['.github/workflows/jfn-public-source-followup.yml']
+permissions:
+  contents: read
+jobs:
+  original-sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: python -m pip install 'pymupdf==1.26.4' 'playwright==1.55.0'
+      - run: python -m playwright install --with-deps chromium
+      - name: Preserve original public documents and public query responses
+        run: |
+          mkdir -p evidence
+          python - <<'PY'
+          import json,hashlib,urllib.request,urllib.parse,datetime
+          from pathlib import Path
+          import pymupdf
+          from playwright.sync_api import sync_playwright
+          root=Path('evidence'); manifest=[]
+          sources=[
+          ('emendas_2020_2024.xlsx','https://hospitalsaorafael.org.br/wp-content/uploads/2025/05/Emendas-HSR-Rolandia.xlsx'),
+          ('instrumentos_emendas_osc.xlsx','https://hospitalsaorafael.org.br/wp-content/uploads/2025/07/RELATORIOS-DE-INSTRUMENTOS-COM-MENDAS-OSC-.xlsx'),
+          ('demonstracoes_2024.pdf','https://hospitalsaorafael.org.br/wp-content/uploads/2025/04/2024-Rolandia-Hospital-S.-Rafael-Rel.-Auditoria-DF_Final.pdf')]
+          for name,url in sources:
+              item={'file':name,'sourceUrl':url,'retrievedAt':datetime.datetime.now(datetime.UTC).isoformat()}
+              try:
+                  with urllib.request.urlopen(url,timeout=55) as response:
+                      data=response.read(95_000_001)
+                      if len(data)>95_000_000: raise ValueError('95MB bound exceeded')
+                      item['http']=response.status
+                  (root/name).write_bytes(data)
+                  item.update(bytes=len(data),sha256=hashlib.sha256(data).hexdigest())
+                  if name.endswith('.pdf'):
+                      with pymupdf.open(root/name) as doc:
+                          (root/'demonstracoes_2024.txt').write_text('\n'.join(f'PAGE {i+1}\n'+page.get_text() for i,page in enumerate(doc)),encoding='utf8')
+                          item['pages']=len(doc)
+              except Exception as e: item['error']=str(e)
+              manifest.append(item)
+          queries=[('emendas','https://portaldatransparencia.gov.br/emendas/consulta-por-favorecido?favorecido=20035'),('convenios','https://portaldatransparencia.gov.br/convenios/consulta?convenente=20035')]
+          with sync_playwright() as p:
+              browser=p.chromium.launch()
+              for name,url in queries:
+                  page=browser.new_page(locale='pt-BR'); responses=[]
+                  def capture(r):
+                      try:
+                          if urllib.parse.urlparse(r.url).hostname=='portaldatransparencia.gov.br' and 'json' in r.headers.get('content-type',''):
+                              text=r.text()
+                              if len(text)<5_000_000: responses.append({'url':r.url,'status':r.status,'body':text})
+                      except Exception: pass
+                  page.on('response',capture)
+                  item={'query':name,'sourceUrl':url,'retrievedAt':datetime.datetime.now(datetime.UTC).isoformat()}
+                  try:
+                      response=page.goto(url,wait_until='domcontentloaded',timeout=50000)
+                      item['http']=response.status if response else None
+                      page.wait_for_timeout(12000)
+                      button=page.get_by_text('Rejeitar cookies opcionais',exact=True)
+                      if button.count():
+                          try: button.first.click(timeout=1500)
+                          except Exception: pass
+                      (root/f'{name}.txt').write_text(page.locator('body').inner_text(),encoding='utf8')
+                      (root/f'{name}-responses.json').write_text(json.dumps(responses,ensure_ascii=False,indent=2),encoding='utf8')
+                      page.screenshot(path=str(root/f'{name}.png'),full_page=True)
+                      item['publicJsonResponses']=len(responses)
+                  except Exception as e: item['error']=str(e)
+                  manifest.append(item);page.close()
+              browser.close()
+          (root/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf8')
+          print('Read-only evidence captured; unavailable sources recorded. No login, challenge bypass, submissions or payments.')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jfn-original-funding-sources
+          path: evidence
+          retention-days: 7
+  backend-authorization:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPENAI_EXECUTION_ENABLED: 'false'
+      CLINICAL_AI_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: python -m pip install uv
+      - name: Locked backend tests with test fixtures only
+        working-directory: firebase-migration/api
+        run: |
+          uv sync --frozen --dev
+          uv run pytest tests/test_auth.py tests/test_app.py --junitxml=backend-auth-results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: jfn-backend-auth-fixtures
+          path: firebase-migration/api/backend-auth-results.xml
+          retention-days: 7

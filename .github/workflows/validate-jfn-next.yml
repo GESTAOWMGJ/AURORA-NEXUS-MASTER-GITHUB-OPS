@@ -1,0 +1,46 @@
+name: Validate JFN Next Firebase integration
+on:
+  push:
+    branches: ['feat/jfn-next-firebase-20260909']
+    paths: ['portal-auditoria/**', '.github/workflows/validate-jfn-next.yml']
+  pull_request:
+    paths: ['portal-auditoria/**', '.github/workflows/validate-jfn-next.yml']
+permissions:
+  contents: read
+concurrency:
+  group: jfn-next-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: portal-auditoria
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      JFN_INTEGRATION_MODE: disabled
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Test deterministic contracts without external services
+        run: npm test
+      - name: Resolve dependencies in isolated runner
+        run: npm install --ignore-scripts --no-audit --fund=false
+      - name: TypeScript validation
+        run: npm run typecheck
+      - name: Next.js build
+        run: npm run build
+      - name: Dependency security gate
+        run: npm audit --omit=dev --audit-level=high
+      - name: Preserve resolved dependency manifest for review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jfn-next-dependency-lock
+          path: portal-auditoria/package-lock.json
+          if-no-files-found: ignore
+# Intencionalmente não há secrets, deploy, migração, escrita no repo ou chamadas a dados reais.
