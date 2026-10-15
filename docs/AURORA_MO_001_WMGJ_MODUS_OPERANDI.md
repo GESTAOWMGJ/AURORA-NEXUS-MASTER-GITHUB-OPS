@@ -108,6 +108,29 @@ Mudanças futuras devem preservar esta linhagem ou registrar explicitamente a ra
 
 ## 1. Ciclo mestre
 
+### Entrega única e instalação com ingestão — 14/10/2026
+
+O titular exige uma beta distribuível com identidade comum entre web, Windows,
+Mac e iOS; melhorias de qualquer origem continuam pelo mesmo ciclo de revisão,
+fonte, teste, promoção assinada e adoção comprovada. O registro nativo usa
+`releaseConvergencePolicy` e `cloudIntakePolicy`, sem outro motor ou scheduler.
+Versão comum não significa que um dispositivo offline recebeu atualização.
+
+Nenhuma instalação pode ser concluída apenas por login, ping ou arquivos
+extraídos. Exigir processamento canônico autenticado, recibo persistido, replay
+idempotente e integração da automação revalidada na mesma organização. Nuvem com
+consentimento oficial, token API, coleta local e alimentação manual conservam
+provas distintas; nome de método informado pelo cliente não comprova aquisição
+de documentos nem um agente instalado. Formato não extraído fica pendente e
+não pode virar `PROCESSADO` por fallback de metadados.
+
+O original Mac escolhido pelo titular é
+`Aurora Nexus HML-0.2.0-hml.20261001.app`, bundle
+`br.com.auroranexus.desktop.hml`, inspecionado sem alteração. Preservar sua
+identidade; abertura/aceite e assinatura permanecem provas independentes.
+O iOS foi solicitado como aplicativo nativo TestFlight/App Store, ainda sem
+publicação existente informada. PWA não substitui esse requisito.
+
 ### Implantação reutilizável — AURORA-INSTALL-INTEGRATION-001
 
 Incremento 13/10/2026: primeira instalação autorizada deve conectar a nuvem

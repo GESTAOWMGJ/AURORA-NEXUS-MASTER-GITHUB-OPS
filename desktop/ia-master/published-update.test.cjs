@@ -16,9 +16,9 @@ function keyPair() {
   return { ...pair, trust: { publicKeySpkiPem: pair.publicKey.export({type:'spki',format:'pem'}).toString(),
     publicKeySha256:h(pair.publicKey.export({type:'spki',format:'der'})) } };
 }
-function envelope(pair, hashes = {}, schema = 2) {
-  const components = Object.fromEntries(real.COMPONENTS.slice(0,schema===2?5:3).map(name=>[name,{version:name==='windowsIntegration'?'1.0.1':'1.1.0',sourceSha:NEXT,manifestSha256:hashes[name]||'c'.repeat(64)}]));
-  const certificate={schemaVersion:schema,sourceSha:NEXT,productVersion:'1.1.0-beta.1',canonicalOrigin:real.ORIGIN,
+function envelope(pair, hashes = {}, schema = 2, sourceSha = NEXT, windowsVersion = '1.0.1') {
+  const components = Object.fromEntries(real.COMPONENTS.slice(0,schema===2?5:3).map(name=>[name,{version:name==='windowsIntegration'?windowsVersion:'1.1.0',sourceSha,manifestSha256:hashes[name]||'c'.repeat(64)}]));
+  const certificate={schemaVersion:schema,sourceSha,productVersion:'1.1.0-beta.1',canonicalOrigin:real.ORIGIN,
     releaseRunId:'13',ciRunId:'12',publishedAtUtc:'2026-10-13T11:00:00.000Z',status:'ACTIVE',
     checks:{ciPassed:true,humanReviewApproved:true,protectedDeploySucceeded:true,smokePassed:true},components};
   return {certificate,signature:crypto.sign(null,real.signingBytes(certificate),pair.privateKey).toString('base64url')};
@@ -27,7 +27,7 @@ function response(env, nonce, org='fixture-org') {
   const covered=real.COMPONENTS.filter(name=>env.certificate.components[name]),complete=env.certificate.schemaVersion===2;
   return {schemaVersion:'aurora.active-release-read.v1',source:real.SOURCE,canonicalOrigin:real.ORIGIN,orgId:org,requestNonce:nonce,
     observedAtUtc:new Date().toISOString(),certificateSha256:h(real.signingBytes(env.certificate)),envelope:env,
-    runtime:{sourceSha:NEXT,serverManifestSha256:env.certificate.components.server.manifestSha256,webManifestSha256:env.certificate.components.web.manifestSha256},
+    runtime:{sourceSha:env.certificate.sourceSha,serverManifestSha256:env.certificate.components.server.manifestSha256,webManifestSha256:env.certificate.components.web.manifestSha256},
     componentCoverage:{status:complete?'COMPLETE_SIGNED_COMPONENT_SET':'PARTIAL',complete,requiredComponents:real.COMPONENTS,coveredComponents:covered,missingComponents:real.COMPONENTS.filter(n=>!covered.includes(n))},
     nativeMacInstallation:'UNVERIFIED',deviceInstallationVerified:false};
 }
@@ -47,26 +47,26 @@ function load(overrides = {}, bootstrapHash, bootstrapHelper, runtimeRoot, windo
   if(bootstrapHelper) source=source.replace("'5c9a54d9d2c5fb980f88f4d73998ead5ae7d06dc877a1446c4f35249cb9d3eed'","'"+bootstrapHelper+"'");
   if(runtimeRoot) source=source.replace("'D:\\\\AuroraNexus'",JSON.stringify(runtimeRoot));
   if(windowsRoot) source=source.replace("'C:\\\\Windows'",JSON.stringify(windowsRoot));
-  const sandbox={module,exports:module.exports,Buffer,URL,structuredClone,console,setTimeout,clearTimeout,process:overrides.process||process,
+  const sandbox={module,exports:module.exports,Buffer,URL,structuredClone,console,setTimeout,clearTimeout,Date:overrides.Date||Date,process:overrides.process||process,
     require:name=>overrides[name]||(name==='./safe-read.cjs'?require('./safe-read.cjs'):require(name))};
   vm.runInNewContext(source,sandbox,{filename:'published-update.cjs'});
   return module.exports;
 }
-function nativeReader(env, modify, capture) {
+function nativeReader(env, modify, capture, status=()=>200) {
   return {request:(options,callback)=>{
     capture?.(options);
     const body=response(env,options.headers['X-Aurora-Release-Nonce']);
     modify?.(body);
-    return emitResponse(callback,body);
+    return emitResponse(callback,body,status());
   }};
 }
 function writeFiles(directory, files) {
   fs.mkdirSync(directory,{recursive:true});
   for(const [name,bytes]of Object.entries(files)){fs.mkdirSync(path.dirname(path.join(directory,name)),{recursive:true});fs.writeFileSync(path.join(directory,name),bytes);}
 }
-function packageFixture(directory, names, source=NEXT, component='iaMaster') {
+function packageFixture(directory, names, source=NEXT, component='iaMaster', windowsVersion='1.0.1') {
   const files=Object.fromEntries(names.map(name=>[name,Buffer.from('synthetic public '+name)]));
-  const manifest={component:component==='iaMaster'?'AURORA_IA_MASTER':'AURORA_WINDOWS_INTEGRATION',version:component==='iaMaster'?'1.1.0':'1.0.1',
+  const manifest={component:component==='iaMaster'?'AURORA_IA_MASTER':'AURORA_WINDOWS_INTEGRATION',version:component==='iaMaster'?'1.1.0':windowsVersion,
     ...(component==='iaMaster'?{sourceRevision:source,dirty:false,nodeMinimumMajor:22,externalAiEnabled:false}:{sourceSha:source}),
     files:Object.fromEntries(Object.entries(files).map(([name,bytes])=>[name,h(bytes)]))};
   const bytes=encode(manifest);writeFiles(directory,{...files,'manifest.json':bytes});
@@ -91,7 +91,10 @@ function transactionFixture(t) {
     expectedNodeSha256:h(fs.readFileSync(process.execPath)),expectedInstallationSha256:h(metadata),
     expectedCheckpointSha256:h(fs.readFileSync(path.join(path.dirname(state),'integration-setup.json')))};
   const pair=keyPair(),env=envelope(pair,{iaMaster:h(candidate.bytes)}),commands=[];let running=true;
-  const controls={fault:null,failStartOnce:false,denyOwner:false,denyStage:false,foreignListener:false,alterResponse:null,powerShellCalls:[],toolMissing:false};
+  const controls={fault:null,failStartOnce:false,denyOwner:false,denyStage:false,foreignListener:false,alterResponse:null,powerShellCalls:[],toolMissing:false,
+    now:Date.now(),nativeEvent:null,managerEvent:null,localEvent:null,canonicalReads:[],canonicalStatus:200,
+    transitionAuthority:null,authorityEvent:null,authorityStatus:200,authorityReads:[]};
+  class FixtureDate extends Date { constructor(...args){super(...(args.length?args:[controls.now]));} static now(){return controls.now;} }
   const descriptors=new Map();
   const fsProxy=new Proxy(fs,{get(target,key){
     if(key==='lstatSync')return (filename,...args)=>{
@@ -116,6 +119,7 @@ function transactionFixture(t) {
   const child={execFileSync:(exe,args,opts)=>{
     if(exe===powershell){
       controls.powerShellCalls.push({exe,args,options:opts});
+      controls.nativeEvent?.(args.join(' '),running);
       assert.equal(opts.cwd,systemDirectory);assert.equal(opts.env.PATH,systemDirectory);assert.equal(opts.env.Path,undefined);
       assert.equal(opts.env.SystemRoot,windowsRoot);assert.equal(opts.env.PSModulePath,path.join(powershellHome,'Modules'));
       if(args.join(' ').includes('currentOwnerAuthorized'))return JSON.stringify({currentOwnerAuthorized:!controls.denyOwner&&!(opts.env.AURORA_RELEASE_STAGE&&controls.denyStage)});
@@ -126,10 +130,12 @@ function transactionFixture(t) {
     }
     assert.equal(exe,process.execPath);assert.equal(args[0],helper);assert.equal(opts.env.AURORA_INTEGRATION_TOKEN,undefined);assert.equal(opts.cwd,root);
     commands.push(args[1]);
+    controls.managerEvent?.(args[1],running);
     if(args[1]==='start'&&controls.failStartOnce){controls.failStartOnce=false;throw Error('private native failure');}
     running=args[1]==='start';return Buffer.from('ignored public operation output');
   }};
   const loopback={get:(options,callback)=>{
+    controls.localEvent?.(options.port,running);
     const req=emitResponse(callback,options.port===38765?(()=>{
       const current=JSON.parse(fs.readFileSync(path.join(pkg,'manifest.json'),'utf8'));
       return {service:'AURORA_IA_MASTER',version:'1.1.0',processManifest:{status:'PROCESS_MANIFEST_OBSERVED',dirty:false,sourceRevision:current.sourceRevision,manifestSha256:h(fs.readFileSync(path.join(pkg,'manifest.json')))}};
@@ -139,13 +145,20 @@ function transactionFixture(t) {
   const fakeProcess={...process,platform:'win32',versions:{...process.versions,node:'22.0.0'},pid:999990,execPath:process.execPath,
     env:{LOCALAPPDATA:local,SystemRoot:windowsRoot,WINDIR:windowsRoot,PATH:path.join(base,'untrusted-path')},
     kill:()=>{const e=Error('synthetic stopped process');e.code='ESRCH';throw e;}};
-  const api=load({'node:fs':fsProxy,'node:child_process':child,'node:http':loopback,
-    'node:https':nativeReader(env,b=>controls.alterResponse?.(b)),process:fakeProcess},h(baseline.bytes),layout.expectedHelperSha256,root,windowsRoot);
+  const reader=nativeReader(env,b=>{b.observedAtUtc=new Date(controls.now).toISOString();controls.alterResponse?.(b);},
+    options=>controls.canonicalReads.push({at:controls.now,nonce:options.headers['X-Aurora-Release-Nonce']}),()=>controls.canonicalStatus);
+  const api=load({'node:fs':fsProxy,'node:child_process':child,'node:http':loopback,Date:FixtureDate,
+    'node:https':{request:(options,callback)=>{
+      if(!options.path.startsWith('/api/integration/ping?documentId='))return reader.request(options,callback);
+      controls.authorityReads.push(options);const body=structuredClone(controls.transitionAuthority);
+      if(body?.installation?.acceptance)body.installation.acceptance.verifiedAt=new Date(controls.now).toISOString();
+      controls.authorityEvent?.(body,options);return emitResponse(callback,body,controls.authorityStatus);
+    }},process:fakeProcess},h(baseline.bytes),layout.expectedHelperSha256,root,windowsRoot);
   const before={control:h(identity['control.key']),org:h(identity['organization.txt']),checkpoint:layout.expectedCheckpointSha256,git:h(fs.readFileSync(path.join(state,'git-task-marker.txt')))};
   const assertIdentity=()=>{assert.equal(h(fs.readFileSync(path.join(state,'control.key'))),before.control);assert.equal(h(fs.readFileSync(path.join(state,'organization.txt'))),before.org);
     assert.equal(h(fs.readFileSync(path.join(path.dirname(state),'integration-setup.json'))),before.checkpoint);assert.equal(h(fs.readFileSync(path.join(state,'git-task-marker.txt'))),before.git);};
-  const options=async()=>({mode:'activate',pin:await api.readActivePin('synthetic-process-bearer',pair.trust,NEXT,'fixture-org'),bearer:'synthetic-process-bearer',trust:pair.trust,
-    expectedSourceSha:NEXT,expectedOrg:'fixture-org',layout,packageDirectory:candidateDir,manifestBytes:candidate.bytes,stageDirectory:path.join(root,'reviewed-stage')});
+  const options=async()=>({mode:'activate',pin:await api.readActivePin('synthetic-process-bearer',pair.trust,env.certificate.sourceSha,'fixture-org'),bearer:'synthetic-process-bearer',trust:pair.trust,
+    expectedSourceSha:env.certificate.sourceSha,expectedOrg:'fixture-org',layout:{...layout},packageDirectory:candidateDir,manifestBytes:candidate.bytes,stageDirectory:path.join(root,'reviewed-stage')});
   return {base,root,state,pkg,layout,pair,env,candidate,candidateDir,baseline,commands,controls,api,options,metadata,assertIdentity,fakeProcess,powershell,systemDirectory};
 }
 test('isolated verified V2 remains candidate, V1 partial and no activation authority',async()=>{
@@ -233,11 +246,63 @@ test('interrupted recovery retries after package restore and journal save failur
   await assert.rejects(f.api.activatePublished(await f.options()),/ROLLBACK_INCOMPLETE/);
   assert.equal(rollbackBlocked,true);fail=false;
   const attempt=path.join(f.root,'installation-rollbacks',fs.readdirSync(path.join(f.root,'installation-rollbacks'))[0]);
-  const result=await f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt});
+  const result=await f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt,trust:f.pair.trust});
   assert.equal(result.status,'ROLLED_BACK_LOCAL_PREVIOUS');f.assertIdentity();
   assert.deepEqual(fs.readFileSync(path.join(f.state,'installation.json')),f.metadata);
-  assert.equal((await f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt})).alreadyRecovered,true);
+  assert.equal((await f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt,trust:f.pair.trust})).alreadyRecovered,true);
 });
+function concurrentRestoredInput(f, kind, attempt) {
+  const filename=kind==='package'?path.join(f.pkg,'concurrent.txt'):
+    kind==='metadata'?path.join(f.state,'installation.json'):path.join(attempt,'journal.json');
+  const bytes=kind==='package'?Buffer.from('synthetic legitimate writer during runtime proof'):
+    Buffer.concat([fs.readFileSync(filename),Buffer.from(' ')]);
+  fs.writeFileSync(filename,bytes);
+  return {filename,bytes};
+}
+for(const window of ['owned-rollback','before-package-move'])for(const kind of ['package','metadata','journal'])
+test('post-await '+window+' rejects concurrent '+kind+' without false rollback success',async t=>{
+  const f=transactionFixture(t);let changed;
+  if(window==='owned-rollback')f.controls.failStartOnce=true;
+  else f.controls.managerEvent=operation=>{if(operation==='stop')f.controls.canonicalStatus=403;};
+  f.controls.localEvent=port=>{
+    const starts=f.commands.filter(command=>command==='start').length;
+    if(!changed&&port===11435&&starts===(window==='owned-rollback'?2:1))
+      changed=concurrentRestoredInput(f,kind,attemptOf(f));
+  };
+  await assert.rejects(f.api.activatePublished(await f.options()),/LOCAL_APPLICATION_ROLLBACK_INCOMPLETE/);
+  assert.ok(changed);assert.deepEqual(fs.readFileSync(changed.filename),changed.bytes);
+  assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),true);
+  const attempt=attemptOf(f),journal=JSON.parse(fs.readFileSync(path.join(attempt,'journal.json')));
+  assert.notEqual(journal.phase,'ROLLED_BACK_LOCAL_PREVIOUS');assert.notEqual(journal.phase,'COMPLETED');
+  assert.deepEqual(fs.readFileSync(path.join(attempt,'metadata.previous')),f.metadata);f.assertIdentity();
+});
+for(const locked of [false,true])for(const kind of ['package','metadata','journal'])
+test('post-await recovery locked='+locked+' rejects concurrent '+kind+' and preserves recovery evidence',async t=>{
+  const f=transactionFixture(t);let interrupt=true;
+  if(locked)f.controls.fault=(when,a,b)=>{
+    if(interrupt&&when==='after-rename'&&String(b).endsWith('component.previous'))throw Error('SYNTHETIC_INTERRUPTION');
+    if(interrupt&&when==='after-rename'&&b===f.pkg&&String(a).endsWith('component.previous'))throw Error('SYNTHETIC_RESTORE_INTERRUPTION');
+  };
+  else f.controls.failStartOnce=true;
+  await assert.rejects(f.api.activatePublished(await f.options()),locked?/ROLLBACK_INCOMPLETE/:/OWNED_MANAGER_OPERATION_FAILED/);
+  interrupt=false;const attempt=attemptOf(f);let changed;
+  f.controls.localEvent=port=>{if(!changed&&port===11435)changed=concurrentRestoredInput(f,kind,attempt);};
+  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt,trust:f.pair.trust}),
+    kind==='journal'?/ROLLBACK_JOURNAL_CHANGED/:locked?/ROLLBACK_READBACK_CHANGED/:/RECOVERED_BYTES_CHANGED/);
+  assert.ok(changed);assert.deepEqual(fs.readFileSync(changed.filename),changed.bytes);
+  assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),locked);
+  assert.deepEqual(fs.readFileSync(path.join(attempt,'metadata.previous')),f.metadata);f.assertIdentity();
+  if(locked)assert.notEqual(JSON.parse(fs.readFileSync(path.join(attempt,'journal.json'))).phase,'ROLLED_BACK_LOCAL_PREVIOUS');
+});
+test('already-recovered runtime proof cannot ignore a newly acquired update lock',async t=>{
+  const f=transactionFixture(t);f.controls.failStartOnce=true;
+  await assert.rejects(f.api.activatePublished(await f.options()),/OWNED_MANAGER_OPERATION_FAILED/);
+  const attempt=attemptOf(f),lock=path.join(f.root,'published-update.lock'),bytes=encode({syntheticConcurrentOwner:true});let inserted=false;
+  f.controls.localEvent=port=>{if(!inserted&&port===11435){inserted=true;fs.writeFileSync(lock,bytes);}};
+  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt,trust:f.pair.trust}),/RECOVERY_LOCK_CHANGED/);
+  assert.equal(inserted,true);assert.deepEqual(fs.readFileSync(lock),bytes);f.assertIdentity();
+});
+
 test('pre-stop guards reject owner, helper hash, private stage ACL, foreign listener and nested staging',async t=>{
   for(const mutation of [f=>f.controls.denyOwner=true,f=>fs.writeFileSync(f.layout.helperPath,'changed helper'),
     f=>f.controls.denyStage=true,f=>f.controls.foreignListener=true,f=>f.layout.expectedCheckpointSha256='f'.repeat(64)]){
@@ -253,13 +318,368 @@ test('canonical pointer failure before stop preserves the running baseline',asyn
   assert.deepEqual(f.commands,[]);assert.equal(h(fs.readFileSync(path.join(f.pkg,'manifest.json'))),h(f.baseline.bytes));f.assertIdentity();
 });
 test('canonical pointer failure after start rolls back only its own new component',async t=>{
-  const f=transactionFixture(t);let reads=0;
-  f.controls.alterResponse=body=>{if(++reads===3)body.runtime.sourceSha='b'.repeat(40);};
+  const f=transactionFixture(t);
+  f.controls.alterResponse=body=>{if(f.commands.includes('start'))body.runtime.sourceSha='b'.repeat(40);};
   await assert.rejects(f.api.activatePublished(await f.options()),/CANONICAL_RUNTIME_CONFLICT/);
   assert.deepEqual(f.commands,['stop','start','stop','start']);
   assert.equal(h(fs.readFileSync(path.join(f.pkg,'manifest.json'))),h(f.baseline.bytes));
   assert.deepEqual(fs.readFileSync(path.join(f.state,'installation.json')),f.metadata);f.assertIdentity();
 });
+test('native checks exceeding 30 seconds renew nonces without extending the pin lease',async t=>{
+  const f=transactionFixture(t);
+  f.controls.nativeEvent=()=>{f.controls.now+=35000;};
+  f.controls.managerEvent=()=>{
+    assert.ok(f.controls.now-f.controls.canonicalReads.at(-1).at<=30000);
+    f.controls.now+=35000;
+  };
+  f.controls.fault=(when,a,b)=>{
+    if(when==='before-rename'&&(String(b).endsWith('component.previous')||b===f.pkg))
+      assert.ok(f.controls.now-f.controls.canonicalReads.at(-1).at<=30000);
+  };
+  const options=await f.options(),original=options.pin;
+  assert.equal((await f.api.activatePublished(options)).status,'SIGNED_LOCAL_COMPONENT_APPLIED');
+  assert.throws(()=>f.api.requireActive(original,f.controls.now),/FRESH_CANONICAL_V2_PIN_REQUIRED/);
+  assert.ok(f.controls.canonicalReads.length>=9);
+  assert.equal(new Set(f.controls.canonicalReads.map(r=>r.nonce)).size,f.controls.canonicalReads.length);
+  assert.equal((await f.api.activatePublished(await f.options())).status,'SIGNED_LOCAL_COMPONENT_ALREADY_APPLIED');
+  assert.deepEqual(f.commands,['stop','start']);f.assertIdentity();
+});
+for(const change of ['certificate','source','revocation'])for(const window of ['pre-stop-native','after-stop','after-first-move','after-start-native','final-native'])
+test(change+' during '+window+' delay cannot promote and preserves the owned rollback',async t=>{
+  const f=transactionFixture(t);let changed=false,prepared=false;
+  const alternate=structuredClone(f.env);alternate.certificate.releaseRunId='14';
+  if(change==='source'){
+    alternate.certificate.sourceSha='b'.repeat(40);
+    for(const component of Object.values(alternate.certificate.components))component.sourceSha='b'.repeat(40);
+  }
+  alternate.signature=crypto.sign(null,real.signingBytes(alternate.certificate),f.pair.privateKey).toString('base64url');
+  const changePointer=()=>{if(changed)return;changed=true;f.controls.now+=35000;
+    if(change==='revocation')f.controls.canonicalStatus=403;
+    else f.controls.alterResponse=body=>{body.envelope=alternate;body.certificateSha256=h(real.signingBytes(alternate.certificate));};
+  };
+  f.controls.fault=(when,a,b)=>{
+    if(when==='before-write'&&String(a).includes('journal.json.')&&String(b).includes('"phase":"PREPARED"'))prepared=true;
+    if(window==='after-first-move'&&when==='after-rename'&&String(b).endsWith('component.previous'))changePointer();
+  };
+  f.controls.nativeEvent=script=>{
+    if(!script.includes('currentOwnerAuthorized'))return;
+    if(window==='pre-stop-native'&&prepared&&f.commands.length===0)changePointer();
+    if(window==='final-native'&&f.commands.includes('start'))changePointer();
+  };
+  f.controls.managerEvent=operation=>{if(window==='after-stop'&&operation==='stop')changePointer();};
+  f.controls.localEvent=port=>{if(window==='after-start-native'&&port===38765&&f.commands.includes('start'))changePointer();};
+  await assert.rejects(f.api.activatePublished(await f.options()),
+    change==='certificate'?/CANONICAL_POINTER_CHANGED/:change==='source'?/EXPECTED_SOURCE_CONFLICT/:/CANONICAL_RELEASE_READ_REJECTED/);
+  assert.equal(changed,true);
+  assert.equal(h(fs.readFileSync(path.join(f.pkg,'manifest.json'))),h(f.baseline.bytes));
+  assert.deepEqual(fs.readFileSync(path.join(f.state,'installation.json')),f.metadata);f.assertIdentity();
+  assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),false);
+  assert.deepEqual(f.commands,window==='pre-stop-native'?[]:
+    ['after-start-native','final-native'].includes(window)?['stop','start','stop','start']:['stop','start']);
+  const journal=JSON.parse(fs.readFileSync(path.join(attemptOf(f),'journal.json')));
+  assert.equal(journal.phase,window==='pre-stop-native'?'PREPARED_NOT_APPLIED':'ROLLED_BACK_LOCAL_PREVIOUS');
+});
+
+async function successorOptions(f, source) {
+  const directory=path.join(f.base,'candidate-'+source.slice(0,8));
+  const candidate=packageFixture(directory,Object.keys(f.candidate.files),source);
+  candidate.files['server.cjs']=Buffer.from('synthetic public server for '+source);
+  candidate.manifest.files['server.cjs']=h(candidate.files['server.cjs']);candidate.bytes=encode(candidate.manifest);
+  writeFiles(directory,{...candidate.files,'manifest.json':candidate.bytes});
+  Object.assign(f.env,envelope(f.pair,{iaMaster:h(candidate.bytes)},2,source));
+  f.layout.expectedInstallationSha256=h(fs.readFileSync(path.join(f.state,'installation.json')));
+  return {...await f.options(),packageDirectory:directory,manifestBytes:candidate.bytes,
+    stageDirectory:path.join(f.root,'reviewed-stage-'+source.slice(0,8))};
+}
+
+function signedWindowsFixture(f, source, iaBytes, windowsVersion='1.0.1') {
+  const directory=path.join(f.base,'windows-'+source.slice(0,8)),pack=packageFixture(directory,WINDOWS,source,'windowsIntegration',windowsVersion);
+  const manifestPath=path.join(f.base,'windows-manifest-'+source.slice(0,8)+'.json');fs.writeFileSync(manifestPath,pack.bytes);
+  Object.assign(f.env,envelope(f.pair,{iaMaster:h(iaBytes),windowsIntegration:h(pack.bytes)},2,source,windowsVersion));
+  return {directory,manifestPath,envelope:structuredClone(f.env)};
+}
+async function transitionBase(t, windowsVersion='1.0.1') {
+  const f=transactionFixture(t),checkpoint=path.join(path.dirname(f.state),'integration-setup.json');
+  const previous={schemaVersion:'aurora.install.integration.v1',componentVersion:'1.0.0',attempt:1,status:'LOCAL_VALIDATED',
+    targetBinding:h('https://wmgj-hml-jfn-20260927.web.app:fixture-org'),sampleKey:'win-v1:'+h('old explicit synthetic sample')};
+  fs.writeFileSync(checkpoint,Buffer.from(real.canonical(previous)+'\n'));f.layout.expectedCheckpointSha256=h(fs.readFileSync(checkpoint));
+  const windows=signedWindowsFixture(f,NEXT,f.candidate.bytes,windowsVersion),applied=await f.api.activatePublished(await f.options());
+  return {f,checkpoint,windows,applied};
+}
+function explicitCheckpointTransition(f, checkpoint, windows, applied, sequence=1, previousTransition=null,
+  checkpointVersion=windows.envelope.certificate.components.windowsIntegration.version) {
+  const bytes=value=>Buffer.from(real.canonical(value)+'\n'),oldBytes=fs.readFileSync(checkpoint),old=JSON.parse(oldBytes);
+  const journalPath=path.join(applied.attempt,'journal.json'),journalBytes=fs.readFileSync(journalPath),journal=JSON.parse(journalBytes);
+  const plan={schemaVersion:'aurora.checkpoint.transition.v1',stateDirectory:path.dirname(f.state),expectedPreviousSha256:h(oldBytes),
+    expectedPreviousTargetBinding:old.targetBinding,expectedPreviousSampleKey:old.sampleKey,nextOrigin:real.ORIGIN,
+    nextTargetBinding:h(real.ORIGIN+':fixture-org'),nextSampleKey:'win-v1:'+h('new explicitly selected sample '+sequence),
+    payloadSha256:h('new normalized synthetic payload '+sequence),method:'API_TOKEN',orgId:'fixture-org',
+    expectedSourceSha:journal.sourceSha,expectedCertificateSha256:journal.certificateSha256,
+    iaAnchor:{attemptDirectory:applied.attempt,journalSha256:h(journalBytes)},previousTransition,
+    publicReleaseControl:{trust:f.pair.trust,expectedSourceSha:journal.sourceSha,manifestPath:windows.manifestPath},
+    envelope:windows.envelope,packageDirectory:windows.directory};
+  const processingProof={state:'FIRST_INGESTION_VERIFIED',firstIngestionVerified:true,operationalComplete:true,
+    documentId:h('doc'+sequence).slice(0,48),sourceVersion:1,revision:1,versionId:h('version'+sequence).slice(0,48),
+    canonicalSnapshotHash:h('snapshot'+sequence),sourceSystem:'SYNTHETIC_PUBLIC',verifiedAt:new Date(f.controls.now).toISOString()};
+  const acceptance={schemaVersion:'aurora.installation.acceptance.v1',orgId:'fixture-org',canonicalOrigin:real.ORIGIN,
+    state:'INSTALLATION_INTEGRATION_VERIFIED',eligible:true,automationScope:'AURORA_CANONICAL_PIPELINE',method:'API_TOKEN',
+    configurationHash:h('current configuration'),receiptId:h('integration-document:ik_0123456789abcdef:'+plan.nextSampleKey),
+    ...Object.fromEntries(['documentId','versionId','sourceVersion','canonicalSnapshotHash','verifiedAt'].map(key=>[key,processingProof[key]])),
+    processingVerified:true,receiptPersisted:true,replayVerified:true,automationConfigured:true,automationVerified:true};
+  const receipt={schemaVersion:1,status:'DUPLICATE',payloadSha256:plan.payloadSha256,idempotencyKey:plan.nextSampleKey,
+    documentId:processingProof.documentId,cloudReceiptVerified:true};
+  const next={schemaVersion:'aurora.install.integration.v1',componentVersion:checkpointVersion,attempt:old.attempt+1,
+    targetBinding:plan.nextTargetBinding,sampleKey:plan.nextSampleKey,status:'SAMPLE_RECEIPT_VERIFIED',
+    receiptVerifiedThisRun:true,processingVerifiedThisRun:true,receipt,processingProof,
+    installationAcceptance:Object.fromEntries(Object.entries(acceptance).filter(([key])=>!['orgId','canonicalOrigin'].includes(key)))};
+  const planBytes=bytes(plan),nextBytes=bytes(next),proofBytes=bytes({schemaVersion:'aurora.checkpoint.transition.proof.v1',receipt,processingProof,installationAcceptance:acceptance});
+  const directory=path.join(path.dirname(f.state),'checkpoint-transitions',h(planBytes));fs.mkdirSync(directory,{recursive:true});
+  const commitBytes=bytes({schemaVersion:'aurora.checkpoint.transition.commit.v1',planSha256:h(planBytes),
+    previousSha256:h(oldBytes),nextSha256:h(nextBytes),proofSha256:h(proofBytes)});
+  writeFiles(directory,{'plan.json':planBytes,'checkpoint.previous':oldBytes,'checkpoint.next':nextBytes,'proof.json':proofBytes,'commit.json':commitBytes});
+  fs.writeFileSync(checkpoint,nextBytes);f.layout.expectedCheckpointSha256=h(nextBytes);
+  f.layout.checkpointTransition={directory,commitSha256:h(commitBytes)};
+  f.controls.transitionAuthority={ok:true,service:'aurora-nexus-integration',orgId:'fixture-org',keyId:'ik_0123456789abcdef',installation:{...processingProof,acceptance}};
+  return {reference:f.layout.checkpointTransition,nextBytes,oldBytes,directory,journalBytes,proofBytes,plan};
+}
+async function successorWithWindows(f, source, windowsVersion='1.0.1') {
+  const options=await successorOptions(f,source),windows=signedWindowsFixture(f,source,options.manifestBytes,windowsVersion);
+  options.pin=await f.api.readActivePin('synthetic-process-bearer',f.pair.trust,source,'fixture-org');return {options,windows};
+}
+for(const signedVersion of ['1.0.1','1.0.2'])test('checkpoint component version binds signed Windows '+signedVersion+' under successor 1.0.2',async t=>{
+  const {f,checkpoint,windows,applied}=await transitionBase(t,signedVersion);
+  const transition=explicitCheckpointTransition(f,checkpoint,windows,applied);
+  const {options}=await successorWithWindows(f,'b'.repeat(40),'1.0.2');
+  assert.equal((await f.api.activatePublished(options)).status,'SIGNED_LOCAL_COMPONENT_APPLIED');
+  assert.equal(JSON.parse(fs.readFileSync(checkpoint)).componentVersion,signedVersion);
+  assert.deepEqual(fs.readFileSync(path.join(applied.attempt,'journal.json')),transition.journalBytes);
+  assert.equal(f.pkg.endsWith(path.join('components','ia-master','1.0.1')),true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.pkg,'manifest.json'))).version,'1.1.0');
+});
+for(const signedVersion of ['1.0.1','1.0.2'])test('checkpoint component version mismatch rejects signed Windows '+signedVersion,async t=>{
+  const {f,checkpoint,windows,applied}=await transitionBase(t,signedVersion);
+  const wrongVersion=signedVersion==='1.0.1'?'1.0.2':'1.0.1';
+  const transition=explicitCheckpointTransition(f,checkpoint,windows,applied,1,null,wrongVersion);
+  const {options}=await successorWithWindows(f,'b'.repeat(40),signedVersion),commands=[...f.commands];
+  await assert.rejects(f.api.activatePublished(options),/CHECKPOINT_TRANSITION_BYTES_CONFLICT/);
+  assert.deepEqual(f.commands,commands);assert.deepEqual(fs.readFileSync(checkpoint),transition.nextBytes);
+});
+test('signed A event B event C carries explicit checkpoint lineage without rewriting completed journals',async t=>{
+  const {f,checkpoint,windows,applied:a}=await transitionBase(t);
+  const first=explicitCheckpointTransition(f,checkpoint,windows,a);
+  const sb=await successorWithWindows(f,'b'.repeat(40)),b=await f.api.activatePublished(sb.options);
+  assert.deepEqual(fs.readFileSync(path.join(a.attempt,'journal.json')),first.journalBytes);
+  const jb=JSON.parse(fs.readFileSync(path.join(b.attempt,'journal.json')));
+  assert.deepEqual(jb.checkpointTransitionFromPrevious,first.reference);
+  const second=explicitCheckpointTransition(f,checkpoint,sb.windows,b,2);
+  const sc=await successorWithWindows(f,'c'.repeat(40)),c=await f.api.activatePublished(sc.options);
+  assert.equal(c.status,'SIGNED_LOCAL_COMPONENT_APPLIED');assert.deepEqual(fs.readFileSync(checkpoint),second.nextBytes);
+  assert.deepEqual(fs.readFileSync(path.join(b.attempt,'journal.json')),second.journalBytes);
+  assert.equal(f.controls.authorityReads.length>2,true);
+  for(const request of f.controls.authorityReads){assert.equal(request.hostname,'auroranexus.com.br');assert.equal(request.rejectUnauthorized,true);
+    assert.match(request.path,/^\/api\/integration\/ping\?documentId=[a-f0-9]{48}$/);assert.equal(request.headers.Cookie,undefined);}
+  assert.equal(fs.readFileSync(path.join(f.state,'control.key'),'utf8'),'synthetic control identity');
+  assert.equal(fs.readFileSync(path.join(f.state,'git-task-marker.txt'),'utf8'),'synthetic Git backlink retained C');
+});
+test('two explicit events on A form one bounded chain before B and remain verifiable on C',async t=>{
+  const {f,checkpoint,windows,applied}=await transitionBase(t);
+  const first=explicitCheckpointTransition(f,checkpoint,windows,applied,1);
+  const second=explicitCheckpointTransition(f,checkpoint,windows,applied,2,first.reference);
+  const sb=await successorWithWindows(f,'b'.repeat(40));await f.api.activatePublished(sb.options);
+  const sc=await successorWithWindows(f,'c'.repeat(40));await f.api.activatePublished(sc.options);
+  assert.deepEqual(fs.readFileSync(checkpoint),second.nextBytes);
+  assert.deepEqual(fs.readFileSync(path.join(applied.attempt,'journal.json')),first.journalBytes);
+});
+test('checkpoint authority is renewed after long native checks with original certificate and 30 second leases',async t=>{
+  const {f,checkpoint,windows,applied}=await transitionBase(t),transition=explicitCheckpointTransition(f,checkpoint,windows,applied);
+  const {options}=await successorWithWindows(f,'b'.repeat(40)),original=options.pin;
+  f.controls.nativeEvent=()=>{f.controls.now+=35000;};f.controls.managerEvent=()=>{f.controls.now+=35000;};
+  assert.equal((await f.api.activatePublished(options)).status,'SIGNED_LOCAL_COMPONENT_APPLIED');
+  assert.throws(()=>f.api.requireActive(original),/FRESH_CANONICAL/);
+  assert.equal(f.controls.authorityReads.length>2,true);assert.deepEqual(fs.readFileSync(checkpoint),transition.nextBytes);
+});
+for(const mutation of ['missing-reference','backup','proof','plan','commit','authority','tuple','automation','foreign-org','receipt-key','control','organization'])
+test('checkpoint transition rejects '+mutation+' without stopping accepted A',async t=>{
+  const {f,checkpoint,windows,applied}=await transitionBase(t),transition=explicitCheckpointTransition(f,checkpoint,windows,applied);
+  const {options}=await successorWithWindows(f,'b'.repeat(40));
+  if(mutation==='missing-reference')delete options.layout.checkpointTransition;
+  if(['backup','proof','plan','commit'].includes(mutation))fs.appendFileSync(path.join(transition.directory,
+    {backup:'checkpoint.previous',proof:'proof.json',plan:'plan.json',commit:'commit.json'}[mutation]),' ');
+  if(mutation==='authority')f.controls.authorityStatus=403;
+  if(mutation==='tuple')f.controls.transitionAuthority.installation.acceptance.versionId='e'.repeat(48);
+  if(mutation==='automation')f.controls.transitionAuthority.installation.acceptance.automationVerified=false;
+  if(mutation==='foreign-org')f.controls.transitionAuthority.orgId='other-org';
+  if(mutation==='receipt-key')f.controls.transitionAuthority.keyId='ik_ffffffffffffffff';
+  if(mutation==='control')fs.writeFileSync(path.join(f.state,'control.key'),'synthetic legitimate changed identity');
+  if(mutation==='organization')fs.writeFileSync(path.join(f.state,'organization.txt'),'different-org');
+  const commands=[...f.commands];await assert.rejects(f.api.activatePublished(options));
+  assert.deepEqual(f.commands,commands);assert.deepEqual(fs.readFileSync(checkpoint),transition.nextBytes);
+  assert.deepEqual(fs.readFileSync(path.join(applied.attempt,'journal.json')),transition.journalBytes);
+});
+for(const window of ['after-stop','final-native'])test('checkpoint authority revoked '+window+' rolls runtime back while preserving new event',async t=>{
+  const {f,checkpoint,windows,applied}=await transitionBase(t),transition=explicitCheckpointTransition(f,checkpoint,windows,applied);
+  const {options}=await successorWithWindows(f,'b'.repeat(40));let changed=false;
+  if(window==='after-stop')f.controls.managerEvent=op=>{if(op==='stop'){changed=true;f.controls.transitionAuthority.installation.acceptance.automationVerified=false;}};
+  else f.controls.nativeEvent=script=>{if(script.includes('currentOwnerAuthorized')&&f.commands.filter(op=>op==='start').length===2){
+    changed=true;f.controls.transitionAuthority.installation.acceptance.automationVerified=false;}};
+  await assert.rejects(f.api.activatePublished(options),/CURRENT_CHECKPOINT_AUTHORITY_REQUIRED/);
+  assert.equal(changed,true);assert.deepEqual(fs.readFileSync(checkpoint),transition.nextBytes);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.pkg,'manifest.json'))).sourceRevision,NEXT);
+  assert.deepEqual(fs.readFileSync(path.join(applied.attempt,'journal.json')),transition.journalBytes);
+  assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),false);
+});
+test('checkpoint transition is rechecked after authenticated awaits and cannot extend pin TTL',async t=>{
+  const {f,checkpoint,windows,applied}=await transitionBase(t),transition=explicitCheckpointTransition(f,checkpoint,windows,applied);
+  const {options}=await successorWithWindows(f,'b'.repeat(40));let mutated=false;
+  f.controls.authorityEvent=()=>{f.controls.now+=35000;if(!mutated){mutated=true;fs.appendFileSync(path.join(transition.directory,'proof.json'),' ');}};
+  const commands=[...f.commands];await assert.rejects(f.api.activatePublished(options));assert.equal(mutated,true);
+  assert.deepEqual(f.commands,commands);assert.deepEqual(fs.readFileSync(checkpoint),transition.nextBytes);
+});
+test('fresh release pin cannot revive checkpoint authority expired during its TLS await',async t=>{
+  const {f,checkpoint,windows,applied}=await transitionBase(t),transition=explicitCheckpointTransition(f,checkpoint,windows,applied);
+  const {options}=await successorWithWindows(f,'b'.repeat(40));let authorityRead=false;
+  f.controls.authorityEvent=()=>{authorityRead=true;};
+  f.controls.alterResponse=body=>{if(authorityRead){f.controls.now+=31000;body.observedAtUtc=new Date(f.controls.now).toISOString();}};
+  const commands=[...f.commands];await assert.rejects(f.api.activatePublished(options),/CURRENT_CHECKPOINT_AUTHORITY_REQUIRED/);
+  assert.equal(authorityRead,true);assert.deepEqual(f.commands,commands);assert.deepEqual(fs.readFileSync(checkpoint),transition.nextBytes);
+});
+for(const futureMs of [80,31000])test('checkpoint authority future skew is bounded, futureMs='+futureMs,async t=>{
+  const {f,checkpoint,windows,applied}=await transitionBase(t),transition=explicitCheckpointTransition(f,checkpoint,windows,applied);
+  const {options}=await successorWithWindows(f,'b'.repeat(40)),commands=[...f.commands];
+  f.controls.authorityEvent=body=>{body.installation.acceptance.verifiedAt=new Date(f.controls.now+futureMs).toISOString();};
+  if(futureMs<=30000)assert.equal((await f.api.activatePublished(options)).status,'SIGNED_LOCAL_COMPONENT_APPLIED');
+  else {await assert.rejects(f.api.activatePublished(options),/CURRENT_CHECKPOINT_AUTHORITY_REQUIRED/);assert.deepEqual(f.commands,commands);}
+  assert.deepEqual(fs.readFileSync(checkpoint),transition.nextBytes);
+});
+test('signed A to B to C preserves verified envelopes, completed lineage, current metadata CAS and identity',async t=>{
+  const f=transactionFixture(t),a=await f.api.activatePublished(await f.options());
+  const b=await f.api.activatePublished(await successorOptions(f,'b'.repeat(40)));
+  const c=await f.api.activatePublished(await successorOptions(f,'c'.repeat(40)));
+  assert.equal(c.status,'SIGNED_LOCAL_COMPONENT_APPLIED');
+  const read=result=>JSON.parse(fs.readFileSync(path.join(result.attempt,'journal.json')));
+  const ja=read(a),jb=read(b),jc=read(c);
+  for(const journal of [ja,jb,jc]){
+    assert.equal(journal.schemaVersion,'aurora.published.activation.v2');assert.equal(journal.phase,'COMPLETED');
+    assert.equal(journal.trustedPublicKeySha256,f.pair.trust.publicKeySha256);
+    const signed=f.api.verifyCandidate(journal.acceptedEnvelope,f.pair.trust,journal.sourceSha);
+    assert.equal(signed.certificateSha256,journal.certificateSha256);
+    assert.equal(JSON.stringify(journal).includes('synthetic-process-bearer'),false);
+  }
+  assert.equal(ja.previousRelease.kind,'REVIEWED_BOOTSTRAP');
+  assert.equal(jb.previousRelease.sourceSha,NEXT);assert.equal(jc.previousRelease.sourceSha,'b'.repeat(40));
+  assert.equal(jb.previousRelease.journalSha256,h(fs.readFileSync(path.join(a.attempt,'journal.json'))));
+  assert.equal(jc.previousRelease.journalSha256,h(fs.readFileSync(path.join(b.attempt,'journal.json'))));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.state,'installation.json'))).previousSourceRevision,'b'.repeat(40));
+  assert.deepEqual(f.commands,['stop','start','stop','start','stop','start']);f.assertIdentity();
+});
+for(const failure of ['start','revoked-after-start'])test('successor '+failure+' rolls back to signed B instead of bootstrap',async t=>{
+  const f=transactionFixture(t);await f.api.activatePublished(await f.options());
+  const b=await f.api.activatePublished(await successorOptions(f,'b'.repeat(40)));
+  const bMetadata=fs.readFileSync(path.join(f.state,'installation.json')),bManifest=fs.readFileSync(path.join(f.pkg,'manifest.json'));
+  const options=await successorOptions(f,'c'.repeat(40));
+  if(failure==='start')f.controls.failStartOnce=true;
+  else f.controls.localEvent=port=>{if(port===38765&&JSON.parse(fs.readFileSync(path.join(f.pkg,'manifest.json'))).sourceRevision==='c'.repeat(40)){
+    f.controls.now+=35000;f.controls.canonicalStatus=403;
+  }};
+  await assert.rejects(f.api.activatePublished(options),failure==='start'?/OWNED_MANAGER_OPERATION_FAILED/:/CANONICAL_RELEASE_READ_REJECTED/);
+  assert.deepEqual(fs.readFileSync(path.join(f.pkg,'manifest.json')),bManifest);
+  assert.deepEqual(fs.readFileSync(path.join(f.state,'installation.json')),bMetadata);f.assertIdentity();
+  const attempts=fs.readdirSync(path.join(f.root,'installation-rollbacks')).map(name=>path.join(f.root,'installation-rollbacks',name));
+  const failed=attempts.find(dir=>JSON.parse(fs.readFileSync(path.join(dir,'journal.json'))).sourceSha==='c'.repeat(40));
+  const recovered=await f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:failed,trust:f.pair.trust});
+  assert.equal(recovered.alreadyRecovered,true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(b.attempt,'journal.json'))).phase,'COMPLETED');
+});
+for(const mutation of ['unsigned-history','signature','fingerprint','prior-journal','metadata','package'])
+test('signed successor rejects '+mutation+' before stopping the current accepted release',async t=>{
+  const f=transactionFixture(t),a=await f.api.activatePublished(await f.options());
+  const options=await successorOptions(f,'b'.repeat(40)),journalPath=path.join(a.attempt,'journal.json');
+  const journal=JSON.parse(fs.readFileSync(journalPath));
+  if(mutation==='unsigned-history'){journal.schemaVersion='aurora.published.activation.v1';delete journal.acceptedEnvelope;}
+  if(mutation==='signature')journal.acceptedEnvelope.signature='A'.repeat(86);
+  if(mutation==='fingerprint')journal.trustedPublicKeySha256='0'.repeat(64);
+  if(mutation==='prior-journal')journal.previousRelease.sourceSha='d'.repeat(40);
+  if(['unsigned-history','signature','fingerprint','prior-journal'].includes(mutation))fs.writeFileSync(journalPath,encode(journal));
+  if(mutation==='metadata')fs.appendFileSync(path.join(f.state,'installation.json'),' ');
+  if(mutation==='package')fs.writeFileSync(path.join(f.pkg,'server.cjs'),'synthetic legitimate concurrent change');
+  const commands=[...f.commands];await assert.rejects(f.api.activatePublished(options));
+  assert.deepEqual(f.commands,commands);assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),false);f.assertIdentity();
+});
+test('an ancestor journal changed after B acceptance cannot seed C',async t=>{
+  const f=transactionFixture(t),a=await f.api.activatePublished(await f.options());
+  await f.api.activatePublished(await successorOptions(f,'b'.repeat(40)));
+  const options=await successorOptions(f,'c'.repeat(40));
+  fs.appendFileSync(path.join(a.attempt,'journal.json'),' ');
+  const commands=[...f.commands];await assert.rejects(f.api.activatePublished(options),/SIGNED_LINEAGE_RECORD_CHANGED/);
+  assert.deepEqual(f.commands,commands);f.assertIdentity();
+});
+test('interrupted successor recovery requires public trust and restores the signed predecessor',async t=>{
+  const f=transactionFixture(t);await f.api.activatePublished(await f.options());
+  await f.api.activatePublished(await successorOptions(f,'b'.repeat(40)));
+  const metadata=fs.readFileSync(path.join(f.state,'installation.json')),manifest=fs.readFileSync(path.join(f.pkg,'manifest.json'));
+  const options=await successorOptions(f,'c'.repeat(40));let failing=true,attempt;
+  f.controls.fault=(when,a,b)=>{
+    if(failing&&when==='after-rename'&&String(a).endsWith(path.join(options.stageDirectory,'package')))throw Error('SYNTHETIC_CANDIDATE_INTERRUPTION');
+    if(failing&&when==='after-rename'&&b===f.pkg&&String(a).endsWith('component.previous')){
+      attempt=path.dirname(a);throw Error('SYNTHETIC_RESTORE_INTERRUPTION');
+    }
+  };
+  await assert.rejects(f.api.activatePublished(options),/ROLLBACK_INCOMPLETE/);assert.ok(attempt);
+  const commands=[...f.commands];
+  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt}),/SIGNED_LINEAGE_JOURNAL_REQUIRED/);
+  assert.deepEqual(f.commands,commands);failing=false;
+  assert.equal((await f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt,trust:f.pair.trust})).status,'ROLLED_BACK_LOCAL_PREVIOUS');
+  assert.deepEqual(fs.readFileSync(path.join(f.state,'installation.json')),metadata);
+  assert.deepEqual(fs.readFileSync(path.join(f.pkg,'manifest.json')),manifest);f.assertIdentity();
+  assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),false);
+});
+test('legacy rollback recovery stays bootstrap-only and does not retrofit a signed history',async t=>{
+  const f=transactionFixture(t);f.controls.failStartOnce=true;
+  await assert.rejects(f.api.activatePublished(await f.options()),/OWNED_MANAGER_OPERATION_FAILED/);
+  const attempt=attemptOf(f),journalPath=path.join(attempt,'journal.json'),journal=JSON.parse(fs.readFileSync(journalPath));
+  journal.schemaVersion='aurora.published.activation.v1';delete journal.acceptedEnvelope;delete journal.trustedPublicKeySha256;delete journal.previousRelease;
+  fs.writeFileSync(journalPath,encode(journal));
+  assert.equal((await f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt})).alreadyRecovered,true);
+  assert.equal(JSON.parse(fs.readFileSync(journalPath)).schemaVersion,'aurora.published.activation.v1');
+  assert.equal(h(fs.readFileSync(path.join(f.pkg,'manifest.json'))),h(f.baseline.bytes));f.assertIdentity();
+});
+
+for(const window of ['before-stop','before-first-move','before-candidate-move','before-metadata','before-start'])
+test('TLS renewal rechecks local CAS '+window+' and never starts or overwrites a foreign writer',async t=>{
+  const f=transactionFixture(t);let prepared=false,changed=false;
+  f.controls.fault=(when,a,b)=>{if(when==='before-write'&&String(a).includes('journal.json.')&&String(b).includes('"phase":"PREPARED"'))prepared=true;};
+  f.controls.alterResponse=()=>{
+    const stopped=f.commands.at(-1)==='stop',present=fs.existsSync(f.pkg);
+    const source=present?JSON.parse(fs.readFileSync(path.join(f.pkg,'manifest.json'))).sourceRevision:null;
+    const metadata=JSON.parse(fs.readFileSync(path.join(f.state,'installation.json')));
+    const hit=window==='before-stop'?prepared&&f.commands.length===0:
+      window==='before-first-move'?stopped&&source===OLD:
+      window==='before-candidate-move'?stopped&&!present:
+      window==='before-metadata'?stopped&&source===NEXT&&metadata.sourceRevision===OLD:
+      stopped&&source===NEXT&&metadata.sourceRevision===NEXT;
+    if(!hit||changed)return;changed=true;fs.mkdirSync(f.pkg,{recursive:true});
+    fs.writeFileSync(path.join(f.pkg,'concurrent.txt'),'synthetic legitimate writer during '+window);
+  };
+  await assert.rejects(f.api.activatePublished(await f.options()),window==='before-stop'?/INSTALLED_BASELINE_CHANGED/:/ROLLBACK_INCOMPLETE/);
+  assert.equal(changed,true);assert.equal(fs.readFileSync(path.join(f.pkg,'concurrent.txt'),'utf8'),'synthetic legitimate writer during '+window);
+  assert.deepEqual(f.commands,window==='before-stop'?[]:['stop']);
+  assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),window!=='before-stop');f.assertIdentity();
+});
+
+for(const repeat of [false,true])test('final canonical renewal cannot hide a concurrent package writer, repeat='+repeat,async t=>{
+  const f=transactionFixture(t);if(repeat)await f.api.activatePublished(await f.options());
+  let ready=false,changed=false,owners=0;
+  f.controls.nativeEvent=script=>{if(script.includes('currentOwnerAuthorized')){
+    owners++;if(repeat?owners>=3:f.commands.includes('start'))ready=true;
+  }};
+  f.controls.alterResponse=()=>{if(ready&&!changed){changed=true;fs.writeFileSync(path.join(f.pkg,'concurrent.txt'),'synthetic concurrent final writer');}};
+  const commands=[...f.commands];await assert.rejects(f.api.activatePublished(await f.options()),
+    repeat?/PRIOR_SIGNED_APPLICATION_CHANGED/:/LOCAL_APPLICATION_ROLLBACK_INCOMPLETE/);
+  assert.equal(changed,true);assert.equal(fs.readFileSync(path.join(f.pkg,'concurrent.txt'),'utf8'),'synthetic concurrent final writer');
+  if(repeat)assert.deepEqual(f.commands,commands);
+  assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),!repeat);f.assertIdentity();
+});
+
 test('concurrent new content is never overwritten by rollback',async t=>{
   const f=transactionFixture(t);let fired=false;
   f.controls.fault=(when,a,b)=>{if(!fired&&when==='after-rename'&&a.endsWith(path.join('reviewed-stage','package'))){
@@ -309,7 +729,7 @@ for(const moment of ['after-displace','before-exclusive-create'])test('metadata 
   assert.deepEqual(fs.readFileSync(installation+'.displaced-'+journal.id),f.metadata);
   assert.equal(fs.existsSync(installation+'.prepared-'+journal.id),true);
   const commands=[...f.commands];
-  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt}),/RECOVERY_METADATA_CHANGED/);
+  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt,trust:f.pair.trust}),/RECOVERY_METADATA_CHANGED/);
   assert.deepEqual(fs.readFileSync(installation),concurrent);assert.deepEqual(f.commands,commands);f.assertIdentity();
   assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),true);
 });
@@ -341,7 +761,7 @@ test('restore exclusive creation preserves an intervening writer and rejects lat
   assert.equal(h(fs.readFileSync(installation+'.candidate-'+journal.id)),journal.nextMetadataSha256);
   assert.deepEqual(fs.readFileSync(path.join(attempt,'metadata.previous')),f.metadata);
   const commands=[...f.commands];
-  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt}),/RECOVERY_METADATA_CHANGED/);
+  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt,trust:f.pair.trust}),/RECOVERY_METADATA_CHANGED/);
   assert.deepEqual(f.commands,commands);assert.deepEqual(fs.readFileSync(installation),concurrent);f.assertIdentity();
 });
 test('partial exclusive restoration fails closed and retains both complete backups',async t=>{
@@ -359,6 +779,6 @@ test('partial exclusive restoration fails closed and retains both complete backu
   assert.deepEqual(fs.readFileSync(installation+'.recovery-'+journal.id),f.metadata);
   assert.equal(h(fs.readFileSync(installation+'.candidate-'+journal.id)),journal.nextMetadataSha256);
   const commands=[...f.commands];
-  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt}),/RECOVERY_METADATA_CHANGED/);
+  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt,trust:f.pair.trust}),/RECOVERY_METADATA_CHANGED/);
   assert.equal(fs.readFileSync(installation).length,0);assert.deepEqual(f.commands,commands);f.assertIdentity();
 });

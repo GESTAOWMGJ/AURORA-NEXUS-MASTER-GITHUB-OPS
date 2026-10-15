@@ -1,5 +1,11 @@
 # Referência comum de componentes — candidata v2
 
+Atualização candidata da beta `1.1.0-beta.2`: a integração Windows passa a
+`1.0.2`, em destino próprio, preservando os componentes e o checkpoint existentes.
+O agente permanece `1.0.1` e o diretório/identidade IA continuam preservados.
+As versões abaixo descrevem a baseline histórica; a referência vigente depende
+do certificado, da publicação e dos recibos atuais, nunca apenas deste documento.
+
 Baseline: `a3ef7a65a56b6c29d74d5e92e0622e81bb0f5cbb`, 13/10/2026.
 Estado desta candidata: IMPLEMENTED, regressões sintéticas locais aprovadas;
 CI, revisão, deploy, endpoint e publicação v2 **NOT_DEPLOYED / PENDING**.

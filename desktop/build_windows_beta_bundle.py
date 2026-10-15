@@ -18,7 +18,7 @@ setlocal
 cd /d "%~dp0"
 py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
 if not errorlevel 1 (
-  py -3 desktop\install_windows_beta.py install
+  py -3 -B desktop\install_windows_beta.py install %*
   goto result
 )
 python -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)" >nul 2>&1
@@ -27,7 +27,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-python desktop\install_windows_beta.py install
+python -B desktop\install_windows_beta.py install %*
 :result
 if errorlevel 1 (
   echo A instalacao nao foi concluida. Preserve esta mensagem para diagnostico.
@@ -53,7 +53,14 @@ def build(repo, output, source_sha=None):
     files['INSTALAR-AURORA-NEXUS.cmd'] = LAUNCHER.replace('\n', '\r\n').encode('ascii')
     files['LEIA-PRIMEIRO.txt'] = (
         f'AURORA NEXUS Windows {version}\n'
-        'Extraia todo o ZIP e abra INSTALAR-AURORA-NEXUS.cmd. Requer Windows, Edge e Python 3.10+.\n'
+        'Extraia todo o ZIP. Requer Windows, Edge e Python 3.10+.\n'
+        'Entre no portal oficial /portal/setup e configure a automacao com sua organizacao e MFA.\n'
+        'Instalacao so conclui apos processamento e replay confirmados com a configuracao autorizada.\n'
+        'Execute INSTALAR-AURORA-NEXUS.cmd com os argumentos nao secretos --integration-input,\n'
+        '--integration-org e --integration-origin; a credencial fica somente no ambiente protegido do processo.\n'
+        'Cloud/local usam --integration-method CLOUD_OAUTH ou LOCAL_AGENT e --integration-agent-target\n'
+        'para revalidar o mesmo agente e fila existentes. Um nome de metodo nao prova acesso a fonte.\n'
+        'Nao passe senhas ou tokens em argumentos. Sem configuracao, a instalacao fica pendente.\n'
         'Atualiza o cliente de acesso existente por usuario, preservando o portal e a instalacao anterior.\n'
         'O portal exige login individual. Nenhuma senha, dado operacional ou modelo de IA acompanha o pacote.\n'
         'O pacote nao instala servico, banco offline ou dependencia. Nao desative protecoes do Windows.\n'

@@ -9,6 +9,7 @@ import type { AuroraMember } from "./auroraAccess.js";
 import { CANONICAL_PORTAL_PATH, companyEntry, userFacingEntryPath } from "./auroraTenantEntry.js";
 import { nativeIngestionSection, nativeIngestionClient } from './auroraNativeIngestionView.js';
 import { canImportNativeDocuments } from './auroraNativeIngestion.js';
+import { automationConfigurationSection, automationConfigurationClient } from './auroraAutomationView.js';
 
 function technicalHostBrowserRedirect(): string {
   if (process.env.AURORA_CANONICAL_PORTAL_READY !== "true") return "";
@@ -44,6 +45,7 @@ export function auroraProtectedShell(member: AuroraMember, csrfTokens: { action:
 <main id="app" class="loading" tabindex="-1"><div class="headline"><div><div class="eyebrow">${escapeHtml(member.orgId.toUpperCase())} · Gestão</div><h1 id="page-title">Seu dia, com clareza.</h1><p id="page-description">Os números que merecem atenção e uma próxima ação para cada prioridade.</p></div><div class="head-actions"><span class="badge" id="generated">Consultando fontes…</span><button class="btn primary" id="refresh"${capabilities.refresh ? "" : " hidden"}>Atualizar dados</button></div></div><div class="sync-line"><span id="sync-status" role="status" aria-live="polite">Consultando o resumo da sua empresa.</span></div><details class="disclosure" id="source-context"><summary>Entenda a leitura <span>Origem, cobertura e modo de operação</span></summary><section class="implant-strip" aria-label="Origem da leitura"><div class="implant-step"><b>Empresa</b><span id="implant-org">${escapeHtml(member.orgId.toUpperCase())}</span></div><div class="implant-step"><b>Modo da leitura</b><span id="implant-mode">Aguardando leitura</span></div><div class="implant-step"><b>Fonte</b><span id="implant-source">Sem leitura confirmada</span></div><div class="implant-step"><b>Próximo passo</b><span id="implant-gate">Conferir fontes</span></div></section></details>
 <div id="notice" class="card empty" role="alert">Validando dados sanitizados…</div>
 ${nativeIngestionSection(member)}
+${capabilities.manageIntegrations ? automationConfigurationSection() : ''}
 <section id="content" hidden>
 <section class="page-section" data-page="overview" id="overview">
 <section id="financial-focus" class="financial-focus" aria-labelledby="focus-title"><div><div class="eyebrow">Dinheiro em foco <span class="focus-ribbon">Olho no bolso</span></div><h2 id="focus-title">Seu caixa merece uma leitura clara.</h2><p id="focus-explanation">Aguardando leitura das fontes para indicar a prioridade.</p></div><div class="focus-amount"><div class="label" id="focus-label">Resumo financeiro</div><div class="focus-value" id="focus-value">—</div><span class="focus-period" id="focus-period">Competência não confirmada</span><a class="btn" id="focus-next" href="#monthly-closing-summary">Ver resumo financeiro</a></div></section>
@@ -238,6 +240,7 @@ if(capabilities.manageIntegrations)loadIntegrations();
 ${capabilities.manageProfiles ? userProfileClient() : ""}
 ${auroraExperienceClient()}
 ${capabilities.manageMaster ? iaMasterClient(member) : ""}
-${nativeIngestionClient(member,{ingest:csrfTokens.documentIngest ?? '',refresh:csrfTokens.refresh})}
+${nativeIngestionClient(member,{ingest:csrfTokens.documentIngest ?? '',refresh:csrfTokens.refresh,integrationKey:csrfTokens.integrationKey})}
+${capabilities.manageIntegrations ? automationConfigurationClient(member.orgId,csrfTokens.integrationKey) : ''}
 </script></body></html>`;
 }

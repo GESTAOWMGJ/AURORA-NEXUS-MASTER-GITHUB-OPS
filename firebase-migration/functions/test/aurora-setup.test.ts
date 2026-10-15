@@ -21,7 +21,9 @@ test('setup separates membership, network proof and physical installation',()=>{
 import {companyEntry,isCompanySlug} from '../src/auroraTenantEntry.ts';
 test('setup is a reserved application route, never a tenant selector',()=>{assert.equal(companyEntry('/setup'),null);assert.equal(isCompanySlug('setup'),false);});
 
-const proof={state:'FIRST_INGESTION_VERIFIED',firstIngestionVerified:true,documentId:'a'.repeat(48),sourceVersion:1,revision:1,versionId:'b'.repeat(48),canonicalSnapshotHash:'c'.repeat(64),sourceSystem:'ERP',verifiedAt:'2026-10-08T05:00:00Z'};
+const acceptance={schemaVersion:'aurora.installation.acceptance.v1',orgId:'synthetic',canonicalOrigin:'https://auroranexus.com.br',state:'INSTALLATION_INTEGRATION_VERIFIED',
+ eligible:true,processingVerified:true,receiptPersisted:true,replayVerified:true,automationConfigured:true,automationVerified:true,automationScope:'AURORA_CANONICAL_PIPELINE',method:'API_TOKEN',configurationHash:'d'.repeat(64),receiptId:'e'.repeat(64),documentId:'a'.repeat(48),versionId:'b'.repeat(48),sourceVersion:1,canonicalSnapshotHash:'c'.repeat(64),verifiedAt:'2026-10-14T00:00:00Z'};
+const proof={state:'FIRST_INGESTION_VERIFIED',firstIngestionVerified:true,documentId:'a'.repeat(48),sourceVersion:1,revision:1,versionId:'b'.repeat(48),canonicalSnapshotHash:'c'.repeat(64),sourceSystem:'ERP',verifiedAt:'2026-10-08T05:00:00Z',acceptance};
 const payload=(installation:any=proof,org='synthetic')=>({ok:true,organization:{id:org},installation});
 const committed=(installation:any={...proof,operationalComplete:true},orgId='synthetic')=>({ok:true,orgId,installation});
 const response=(data:any,status=200,contentType='application/json')=>({status,ok:status===200,headers:{get:()=>contentType},json:async()=>data});
@@ -69,6 +71,15 @@ test('malformed or stale first-ingestion evidence never starts completion',async
   assert.equal(result.calls.length,1);assert.equal(result.nodes.complete.disabled,true);
  }
 });
+test('login, canonical processing and client-only automation flags cannot bypass integration acceptance',async()=>{
+ for(const patch of [{acceptance:null},{acceptance:{...acceptance,replayVerified:false}},
+   {acceptance:{...acceptance,automationVerified:false}},{acceptance:{...acceptance,orgId:'foreign'}},
+   {acceptance:{...acceptance,method:'CLOUD_OAUTH'}},{acceptance:{...acceptance,sourceVersion:2}},
+   {acceptance:{...acceptance,state:'PENDING_REPLAY',eligible:true}}]){
+  const result=await wizard([response(payload({...proof,...patch,operationalComplete:true,automationConfigured:true}))]);
+  assert.equal(result.calls.length,1);assert.equal(result.nodes.complete.disabled,true);
+ }
+});
 test('missing, foreign or expired session proof blocks writes and polling',async()=>{
  for(const reply of [response(payload(proof,'foreign')),response({ok:true,installation:proof}),response(payload(),401),response(payload(),403)]){
   const result=await wizard([reply]);assert.equal(result.calls.length,1);assert.equal(result.nodes.complete.disabled,true);assert.equal(result.timers.size,0);
@@ -80,7 +91,7 @@ test('completion stays disabled on uncommitted, foreign or mismatching receipts'
  for(const result of [{ok:true},committed({...proof,operationalComplete:false}),committed({...proof,operationalComplete:true,sourceVersion:2}),
  committed({...proof,operationalComplete:true,documentId:'d'.repeat(48)}),committed({...proof,operationalComplete:true,revision:2}),
  committed({...proof,operationalComplete:true,versionId:'d'.repeat(48)}),committed({...proof,operationalComplete:true,canonicalSnapshotHash:'d'.repeat(64)}),
- committed({...proof,operationalComplete:true,sourceSystem:'MV'}),committed(undefined,'foreign')]){
+ committed({...proof,operationalComplete:true,sourceSystem:'MV'}),committed({...proof,operationalComplete:true,acceptance:{...acceptance,configurationHash:'f'.repeat(64)}}),committed(undefined,'foreign')]){
   const wizardResult=await wizard([response(payload()),response(result)]);
   assert.equal(wizardResult.nodes.complete.disabled,true);wizardResult.callbacks.complete();assert.deepEqual(wizardResult.navigations,[]);
  }

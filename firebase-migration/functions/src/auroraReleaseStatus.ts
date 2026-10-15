@@ -1,4 +1,6 @@
-export const AURORA_PRODUCT_VERSION = "1.1.0-beta.1";
+import { buildUnifiedBetaRelease, isUnifiedBetaProjection, type UnifiedBetaProjection } from "./auroraUnifiedBeta.js";
+
+export const AURORA_PRODUCT_VERSION = "1.1.0-beta.2";
 export const AURORA_RELEASE_TRAIN = "2026.10";
 
 export type ReleaseGateStatus = "DONE" | "IN_PROGRESS" | "BLOCKED" | "PLANNED";
@@ -14,8 +16,8 @@ export type ReleaseGate = {
 function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
-
-export function buildReleaseStatus(organization: Record<string, unknown> = {}): Record<string, unknown> {
+export function buildReleaseStatus(organization: Record<string, unknown> = {}, projectedBeta?: UnifiedBetaProjection): Record<string, unknown> {
+  const unifiedBeta = isUnifiedBetaProjection(projectedBeta) ? projectedBeta : buildUnifiedBetaRelease();
   const organicSectors = stringArray(organization.organicSectors);
   const organicReady = organization.active === true
     && organization.organicEnabled === true
@@ -69,10 +71,10 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}): 
     },
     {
       id: "desktop-continuity",
-      label: "Atualização in-place do aplicativo Mac",
+      label: "Aceite nativo do aplicativo Mac selecionado",
       status: "BLOCKED",
       weight: 10,
-      detail: "Baseline instalada precisa de inspeção técnica e teste nativo antes de qualquer substituição controlada."
+      detail: "Identidade pública do Aurora Nexus HML selecionado preservada; confiança Apple e aceite nativo exigem evidências próprias."
     },
     {
       id: "commercial-hardening",
@@ -87,7 +89,8 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}): 
   const doneWeight = gates.filter((gate) => gate.status === "DONE").reduce((sum, gate) => sum + gate.weight, 0);
 
   return {
-    productVersion: AURORA_PRODUCT_VERSION,
+    productVersion: unifiedBeta.reference?.productVersion ?? AURORA_PRODUCT_VERSION,
+    productVersionSource: unifiedBeta.reference ? "VERIFIED_ACTIVE_REFERENCE" : "ENGINEERING_DEFAULT_UNVERIFIED",
     releaseTrain: AURORA_RELEASE_TRAIN,
     target: "SELLABLE_GA",
     iaMaster: { routineId: "AURORA-IA-MASTER-001", version: "1.0.0", status: "IMPLEMENTED_PENDING_DEVICE_ATTESTATION", externalAiEnabled: false, cloudSyncVerified: false, autonomousDevelopmentPromoted: false },
@@ -101,6 +104,7 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}): 
       signedCoverageIsDeviceAcceptance: false,
       nativeMacAcceptance: "UNVERIFIED",
       allClientsSynchronized: false,
+      unifiedBeta,
       detail: "Referência v1 cobre parte dos componentes. A candidata v2 exige cinco manifestos e leitura privada atual; instalação, recibos e aceite do Mac permanecem gates próprios."
     },
     installerIntegration: {

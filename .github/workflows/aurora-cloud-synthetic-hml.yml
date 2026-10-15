@@ -1,0 +1,92 @@
+name: Isolated synthetic Cloud format probe HML
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact current main SHA already published by deploy-appscript
+        type: string
+        required: true
+      confirmation:
+        description: RUN_ISOLATED_SYNTHETIC_HML_PROBE
+        type: string
+        required: true
+
+permissions:
+  contents: read
+concurrency:
+  group: aurora-cloud-synthetic-hml
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    if: github.ref == 'refs/heads/main' && inputs.expected_sha == github.sha && inputs.confirmation == 'RUN_ISOLATED_SYNTHETIC_HML_PROBE'
+    environment: firebase-homologation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout exact approved source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+      - name: Validate source and existing HML authorization window
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$EXPECTED_SHA" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test "$APPROVED_PROJECT" = wmgj-hml-jfn-20260927
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)" = "$EXPECTED_SHA"
+          python3 - <<'PY'
+          import datetime,json
+          policy=json.load(open('firebase-migration/policy/hml-owner-release-approval-v1.json'))
+          assert policy['scope']['environment']=='firebase-homologation'
+          assert policy['scope']['projectId']=='wmgj-hml-jfn-20260927'
+          assert policy['integrationAndHmlPublicationAuthorized'] is True
+          assert datetime.datetime.now(datetime.timezone.utc)<datetime.datetime.fromisoformat(policy['scope']['validUntilUtc'].replace('Z','+00:00'))
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test isolated harness and unchanged bridge wrapper behavior
+        run: node --test tools/test-aurora-cloud-synthetic-probe.cjs
+      - name: Authenticate existing HML reader without new grants
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2 existing deployment refs
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+        with:
+          version: '548.0.0'
+      - name: Install existing clasp version and configure protected OAuth reference
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$CLASPRC_JSON"
+          npm install -g @google/clasp@3.4.1
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+      - name: Verify published version then run only the owner-scoped synthetic probe
+        run: |
+          set -euo pipefail
+          # No ensure/redeploy helper: this probe requires a separately published executable.
+          node tools/aurora-cloud-synthetic-probe.cjs
+      - name: Preserve only sanitized cryptographic states
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aurora-hml-synthetic-format-proof-${{ github.sha }}
+          path: ${{ runner.temp }}/aurora-hml-synthetic-summary.json
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Remove runner OAuth file
+        if: always()
+        run: rm -f "$HOME/.clasprc.json"

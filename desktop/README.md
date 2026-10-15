@@ -4,7 +4,15 @@
 
 Decisão do titular em 28/09/2026: utilizar o Nexus original já instalado e funcionando no Mac como base de todas as melhorias, atualizações e futuras instalações. Preservar seu nome, ícone, miniatura, padrão visual e funcionamento. Essa decisão prevalece sobre o plano anterior de entregar um cliente HML separado como alternativa de aplicativo.
 
-O relato do titular estabelece a referência de produto. Não estabelece, sozinho, os metadados técnicos do bundle. Na checagem desta conversa, Desktop Commander não retornou dispositivo conectado; TRIGGERcmd retornou apenas Trigger sent. Nome exato do .app, caminho, versão, bundle identifier, arquivo de ícone, assinatura e backend do original permanecem NÃO INSPECIONADOS. Não substituir esses valores pelos do pacote HML nem pelos de uma versão registral.
+Atualização factual de 14/10/2026: o titular identificou expressamente
+`Aurora Nexus HML-0.2.0-hml.20261001.app` como a aplicação original a preservar.
+A inspeção autorizada confirmou `br.com.auroranexus.desktop.hml`, versão `0.2.0`,
+build `1`, executável `aurora-portal` e correspondência dos cinco arquivos públicos
+com o pacote oficial inspecionado. O caminho particular permanece apenas na
+evidência privada. Essa identificação substitui a antiga pendência de inspeção;
+não comprova abertura, assinatura Apple, instalação de atualização ou aceite.
+A avaliação nativa inspecionada identificou bundle sem assinatura utilizável.
+Não inferir falha de abertura a partir dessa avaliação nem desativar proteções.
 
 ### Identificar antes de alterar
 
@@ -14,7 +22,7 @@ Preservar uma cópia verificável da aplicação funcional e das configurações
 
 ### Atualização do mesmo aplicativo
 
-- Derivar a candidata da baseline funcional identificada e de sua origem de código. Não usar o launcher HML como se fosse essa baseline.
+- Derivar a candidata da baseline identificada pelo titular e de sua origem de código. O sufixo HML do nome efetivamente escolhido não autoriza trocar a identidade por outro aplicativo.
 - Manter o mesmo nome do .app, nome exibido, identidade de bundle, destino de instalação e ícone original. Preservar a experiência no Finder, Dock e janela, bem como configuração, dados, autenticação individual e padrão da interface. Não acrescentar HML, datas ou novos nomes ao aplicativo principal.
 - Incrementar a versão técnica sem reiniciar a identidade do produto. Preservar o backend/endereço funcional; qualquer migração de destino exige validação específica e não pode redirecionar silenciosamente para ambiente indisponível.
 - Preparar a candidata em staging privado e conferir integridade, confiança do editor, compatibilidade e regressões. Não alterar um bundle assinado em uso nem desativar Gatekeeper, quarentena ou outras proteções.
@@ -24,6 +32,26 @@ Preservar uma cópia verificável da aplicação funcional e das configurações
 - Somente após validação e aceite a candidata passa a ser a nova baseline funcional. A linhagem continua a partir do original; não reinstalar indefinidamente a primeira versão congelada nem regredir funcionalidades aprovadas.
 
 Instalações futuras do produto devem usar a última descendente aprovada dessa baseline. Em Mac já existente, o resultado esperado é um único aplicativo principal atualizado, não outra cópia com identidade diferente. Em nova máquina, manter a identidade e o padrão do produto sem copiar credenciais ou dados de outro usuário/cliente. Windows deve preservar continuidade lógica do produto com empacotamento próprio, nunca executar o bundle Mac.
+
+### Beta única e integração obrigatória — 14/10/2026
+
+`desktop/build_unified_beta.py` reúne os payloads existentes do mesmo SHA em uma
+candidata fechada antes da promoção protegida. Depois da promoção, anexa somente
+o certificado público verificado à mesma candidata. A identidade comum é
+`releaseId`, versão do produto, SHA e hash do certificado; versões técnicas dos
+componentes preservam sua linhagem. Disponibilidade do ZIP e recibos de adoção
+são estados próprios: dispositivo offline permanece pendente.
+
+A instalação exige processamento autenticado, persistência do recibo, repetição
+idempotente e integração da automação comprovada no tenant. Login, ping, extração
+de arquivos do instalador ou saída zero do processo não bastam. Os métodos
+Cloud/OAuth, token API, agente local e alimentação manual não atestam uns aos
+outros. Formatos sem extração válida permanecem `PENDING_EXTRACTION`.
+
+O titular escolheu iOS nativo por TestFlight/App Store. O PWA atual continua
+sendo um canal web; não satisfaz a entrega nativa. Fonte, build, assinatura,
+provisionamento, envio e aceite iOS exigem provas próprias. Não há publicação
+de loja ou aprovação Apple inferida pela beta web ou pelo certificado Ed25519.
 
 ### Gate e estado desta mudança
 

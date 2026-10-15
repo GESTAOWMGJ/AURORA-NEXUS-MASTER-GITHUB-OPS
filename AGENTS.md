@@ -22,6 +22,14 @@ AURORA NEXUS é o sistema-mãe JFN-AUD-GOV-001. Preservar M01–M10, JFN-AUD-FAT
 
 ## Precedência da versão instalada e funcional — decisão de 28/09/2026
 
+Atualização factual de 14/10/2026: o titular identificou
+`Aurora Nexus HML-0.2.0-hml.20261001.app` como o original, e a inspeção autorizada
+confirmou bundle `br.com.auroranexus.desktop.hml`, versão `0.2.0`/build `1`.
+Essa identificação prevalece sobre a antiga suposição abaixo de que o original
+seria outro aplicativo. Preservar exatamente a identidade escolhida; inspeção e
+correspondência de bytes não comprovam abertura, assinatura ou aceite nativo.
+O caminho particular e as provas operacionais permanecem fora da fonte pública.
+
 A referência obrigatória de produto desktop é o Nexus original que o titular informa já estar instalado e funcionando no Mac. Essa baseline prevalece sobre clientes experimentais, pacotes HML e propostas de redesenho. Não ignorar a instalação existente, não escolher automaticamente o commit mais recente como baseline funcional e não confundir a versão registral com a versão do aplicativo instalado.
 
 Todas as melhorias devem derivar dessa aplicação e atualizar o MESMO aplicativo, preservando nome real, identidade/bundle identifier, ícone/miniatura originais, padrão de interface, destino de acesso validado, configurações e dados. Sem sufixos HML, datas ou nomes alternativos no aplicativo principal. Ler o procedimento em `desktop/README.md` antes de empacotar ou instalar.

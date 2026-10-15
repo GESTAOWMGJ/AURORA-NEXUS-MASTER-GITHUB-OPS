@@ -4,7 +4,15 @@
   "channel": "beta",
   "frontendVersionPolicy": "EXISTING_MAIN_NO_REDESIGN",
   "frontendVersionSource": "firebase-migration/functions/src/auroraReleaseStatus.ts",
-  "reviewedMainSha": "bebb0a0b62baa47b2057dbf773c87b6ca8e7e3da",
+  "releaseAuthority": {
+    "pointer": "platformRuntime/activeRelease",
+    "source": "VERIFIED_SIGNED_RUNTIME_PIN",
+    "releaseIdPattern": "aurora-<productVersion>-<sourceSha>",
+    "commonIdentity": ["releaseId", "productVersion", "sourceSha", "certificateSha256"],
+    "deviceAdoptionRequiresCurrentReceipt": true,
+    "offlineDeviceState": "PENDING",
+    "complete": false
+  },
   "portal": "https://auroranexus.com.br/portal",
   "windows": {
     "clientVersion": "0.2.0-beta.4",
@@ -17,26 +25,44 @@
   },
   "mac": {
     "strategy": "PRESERVE_EXISTING_APP_IDENTITY",
-    "nativeUpdate": "BLOCKED_BASELINE_INSPECTION",
+    "nativeUpdate": "PENDING_SIGNATURE_AND_NATIVE_ACCEPTANCE",
+    "selectedAppName": "Aurora Nexus HML-0.2.0-hml.20261001.app",
+    "bundleIdentifier": "br.com.auroranexus.desktop.hml",
+    "baselineInspection": "READ_ONLY_VERIFIED_20261014",
+    "selectedByOwner": true,
+    "nativeAcceptanceVerified": false,
     "credentialMode": "CANONICAL_PORTAL_IDENTITY"
   },
   "ios": {
     "type": "EXISTING_PWA",
+    "requestedDistribution": "NATIVE_TESTFLIGHT_APP_STORE",
+    "nativeCandidateSource": "desktop/ios",
+    "nativeCandidateWorkflow": ".github/workflows/ios.yml",
+    "nativeCandidateDistribution": "UNSIGNED_SIMULATOR_ONLY",
+    "nativeDeliveryStatus": "PENDING_BUILD_SIGNING_AND_DEVICE_ACCEPTANCE",
     "nativeAppStoreBuild": false,
     "deviceTest": "PENDING",
     "credentialMode": "CANONICAL_PORTAL_IDENTITY"
   },
   "web": {
     "type": "CANONICAL_PRIVATE_PORTAL",
-    "deployedFrontendSha": "bebb0a0b62baa47b2057dbf773c87b6ca8e7e3da",
-    "deploymentEvidence": "https://github.com/GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS/actions/runs/37711572514",
+    "deployedFrontendSource": "VERIFIED_SIGNED_RUNTIME_PIN_AND_CURRENT_RUNTIME",
     "canonicalPortal": "https://auroranexus.com.br/portal",
     "technicalFallbackUrl": null,
     "singleAccessPath": true,
     "technicalHostBehavior": "REDIRECT_TO_CANONICAL_DNS",
     "credentialMode": "CANONICAL_PORTAL_IDENTITY"
   },
-  "fullLocalCloudSync": "BLOCKED_INTEGRATION_RUNTIME_AND_DEVICE_AUTH",
+  "fullLocalCloudSync": "PENDING_CURRENT_RECEIPTS_FOR_ALL_TARGETS",
+  "installationCompletion": {
+    "contract": "aurora.installation.acceptance.v1",
+    "methods": ["CLOUD_OAUTH", "API_TOKEN", "LOCAL_AGENT", "MANUAL"],
+    "requiresAuthenticatedProcessing": true,
+    "requiresPersistedReceiptAndIdempotentReplay": true,
+    "requiresVerifiedAutomationIntegration": true,
+    "unsupportedFormatState": "PENDING_EXTRACTION",
+    "loginOrPingCompletesInstallation": false
+  },
   "productionReleased": false,
   "singleAccessPolicy": {
     "userFacingEntry": "https://auroranexus.com.br/portal",

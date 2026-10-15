@@ -41,13 +41,22 @@ class WindowsBetaBundleTests(unittest.TestCase):
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             integration = json.loads(result.stdout)
-            self.assertEqual(integration['version'], '1.0.1')
+            self.assertEqual(integration['version'], '1.0.2')
             component = state / 'integration' / integration['version']
             installed_manifest = json.loads((component / 'manifest.json').read_text())
             self.assertEqual(installed_manifest['version'], integration['version'])
             self.assertEqual(set(installed_manifest['sha256']), set(INTEGRATION_ASSETS))
             for name, digest in installed_manifest['sha256'].items():
                 self.assertEqual(hashlib.sha256((component / name).read_bytes()).hexdigest(), digest)
+            # The installer records the package's actual immutable SHA, never its old migration baseline.
+            command=[sys.executable,'-B','-c',
+                     "import sys;sys.path.insert(0,sys.argv[1]);import install_windows_beta as installer;print(installer.package_source())",
+                     str(extracted/'desktop')]
+            identity=subprocess.run(command,capture_output=True,text=True)
+            self.assertEqual(identity.returncode,0,identity.stderr);self.assertEqual(identity.stdout.strip(),'a'*40)
+            (extracted/'aurora-coletor'/'client_agent.py').write_bytes(b'changed dependency')
+            changed=subprocess.run(command,capture_output=True,text=True)
+            self.assertNotEqual(changed.returncode,0);self.assertIn('PACKAGE_BYTES_CHANGED',changed.stderr)
 
     def test_bundle_rejects_unpinned_source(self):
         with tempfile.TemporaryDirectory() as temp:

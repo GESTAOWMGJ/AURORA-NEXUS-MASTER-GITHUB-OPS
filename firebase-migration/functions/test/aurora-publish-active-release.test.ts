@@ -35,7 +35,7 @@ function fixture() {
     const fileBytes=Object.fromEntries(names.map(name=>[name,Buffer.from('// synthetic '+name)]));
     const files=Object.fromEntries(Object.entries(fileBytes).map(([name,bytes])=>[name,createHash('sha256').update(bytes).digest('hex')]));
     const metadata=component==='iaMaster'?{component:'AURORA_IA_MASTER',version:'1.1.0',sourceRevision:sourceSha,dirty:false,nodeMinimumMajor:22,externalAiEnabled:false,files}:
-      {schemaVersion:1,component:'AURORA_WINDOWS_INTEGRATION',version:'1.0.1',sourceSha,platform:'windows',files};
+      {schemaVersion:1,component:'AURORA_WINDOWS_INTEGRATION',version:'1.0.2',sourceSha,platform:'windows',files};
     return {manifestBytes:Buffer.from(JSON.stringify(metadata)),fileBytes};
   };
   const packages:any={iaMaster:makePackage('iaMaster'),windowsIntegration:makePackage('windowsIntegration')};

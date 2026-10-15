@@ -25,7 +25,23 @@ test('existing package closure yields separate real IA34 and Windows7 manifests 
   assert.deepEqual(Object.keys(windows.fileBytes).sort(),[...WINDOWS_INTEGRATION_FILES].sort());
   for(const name of WINDOWS_INTEGRATION_FILES)assert.ok(Buffer.from(windows.fileBytes[name]).equals(Buffer.from(ia.fileBytes['client-agent/'+name])));
   assert.equal(windows.manifest.sourceSha,sourceSha);assert.equal(windows.manifest.component,'AURORA_WINDOWS_INTEGRATION');
+  assert.equal(windows.manifest.version,'1.0.2');assert.equal(ia.manifest.clientAgent.version,'1.0.1');
   assert.equal('configured' in windows.manifest,false);assert.equal('installationVerified' in windows.manifest,false);
+});
+test('Windows Integration1.0.2 round-trips the seven-file package and rejects the protected old component version',async t=>{
+  const f=fixture(t),ia=await readComponentPackage(f.directory,'iaMaster',sourceSha),windows=windowsIntegrationPackage(ia,sourceSha);
+  const directory=await retainComponentPackage(join(f.temporary,'retained'),'windows-integration-package',windows);
+  const retained=await readComponentPackage(directory,'windowsIntegration',sourceSha);
+  assert.equal(retained.manifest.version,'1.0.2');assert.equal(retained.manifest.sourceSha,sourceSha);
+  assert.ok(retained.manifestBytes.equals(windows.manifestBytes));
+  for(const name of WINDOWS_INTEGRATION_FILES)assert.ok(retained.fileBytes[name].equals(ia.fileBytes['client-agent/'+name]));
+  const old={...windows.manifest,version:'1.0.1'};
+  writeFileSync(join(directory,'manifest.json'),JSON.stringify(old,null,2)+'\n');
+  await assert.rejects(readComponentPackage(directory,'windowsIntegration',sourceSha),/COMPONENT_IDENTITY_CONFLICT/);
+});
+test('Windows Integration version bump does not change the IA clientAgent version contract',async t=>{
+  const f=fixture(t);f.manifest.clientAgent.version='1.0.2';f.rewrite();
+  await assert.rejects(readComponentPackage(f.directory,'iaMaster',sourceSha),/COMPONENT_IDENTITY_CONFLICT/);
 });
 for(const scenario of ['wrong source','dirty','configured agent','extra claimed path','missing claim','changed bytes','missing public file','extra private file'])test(`component closure rejects ${scenario}`,async t=>{
   const f=fixture(t);

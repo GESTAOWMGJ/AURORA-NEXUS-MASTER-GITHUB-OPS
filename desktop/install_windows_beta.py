@@ -25,6 +25,7 @@ import uuid
 COLLECTOR_SOURCE = Path(__file__).resolve().parents[1] / "aurora-coletor"
 sys.path.insert(0, str(COLLECTOR_SOURCE))
 from aurora_deployment import install_assets as install_integration_assets, read_json, safe_path as deployment_safe_path
+import aurora_deployment as integration_deployment
 
 VERSION = "0.2.0-beta.4"
 BASE = "https://auroranexus.com.br/portal"
@@ -43,6 +44,26 @@ CANONICAL_SCRIPT_HASHES = {
     "f33f138b018e39275055418563a3a1c4ff34a92eed0747b95a34e84525abda78",
     "a43d457bd20cda69d180f499f717262f58cbbe0dad09c60c809e46a40e5762d9",
 }
+PACKAGE_SOURCES = ('desktop/install_windows_beta.py', *('aurora-coletor/'+name for name in integration_deployment.ASSETS))
+
+
+def package_source():
+    """Package identity comes from its closed byte manifest, never a stale source constant."""
+    root=Path(__file__).resolve().parents[1]
+    manifest=read_json(root/'manifest.json')
+    source=manifest.get('sourceCommit')
+    expected=set(PACKAGE_SOURCES)|{'INSTALAR-AURORA-NEXUS.cmd','LEIA-PRIMEIRO.txt'}
+    if (manifest.get('schemaVersion')!=1 or manifest.get('clientVersion')!=VERSION
+            or not isinstance(source,str) or not re.fullmatch(r'[a-f0-9]{40}',source)
+            or set(manifest.get('files',{}))!=expected):
+        raise ValueError('CLOSED_PACKAGE_SOURCE_REQUIRED')
+    for name,digest in manifest['files'].items():
+        path=deployment_safe_path(root/name)
+        if (not isinstance(digest,str) or not re.fullmatch(r'[a-f0-9]{64}',digest)
+                or not path.is_file() or path.stat().st_nlink!=1 or path.stat().st_size>1024*1024
+                or hashlib.sha256(path.read_bytes()).hexdigest()!=digest):
+            raise ValueError('PACKAGE_BYTES_CHANGED')
+    return source
 
 
 class LoginForm(HTMLParser):
@@ -251,6 +272,10 @@ def known_identity(previous, expected):
             and "technicalSmokeBase" not in previous
             and previous.get("sourceScriptSha256") in LEGACY_SCRIPT_HASHES):
         return "LEGACY_APPROVED_BETA4"
+    canonical_legacy={**expected,'reviewedMainSha':SOURCE_SHA}
+    if (current_identity_matches(previous,canonical_legacy)
+            and previous.get('sourceScriptSha256') in CANONICAL_SCRIPT_HASHES):
+        return 'CANONICAL_APPROVED_BETA4'
     if (current_identity_matches(previous, expected)
             and previous.get("sourceScriptSha256") in CANONICAL_SCRIPT_HASHES | current_script_hashes()):
         return "CURRENT_BETA4"
@@ -405,7 +430,7 @@ def rollback(backup_path):
             raise ValueError("INSTALLATION_CHANGED_REQUIRES_REVIEW")
     previous = read_json(backup / backup_name("manifest"))
     expected = {"clientVersion": VERSION, "portal": BASE, "technicalSmokeBase": TECHNICAL_SMOKE_BASE,
-                "frontendPolicy": "CANONICAL_PORTAL_SINGLE_ENTRY", "reviewedMainSha": SOURCE_SHA,
+                "frontendPolicy": "CANONICAL_PORTAL_SINGLE_ENTRY", "reviewedMainSha": package_source(),
                 "environment": "HML", "offlineBusinessApp": False}
     known_identity(previous, expected)
     edge = Path(previous.get("launchTarget", ""))
@@ -436,9 +461,57 @@ def rollback(backup_path):
     print(json.dumps({"status": "CLIENT_ROLLED_BACK", "clientVersion": VERSION}))
 
 
-def install():
+def verify_installation_integration(root, input_path, org, origin, method, agent_target=None,
+                                    transition_plan_path=None, transition_recover=False, expected_source=None):
+    if transition_recover and not transition_plan_path:
+        raise ValueError('EXPLICIT_CHECKPOINT_TRANSITION_PLAN_REQUIRED')
+    if transition_plan_path and (method != 'API_TOKEN' or agent_target):
+        raise ValueError('SEPARATE_CHECKPOINT_TRANSITION_REQUIRED')
+    if method in ('CLOUD_OAUTH','LOCAL_AGENT'):
+        if not agent_target:raise ValueError('EXISTING_AUTHORIZED_SOURCE_AGENT_REQUIRED')
+        from install_client_agent import verify_existing_integration
+        readiness=verify_existing_integration(agent_target)
+        if method not in readiness.get('sourceModesVerifiedThisRun',[]):raise ValueError('REAL_SOURCE_ADAPTER_REQUIRED')
+        return readiness
+    if not input_path or not org or not origin:
+        raise ValueError("AUTHENTICATED_AUTOMATION_INTEGRATION_REQUIRED")
+    if method not in ("API_TOKEN", "MANUAL"):
+        raise ValueError("REAL_SOURCE_ADAPTER_REQUIRED")
+    raw = read_json(input_path)
+    # Validate the exact approved sample/target before staging any private checkpoint.
+    integration_deployment.sync.synchronize(raw, origin, org)
+    state = deployment_safe_path(root / "integration/state")
+    if transition_plan_path:
+        plan = read_json(transition_plan_path)
+        if (plan.get('stateDirectory') != str(state) or plan.get('orgId') != org
+                or plan.get('nextOrigin') != integration_deployment.sync.origin_url(origin)
+                or plan.get('method') != method or plan.get('expectedSourceSha') != expected_source):
+            raise ValueError('SAME_INSTALLATION_TRANSITION_REQUIRED')
+        result = integration_deployment.transition_checkpoint(plan, raw,
+            os.environ.get('AURORA_INTEGRATION_TOKEN'), recover=transition_recover)
+        acceptance = result.get('installationAcceptance')
+        if (result.get('status') != 'CHECKPOINT_TRANSITION_COMMITTED'
+                or not isinstance(acceptance, dict) or acceptance.get('eligible') is not True
+                or acceptance.get('orgId') != org or acceptance.get('canonicalOrigin') != 'https://auroranexus.com.br'
+                or acceptance.get('method') != method
+                or not all(acceptance.get(key) is True for key in
+                    ('processingVerified','receiptPersisted','replayVerified','automationConfigured','automationVerified'))):
+            raise ValueError('AUTHORITATIVE_AUTOMATION_INTEGRATION_REQUIRED')
+        return {**acceptance, 'installationComplete':False, 'checkpointTransition':result['checkpointTransition'],
+                'targetBinding':result['targetBinding'], 'sampleKey':result['sampleKey'],
+                'globalIngestionVerified':False, 'sourceAcquisitionCertified':False}
+    if (state / 'ia-master' / 'installation.json').exists():
+        raise ValueError('EXPLICIT_CHECKPOINT_TRANSITION_REQUIRED')
+    state.mkdir(parents=True, mode=0o700, exist_ok=True)
+    return integration_deployment.integrate_installation(raw, origin, org, state,
+        token=os.environ.get("AURORA_INTEGRATION_TOKEN"), method=method)
+
+
+def install(integration_input=None, integration_org=None, integration_origin=None, integration_method="API_TOKEN", integration_agent_target=None,
+            integration_transition_plan=None, integration_transition_recover=False):
     if os.name != "nt":
         raise RuntimeError("WINDOWS_REQUIRED")
+    source_sha=package_source()
     # No admin, policy change, browser profile copy or service-account credential.
     local = Path(os.environ["LOCALAPPDATA"])
     roaming = Path(os.environ["APPDATA"])
@@ -458,7 +531,7 @@ def install():
     manifest_file = safe_path(target / "installation.json")
     existed = manifest_file.exists()
     expected = {"clientVersion": VERSION, "portal": BASE, "technicalSmokeBase": TECHNICAL_SMOKE_BASE, "frontendPolicy": "CANONICAL_PORTAL_SINGLE_ENTRY",
-                "reviewedMainSha": SOURCE_SHA, "environment": "HML", "offlineBusinessApp": False}
+                "reviewedMainSha": source_sha, "environment": "HML", "offlineBusinessApp": False}
     if existed:
         manifest_bytes = file_bytes(manifest_file)
         previous = read_json(manifest_file)
@@ -484,8 +557,14 @@ def install():
     if (proof.get("probedPortal") != BASE or proof.get("sameOriginBootstrapVerified") is not True
             or proof.get("sameOriginAuthProjectVerified") is not True):
         raise ValueError("CANONICAL_PORTAL_PROOF_REQUIRED")
+    acceptance = verify_installation_integration(root, integration_input, integration_org, integration_origin,
+                                                 integration_method, integration_agent_target,
+                                                 integration_transition_plan, integration_transition_recover, source_sha)
+    proof["installationAcceptance"] = acceptance
     backup = update_client(root, target, edge, shortcuts, previous if existed else None, expected, proof, snapshots)
     print(json.dumps({"status": "CLIENT_INSTALLED", "idempotent": existed,
+                      "installationComplete": True, "automationIntegrationVerified": True,
+                      "globalIngestionVerified": False,
                       "manifest": str(manifest_file), "rollbackBackup": str(backup), "proof": proof}, indent=2))
 
 
@@ -494,6 +573,13 @@ def main():
     parser.add_argument("action", choices=("probe", "install", "prepare-integration", "rollback"))
     parser.add_argument("--target", help="Existing installation root for prepare-integration")
     parser.add_argument("--backup", help="Explicit verified installation rollback directory")
+    parser.add_argument("--integration-input", help="Explicit authorized structured sample; never credentials")
+    parser.add_argument("--integration-org", help="Organization verified by the authenticated server")
+    parser.add_argument("--integration-origin", help="Approved integration HTTPS origin")
+    parser.add_argument("--integration-method", choices=("API_TOKEN", "MANUAL", "CLOUD_OAUTH", "LOCAL_AGENT"), default="API_TOKEN")
+    parser.add_argument("--integration-agent-target", help="Existing app-scoped agent with the same authorized configuration and state")
+    parser.add_argument('--integration-transition-plan', help='Explicit reviewed transition for the same existing IA checkpoint')
+    parser.add_argument('--integration-transition-recover', action='store_true', help='Revalidate and recover the explicit checkpoint transition')
     args = parser.parse_args()
     try:
         if args.action == "prepare-integration":
@@ -507,7 +593,8 @@ def main():
         elif args.action == "probe":
             print(json.dumps(probe(), indent=2))
         else:
-            install()
+            install(args.integration_input, args.integration_org, args.integration_origin, args.integration_method,args.integration_agent_target,
+                    args.integration_transition_plan,args.integration_transition_recover)
         return 0
     except Exception as error:
         code = str(error)

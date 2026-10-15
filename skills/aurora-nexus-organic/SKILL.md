@@ -15,6 +15,13 @@ Orgânico significa adaptar rotinas a evidências e resultados do serviço, com 
 
 ## Baseline funcional do aplicativo instalado
 
+Atualização factual de 14/10/2026: o original escolhido expressamente pelo titular
+é `Aurora Nexus HML-0.2.0-hml.20261001.app`. A inspeção autorizada confirmou bundle
+`br.com.auroranexus.desktop.hml`, versão `0.2.0`, build `1`. Esta identificação
+substitui a antiga pendência de identificar o original e a suposição de que ele
+teria outro nome. Não substitui assinatura, abertura/aceite nativo nem autoriza
+instalar outra cópia. As regras de preservação, backup e rollback continuam.
+
 Decisão de 28/09/2026: o Nexus original já instalado e funcionando no Mac, conforme informado pelo titular, é a referência obrigatória de produto e de evolução desktop. Ler AGENTS.md e desktop/README.md antes de qualquer instalador, atualização ou redesenho. Essa referência tem precedência sobre clientes HML e experiências paralelas; não confundir a versão registral com o aplicativo instalado nem presumir que o commit mais recente seja a versão funcional do Mac.
 
 Todas as melhorias devem atualizar o MESMO aplicativo, preservando nome real, ícone/miniatura, identidade de bundle, padrão de interface, destino de acesso validado, configurações e dados. Identificar tecnicamente o original antes de gerar uma candidata. Substituição controlada no mesmo destino, com backup verificável, validação nativa e rollback; sem cópias concorrentes com nomes ou ícones diferentes. Depois do aceite, a descendente funcional aprovada torna-se a próxima baseline, sem congelar a evolução nem apagar sua origem.
