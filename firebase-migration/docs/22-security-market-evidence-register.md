@@ -82,3 +82,8 @@ Bloqueado até envelope encryption homologada, KMS, estratégia CMEK comprovada,
 ### Escala enterprise
 
 Requer evidência recorrente e independente. ISO/IEC 27001, ISO/IEC 27701 e SOC 2 são decisões de posicionamento/procurement; não são declaradas como existentes antes da auditoria competente.
+
+
+## Reconciliacao de 15/10/2026 ? recursos existentes, recuperacao pendente
+
+A coleta autenticada de 13:23-13:25 (Brasilia) confirmou `aurora-hml-cmek` existente desde 03/10 com CMEK, PITR, delete protection, backup diario/14 dias, 11 backups READY e leitura sintetica. A indicacao historica de banco nao criado/PREPARED_NOT_APPLIED acima nao descreve a existencia dos recursos nessa data. O controle integral segue sem `HML_VERIFIED`: restore CMEK e key-failure recovery pendentes. O titular autorizou adocao produtiva em 15/10, sem promover evidencias ausentes. Ver `docs/AURORA_CMEK_PRODUCTION_AUTHORIZATION_20261015.md` na raiz do repositorio.

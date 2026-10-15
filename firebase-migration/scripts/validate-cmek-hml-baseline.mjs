@@ -6,12 +6,14 @@ const p = JSON.parse(fs.readFileSync(path, "utf8"));
 const fail = (m) => { console.error("CMEK_HML_BASELINE_INVALID:", m); process.exit(1); };
 
 if (p.id !== "AURORA-SEC-002-CMEK-HML") fail("id");
-if (p.status !== "PREPARED_NOT_APPLIED") fail("status must remain plan-only in repo");
+if (p.status !== "IMPLEMENTED_PENDING_RECOVERY_VERIFICATION") fail("status must not claim completed recovery");
 if (p.projectId !== "wmgj-hml-jfn-20260927") fail("project");
 if (p.databaseId !== "aurora-hml-cmek") fail("database");
 if (p.location !== "southamerica-east1") fail("location");
-if (p.firestoreCmekFeatureAccessRequired !== false) fail("CMEK runtime capability gate");
-if (p.firestoreCmekFeatureAccessState !== "RUNTIME_VERIFIED_BY_DATABASE_CREATE_OR_EXISTING_CMEK_DATABASE") fail("CMEK feature access state");
+if (p.firestoreCmekFeatureAccessRequired !== true) fail("CMEK runtime capability gate");
+if (p.firestoreCmekFeatureAccessState !== "EXTERNALLY_CONFIRMED") fail("CMEK feature access state");
+if (p.firestoreCmekOperationalState !== "PENDING_HML_VERIFICATION") fail("operational evidence remains pending");
+if (p.firestoreCmekFeatureAccessEvidence?.projectId !== p.projectId || p.firestoreCmekFeatureAccessEvidence?.messageId !== "1a0fd2f51798e6ef") fail("project-scoped external access evidence");
 if (p.sameLocationKmsRequired !== true) fail("KMS location binding");
 if (p.serviceAgentRole !== "roles/cloudkms.cryptoKeyEncrypterDecrypter") fail("service agent role");
 if (p.type !== "firestore-native") fail("type");

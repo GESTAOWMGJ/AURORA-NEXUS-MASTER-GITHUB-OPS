@@ -123,3 +123,8 @@ de controle, origem por campo, replay versionado, preservação de null e exclus
 de notas substituídas. Distingue saldo a receber de bruto e prazos a pagar de
 emissão/crédito. Não altera fechamentos. CI, publicação e ingestão real possuem
 gates independentes. Ver `AURORA_STRUCTURED_FINANCIAL_FEEDING.md`.
+
+
+## 15/10/2026 ? CMEK autorizado para producao; recuperacao candidata
+
+Autorizacao direta do titular registrada (comentario 6197336877, PR #99). Correcao reaproveitada em nova branch sobre a27d606, com grupo CLI KMS valido, backup por UID, restore concluido, reativacao obrigatoria e erros sem falso positivo. `IMPLEMENTED_PENDING_RECOVERY_VERIFICATION`: nao equivale a restore/deploy/cutover. Mantem `(default)` e CLINICAL_SENSITIVE inalterados. Documento: `docs/AURORA_CMEK_PRODUCTION_AUTHORIZATION_20261015.md`. SHA/testes/CI finais no PR.
