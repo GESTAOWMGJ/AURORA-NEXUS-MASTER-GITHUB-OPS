@@ -49,6 +49,7 @@ async function createSession(user) {
   clearSetup(); await signOut(auth); location.replace(entryPath);
 }
 function accessIssueMessage(error) {
+  if (error?.code === 'auth/network-request-failed') return 'Não foi possível confirmar o acesso. Confira a conexão e tente novamente.';
   const code = error?.message || error?.code || '';
   if (code === 'EMAIL_NOT_ALLOWED') return 'E-mail autenticado, mas fora da lista autorizada deste ambiente.';
   if (code === 'MEMBERSHIP_NOT_PROVISIONED') return 'Conta autenticada, mas ainda sem vínculo operacional provisionado na organização.';
@@ -124,6 +125,12 @@ element('mfa-form').addEventListener('submit', async event => {
     element('mfa-code').value = ''; await completeLogin(credential.user);
   } catch (error) { element('mfa-status').textContent = accessIssueMessage(error); }
   finally { button.disabled = false; }
+});
+element('mfa-code').addEventListener('keydown', event => {
+  if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  if (event.repeat || element('mfa-submit').disabled) return;
+  element('mfa-form').requestSubmit();
 });
 element('onboarding-submit')?.addEventListener('click', async () => {
   const button = element('onboarding-submit'); button.disabled = true;

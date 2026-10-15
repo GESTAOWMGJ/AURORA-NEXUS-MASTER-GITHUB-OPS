@@ -130,6 +130,8 @@ test("served second-factor controls share the submit form and retain separate re
   assert.equal(document.getElementById("mfa-submit")!.getAttribute("type"), "submit");
   assert.equal(document.getElementById("mfa-recovery-help")!.getAttribute("type"), "button");
   const code = document.getElementById("mfa-code")!;
+  assert.equal(code.getAttribute("required"), "");
+  assert.equal(code.getAttribute("pattern"), "[0-9]{6,8}");
   for (const id of code.getAttribute("aria-describedby")!.split(/\s+/)) assert.ok(document.getElementById(id));
   assert.equal(document.getElementById("mfa-panel")!.getAttribute("hidden"), "");
   assert.match(response.body, /<meta http-equiv="Content-Security-Policy" content="form-action 'none'">/);

@@ -160,7 +160,7 @@ function loginPage(message = "Use o e-mail e a senha da sua conta para continuar
       <label for="mfa-factor">Autenticador cadastrado</label>
       <select id="mfa-factor"></select>
       <label for="mfa-code">Código temporário</label>
-      <input id="mfa-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,8}" maxlength="8" aria-describedby="mfa-help mfa-status">
+      <input id="mfa-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,8}" maxlength="8" required aria-describedby="mfa-help mfa-status">
       <button id="mfa-submit" type="submit">Confirmar segundo fator</button>
       <button id="mfa-recovery-help" class="secondary" type="button">Perdi meu autenticador</button>
       </form>

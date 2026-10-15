@@ -9,12 +9,18 @@ const script=loginClient('synthetic-company');
 class Element {
   value='';textContent='';hidden=false;disabled=false;checked=false;children:Element[]=[]; handlers=new Map<string,any>();
   parentElement:Element|null=null; cssHidden=false; ownerDocument?:{activeElement:Element|null};
+  nativeValid=true; requestSubmitCalls=0; submitTasks:Promise<unknown>[]=[]; nativeSubmitPrevented:boolean[]=[];
   addEventListener(event:string,handler:any){this.handlers.set(event,handler);}
   replaceChildren(){this.children=[];}
   appendChild(child:Element){child.parentElement=this;this.children.push(child);}
   closest(selector:string):Element|null{for(let node:Element|null=this;node;node=node.parentElement)if(selector==='[hidden]'&&node.hidden)return node;return null;}
   getClientRects():object[]{return this.hidden||this.cssHidden||this.parentElement?.getClientRects().length===0?[]:[{}];}
   focus(){if(!this.disabled&&this.getClientRects().length&&this.ownerDocument)this.ownerDocument.activeElement=this;}
+  requestSubmit(){
+    this.requestSubmitCalls++;if(!this.nativeValid)return;
+    let prevented=false;const task=this.handlers.get('submit')({preventDefault(){prevented=true;}});
+    this.nativeSubmitPrevented.push(prevented);this.submitTasks.push(Promise.resolve(task));
+  }
 }
 async function fixture(managed=true, sessionLoginResponse:any={ok:true,status:204,json:async()=>({})}) {
   const document={activeElement:null as Element|null,body:new Element(),getElementById:(id:string)=>el(id),createElement:()=>new Element()};
@@ -41,7 +47,7 @@ async function fixture(managed=true, sessionLoginResponse:any={ok:true,status:20
   const withoutImports=script.replace(/^import[\s\S]*?from 'https:\/\/[^']+';\n/gm,'');
   assert.ok(executable); const context=createContext(sandbox);
   await new Script('(async()=>{'+withoutImports+'})()').runInContext(context);
-  return {el,document,calls,redirects,user,factors,winHandlers,claims:(value:any)=>{claims=value;},sessionResponse:(value:any)=>{currentSessionResponses=[value];},redemption:(value:any)=>{redemption=value;},signIn:(fn:any)=>{signIn=fn;},resolveMfa:(fn:any)=>{resolveMfa=fn;},async click(id:string){el(id).focus();await el(id).handlers.get('click')();},async submit(){await el('login-form').handlers.get('submit')({preventDefault(){}});},async submitMfa(){let prevented=false;await el('mfa-form').handlers.get('submit')({preventDefault(){prevented=true;}});assert.equal(prevented,true);}};
+  return {el,document,calls,redirects,user,factors,winHandlers,claims:(value:any)=>{claims=value;},sessionResponse:(value:any)=>{currentSessionResponses=[value];},redemption:(value:any)=>{redemption=value;},signIn:(fn:any)=>{signIn=fn;},resolveMfa:(fn:any)=>{resolveMfa=fn;},async click(id:string){el(id).focus();await el(id).handlers.get('click')();},async submit(){await el('login-form').handlers.get('submit')({preventDefault(){}});},async submitMfa(){let prevented=false;await el('mfa-form').handlers.get('submit')({preventDefault(){prevented=true;}});assert.equal(prevented,true);},async keyMfa(options:Record<string,unknown>={}){const form=el('mfa-form'),before=form.submitTasks.length;let prevented=false;el('mfa-code').handlers.get('keydown')({key:'Enter',isComposing:false,repeat:false,...options,preventDefault(){prevented=true;}});await Promise.all(form.submitTasks.slice(before));return prevented;}};
 }
 
 test('managed first access does not issue app session or send verification before user action',async()=>{
@@ -104,6 +110,72 @@ test('MFA form submission preserves invalid-code retry and accepts only one conc
   resolve({user:f.user});await first;
   assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,1);
   assert.equal(f.el('mfa-code').value,'');assert.deepEqual(f.redirects,['/portal']);
+});
+
+test('Enter in the focused MFA code requests the same native form and opens one private session',async()=>{
+  const f=await fixture();f.user.emailVerified=true;
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();
+  assert.equal(f.document.activeElement,f.el('mfa-code'));f.el('mfa-code').value='123456';
+  assert.equal(await f.keyMfa(),true);
+  assert.equal(f.el('mfa-form').requestSubmitCalls,1);assert.deepEqual(f.el('mfa-form').nativeSubmitPrevented,[true]);
+  assert.equal(f.calls.filter(c=>c.name==='resolveMfa').length,1);
+  assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,1);
+  assert.equal(f.el('mfa-code').value,'');assert.deepEqual(f.redirects,['/portal']);
+});
+
+test('MFA Enter leaves composing and unrelated keys alone before accepting a completed code',async()=>{
+  const f=await fixture();f.user.emailVerified=true;
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();f.el('mfa-code').value='123456';
+  for(const event of [{key:'Tab'},{isComposing:true},{keyCode:229}])assert.equal(await f.keyMfa(event),false);
+  assert.equal(f.el('mfa-form').requestSubmitCalls,0);assert.equal(f.calls.some(c=>c.name==='resolveMfa'),false);
+  assert.equal(f.calls.some(c=>c.url==='/__sessionLogin'),false);
+  assert.equal(await f.keyMfa(),true);assert.equal(f.calls.filter(c=>c.name==='resolveMfa').length,1);
+});
+
+test('held Enter suppresses implicit repeats without starting MFA authentication',async()=>{
+  const f=await fixture();f.user.emailVerified=true;
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();f.el('mfa-code').value='123456';
+  assert.equal(await f.keyMfa({repeat:true}),true);assert.equal(await f.keyMfa({repeat:true}),true);
+  assert.equal(f.el('mfa-form').requestSubmitCalls,0);assert.equal(f.calls.some(c=>c.name==='resolveMfa'),false);
+  assert.equal(f.el('mfa-submit').disabled,false);assert.equal(f.el('mfa-code').value,'123456');
+  await f.keyMfa();assert.equal(f.el('mfa-form').requestSubmitCalls,1);
+  assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,1);
+});
+
+test('Enter preserves the native validity gate instead of invoking the MFA resolver directly',async()=>{
+  const f=await fixture();f.user.emailVerified=true;
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();
+  f.el('mfa-form').nativeValid=false;assert.equal(await f.keyMfa(),true);
+  assert.equal(f.el('mfa-form').requestSubmitCalls,1);assert.equal(f.el('mfa-form').submitTasks.length,0);
+  assert.equal(f.calls.some(c=>c.name==='resolveMfa'),false);assert.equal(f.calls.some(c=>c.url==='/__sessionLogin'),false);
+  f.el('mfa-code').value='123456';f.el('mfa-form').nativeValid=true;await f.keyMfa();
+  assert.equal(f.el('mfa-form').requestSubmitCalls,2);assert.equal(f.calls.filter(c=>c.name==='resolveMfa').length,1);
+});
+
+test('pending Enter confirmation blocks keyboard repeats and concurrent submits then permits rejected-code retry',async()=>{
+  const f=await fixture();f.user.emailVerified=true;
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();f.el('mfa-code').value='123456';
+  let reject!:(error:Error)=>void;f.resolveMfa(()=>new Promise((_resolve,rejected)=>{reject=rejected;}));
+  const first=f.keyMfa();assert.equal(f.el('mfa-submit').disabled,true);
+  assert.equal(await f.keyMfa({repeat:true}),true);assert.equal(await f.keyMfa(),true);await f.submitMfa();
+  assert.equal(f.el('mfa-form').requestSubmitCalls,1);assert.equal(f.calls.filter(c=>c.name==='resolveMfa').length,1);
+  reject(Error('synthetic-invalid-code'));await first;
+  assert.equal(f.el('mfa-submit').disabled,false);assert.match(f.el('mfa-status').textContent,/Segundo fator inválido ou expirado/);
+  assert.equal(f.calls.some(c=>c.url==='/__sessionLogin'),false);assert.equal(f.el('mfa-code').value,'123456');
+  f.resolveMfa(async()=>({user:f.user}));await f.keyMfa();
+  assert.equal(f.el('mfa-form').requestSubmitCalls,2);assert.equal(f.calls.filter(c=>c.name==='resolveMfa').length,2);
+  assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,1);assert.deepEqual(f.redirects,['/portal']);
+});
+
+test('MFA network failure preserves retry without claiming an invalid code or exposing provider details',async()=>{
+  const f=await fixture();f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();
+  f.el('mfa-code').value='123456';
+  f.resolveMfa(async()=>{throw Object.assign(Error('sensitive-provider-network-detail'),{code:'auth/network-request-failed'});});
+  await f.keyMfa();
+  assert.match(f.el('mfa-status').textContent,/Confira a conexão/);
+  assert.doesNotMatch(f.el('mfa-status').textContent,/inválido|expirado|sensitive-provider/);
+  assert.equal(f.el('mfa-submit').disabled,false);assert.equal(f.el('mfa-code').value,'123456');
+  assert.equal(f.calls.some(c=>c.url==='/__sessionLogin'),false);assert.equal(f.redirects.length,0);
 });
 
 test('late MFA response does not take focus away from an explicitly opened recovery flow',async()=>{

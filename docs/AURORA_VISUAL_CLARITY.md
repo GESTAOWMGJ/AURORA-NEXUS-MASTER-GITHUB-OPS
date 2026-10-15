@@ -76,7 +76,7 @@ registrada. Conferir diferenças em PROPOSED mostra caminhos e hashes sem
 registrar uma transição de estado; preparo e publicação exigem o recibo de
 verificação vinculado à proposta.
 
-Após essas correções, a suíte combinada registrou 161 testes: 160 passaram,
+Após essas correções, a suíte combinada registrou 167 testes: 166 passaram,
 nenhum falhou e um foi pulado no Windows por indisponibilidade de symlink.
 A compilação passou. O log local está preservado na entrega; CI deve ser
 conferida no SHA final do PR, separadamente.
@@ -86,9 +86,11 @@ acesso, a tela de segundo fator sem overflow em largura de 1225 px e o foco em
 `mfa-code`. Acesso e Master também foram conferidos em 320 px, sem overflow horizontal;
 o Master foi renderizado em 1440 × 1000. O fallback sem módulo JavaScript foi
 observado como descrito acima. A confirmação fictícia pelo botão acionou o
-resolver uma vez e mostrou o erro esperado da simulação. O envio por Enter
-está coberto nos testes do handler, mas o smoke nativo de teclado não foi
-confirmado pela automação do navegador. Essas observações não comprovam
+resolver uma vez. O envio por Enter foi confirmado com uma única chamada
+fictícia; o código vazio foi bloqueado pela validação nativa sem nova chamada.
+Enter usa o mesmo submit, ignorando composição de texto e bloqueando repetição
+e concorrência. Falha de rede tem mensagem própria sem alegar código inválido.
+Essas observações não comprovam
 autenticação real, instalação, publicação ou uso de dados operacionais. O
 PR #265 permanece draft; CI, smoke final e promoção têm recibos próprios.
 

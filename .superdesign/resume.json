@@ -21,7 +21,7 @@
         ".superdesign/context/access-art-deco.html"
       ],
       "fingerprints": {
-        ".superdesign/design-system.md": "10ecf0ed54ec95f8849b7f8a0aff6c0749275f9d1d483a6b80cf77d43bf26256",
+        ".superdesign/design-system.md": "828f129c9a57e3b27b029efd5e333b3e0b6b1b153ca0af34a0a73b634fc35201",
         ".superdesign/context/access-art-deco.html": "017d30f784406e322fddf52d5241a65a155da6e8f902c6508749a80db46c8785"
       },
       "drafts": {
@@ -32,7 +32,7 @@
         }
       },
       "promotionState": "DESIGN_CANDIDATE_NOT_OPERATIONAL_RELEASE",
-      "updatedAt": "2026-10-15T09:39:19.317355+00:00"
+      "updatedAt": "2026-10-15T09:49:43.976260+00:00"
     },
     "/portal#access-warm": {
       "targetKind": "existing-ui",
@@ -54,7 +54,7 @@
         ".superdesign/context/access-warm.html"
       ],
       "fingerprints": {
-        ".superdesign/design-system.md": "10ecf0ed54ec95f8849b7f8a0aff6c0749275f9d1d483a6b80cf77d43bf26256",
+        ".superdesign/design-system.md": "828f129c9a57e3b27b029efd5e333b3e0b6b1b153ca0af34a0a73b634fc35201",
         ".superdesign/context/access-warm.html": "892a8da4847f0e8546a0abc72cb9268b699860d929e8160339c985c43ee454be"
       },
       "drafts": {
@@ -65,7 +65,7 @@
         }
       },
       "promotionState": "DESIGN_CANDIDATE_NOT_OPERATIONAL_RELEASE",
-      "updatedAt": "2026-10-15T09:39:19.321262+00:00"
+      "updatedAt": "2026-10-15T09:49:43.980797+00:00"
     },
     "/portal#access-geometric": {
       "targetKind": "existing-ui",
@@ -87,7 +87,7 @@
         ".superdesign/context/access-geometric.html"
       ],
       "fingerprints": {
-        ".superdesign/design-system.md": "10ecf0ed54ec95f8849b7f8a0aff6c0749275f9d1d483a6b80cf77d43bf26256",
+        ".superdesign/design-system.md": "828f129c9a57e3b27b029efd5e333b3e0b6b1b153ca0af34a0a73b634fc35201",
         ".superdesign/context/access-geometric.html": "840490ce33acd5731053e87a28d5a20224b10519937428dfb75f629d7a729ec4"
       },
       "drafts": {
@@ -98,7 +98,7 @@
         }
       },
       "promotionState": "DESIGN_CANDIDATE_NOT_OPERATIONAL_RELEASE",
-      "updatedAt": "2026-10-15T09:39:19.325243+00:00"
+      "updatedAt": "2026-10-15T09:49:43.985136+00:00"
     },
     "/portal#overview": {
       "targetKind": "existing-ui",
@@ -121,7 +121,7 @@
         "firebase-migration/functions/src/auroraFrontend.ts:40:62"
       ],
       "fingerprints": {
-        ".superdesign/design-system.md": "10ecf0ed54ec95f8849b7f8a0aff6c0749275f9d1d483a6b80cf77d43bf26256",
+        ".superdesign/design-system.md": "828f129c9a57e3b27b029efd5e333b3e0b6b1b153ca0af34a0a73b634fc35201",
         "firebase-migration/functions/src/auroraDesignSystem.ts": "87e1d1dd848f47b15f1366e514110ed4c684b6f46c3d895fced95c36ec338c12",
         "firebase-migration/functions/src/auroraFrontend.ts": "49f19a60cdda67b788ecd024ac64a5aa32147b75d5fb08d6a8e6e394b9f06d74"
       },
@@ -133,7 +133,7 @@
         }
       },
       "promotionState": "DESIGN_CANDIDATE_NOT_OPERATIONAL_RELEASE",
-      "updatedAt": "2026-10-15T09:39:19.331483+00:00",
+      "updatedAt": "2026-10-15T09:49:43.991600+00:00",
       "baselineDraftId": "f78aec2c-60bb-4c42-a6bd-13c9fbbac9f6",
       "components": [
         {
