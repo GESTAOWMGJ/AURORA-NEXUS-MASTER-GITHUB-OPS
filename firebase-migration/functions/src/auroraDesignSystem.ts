@@ -64,6 +64,8 @@ main{padding:34px 40px 50px;max-width:1600px;width:100%;min-width:0}
 .card{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:22px;min-width:0;box-shadow:var(--shadow)}
 .card .label,.label{color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.03em}
 .value{font-size:clamp(22px,2.3vw,32px);line-height:1.2;font-weight:700;letter-spacing:-.03em;margin:12px 0 8px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.grid>.card{container-type:inline-size}
+.grid>.card>.value{font-size:clamp(18px,12cqi,32px)}
 .value.ok{color:var(--ok)}
 .value.warn{color:var(--warn)}
 .value.danger{color:var(--danger)}
@@ -116,12 +118,14 @@ main{padding:34px 40px 50px;max-width:1600px;width:100%;min-width:0}
 .implant-step span{display:block;margin-top:7px;font-size:13px;overflow-wrap:anywhere}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
 
-.financial-focus{display:grid;grid-template-columns:1.15fr 1fr;gap:28px;position:relative;overflow:hidden;padding:32px 36px;border-radius:18px;background:var(--ink);color:var(--bg);border:1px solid #c59a4560}
+.financial-focus{display:grid;grid-template-columns:1.15fr 1fr;grid-template-areas:'heading amount' 'explanation amount';gap:12px 28px;position:relative;overflow:hidden;padding:32px 36px;border-radius:18px;background:var(--ink);color:var(--bg);border:1px solid #c59a4560}
+.focus-heading{grid-area:heading}
+.financial-focus .focus-explanation{grid-area:explanation;margin:0}
 .financial-focus:after{content:'';position:absolute;width:480px;height:480px;border:1px solid #c59a4545;border-radius:50%;right:-240px;top:-250px;pointer-events:none}
 .financial-focus .eyebrow{color:#d8b775}
-.financial-focus h2{font-family:'Source Serif 4',Georgia,serif;font-size:clamp(27px,2.7vw,39px);font-weight:400;line-height:1.15;letter-spacing:-.02em;margin:12px 0 18px;max-width:450px}
+.financial-focus h2{font-family:'Source Serif 4',Georgia,serif;font-size:clamp(27px,2.7vw,39px);font-weight:400;line-height:1.15;letter-spacing:-.02em;margin:12px 0 0;max-width:450px}
 .financial-focus p{font-size:13px;line-height:1.6;color:#d3e0dc;max-width:530px;margin:12px 0 0}
-.focus-amount{align-self:center;padding:14px 0 14px 32px;border-left:1px solid #ffffff25;position:relative;z-index:1}
+.focus-amount{grid-area:amount;align-self:center;padding:14px 0 14px 32px;border-left:1px solid #ffffff25;position:relative;z-index:1}
 .focus-amount .label{color:#d3e0dc;letter-spacing:.03em}
 .focus-value{font-size:clamp(32px,3.7vw,54px);font-weight:700;letter-spacing:-.04em;line-height:1.15;color:#f3d399;margin:14px 0 10px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .financial-focus.danger .focus-value{color:#ffb8a3}
@@ -192,7 +196,7 @@ main{padding:25px 20px 36px}
 .headline h1{font-size:34px}
 .headline p{font-size:14px}
 .head-actions{width:100%;justify-content:space-between}
-.financial-focus{grid-template-columns:1fr;padding:26px;gap:22px}
+.financial-focus{grid-template-columns:1fr;grid-template-areas:'heading' 'amount' 'explanation';padding:26px;gap:22px}
 .financial-focus h2{font-size:33px}
 .focus-amount{border-left:0;border-top:1px solid #ffffff25;padding:22px 0 0}
 .focus-value{font-size:42px}
