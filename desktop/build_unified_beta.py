@@ -11,6 +11,7 @@ import stat
 import tempfile
 import zipfile
 import json
+import subprocess
 
 from verify_unified_beta import (COMPONENTS, MAX_FILE, MAX_TOTAL, SCHEMA, VerificationError,
                                 canonical, demand, digest, linked, parse_json, read_regular,
@@ -59,13 +60,13 @@ def zip_files(data):
 
 def archive_bytes(files):
     stream = io.BytesIO()
-    with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+    with zipfile.ZipFile(stream, "w", zipfile.ZIP_STORED) as archive:
         for name, data in sorted(files.items()):
             safe_name(name)
             entry = zipfile.ZipInfo(name, (2026, 1, 1, 0, 0, 0))
             entry.create_system = 3
             entry.external_attr = (stat.S_IFREG | 0o644) << 16
-            entry.compress_type = zipfile.ZIP_DEFLATED
+            entry.compress_type = zipfile.ZIP_STORED
             archive.writestr(entry, data)
     return stream.getvalue()
 
@@ -222,7 +223,7 @@ def build_candidate(functions, source):
     for target in ("web", "ios", "android"):
         files["access/" + target + "/index.html"] = access_page(target)
     files["README.md"] = README.encode("utf-8")
-    files["VERIFY.py"] = read_regular(Path(__file__).with_name("verify_unified_beta.py"))
+    files["VERIFY.py"] = read_regular(Path(__file__).with_name("verify_unified_beta.py")).replace(b"\r\n", b"\n")
     identity = {"releaseId": "aurora-" + product_version + "-" + source, "productVersion": product_version,
                 "sourceSha": source, "certificateSha256": None}
     index = {"schemaVersion": CANDIDATE_SCHEMA, "status": "PREPARADO", "complete": False,
@@ -235,6 +236,9 @@ def build_candidate(functions, source):
 
 def verify_candidate(data, source, manifests_directory=None):
     files = zip_files(data)
+    demand(len(data) <= 16 * 1024 * 1024 and len(files) <= 2048
+           and all(len(content) <= 8 * 1024 * 1024 for content in files.values())
+           and data == archive_bytes(files), "NONCANONICAL_CANDIDATE_ZIP")
     demand("candidate-manifest.json" in files, "CANDIDATE_MANIFEST_REQUIRED")
     index = parse_json(files["candidate-manifest.json"])
     demand(index.get("schemaVersion") == CANDIDATE_SCHEMA and index.get("sourceSha") == source
@@ -270,47 +274,34 @@ def verify_candidate(data, source, manifests_directory=None):
            and index.get("installationAcceptancePolicy") == installation_policy(), "CANDIDATE_RELEASE_ID_CONFLICT")
     for target in ("web", "ios", "android"):
         demand(files.get("access/" + target + "/index.html") == access_page(target), "ACCESS_ENTRY_REQUIRED")
-    demand(files.get("VERIFY.py") == read_regular(Path(__file__).with_name("verify_unified_beta.py"))
+    demand(files.get("VERIFY.py") == read_regular(Path(__file__).with_name("verify_unified_beta.py")).replace(b"\r\n", b"\n")
            and files.get("README.md") == README.encode("utf-8"), "REVIEWED_VERIFIER_REQUIRED")
     return files, index
 
 
 def finalize(candidate, public_envelope, public_trust, source, trusted_public_key_sha256):
-    files, index = verify_candidate(candidate, source)
-    signed = parse_json(public_envelope)
-    demand(isinstance(signed, dict) and set(signed) == {"certificate", "signature"}, "PUBLIC_ENVELOPE_REQUIRED")
-    certificate = signed["certificate"]
-    demand(certificate.get("sourceSha") == source and certificate.get("schemaVersion") == 2
-           and certificate.get("components") == index["components"]
-           and certificate.get("productVersion") == index["productVersion"], "SIGNED_CANDIDATE_CONFLICT")
-    cert_hash = digest(signing_bytes(certificate))
-    files["trust/certificate.json"] = json_bytes(certificate)
-    files["trust/public-trust.json"] = public_trust
-    files["trust/release-envelope-signed.json"] = public_envelope
-    identity = {**index["identity"], "certificateSha256": cert_hash}
-    delivery = {"schemaVersion": SCHEMA, "status": "PREPARADO", "complete": False, **identity,
-                "identity": identity, "components": index["components"], "adoption": index["adoption"],
-                "installationAcceptancePolicy": index["installationAcceptancePolicy"],
-                "files": records(files), "candidateSha256": digest(candidate),
-                "allDeclaredPayloadsPresent": True, "publicationAvailability": "PENDING",
-                "missingTargets": index["missingTargets"],
-                "remainingGates": ["FINAL_ARTIFACT_AVAILABILITY", "WINDOWS_EDITOR_SIGNATURE_AND_NATIVE_ACCEPTANCE",
-                                   "MAC_APPLE_SIGNATURE_AND_NATIVE_ACCEPTANCE", "IOS_NATIVE_BUILD_SIGNING_AND_DEVICE_ACCEPTANCE",
-                                   "ANDROID_PWA_DEVICE_ACCEPTANCE"]}
-    files["release-envelope.json"] = json_bytes(delivery)
-    files["SHA256SUMS"] = "".join(digest(data) + "  " + name + "\n" for name, data in sorted(files.items())).encode("utf-8")
-    # Materialize only this process's new bounded temporary directory. No payload execution.
-    with tempfile.TemporaryDirectory(prefix="aurora-unified-verify-") as temporary:
+    # Compatibility entry point only: official bytes come from the SAME compiled
+    # Node finalizer used by AuthGate. No second Python serialization/ZIP variant.
+    verify_candidate(candidate, source)
+    repo = Path(__file__).resolve().parents[1]
+    with tempfile.TemporaryDirectory(prefix="aurora-node-finalize-") as temporary:
         root = Path(temporary)
-        for name, data in files.items():
-            path = root.joinpath(*safe_name(name))
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(data)
-        result = verify(root, trusted_public_key_sha256)
-        demand(result["integrityVerified"] and result["signatureVerified"]
-               and result["trustedPublisherVerified"] and result["allDeclaredPayloadsPresent"],
-               "FINAL_DELIVERY_VERIFICATION_REQUIRED")
-    return archive_bytes(files), delivery
+        for name, data in (("candidate.zip", candidate), ("envelope.json", public_envelope),
+                           ("trust.json", public_trust)):
+            (root / name).write_bytes(data)
+        try:
+            subprocess.run(["node", str(repo / "firebase-migration/scripts/finalize-unified-beta.mjs"),
+                            "--candidate", str(root / "candidate.zip"),
+                            "--public-envelope", str(root / "envelope.json"),
+                            "--public-trust", str(root / "trust.json"), "--source-sha", source,
+                            "--expected-candidate-sha256", digest(candidate),
+                            "--trusted-public-key-sha256", trusted_public_key_sha256,
+                            "--output", str(root / "delivery.zip")], check=True, capture_output=True,
+                           timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            demand(False, "FINAL_DELIVERY_VERIFICATION_REQUIRED")
+        result = read_regular(root / "delivery.zip", 16 * 1024 * 1024)
+        return result, parse_json(zip_files(result)["release-envelope.json"])
 
 
 def write_exclusive(path, data):

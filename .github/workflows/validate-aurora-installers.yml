@@ -12,6 +12,7 @@ on:
       - 'firebase-migration/scripts/build-release-manifests.mjs'
       - 'firebase-migration/scripts/release-component-packages.mjs'
       - 'firebase-migration/scripts/export-public-unified-release*'
+      - 'firebase-migration/scripts/finalize-unified-beta.mjs'
       - 'docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md'
       - 'firebase-migration/functions/test/aurora-downloads.test.ts'
       - '.github/workflows/validate-aurora-installers.yml'
@@ -160,6 +161,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install -r aurora-coletor/requirements-release-verification.txt
+          npm run build --prefix firebase-migration/functions
           python3 -m unittest discover -s aurora-coletor/tests -p test_published_release.py -v
           python3 -m unittest discover -s desktop -p test_unified_beta.py -v
       - name: Retain local IA Master candidate with exact source manifest
@@ -181,7 +183,7 @@ jobs:
       - name: Private download authorization and integrity tests
         run: |
           set -euo pipefail
-          node --import ./firebase-migration/functions/node_modules/tsx/dist/loader.mjs --test firebase-migration/functions/test/aurora-downloads.test.ts 2>&1 | tee "${RUNNER_TEMP}/aurora-hml-installers/download-tests.txt"
+          node --import ./firebase-migration/functions/node_modules/tsx/dist/loader.mjs --test firebase-migration/functions/test/aurora-downloads.test.ts firebase-migration/functions/test/aurora-unified-download.test.ts 2>&1 | tee "${RUNNER_TEMP}/aurora-hml-installers/download-tests.txt"
       - name: Verify source-bound server, web and satellite release manifests
         run: |
           set -euo pipefail

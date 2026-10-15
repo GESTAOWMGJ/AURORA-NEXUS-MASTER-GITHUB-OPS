@@ -15,6 +15,7 @@ import { auroraProtectedShell } from "./auroraFrontend.js";
 import { readRuntimeActiveRelease } from "./auroraActiveReleaseRuntime.js";
 import { auroraAuth } from "./firebase.js";
 import { servePrivateDownloads } from "./auroraDownloads.js";
+import { makeRuntimeUnifiedBetaReader } from './auroraUnifiedBetaDownload.js';
 import { setupPage } from "./auroraSetup.js";
 import { loginClient } from "./auroraLoginClient.js";
 import { passwordRecoveryMarkup } from "./auroraPasswordRecovery.js";
@@ -28,6 +29,8 @@ const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const SESSION_TTL_SECONDS = SESSION_TTL_MS / 1000;
 const CANONICAL_PORTAL_ORIGIN = "https://auroranexus.com.br";
 const CANONICAL_PORTAL_URL = `${CANONICAL_PORTAL_ORIGIN}${CANONICAL_PORTAL_PATH}`;
+const unifiedBetaReader = makeRuntimeUnifiedBetaReader();
+void unifiedBetaReader.catch(()=>{}); // Missing packaged bytes stay unavailable, not an unhandled rejection.
 const TECHNICAL_FIREBASE_HOSTS = new Set(["wmgj-hml-jfn-20260927.web.app", "wmgj-hml-jfn-20260927.firebaseapp.com"]);
 
 function requestedHost(req: { get(name: string): string | undefined }): string {
@@ -263,7 +266,13 @@ export const auroraNexusAuthGate = onRequest(
       return;
     }
     if (isDownload) {
-      await servePrivateDownloads(req, res, member);
+      await servePrivateDownloads(req, res, member, undefined, {
+        read: async()=> (await unifiedBetaReader)(),
+        reauthorize: async()=>{
+          const current=await verifySession(req.get('cookie'),AURORA_NEXUS_ALLOWED_EMAILS.value());
+          return current?resolveMember(current):null;
+        }
+      });
       return;
     }
     if (["/", "/login"].includes(req.path)) {

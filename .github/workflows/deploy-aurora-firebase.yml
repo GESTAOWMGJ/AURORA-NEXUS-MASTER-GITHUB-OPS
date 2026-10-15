@@ -995,6 +995,9 @@ jobs:
             --candidate firebase-migration/functions/runtime-release/unified-beta-candidate.zip \
             --source-sha "$GITHUB_SHA" \
             --manifests-directory firebase-migration/functions/runtime-release)"
+          node firebase-migration/scripts/finalize-unified-beta.mjs --verify-candidate \
+            --candidate firebase-migration/functions/runtime-release/unified-beta-candidate.zip \
+            --source-sha "$GITHUB_SHA"
           printf '%s\n' "$verification"
           printf 'sha256=%s\n' "$(jq -r '.archiveSha256' <<<"$verification")" >> "$GITHUB_OUTPUT"
           fingerprint="$(node -e 'const {createPublicKey,createHash}=require("node:crypto"); const key=createPublicKey(process.env.AURORA_ACTIVE_RELEASE_PUBLIC_KEY); if(key.asymmetricKeyType!=="ed25519")throw Error("ED25519_PUBLIC_KEY_REQUIRED"); process.stdout.write(createHash("sha256").update(key.export({format:"der",type:"spki"})).digest("hex"));')"
@@ -1034,7 +1037,7 @@ jobs:
         run: |
           set -euo pipefail
           node firebase-migration/scripts/export-public-unified-release.mjs "$RUNNER_TEMP/unified-release-public"
-          python3 desktop/build_unified_beta.py finalize \
+          node firebase-migration/scripts/finalize-unified-beta.mjs \
             --candidate firebase-migration/functions/runtime-release/unified-beta-candidate.zip \
             --public-envelope "$RUNNER_TEMP/unified-release-public/release-envelope-signed.json" \
             --public-trust "$RUNNER_TEMP/unified-release-public/public-trust.json" \
