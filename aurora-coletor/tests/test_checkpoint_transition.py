@@ -84,7 +84,7 @@ class CheckpointTransitionTests(unittest.TestCase):
         win_files = {name: ('# synthetic signed fixture ' + name + '\n').encode() for name in deployment.ASSETS}
         for name, data in win_files.items():
             (self.package / name).write_bytes(data)
-        self.win_manifest = {'component': 'AURORA_WINDOWS_INTEGRATION', 'version': '1.0.2', 'sourceSha': NEXT,
+        self.win_manifest = {'component': 'AURORA_WINDOWS_INTEGRATION', 'version': '1.0.3', 'sourceSha': NEXT,
                              'files': {name: release.digest(data) for name, data in win_files.items()}}
         self.manifest_path = self.base / 'windowsIntegration-manifest.json'
         self.manifest_path.write_bytes(deployment._transition_encoded(self.win_manifest))
@@ -98,7 +98,7 @@ class CheckpointTransitionTests(unittest.TestCase):
         (self.ia_package / 'manifest.json').write_bytes(ia_bytes)
         self.env = envelope(self.key, {'windowsIntegration': release.digest(self.manifest_path.read_bytes()),
                                        'iaMaster': release.digest(ia_bytes)})
-        self.env['certificate']['components']['windowsIntegration']['version'] = '1.0.2'
+        self.env['certificate']['components']['windowsIntegration']['version'] = '1.0.3'
         self.resign(self.env)
         self.cert_sha = release.digest(release.signing_bytes(self.env['certificate']))
         metadata = {'version': '1.1.0', 'sourceRevision': NEXT, 'organization': ORG,
@@ -220,7 +220,7 @@ class CheckpointTransitionTests(unittest.TestCase):
         self.assertEqual(commit['proofSha256'], release.digest((directory / 'proof.json').read_bytes()))
         self.assertEqual(result['checkpointTransition']['commitSha256'], release.digest((directory / 'commit.json').read_bytes()))
         saved = json.loads(self.active.read_bytes())
-        self.assertEqual(saved['componentVersion'], '1.0.2')
+        self.assertEqual(saved['componentVersion'], '1.0.3')
         self.assertEqual(saved['receipt']['status'], 'DUPLICATE')
         self.assertTrue(saved['installationAcceptance']['eligible'])
         self.assertNotIn('orgId', saved['installationAcceptance'])
@@ -290,27 +290,32 @@ class CheckpointTransitionTests(unittest.TestCase):
         previous['componentVersion'] = version
         self.set_previous(previous)
         self.assertEqual(self.execute()['status'], 'CHECKPOINT_TRANSITION_COMMITTED')
-        self.assertEqual(json.loads(self.active.read_bytes())['componentVersion'], '1.0.2')
+        self.assertEqual(json.loads(self.active.read_bytes())['componentVersion'], '1.0.3')
         self.assertEqual((self.directory() / 'checkpoint.previous').read_bytes(), self.previous)
 
-    def test_historical_100_checkpoint_transitions_to_component_102(self):
+    def test_historical_100_checkpoint_transitions_to_component_103(self):
         self.assert_historical_checkpoint_transition('1.0.0')
 
-    def test_historical_101_checkpoint_transitions_to_component_102(self):
+    def test_historical_101_checkpoint_transitions_to_component_103(self):
         self.assert_historical_checkpoint_transition('1.0.1')
 
-    def test_current_transition_rejects_valid_signed_component_101_before_posts_or_writes(self):
-        self.win_manifest['version'] = '1.0.1'
-        self.manifest_path.write_bytes(deployment._transition_encoded(self.win_manifest))
-        pin = self.env['certificate']['components']['windowsIntegration']
-        pin.update(version='1.0.1', manifestSha256=release.digest(self.manifest_path.read_bytes()))
-        self.resign(self.env)
-        self.plan['expectedCertificateSha256'] = release.digest(release.signing_bytes(self.env['certificate']))
-        with self.assertRaisesRegex(sync.SyncError, 'CHECKPOINT_TRANSITION_COMPONENT_VERSION_CONFLICT'):
-            self.execute()
-        self.assertEqual(self.transport.posts, [])
-        self.assertFalse((self.state / 'checkpoint-transitions').exists())
-        self.assert_unpublished()
+    def test_historical_102_checkpoint_transitions_to_component_103(self):
+        self.assert_historical_checkpoint_transition('1.0.2')
+
+    def test_current_transition_rejects_prior_signed_component_before_posts_or_writes(self):
+        for version in ('1.0.1','1.0.2'):
+            with self.subTest(version=version):
+                self.win_manifest['version'] = version
+                self.manifest_path.write_bytes(deployment._transition_encoded(self.win_manifest))
+                pin = self.env['certificate']['components']['windowsIntegration']
+                pin.update(version=version, manifestSha256=release.digest(self.manifest_path.read_bytes()))
+                self.resign(self.env)
+                self.plan['expectedCertificateSha256'] = release.digest(release.signing_bytes(self.env['certificate']))
+                with self.assertRaisesRegex(sync.SyncError, 'CHECKPOINT_TRANSITION_COMPONENT_VERSION_CONFLICT'):
+                    self.execute()
+                self.assertEqual(self.transport.posts, [])
+                self.assertFalse((self.state / 'checkpoint-transitions').exists())
+                self.assert_unpublished()
 
     def test_invalid_envelope_cannot_reach_network_or_local_writes(self):
         self.plan['envelope'] = {**self.env, 'signature': 'A' * 86}

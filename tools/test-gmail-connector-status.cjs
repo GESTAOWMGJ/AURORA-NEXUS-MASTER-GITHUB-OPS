@@ -168,3 +168,41 @@ test('invalid configuration and unavailable Drive service cannot imply verified 
   assert.equal(unavailable.sourceAccessChecked, false);
   assert.equal(unavailable.reachableSourceCount, null); safeOutput(unavailable);
 });
+
+test('explicitly bound WMGJ can identify its legacy configured folder without activating it',()=>{
+  const {c,calls,props}=fixture();props.set('WMGJ_FIRESTORE_ORG_ID','wmgj');
+  props.delete('AURORA_DOCUMENT_SOURCE_REGISTRY');props.delete('WMGJ_PASTA_ENTRADA_ID');
+  c.getConfigWMGJ_=()=>({PASTA_ENTRADA_ID:'private-legacy-folder'});
+  const r=c.auroraLerStatusConectoresPlugAndPlay('wmgj');
+  assert.equal(r.ok,true);assert.equal(r.legacySourceSelected,true);assert.equal(r.sourceCount,0);
+  assert.equal(r.reachableSourceCount,0);assert.equal(c.auroraFontesDocumentaisConfiguradas_().length,0);
+  assert.ok(!calls.some(x=>x.startsWith('folder:')||x==='MUTATION'));safeOutput(r);
+});
+test('legacy code fallback is unavailable to other or unbound tenants',()=>{
+  for(const binding of ['synthetic','foreign','']){
+    const {c,calls,props}=fixture();props.set('WMGJ_FIRESTORE_ORG_ID',binding);
+    props.delete('AURORA_DOCUMENT_SOURCE_REGISTRY');props.delete('WMGJ_PASTA_ENTRADA_ID');
+    c.getConfigWMGJ_=()=>{throw Error('forbidden legacy lookup');};
+    const r=c.auroraLerStatusConectoresPlugAndPlay('synthetic');
+    assert.equal(r.legacySourceSelected,false);assert.ok(!calls.includes('MUTATION'));safeOutput(r);
+  }
+});
+test('inactive or malformed registry cannot silently select a legacy execution source',()=>{
+  const valid=fixture([source(undefined,{active:false})]);
+  valid.props.set('WMGJ_FIRESTORE_ORG_ID','wmgj');
+  valid.c.getConfigWMGJ_=()=>{throw Error('forbidden fallback');};
+  const r=valid.c.auroraLerStatusConectoresPlugAndPlay('wmgj');
+  assert.equal(r.sourceCount,0);assert.equal(r.legacySourceSelected,false);
+  assert.equal(valid.c.auroraFontesDocumentaisConfiguradas_().length,0);safeOutput(r);
+  const invalid=fixture([source(undefined,{active:false,mode:'API'})]);
+  assert.equal(invalid.c.auroraLerStatusConectoresPlugAndPlay('synthetic').code,'AURORA_CONNECTOR_STATUS_REGISTRY_INVALID');
+  assert.throws(()=>invalid.c.auroraFontesDocumentaisConfiguradas_(),/AURORA_DOCUMENT_SOURCE_REGISTRY_INVALID/);
+  assert.ok(!invalid.calls.some(x=>x.startsWith('folder:')||x==='MUTATION'));
+});
+test('WMGJ registry versus configured primary-folder conflict blocks without source access',()=>{
+  const {c,calls,props}=fixture([source('private-folder-one',{sourceId:'drive-primary'})]);
+  props.set('WMGJ_FIRESTORE_ORG_ID','wmgj');
+  const r=c.auroraLerStatusConectoresPlugAndPlay('wmgj');
+  assert.equal(r.code,'AURORA_CONNECTOR_STATUS_REGISTRY_INVALID');assert.equal(r.registryValid,false);
+  assert.ok(!calls.some(x=>x.startsWith('folder:')||x==='MUTATION'));safeOutput(r);
+});

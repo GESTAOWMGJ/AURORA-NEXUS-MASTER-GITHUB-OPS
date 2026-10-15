@@ -179,6 +179,9 @@ test('runtime caller performs actual signed-pin and startup-file projection; coc
   assert.equal(runtime.unifiedBeta.platforms.web.state, 'RUNTIME_BYTES_MATCH');
   const cockpit = buildReleaseStatus({ allClientsSynchronized: true }, runtime.unifiedBeta) as any;
   assert.equal(cockpit.productVersionSource, 'VERIFIED_ACTIVE_REFERENCE');
+  assert.equal(cockpit.iaMaster.version, '1.1.0');
+  assert.equal(cockpit.installerIntegration.componentVersion, f.cert.components.windowsIntegration!.version);
+  assert.equal(cockpit.installerIntegration.versionSource, 'VERIFIED_ACTIVE_REFERENCE');
   assert.strictEqual(cockpit.releaseConvergence.unifiedBeta, runtime.unifiedBeta);
   assert.equal(cockpit.releaseConvergence.allClientsSynchronized, false);
   assert.equal(cockpit.gates.find((g: any) => g.id === 'desktop-continuity').status, 'BLOCKED');
@@ -186,6 +189,8 @@ test('runtime caller performs actual signed-pin and startup-file projection; coc
   const clone = buildReleaseStatus({}, structuredClone(runtime.unifiedBeta)) as any;
   assert.equal(clone.productVersionSource, 'ENGINEERING_DEFAULT_UNVERIFIED');
   assert.equal(clone.releaseConvergence.unifiedBeta.reference, null);
+  assert.equal(clone.iaMaster.version, null);
+  assert.equal(clone.installerIntegration.componentVersion, null);
 });
 
 test('mixed actual runtime source or manifest bytes cannot appear as the beta applied to the web', async () => {

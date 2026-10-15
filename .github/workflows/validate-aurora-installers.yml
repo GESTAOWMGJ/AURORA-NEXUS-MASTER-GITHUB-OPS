@@ -96,7 +96,7 @@ jobs:
           assert 'published-update.cjs' in files, 'Missing explicit published release consumer'
           agent_names = {'client-agent/' + name for name in ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py', 'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py')}
           assert {name for name in files if name.startswith('client-agent/')} == agent_names, 'Unexpected client agent composition'
-          assert manifest['clientAgent']['component'] == 'AURORA_CLIENT_AGENT' and manifest['clientAgent']['version'] == '1.0.1'
+          assert manifest['clientAgent']['component'] == 'AURORA_CLIENT_AGENT' and manifest['clientAgent']['version'] == '1.0.2'
           assert manifest['clientAgent']['configured'] is False and manifest['clientAgent']['providerConnectionsVerified'] is False
           assert len({name.casefold() for name in files}) == len(files), 'Case-folded duplicate manifest name'
           expected_names = set(files) | {'manifest.json'}

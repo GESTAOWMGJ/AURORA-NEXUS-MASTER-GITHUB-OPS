@@ -5,7 +5,10 @@
  * Segredos entram somente por parâmetro de uma chamada autenticada/administrativa
  * e são persistidos em ScriptProperties. Nunca são retornados ou logados.
  */
-var AURORA_CONNECTOR_SETUP_VERSION = 'v1.1.2-read-only-connector-status';
+var AURORA_CONNECTOR_SETUP_VERSION = 'v1.1.3-inactive-source-reuse';
+var AURORA_CONNECTOR_REUSE_OWNER_HASH = 'bb3a1e4a24554f0cd324e0fb8a14559df4fe22a1f3b40e8d7d1f454f9d2ffc09';
+var AURORA_CONNECTOR_REUSE_FOLDER = '1Gz0GtUfvKezI8OmAH0h8fkNLlqEzfYU-';
+var AURORA_CONNECTOR_REUSE_DEADLINE = '2026-10-16T03:00:00.000Z';
 
 function auroraNormalizarSistemaFonte_(value) {
   var system = String(value || 'DRIVE').trim().toUpperCase();
@@ -48,16 +51,216 @@ function auroraNormalizarFontesDocumentais_(sources, primaryFolderId) {
 }
 
 function auroraFontesDocumentaisConfiguradas_() {
-  var props = PropertiesService.getScriptProperties();
+  return auroraResolverFontesDocumentais_(PropertiesService.getScriptProperties()).sources;
+}
+
+// Resolution is pure configuration inspection. A previously unregistered legacy
+// source is only a candidate: it must never become executable through fallback.
+function auroraResolverFontesDocumentais_(props) {
   var raw = props.getProperty('AURORA_DOCUMENT_SOURCE_REGISTRY');
-  if (raw) {
-    try {
-      var parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) return parsed.filter(function(item) { return item && item.active !== false; });
-    } catch (ignore) {}
+  var registered;
+  try { registered = raw ? JSON.parse(raw) : []; } catch (ignore) { throw new Error('AURORA_DOCUMENT_SOURCE_REGISTRY_INVALID'); }
+  if (!Array.isArray(registered) || registered.length > 12) throw new Error('AURORA_DOCUMENT_SOURCE_REGISTRY_INVALID');
+  var seen = {};
+  registered.forEach(function(item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)
+      || Object.keys(item).some(function(key) { return ['sourceId', 'system', 'mode', 'folderId', 'folderName', 'slaMinutes', 'active'].indexOf(key) < 0; })
+      || (item.folderName !== undefined && (typeof item.folderName !== 'string' || item.folderName.length > 256))
+      || !/^[a-z0-9][a-z0-9_.-]{2,63}$/.test(item.sourceId || '') || seen[item.sourceId]
+      || ['DRIVE', 'MV', 'TASY', 'ERP'].indexOf(item.system) < 0 || item.mode !== 'DRIVE_FOLDER'
+      || !/^[A-Za-z0-9_-]{10,200}$/.test(item.folderId || '')
+      || !Number.isSafeInteger(item.slaMinutes) || item.slaMinutes < 15 || item.slaMinutes > 43200
+      || (item.active !== undefined && typeof item.active !== 'boolean')) throw new Error('AURORA_DOCUMENT_SOURCE_REGISTRY_INVALID');
+    seen[item.sourceId] = true;
+  });
+  if (registered.length) {
+    var primary = registered.filter(function(item) { return item.sourceId === 'drive-primary'; });
+    var configured = props.getProperty('WMGJ_PASTA_ENTRADA_ID');
+    if (props.getProperty('WMGJ_FIRESTORE_ORG_ID') === 'wmgj' && configured && primary.length
+      && primary[0].folderId !== configured) throw new Error('AURORA_DOCUMENT_SOURCE_REGISTRY_INVALID');
+    return {registered: true, legacy: false, candidates: registered,
+      sources: registered.filter(function(item) { return item.active !== false; })};
   }
   var fallback = String(props.getProperty('WMGJ_PASTA_ENTRADA_ID') || '');
-  return fallback ? [{ sourceId: 'drive-primary', system: 'DRIVE', mode: 'DRIVE_FOLDER', folderId: fallback, slaMinutes: 1440, active: true }] : [];
+  var active = true;
+  if (!fallback && props.getProperty('WMGJ_FIRESTORE_ORG_ID') === 'wmgj' && typeof getConfigWMGJ_ === 'function') {
+    fallback = String(getConfigWMGJ_().PASTA_ENTRADA_ID || '');
+    active = false;
+  }
+  if (fallback && !/^[A-Za-z0-9_-]{10,200}$/.test(fallback)) throw new Error('AURORA_DOCUMENT_SOURCE_REGISTRY_INVALID');
+  var candidates = fallback ? [{sourceId: 'drive-primary', system: 'DRIVE', mode: 'DRIVE_FOLDER',
+    folderId: fallback, slaMinutes: 1440, active: active}] : [];
+  return {registered: false, legacy: !!fallback, candidates: candidates, sources: active ? candidates : []};
+}
+
+function auroraConnectorReuseSha_(value) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, value, Utilities.Charset.UTF_8)
+    .map(function(n) { return ('0' + ((n + 256) % 256).toString(16)).slice(-2); }).join('');
+}
+
+function auroraConnectorReuseOwner_() {
+  var active = '', effective = '';
+  try {
+    active = String(Session.getActiveUser().getEmail() || '').trim().toLowerCase();
+    effective = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+  } catch (ignore) { throw new Error('AURORA_CONNECTOR_REUSE_OWNER_REQUIRED'); }
+  if (!active || active !== effective || auroraConnectorReuseSha_(active) !== AURORA_CONNECTOR_REUSE_OWNER_HASH) {
+    throw new Error('AURORA_CONNECTOR_REUSE_OWNER_REQUIRED');
+  }
+}
+
+function auroraConnectorReuseWindow_() {
+  if (Date.now() >= Date.parse(AURORA_CONNECTOR_REUSE_DEADLINE)) throw new Error('AURORA_CONNECTOR_REUSE_EXPIRED');
+}
+
+function auroraConnectorReuseTriggers_() {
+  var triggers = ScriptApp.getProjectTriggers();
+  if (!Array.isArray(triggers) || triggers.length > 12) throw new Error('AURORA_CONNECTOR_REUSE_TRIGGER_REVIEW_REQUIRED');
+  return triggers.map(function(trigger) {
+    var handler = trigger.getHandlerFunction();
+    if (typeof handler !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(handler)) throw new Error('AURORA_CONNECTOR_REUSE_TRIGGER_REVIEW_REQUIRED');
+    return auroraConnectorReuseSha_(handler);
+  }).sort();
+}
+
+function auroraConnectorReuseSnapshot_(props) {
+  var keys = ['WMGJ_FIRESTORE_ORG_ID', 'WMGJ_FIRESTORE_INGEST_URL', 'WMGJ_FIRESTORE_HMAC_KEY_ID',
+    'WMGJ_FIRESTORE_HMAC_SECRET', 'WMGJ_FIRESTORE_DRY_RUN', 'AURORA_FIRESTORE_MIRROR_REQUIRED',
+    'WMGJ_PASTA_ENTRADA_ID', 'AURORA_DOCUMENT_SOURCE_REGISTRY', 'AURORA_CONNECTOR_SETUP_VERSION'];
+  var value = {};
+  keys.forEach(function(key) { var current = props.getProperty(key); value[key] = current == null ? null : current; });
+  var registered;
+  try { registered = value.AURORA_DOCUMENT_SOURCE_REGISTRY ? JSON.parse(value.AURORA_DOCUMENT_SOURCE_REGISTRY) : []; }
+  catch (ignore) { throw new Error('AURORA_DOCUMENT_SOURCE_REGISTRY_INVALID'); }
+  if (!Array.isArray(registered) || registered.length > 12) throw new Error('AURORA_DOCUMENT_SOURCE_REGISTRY_INVALID');
+  value.legacyFolder = !registered.length && !value.WMGJ_PASTA_ENTRADA_ID && typeof getConfigWMGJ_ === 'function'
+    ? String(getConfigWMGJ_().PASTA_ENTRADA_ID || '') : null;
+  return value;
+}
+
+// No provider enrollment, secret argument, activation or operational execution.
+// CONFIGURE only registers an INACTIVE candidate in the existing properties.
+function auroraReaproveitarFonteWmgjConfigOnly(request) {
+  var result = {ok: false, code: 'AURORA_CONNECTOR_REUSE_PENDING', state: 'PENDING_CONFIGURATION',
+    scope: 'WMGJ_EXISTING_SOURCE_CONFIG_ONLY', sourceIdentified: false, sourceCount: 0,
+    metadataAccessVerified: false, existingHmacReused: false, configurationSha256: null,
+    triggerCount: null, handlerHashes: [], triggerReviewRequired: false, configurationWriteEligible: false,
+    configurationChanged: false, configurationUncertain: false, rollbackVerified: false,
+    configOnly: true, sourceActive: false, triggersChanged: false, contentRead: false,
+    providerConsentVerified: false, firstIngestionVerified: false, operationalReady: false,
+    installationComplete: false, complete: false};
+  var lock = null, held = false, props = null, before = null, changes = null, attempted = false;
+  try {
+    auroraConnectorReuseOwner_();
+    auroraConnectorReuseWindow_();
+    var keys = ['confirmation', 'configOnly', 'mode', 'orgId', 'expectedFolderId', 'expectedSourceId', 'expectedSlaMinutes', 'expectedConfigurationSha256'];
+    if (!request || typeof request !== 'object' || Array.isArray(request)
+      || Object.keys(request).sort().join(',') !== keys.sort().join(',')
+      || request.confirmation !== 'REUSE_EXISTING_WMGJ_SOURCE_CONFIG_ONLY' || request.configOnly !== true
+      || ['PREVIEW', 'CONFIGURE'].indexOf(request.mode) < 0 || request.orgId !== 'wmgj'
+      || request.expectedFolderId !== AURORA_CONNECTOR_REUSE_FOLDER || request.expectedSourceId !== 'drive-primary'
+      || !Number.isSafeInteger(request.expectedSlaMinutes) || request.expectedSlaMinutes < 15 || request.expectedSlaMinutes > 43200
+      || (request.mode === 'PREVIEW' ? request.expectedConfigurationSha256 !== null
+        : typeof request.expectedConfigurationSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(request.expectedConfigurationSha256))) {
+      throw new Error('AURORA_CONNECTOR_REUSE_REQUEST_REJECTED');
+    }
+    lock = LockService.getScriptLock();
+    held = lock.tryLock(1000);
+    if (!held) throw new Error('AURORA_CONNECTOR_REUSE_LOCK_BUSY');
+    props = PropertiesService.getScriptProperties();
+    if (props.getProperty('WMGJ_FIRESTORE_ORG_ID') !== 'wmgj') throw new Error('AURORA_CONNECTOR_REUSE_TENANT_MISMATCH');
+    before = auroraConnectorReuseSnapshot_(props);
+    if (before.WMGJ_FIRESTORE_INGEST_URL !== 'https://southamerica-east1-wmgj-hml-jfn-20260927.cloudfunctions.net/ingestWmgjEvent'
+      || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$/.test(before.WMGJ_FIRESTORE_HMAC_KEY_ID || '')
+      || !/^[a-fA-F0-9]{64}$/.test(before.WMGJ_FIRESTORE_HMAC_SECRET || '')) throw new Error('AURORA_CONNECTOR_REUSE_CONFIGURATION_INVALID');
+    var resolved = auroraResolverFontesDocumentais_(props);
+    var selected = resolved.candidates[0];
+    if (resolved.candidates.length !== 1 || selected.folderId !== request.expectedFolderId
+      || selected.sourceId !== request.expectedSourceId || selected.system !== 'DRIVE' || selected.slaMinutes !== request.expectedSlaMinutes
+      || (before.WMGJ_PASTA_ENTRADA_ID && before.WMGJ_PASTA_ENTRADA_ID !== selected.folderId)) {
+      throw new Error('AURORA_CONNECTOR_REUSE_SOURCE_CONFLICT');
+    }
+    auroraConnectorReuseWindow_();
+    if (DriveApp.getFolderById(selected.folderId).getId() !== selected.folderId) throw new Error('AURORA_CONNECTOR_REUSE_SOURCE_CONFLICT');
+    result.sourceIdentified = true; result.sourceCount = 1; result.metadataAccessVerified = true;
+    result.existingHmacReused = true; result.state = 'SOURCE_IDENTIFIED';
+    result.sourceActive = selected.active !== false;
+    auroraConnectorReuseWindow_();
+    var handlers = auroraConnectorReuseTriggers_();
+    result.triggerCount = handlers.length; result.handlerHashes = handlers;
+    result.triggerReviewRequired = handlers.length > 0;
+    if (result.triggerReviewRequired) result.state = 'PENDING_TRIGGER_REVIEW';
+    result.configurationWriteEligible = !result.sourceActive && before.WMGJ_FIRESTORE_DRY_RUN === 'true'
+      && (before.AURORA_FIRESTORE_MIRROR_REQUIRED === null || before.AURORA_FIRESTORE_MIRROR_REQUIRED === 'false') && !handlers.length;
+    var fingerprint = auroraConnectorReuseSha_(JSON.stringify(before));
+    result.configurationSha256 = fingerprint;
+    if (request.mode === 'CONFIGURE') {
+      if (!result.configurationWriteEligible) throw new Error('AURORA_CONNECTOR_REUSE_ACTIVE_STATE_REQUIRES_REVIEW');
+      if (request.expectedConfigurationSha256 !== fingerprint
+        || auroraConnectorReuseSha_(JSON.stringify(auroraConnectorReuseSnapshot_(props))) !== fingerprint
+        || JSON.stringify(auroraConnectorReuseTriggers_()) !== JSON.stringify(handlers)) throw new Error('AURORA_CONNECTOR_REUSE_CAS_CONFLICT');
+      changes = {AURORA_DOCUMENT_SOURCE_REGISTRY: resolved.registered ? before.AURORA_DOCUMENT_SOURCE_REGISTRY
+        : JSON.stringify([{sourceId: selected.sourceId, system: 'DRIVE', mode: 'DRIVE_FOLDER',
+          folderId: selected.folderId, slaMinutes: selected.slaMinutes, active: false}]),
+        AURORA_CONNECTOR_SETUP_VERSION: AURORA_CONNECTOR_SETUP_VERSION};
+      auroraConnectorReuseWindow_();
+      if (Object.keys(changes).some(function(key) { return changes[key] !== before[key]; })) {
+        attempted = true;
+        props.setProperties(changes, false);
+      }
+      var after = auroraConnectorReuseSnapshot_(props);
+      // The committed registry now has precedence over the legacy fallback.
+      var expectedAfter = Object.assign({}, before, changes, {legacyFolder: null});
+      if (!Object.keys(expectedAfter).every(function(key) { return after[key] === expectedAfter[key]; })) {
+        throw new Error('AURORA_CONNECTOR_REUSE_CAS_CONFLICT');
+      }
+      auroraConnectorReuseWindow_();
+      result.configurationChanged = JSON.stringify(after) !== JSON.stringify(before);
+      result.configurationSha256 = auroraConnectorReuseSha_(JSON.stringify(after));
+      result.state = 'CONFIGURED_INACTIVE';
+    } else {
+      if (auroraConnectorReuseSha_(JSON.stringify(auroraConnectorReuseSnapshot_(props))) !== fingerprint) throw new Error('AURORA_CONNECTOR_REUSE_CAS_CONFLICT');
+      auroraConnectorReuseWindow_();
+    }
+    result.ok = true; result.code = 'AURORA_CONNECTOR_REUSE_CONFIG_ONLY_VERIFIED';
+  } catch (error) {
+    result.configurationSha256 = null;
+    result.configurationWriteEligible = false;
+    if (attempted) {
+      result.configurationChanged = null;
+      result.configurationUncertain = true;
+      try {
+        var owned = Object.keys(changes).every(function(key) { var current = props.getProperty(key); current = current == null ? null : current;
+          return current === before[key] || current === changes[key]; });
+        if (owned) {
+          Object.keys(changes).forEach(function(key) {
+            var current = props.getProperty(key); current = current == null ? null : current;
+            if (current !== before[key] && current !== changes[key]) throw new Error('CAS_CONFLICT');
+            if (before[key] === null) props.deleteProperty(key); else props.setProperty(key, before[key]);
+          });
+          result.rollbackVerified = JSON.stringify(auroraConnectorReuseSnapshot_(props)) === JSON.stringify(before);
+          result.configurationUncertain = !result.rollbackVerified;
+          if (result.rollbackVerified) result.configurationChanged = false;
+        }
+      } catch (ignoreRollback) {}
+    }
+    var codes = ['OWNER_REQUIRED', 'EXPIRED', 'REQUEST_REJECTED', 'LOCK_BUSY', 'TENANT_MISMATCH', 'CONFIGURATION_INVALID',
+      'SOURCE_CONFLICT', 'ACTIVE_STATE_REQUIRES_REVIEW', 'CAS_CONFLICT', 'TRIGGER_REVIEW_REQUIRED', 'REGISTRY_INVALID'];
+    var message = String(error && error.message || '');
+    if (message === 'AURORA_DOCUMENT_SOURCE_REGISTRY_INVALID') message = 'AURORA_CONNECTOR_REUSE_REGISTRY_INVALID';
+    result.code = codes.some(function(code) { return message === 'AURORA_CONNECTOR_REUSE_' + code; })
+      ? message : 'AURORA_CONNECTOR_REUSE_DEPENDENCY_FAILED';
+    if (result.configurationUncertain) {
+      result.code = 'AURORA_CONNECTOR_REUSE_CONFIGURATION_UNCERTAIN';
+      result.state = 'PENDING_CONFIGURATION_RECONCILIATION';
+    }
+  } finally {
+    if (held) {
+      try { lock.releaseLock(); }
+      catch (ignoreRelease) { result.ok = false; result.code = 'AURORA_CONNECTOR_REUSE_DEPENDENCY_FAILED'; }
+    }
+  }
+  return result;
 }
 
 
@@ -237,33 +440,9 @@ function auroraLerStatusConectoresPlugAndPlay(expectedOrgId) {
   try {
     var raw = props.getProperty('AURORA_DOCUMENT_SOURCE_REGISTRY');
     result.registryConfigured = !!raw;
-    var registered = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(registered) || registered.length > 12) throw new Error('INVALID_REGISTRY');
-    registered.forEach(function(item) {
-      if (!item || typeof item !== 'object' || Array.isArray(item)
-        || (item.active !== undefined && typeof item.active !== 'boolean')) throw new Error('INVALID_REGISTRY');
-    });
-    var seen = {};
-    sources = registered.filter(function(item) { return item && item.active !== false; });
-    sources.forEach(function(item) {
-      if (typeof item !== 'object' || Array.isArray(item)
-        || !/^[a-z0-9][a-z0-9_.-]{2,63}$/.test(item.sourceId || '')
-        || seen[item.sourceId] || ['DRIVE', 'MV', 'TASY', 'ERP'].indexOf(item.system) < 0
-        || item.mode !== 'DRIVE_FOLDER' || !/^[A-Za-z0-9_-]{10,200}$/.test(item.folderId || '')
-        || !Number.isSafeInteger(item.slaMinutes) || item.slaMinutes < 15 || item.slaMinutes > 43200) {
-        throw new Error('INVALID_REGISTRY');
-      }
-      seen[item.sourceId] = true;
-    });
-    // Match the existing executor fallback only when no nonempty registry exists.
-    if (!registered.length) {
-      var fallback = String(props.getProperty('WMGJ_PASTA_ENTRADA_ID') || '');
-      if (fallback) {
-        if (!/^[A-Za-z0-9_-]{10,200}$/.test(fallback)) throw new Error('INVALID_REGISTRY');
-        sources = [{ folderId: fallback }];
-        result.legacySourceSelected = true;
-      }
-    }
+    var resolved = auroraResolverFontesDocumentais_(props);
+    sources = resolved.sources;
+    result.legacySourceSelected = resolved.legacy;
     result.registryValid = true;
     result.sourceCount = sources.length;
   } catch (ignoreRegistry) {

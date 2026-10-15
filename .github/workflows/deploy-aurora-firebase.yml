@@ -454,6 +454,10 @@ jobs:
             echo "::error::HML_ROOT_COLLECTIONS_INCOMPLETE"
             exit 48
           fi
+      - name: Retain existing HML ingest runtime boundary before deployment
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+        run: node firebase-migration/scripts/verify-hml-ingest-runtime.mjs before
       - name: Deploy Functions, Hosting, Rules and indexes
         working-directory: firebase-migration
         env:
@@ -485,7 +489,19 @@ jobs:
             fs.appendFileSync('functions/.env.' + process.env.PROJECT_ID, 'AURORA_ACTIVE_RELEASE_PUBLIC_KEY=' + JSON.stringify(key) + '\n');
           }
           NODE
-          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusUserProfiles,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
+          npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:ingestWmgjEvent,functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusUserProfiles,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
+      - name: Verify actual HML ingest build, boundary and ready traffic after deployment
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+        run: node firebase-migration/scripts/verify-hml-ingest-runtime.mjs after
+      - name: Retain bounded HML ingest provider metadata without payload or secret values
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-hml-ingest-runtime-metadata-${{ github.sha }}
+          path: ${{ runner.temp }}/aurora-ingest-runtime-*.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Promote exact ready AuthGate traffic after full canonical preflight
         if: ${{ inputs.publish_active_release }}
         env:
@@ -514,6 +530,7 @@ jobs:
           set -euo pipefail
           functions="$(npx --yes firebase-tools@14.17.0 functions:list --project "$PROJECT_ID" --json)"
           jq -e --argjson expected '[
+            "ingestWmgjEvent",
             "runtimeWatchdog",
             "runtimeHealth",
             "auroraNexusAuthGate",

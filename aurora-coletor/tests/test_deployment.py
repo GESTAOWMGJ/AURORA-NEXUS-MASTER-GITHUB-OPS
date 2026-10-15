@@ -159,7 +159,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertFalse(result['processingVerifiedThisRun'])
 
     def test_historical_receipts_migrate_without_changing_payload_or_key(self):
-        for version in ('1.0.0', '1.0.1'):
+        for version in ('1.0.0', '1.0.1', '1.0.2'):
             with self.subTest(version=version):
                 (self.state / deployment.STATE_NAME).unlink(missing_ok=True)
                 first = self.run_setup(token='test-token', send=True, transport=Mock(
@@ -170,7 +170,7 @@ class DeploymentTests(unittest.TestCase):
                 network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}),
                                            (200, processed_response(self.payload, True))])
                 result = self.run_setup(token='test-token', send=True, transport=network)
-                self.assertEqual(result['componentVersion'], '1.0.2')
+                self.assertEqual(result['componentVersion'], '1.0.3')
                 self.assertEqual(result['sampleKey'], first['sampleKey'])
                 self.assertTrue(result['processingVerifiedThisRun'])
 
@@ -254,7 +254,7 @@ class DeploymentTests(unittest.TestCase):
     def test_corrupt_receipt_and_schema_fail_closed(self):
         checkpoint = self.state / deployment.STATE_NAME
         for patch in ({'receipt': {'status': 'ACCEPTED'}}, {'schemaVersion': 'unknown'}, {'attempt': True},
-                      {'componentVersion': '1.0.3'}):
+                      {'componentVersion': '9.9.9'}):
             checkpoint.unlink(missing_ok=True)
             value = self.run_setup()
             checkpoint.write_text(json.dumps(dict(value, **patch)))
@@ -323,7 +323,7 @@ class DeploymentTests(unittest.TestCase):
         sentinel.write_bytes(b'# synthetic legacy bundle')
         before = sentinel.read_bytes()
         result = deployment.install_assets(ROOT, self.state)
-        self.assertEqual(result['version'], '1.0.2')
+        self.assertEqual(result['version'], '1.0.3')
         manifest = deployment.read_json(self.state / 'integration' / deployment.VERSION / 'manifest.json')
         self.assertEqual(manifest['schemaVersion'], deployment.SCHEMA)
         self.assertEqual(manifest['version'], deployment.VERSION)
@@ -331,8 +331,8 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual(manifest['sha256'][name], deployment.hashlib.sha256((ROOT / name).read_bytes()).hexdigest())
         self.assertEqual(sentinel.read_bytes(), before)
 
-    def test_component_102_installs_without_reading_unknown_101_directory(self):
-        legacy = self.state / 'integration' / '1.0.1'
+    def test_component_103_installs_without_reading_unknown_102_directory(self):
+        legacy = self.state / 'integration' / '1.0.2'
         legacy.mkdir(parents=True)
         old_files = {name: ('unknown old bytes: ' + name).encode()
                      for name in (*deployment.ASSETS, 'manifest.json')}
@@ -360,11 +360,11 @@ class DeploymentTests(unittest.TestCase):
             first = deployment.install_assets(ROOT, self.state)
             second = deployment.install_assets(ROOT, self.state)
             self.assertEqual(old_accesses, [])
-            self.assertEqual(first, {'version': '1.0.2', 'alreadyInstalled': False})
-            self.assertEqual(second, {'version': '1.0.2', 'alreadyInstalled': True})
-            current = self.state / 'integration' / '1.0.2'
+            self.assertEqual(first, {'version': '1.0.3', 'alreadyInstalled': False})
+            self.assertEqual(second, {'version': '1.0.3', 'alreadyInstalled': True})
+            current = self.state / 'integration' / '1.0.3'
             manifest = deployment.read_json(current / 'manifest.json')
-            self.assertEqual(manifest['version'], '1.0.2')
+            self.assertEqual(manifest['version'], '1.0.3')
             for name in deployment.ASSETS:
                 self.assertEqual((current / name).read_bytes(), (ROOT / name).read_bytes())
         self.assertEqual({name: (legacy / name).read_bytes() for name in old_files}, old_files)
