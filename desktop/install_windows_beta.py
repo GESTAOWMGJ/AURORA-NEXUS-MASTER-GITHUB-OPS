@@ -461,7 +461,12 @@ def rollback(backup_path):
     print(json.dumps({"status": "CLIENT_ROLLED_BACK", "clientVersion": VERSION}))
 
 
-def verify_installation_integration(root, input_path, org, origin, method, agent_target=None):
+def verify_installation_integration(root, input_path, org, origin, method, agent_target=None,
+                                    transition_plan_path=None, transition_recover=False, expected_source=None):
+    if transition_recover and not transition_plan_path:
+        raise ValueError('EXPLICIT_CHECKPOINT_TRANSITION_PLAN_REQUIRED')
+    if transition_plan_path and (method != 'API_TOKEN' or agent_target):
+        raise ValueError('SEPARATE_CHECKPOINT_TRANSITION_REQUIRED')
     if method in ('CLOUD_OAUTH','LOCAL_AGENT'):
         if not agent_target:raise ValueError('EXISTING_AUTHORIZED_SOURCE_AGENT_REQUIRED')
         from install_client_agent import verify_existing_integration
@@ -476,12 +481,34 @@ def verify_installation_integration(root, input_path, org, origin, method, agent
     # Validate the exact approved sample/target before staging any private checkpoint.
     integration_deployment.sync.synchronize(raw, origin, org)
     state = deployment_safe_path(root / "integration/state")
+    if transition_plan_path:
+        plan = read_json(transition_plan_path)
+        if (plan.get('stateDirectory') != str(state) or plan.get('orgId') != org
+                or plan.get('nextOrigin') != integration_deployment.sync.origin_url(origin)
+                or plan.get('method') != method or plan.get('expectedSourceSha') != expected_source):
+            raise ValueError('SAME_INSTALLATION_TRANSITION_REQUIRED')
+        result = integration_deployment.transition_checkpoint(plan, raw,
+            os.environ.get('AURORA_INTEGRATION_TOKEN'), recover=transition_recover)
+        acceptance = result.get('installationAcceptance')
+        if (result.get('status') != 'CHECKPOINT_TRANSITION_COMMITTED'
+                or not isinstance(acceptance, dict) or acceptance.get('eligible') is not True
+                or acceptance.get('orgId') != org or acceptance.get('canonicalOrigin') != 'https://auroranexus.com.br'
+                or acceptance.get('method') != method
+                or not all(acceptance.get(key) is True for key in
+                    ('processingVerified','receiptPersisted','replayVerified','automationConfigured','automationVerified'))):
+            raise ValueError('AUTHORITATIVE_AUTOMATION_INTEGRATION_REQUIRED')
+        return {**acceptance, 'installationComplete':False, 'checkpointTransition':result['checkpointTransition'],
+                'targetBinding':result['targetBinding'], 'sampleKey':result['sampleKey'],
+                'globalIngestionVerified':False, 'sourceAcquisitionCertified':False}
+    if (state / 'ia-master' / 'installation.json').exists():
+        raise ValueError('EXPLICIT_CHECKPOINT_TRANSITION_REQUIRED')
     state.mkdir(parents=True, mode=0o700, exist_ok=True)
     return integration_deployment.integrate_installation(raw, origin, org, state,
         token=os.environ.get("AURORA_INTEGRATION_TOKEN"), method=method)
 
 
-def install(integration_input=None, integration_org=None, integration_origin=None, integration_method="API_TOKEN", integration_agent_target=None):
+def install(integration_input=None, integration_org=None, integration_origin=None, integration_method="API_TOKEN", integration_agent_target=None,
+            integration_transition_plan=None, integration_transition_recover=False):
     if os.name != "nt":
         raise RuntimeError("WINDOWS_REQUIRED")
     source_sha=package_source()
@@ -531,7 +558,8 @@ def install(integration_input=None, integration_org=None, integration_origin=Non
             or proof.get("sameOriginAuthProjectVerified") is not True):
         raise ValueError("CANONICAL_PORTAL_PROOF_REQUIRED")
     acceptance = verify_installation_integration(root, integration_input, integration_org, integration_origin,
-                                                 integration_method, integration_agent_target)
+                                                 integration_method, integration_agent_target,
+                                                 integration_transition_plan, integration_transition_recover, source_sha)
     proof["installationAcceptance"] = acceptance
     backup = update_client(root, target, edge, shortcuts, previous if existed else None, expected, proof, snapshots)
     print(json.dumps({"status": "CLIENT_INSTALLED", "idempotent": existed,
@@ -550,6 +578,8 @@ def main():
     parser.add_argument("--integration-origin", help="Approved integration HTTPS origin")
     parser.add_argument("--integration-method", choices=("API_TOKEN", "MANUAL", "CLOUD_OAUTH", "LOCAL_AGENT"), default="API_TOKEN")
     parser.add_argument("--integration-agent-target", help="Existing app-scoped agent with the same authorized configuration and state")
+    parser.add_argument('--integration-transition-plan', help='Explicit reviewed transition for the same existing IA checkpoint')
+    parser.add_argument('--integration-transition-recover', action='store_true', help='Revalidate and recover the explicit checkpoint transition')
     args = parser.parse_args()
     try:
         if args.action == "prepare-integration":
@@ -563,7 +593,8 @@ def main():
         elif args.action == "probe":
             print(json.dumps(probe(), indent=2))
         else:
-            install(args.integration_input, args.integration_org, args.integration_origin, args.integration_method,args.integration_agent_target)
+            install(args.integration_input, args.integration_org, args.integration_origin, args.integration_method,args.integration_agent_target,
+                    args.integration_transition_plan,args.integration_transition_recover)
         return 0
     except Exception as error:
         code = str(error)

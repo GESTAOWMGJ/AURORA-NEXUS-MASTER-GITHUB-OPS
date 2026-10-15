@@ -41,7 +41,13 @@ function wmgjFirestoreDiagnostico() {
 }
 
 function wmgjFirestoreEnviarEvento_(event) {
-  var cfg = wmgjFirestoreConfig_();
+  return wmgjFirestoreEnviarEventoComConfig_(event, wmgjFirestoreConfig_(), wmgjFirestoreLog_);
+}
+
+// Private transport seam: the ordinary wrapper retains its config/logger contract.
+// Narrow HML callers may supply validated per-call config without mutating properties.
+function wmgjFirestoreEnviarEventoComConfig_(event, cfg, logger, beforeRequest) {
+  if (!cfg || typeof logger !== 'function' || (beforeRequest !== undefined && typeof beforeRequest !== 'function')) throw new Error('CONFIG_FIRESTORE_INCOMPLETA');
   if (!event || !event.idempotencyKey || !event.orgId) {
     throw new Error('EVENTO_FIRESTORE_INVALIDO');
   }
@@ -56,7 +62,7 @@ function wmgjFirestoreEnviarEvento_(event) {
       entityType: event.entityType,
       idempotencyKey: event.idempotencyKey
     };
-    wmgjFirestoreLog_('DRY_RUN', 'OK', dry);
+    logger('DRY_RUN', 'OK', dry);
     return dry;
   }
 
@@ -94,6 +100,7 @@ function wmgjFirestoreEnviarEvento_(event) {
         'X-WMGJ-Idempotency-Key': event.idempotencyKey
       }
     };
+    if (beforeRequest) beforeRequest();
     var response = UrlFetchApp.fetch(cfg.url, options);
     var code = response.getResponseCode();
     var text = response.getContentText();
@@ -104,7 +111,7 @@ function wmgjFirestoreEnviarEvento_(event) {
         lastError = 'INVALID_SUCCESS_RESPONSE';
         break;
       }
-      wmgjFirestoreLog_('ENVIO', 'OK', {
+      logger('ENVIO', 'OK', {
         attempt: attempt,
         eventId: event.eventId,
         entityType: event.entityType,
@@ -120,7 +127,7 @@ function wmgjFirestoreEnviarEvento_(event) {
     Utilities.sleep(attempt * 750);
   }
 
-  wmgjFirestoreLog_('ENVIO', 'ERRO', {
+  logger('ENVIO', 'ERRO', {
     eventId: event.eventId,
     entityType: event.entityType,
     error: lastError

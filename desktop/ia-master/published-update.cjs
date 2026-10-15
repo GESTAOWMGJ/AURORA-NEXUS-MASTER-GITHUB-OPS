@@ -15,6 +15,9 @@ const COMPONENTS = ['server', 'web', 'satellite', 'iaMaster', 'windowsIntegratio
 const CHECKS = ['ciPassed', 'humanReviewApproved', 'protectedDeploySucceeded', 'smokePassed'];
 const WINDOWS_FILES = ['client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
   'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py'];
+const CHECKPOINT_FIELDS = ['schemaVersion', 'componentVersion', 'targetBinding', 'sampleKey', 'attempt', 'updatedAt',
+  'status', 'nextAction', 'connectionVerified', 'receiptVerifiedThisRun', 'processingVerifiedThisRun', 'processingProof',
+  'previousReceiptCached', 'receipt', 'fullSynchronizationVerified', 'productionReleased', 'code', 'installationAcceptance'];
 const activePins = new WeakMap();
 const candidates = new WeakSet();
 const BOOTSTRAP_SOURCE = '56a813aac38390d928122cb774a16b3503977d72';
@@ -79,12 +82,12 @@ function verifyCandidate(envelope, trust, expectedSourceSha, now = Date.now()) {
   candidates.add(candidate);
   return candidate;
 }
-function readResponse(bearer, nonce) {
+function readResponse(bearer, nonce, requestPath = READ_PATH) {
   demand(typeof bearer === 'string' && bearer.length > 0 && bearer.length <= 8192 && !/[\r\n]/.test(bearer), 'PROCESS_BEARER_REQUIRED');
   return new Promise((resolve, reject) => {
     let timer;
     const fail = code => { clearTimeout(timer); reject(Error(code)); };
-    const request = https.request({ hostname: 'auroranexus.com.br', port: 443, path: READ_PATH, method: 'GET',
+    const request = https.request({ hostname: 'auroranexus.com.br', port: 443, path: requestPath, method: 'GET',
       minVersion: 'TLSv1.2', rejectUnauthorized: true, agent: false,
       headers: { Authorization: 'Bearer ' + bearer, 'X-Aurora-Release-Nonce': nonce, Accept: 'application/json' } }, response => {
       const chunks = []; let size = 0;
@@ -274,7 +277,8 @@ function stageOwnership(directory) {
 }
 function layoutShape(layout) {
   demand(exact(layout, ['runtimeRoot', 'stateDir', 'helperPath', 'nodeExecutable', 'expectedHelperSha256',
-    'expectedNodeSha256', 'expectedInstallationSha256', 'expectedCheckpointSha256']), 'REVIEWED_LAYOUT_REQUIRED');
+    'expectedNodeSha256', 'expectedInstallationSha256', 'expectedCheckpointSha256',
+    ...(Object.hasOwn(layout || {}, 'checkpointTransition') ? ['checkpointTransition'] : [])]), 'REVIEWED_LAYOUT_REQUIRED');
   for (const key of ['runtimeRoot', 'stateDir', 'helperPath', 'nodeExecutable']) demand(path.isAbsolute(layout[key]), 'ABSOLUTE_LOCAL_PATHS_REQUIRED');
   for (const key of ['expectedHelperSha256', 'expectedNodeSha256', 'expectedInstallationSha256', 'expectedCheckpointSha256']) demand(hex(layout[key], 64), 'REVIEWED_LAYOUT_HASH_REQUIRED');
   const result = { ...layout, runtimeRoot: noLinks(layout.runtimeRoot), stateDir: noLinks(layout.stateDir),
@@ -290,6 +294,7 @@ function layoutShape(layout) {
     'PRESERVED_STATE_LAYOUT_REQUIRED');
   result.installation = path.join(result.stateDir, 'installation.json');
   result.checkpoint = path.join(path.dirname(result.stateDir), 'integration-setup.json');
+  if (result.checkpointTransition) transitionReference(result, result.checkpointTransition);
   return result;
 }
 function hashFile(filename, limit = 32 * 1024 * 1024) { return digest(readRegularFile(filename, limit)); }
@@ -304,6 +309,115 @@ function identitySnapshot(layout) {
 }
 function unchangedIdentity(layout, snapshot) {
   demand(canonical(identitySnapshot(layout)) === canonical(snapshot), 'PRESERVED_IDENTITY_OR_CHECKPOINT_CHANGED');
+}
+function stableIdentity(a, b) {
+  const keys = ['control', 'organization', 'checkpoint'];
+  return exact(a, keys) && exact(b, keys) && keys.every(key => hex(a[key], 64) && hex(b[key], 64))
+    && a.control === b.control && a.organization === b.organization;
+}
+function transitionReference(layout, reference) {
+  demand(exact(reference, ['directory', 'commitSha256']) && hex(reference.commitSha256, 64)
+    && path.isAbsolute(reference.directory), 'EXPLICIT_CHECKPOINT_TRANSITION_REQUIRED');
+  const directory = noLinks(reference.directory);
+  demand(path.dirname(directory) === path.join(path.dirname(layout.stateDir), 'checkpoint-transitions')
+    && hex(path.basename(directory), 64), 'OWNED_CHECKPOINT_TRANSITION_REQUIRED');
+  return directory;
+}
+function transitionJson(directory, name) {
+  const bytes = readRegularFile(path.join(directory, name), 65536), value = JSON.parse(bytes);
+  demand(bytes.equals(Buffer.from(canonical(value) + '\n')), 'CANONICAL_TRANSITION_ARTIFACT_REQUIRED');
+  return { bytes, value };
+}
+function checkpointLineage(layout, fromSha256, toSha256, reference, anchor, trust) {
+  const seen = new Set(), firstReference = reference; let nextHash = toSha256, latestProof;
+  while (reference) {
+    const directory = transitionReference(layout, reference);
+    demand(!seen.has(directory) && seen.size < 64, 'CHECKPOINT_TRANSITION_CYCLE_OR_LIMIT'); seen.add(directory);
+    const committed = transitionJson(directory, 'commit.json'), commit = committed.value;
+    demand(digest(committed.bytes) === reference.commitSha256
+      && exact(commit, ['schemaVersion', 'planSha256', 'previousSha256', 'nextSha256', 'proofSha256'])
+      && commit.schemaVersion === 'aurora.checkpoint.transition.commit.v1'
+      && [commit.planSha256, commit.previousSha256, commit.nextSha256, commit.proofSha256].every(value => hex(value, 64))
+      && commit.nextSha256 === nextHash, 'CHECKPOINT_TRANSITION_COMMIT_CONFLICT');
+    const planned = transitionJson(directory, 'plan.json'), plan = planned.value;
+    demand(digest(planned.bytes) === commit.planSha256 && path.basename(directory) === commit.planSha256
+      && exact(plan, ['schemaVersion', 'stateDirectory', 'expectedPreviousSha256', 'expectedPreviousTargetBinding',
+        'expectedPreviousSampleKey', 'nextOrigin', 'nextTargetBinding', 'nextSampleKey', 'payloadSha256', 'method',
+        'orgId', 'expectedSourceSha', 'expectedCertificateSha256', 'iaAnchor', 'previousTransition',
+        'publicReleaseControl', 'envelope', 'packageDirectory'])
+      && plan.schemaVersion === 'aurora.checkpoint.transition.v1' && plan.stateDirectory === path.dirname(layout.stateDir)
+      && plan.expectedPreviousSha256 === commit.previousSha256 && plan.nextOrigin === ORIGIN && plan.method === 'API_TOKEN'
+      && typeof plan.orgId === 'string' && /^[a-z0-9][a-z0-9-]{1,62}$/.test(plan.orgId)
+      && plan.nextTargetBinding === digest(ORIGIN + ':' + plan.orgId)
+      && [plan.expectedPreviousTargetBinding, plan.payloadSha256].every(value => hex(value, 64))
+      && [plan.expectedPreviousSampleKey, plan.nextSampleKey].every(value => typeof value === 'string' && /^win-v1:[a-f0-9]{64}$/.test(value))
+      && exact(plan.iaAnchor, ['attemptDirectory', 'journalSha256'])
+      && plan.iaAnchor.attemptDirectory === anchor.attempt && plan.iaAnchor.journalSha256 === anchor.journalSha256
+      && plan.expectedSourceSha === anchor.journal.sourceSha && plan.expectedCertificateSha256 === anchor.journal.certificateSha256,
+      'CHECKPOINT_TRANSITION_PLAN_CONFLICT');
+    const candidate = verifyCandidate(plan.envelope, trust, plan.expectedSourceSha);
+    demand(candidate.certificateSha256 === plan.expectedCertificateSha256
+      && exact(plan.publicReleaseControl, ['trust', 'expectedSourceSha', 'manifestPath'])
+      && canonical(plan.publicReleaseControl.trust) === canonical(trust)
+      && plan.publicReleaseControl.expectedSourceSha === plan.expectedSourceSha
+      && path.isAbsolute(plan.publicReleaseControl.manifestPath) && path.isAbsolute(plan.packageDirectory), 'CHECKPOINT_TRANSITION_RELEASE_CONFLICT');
+    inspectPackage(candidate, 'windowsIntegration', plan.packageDirectory,
+      readRegularFile(noLinks(plan.publicReleaseControl.manifestPath), 65536));
+    const previousBytes = readRegularFile(path.join(directory, 'checkpoint.previous'), 65536);
+    const nextBytes = readRegularFile(path.join(directory, 'checkpoint.next'), 65536), next = JSON.parse(nextBytes);
+    const previous = JSON.parse(previousBytes);
+    demand(digest(previousBytes) === commit.previousSha256 && digest(nextBytes) === commit.nextSha256
+      && row(previous) && row(next) && [previous, next].every(value => Object.keys(value).every(key => CHECKPOINT_FIELDS.includes(key)))
+      && previous.schemaVersion === 'aurora.install.integration.v1'
+      && previous.targetBinding === plan.expectedPreviousTargetBinding && previous.sampleKey === plan.expectedPreviousSampleKey
+      && next.schemaVersion === 'aurora.install.integration.v1' && next.componentVersion === '1.0.1'
+      && next.targetBinding === plan.nextTargetBinding && next.sampleKey === plan.nextSampleKey
+      && next.status === 'SAMPLE_RECEIPT_VERIFIED' && next.receiptVerifiedThisRun === true
+      && next.processingVerifiedThisRun === true, 'CHECKPOINT_TRANSITION_BYTES_CONFLICT');
+    const proved = transitionJson(directory, 'proof.json'), proof = proved.value;
+    demand(digest(proved.bytes) === commit.proofSha256
+      && exact(proof, ['schemaVersion', 'receipt', 'processingProof', 'installationAcceptance'])
+      && proof.schemaVersion === 'aurora.checkpoint.transition.proof.v1'
+      && proof.receipt?.status === 'DUPLICATE' && proof.receipt.cloudReceiptVerified === true
+      && proof.receipt.payloadSha256 === plan.payloadSha256 && proof.receipt.idempotencyKey === plan.nextSampleKey
+      && canonical(proof.receipt) === canonical(next.receipt)
+      && canonical(proof.processingProof) === canonical(next.processingProof)
+      && canonical(Object.fromEntries(Object.entries(proof.installationAcceptance || {}).filter(([key]) => !['orgId', 'canonicalOrigin'].includes(key))))
+        === canonical(next.installationAcceptance), 'CHECKPOINT_TRANSITION_PROOF_CONFLICT');
+    if (!latestProof) latestProof = { proof, orgId: plan.orgId, reference: firstReference };
+    nextHash = commit.previousSha256; reference = plan.previousTransition;
+  }
+  demand(latestProof && nextHash === fromSha256, 'CHECKPOINT_TRANSITION_ANCESTRY_CONFLICT');
+  return { ...latestProof, fromSha256, toSha256, anchor };
+}
+async function checkpointAuthority(bearer, evidence, expectedOrg) {
+  demand(evidence.orgId === expectedOrg, 'CHECKPOINT_TRANSITION_ORGANIZATION_CONFLICT');
+  const previous = evidence.proof, documentId = previous.receipt?.documentId;
+  demand(hex(documentId, 48), 'CHECKPOINT_TRANSITION_DOCUMENT_REQUIRED');
+  // Existing integration.read route re-evaluates the exact document's ledger,
+  // projection, replay, credential and automation authority. It issues no signature.
+  const body = await readResponse(bearer, crypto.randomBytes(32).toString('hex'), '/api/integration/ping?documentId=' + documentId);
+  const processing = body?.installation, acceptance = processing?.acceptance;
+  const tuple = ['documentId', 'versionId', 'sourceVersion', 'canonicalSnapshotHash'];
+  const flags = ['processingVerified', 'receiptPersisted', 'replayVerified', 'automationConfigured', 'automationVerified'];
+  demand(body?.ok === true && body.service === 'aurora-nexus-integration' && body.orgId === expectedOrg
+    && processing?.state === 'FIRST_INGESTION_VERIFIED' && processing.firstIngestionVerified === true
+    && processing.documentId === documentId && hex(processing.versionId, 48) && hex(processing.canonicalSnapshotHash, 64)
+    && Number.isSafeInteger(processing.sourceVersion) && processing.sourceVersion >= 1
+    && acceptance?.schemaVersion === 'aurora.installation.acceptance.v1'
+    && acceptance.orgId === expectedOrg && acceptance.canonicalOrigin === ORIGIN
+    && acceptance.state === 'INSTALLATION_INTEGRATION_VERIFIED' && acceptance.eligible === true
+    && acceptance.method === 'API_TOKEN' && acceptance.automationScope === 'AURORA_CANONICAL_PIPELINE'
+    && typeof body.keyId === 'string' && /^ik_[a-f0-9]{16}$/.test(body.keyId)
+    && acceptance.receiptId === digest('integration-document:' + body.keyId + ':' + previous.receipt.idempotencyKey)
+    && flags.every(key => acceptance[key] === true)
+    && tuple.every(key => acceptance[key] === processing[key] && processing[key] === previous.processingProof?.[key])
+    && ['receiptId', 'configurationHash', 'method'].every(key => acceptance[key] === previous.installationAcceptance?.[key])
+    && hex(acceptance.receiptId, 64) && hex(acceptance.configurationHash, 64)
+    && typeof acceptance.verifiedAt === 'string' && Number.isFinite(Date.parse(acceptance.verifiedAt))
+    && Date.now() - Date.parse(acceptance.verifiedAt) >= -30000 && Date.now() - Date.parse(acceptance.verifiedAt) <= 30000,
+    'CURRENT_CHECKPOINT_AUTHORITY_REQUIRED');
+  return Date.parse(acceptance.verifiedAt);
 }
 function helperAndNode(layout) {
   demand(hashFile(layout.helperPath, 65536) === layout.expectedHelperSha256
@@ -378,8 +492,11 @@ function previousRelease(layout, attempt, journal, trust, seen = new Set()) {
     const prior = JSON.parse(priorBytes);
     demand(prior.phase === 'COMPLETED' && prior.sourceSha === previous.sourceSha && prior.manifestSha256 === previous.manifestSha256
       && prior.nextTreeSha256 === previous.treeSha256 && prior.nextMetadataSha256 === previous.metadataSha256
-      && prior.certificateSha256 === previous.certificateSha256 && canonical(prior.identity) === canonical(journal.identity),
+      && prior.certificateSha256 === previous.certificateSha256 && stableIdentity(prior.identity, journal.identity),
       'SIGNED_LINEAGE_PREDECESSOR_CONFLICT');
+    if (prior.identity.checkpoint !== journal.identity.checkpoint) checkpointLineage(layout, prior.identity.checkpoint,
+      journal.identity.checkpoint, journal.checkpointTransitionFromPrevious,
+      { attempt: priorAttempt, journalSha256: digest(priorBytes), journal: prior }, trust);
     seen.add(priorAttempt);
     previousRelease(layout, priorAttempt, prior, trust, seen);
   }
@@ -409,21 +526,39 @@ function signedBaseline(layout, expectedOrg, trust, retry = false) {
     && metadata.existingClientPreserved === true && metadata.publishedCertificateSha256 === candidate.certificateSha256
     && metadata.signedComponentManifestSha256 === journal.manifestSha256 && digest(metadataBytes) === journal.nextMetadataSha256
     && (digest(metadataBytes) === layout.expectedInstallationSha256 || (retry && journal.previousMetadataSha256 === layout.expectedInstallationSha256))
-    && journal.identity?.checkpoint === layout.expectedCheckpointSha256 && journal.runtimeProof?.localProcessesVerified === true
+    && journal.runtimeProof?.localProcessesVerified === true
     && journal.runtimeProof.modelAvailable === true && journal.runtimeProof.sourceSha === journal.sourceSha
     && journal.runtimeProof.manifestSha256 === journal.manifestSha256, 'PRIOR_SIGNED_APPLICATION_CONFLICT');
   const checked = inspectPackage(candidate, 'iaMaster', layout.packageDir, readRegularFile(path.join(layout.packageDir, 'manifest.json'), 65536));
   demand(checked.treeSha256 === journal.nextTreeSha256, 'PRIOR_SIGNED_APPLICATION_CHANGED');
-  const predecessor = previousRelease(layout, attempt, journal, trust, new Set([attempt]));
+  const ancestors = new Set([attempt]), predecessor = previousRelease(layout, attempt, journal, trust, ancestors);
   // Preserve and check the rollback material which linked this completed update.
   demand(hashFile(path.join(attempt, 'metadata.previous'), 65536) === predecessor.metadataSha256, 'SIGNED_LINEAGE_RECORD_CHANGED');
   const previousCandidate = predecessor.kind === 'SIGNED_COMPLETED'
     ? journalTarget(layout, predecessor.attemptDirectory, JSON.parse(readRegularFile(path.join(predecessor.attemptDirectory, 'journal.json'), 65536)), trust) : null;
   inspectPreviousPackage(predecessor, path.join(attempt, 'component.previous'), previousCandidate);
-  unchangedIdentity(layout, journal.identity);
+  const identity = identitySnapshot(layout);
+  demand(stableIdentity(identity, journal.identity) && identity.checkpoint === layout.expectedCheckpointSha256,
+    'PRESERVED_IDENTITY_OR_CHECKPOINT_CHANGED');
+  let checkpointProof = null;
+  const changedCheckpoint = identity.checkpoint !== journal.identity.checkpoint;
+  const reference = changedCheckpoint ? layout.checkpointTransition : journal.checkpointTransition;
+  if (changedCheckpoint) checkpointProof = checkpointLineage(layout, journal.identity.checkpoint, identity.checkpoint,
+    reference, { attempt, journalSha256: digest(journalBytes), journal }, trust);
+  else if (reference) {
+    const directory = transitionReference(layout, reference), plan = transitionJson(directory, 'plan.json').value;
+    const anchorAttempt = ownedAttempt(layout, plan.iaAnchor?.attemptDirectory);
+    demand(ancestors.has(anchorAttempt), 'CHECKPOINT_TRANSITION_ANCHOR_CONFLICT');
+    const anchorBytes = readRegularFile(path.join(anchorAttempt, 'journal.json'), 65536), anchorJournal = JSON.parse(anchorBytes);
+    demand(digest(anchorBytes) === plan.iaAnchor.journalSha256 && anchorJournal.phase === 'COMPLETED', 'CHECKPOINT_TRANSITION_ANCHOR_CONFLICT');
+    checkpointProof = checkpointLineage(layout, anchorJournal.identity.checkpoint, identity.checkpoint,
+      reference, { attempt: anchorAttempt, journalSha256: digest(anchorBytes), journal: anchorJournal }, trust);
+  }
+  unchangedIdentity(layout, identity);
   demand(readRegularFile(path.join(layout.stateDir, 'organization.txt'), 256).toString('utf8').trim() === expectedOrg, 'INSTALLED_ORGANIZATION_CONFLICT');
   return {sourceSha:journal.sourceSha,manifestSha256:journal.manifestSha256,treeSha256:checked.treeSha256,
-    metadataSha256:digest(metadataBytes),metadataBytes,identity:journal.identity,journal,
+    metadataSha256:digest(metadataBytes),metadataBytes,identity,journal,checkpointProof,
+    checkpointTransitionFromPrevious:changedCheckpoint ? reference : null,
     previousRelease:{kind:'SIGNED_COMPLETED',sourceSha:journal.sourceSha,manifestSha256:journal.manifestSha256,
       treeSha256:checked.treeSha256,metadataSha256:digest(metadataBytes),attemptDirectory:attempt,
       journalSha256:digest(journalBytes),certificateSha256:journal.certificateSha256}};
@@ -579,31 +714,44 @@ async function activateCore({ mode, pin, bearer, trust, expectedSourceSha, expec
   demand(mode === 'activate', 'EXPLICIT_ACTIVATION_REQUIRED');
   const current = requireActive(pin), layout = layoutShape(rawLayout);
   demand(pin.orgId === expectedOrg && current.candidate.certificate.sourceSha === expectedSourceSha, 'ACTIVE_PIN_IDENTITY_CONFLICT');
-  const refresh = () => refreshBoundPin(bearer, trust, expectedSourceSha, expectedOrg, operation.certificateSha256);
+  const refresh = async () => {
+    let fresh = await refreshBoundPin(bearer, trust, expectedSourceSha, expectedOrg, operation.certificateSha256);
+    if (operation.checkpointProof) {
+      const authorityAt = await checkpointAuthority(bearer, operation.checkpointProof, expectedOrg);
+      fresh = await refreshBoundPin(bearer, trust, expectedSourceSha, expectedOrg, operation.certificateSha256);
+      const evidence = operation.checkpointProof;
+      checkpointLineage(layout, evidence.fromSha256, evidence.toSha256, evidence.reference, evidence.anchor, trust);
+      requireActive(fresh);
+      demand(Date.now() - authorityAt >= -30000 && Date.now() - authorityAt <= 30000, 'CURRENT_CHECKPOINT_AUTHORITY_REQUIRED');
+    }
+    return fresh;
+  };
   ownership(layout); helperAndNode(layout);
   const checked = inspectPackage(current.candidate, 'iaMaster', packageDirectory, manifestBytes);
   if (hashFile(path.join(layout.packageDir, 'manifest.json'), 65536) === checked.manifestSha256) {
     const accepted = signedBaseline(layout, expectedOrg, trust, true), journal = accepted.journal;
+    operation.checkpointProof = accepted.checkpointProof;
     demand(journal.sourceSha === expectedSourceSha && journal.certificateSha256 === current.candidate.certificateSha256
       && journal.manifestSha256 === checked.manifestSha256 && journal.nextTreeSha256 === checked.treeSha256, 'PRIOR_SIGNED_APPLICATION_CONFLICT');
-    unchangedIdentity(layout, journal.identity);
+    unchangedIdentity(layout, accepted.identity);
     const proof = await runtimeProof(layout, expectedSourceSha, checked.manifestSha256);
     demand(treeDigest(layout.packageDir) === journal.nextTreeSha256 && hashFile(layout.installation, 65536) === journal.nextMetadataSha256,
       'PRIOR_SIGNED_APPLICATION_CHANGED');
-    ownership(layout); helperAndNode(layout); unchangedIdentity(layout, journal.identity);
+    ownership(layout); helperAndNode(layout); unchangedIdentity(layout, accepted.identity);
     // Native ownership/listener checks may take longer than the pin lease. A new
     // nonce/TLS/signature read follows them; the original certificate still binds it.
     const fresh = await refresh();
     demand(requireActive(fresh).candidate.certificateSha256 === journal.certificateSha256
       && treeDigest(layout.packageDir) === journal.nextTreeSha256 && hashFile(layout.installation, 65536) === journal.nextMetadataSha256,
       'PRIOR_SIGNED_APPLICATION_CHANGED');
-    unchangedIdentity(layout, journal.identity); requireActive(fresh);
+    unchangedIdentity(layout, accepted.identity); requireActive(fresh);
     operation.finished = true;
     return { status: 'SIGNED_LOCAL_COMPONENT_ALREADY_APPLIED', sourceSha: expectedSourceSha,
       manifestSha256: checked.manifestSha256, localProcessesVerified: proof.localProcessesVerified,
       identityAndCheckpointPreserved: true, allClientsSynchronized: false, cloudReceiptVerified: false };
   }
   const baseline = installedBaseline(layout, expectedOrg, trust);
+  operation.checkpointProof = baseline.checkpointProof;
   demand(checked.version === '1.1.0'
     && digest(checked.files['manage.cjs']) === hashFile(path.join(layout.packageDir, 'manage.cjs'), 65536)
     && digest(checked.files['knowledge-registry.cjs']) === hashFile(path.join(layout.packageDir, 'knowledge-registry.cjs'), 65536),
@@ -640,6 +788,8 @@ async function activateCore({ mode, pin, bearer, trust, expectedSourceSha, expec
     certificateSha256: fresh.certificateSha256, manifestSha256: checked.manifestSha256, allClientsSynchronized: false,
     acceptedEnvelope: structuredClone(requireActive(fresh).envelope), trustedPublicKeySha256: trust.publicKeySha256,
     previousRelease: baseline.previousRelease };
+  if (baseline.checkpointProof) journal.checkpointTransition = baseline.checkpointProof.reference;
+  if (baseline.checkpointTransitionFromPrevious) journal.checkpointTransitionFromPrevious = baseline.checkpointTransitionFromPrevious;
   durable(path.join(attempt, 'metadata.previous'), baseline.metadataBytes);
   let ownedJournalSha256 = saveJournal(journalPath, journal);
   let stopAttempted = false, packageMoved = false;
