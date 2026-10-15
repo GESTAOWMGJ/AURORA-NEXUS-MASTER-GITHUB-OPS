@@ -166,6 +166,36 @@ test('runtime function mismatch fails before config or creation rather than echo
   const f=fixture(),result=f.execute(r=>r.runtimeFunctionHashes.sender='b'.repeat(64));
   assert.equal(result.code,'PROBE_RUNTIME_SOURCE_MISMATCH');assert.equal(f.calls.configReads,0);assert.equal(f.calls.filesCreated,0);
 });
+test('Apps Script transport may reorder object properties without changing exact runtime hashes',()=>{
+  // The real Execution API artifact returns object keys in a different order.
+  // Rebuild JSON objects in reverse order to model that transport boundary;
+  // arrays and every name/value remain unchanged.
+  const transported=value=>Array.isArray(value)?value.map(transported):value&&typeof value==='object'
+    ?Object.fromEntries(Object.entries(value).reverse().map(([key,item])=>[key,transported(item)])):value;
+  const f=fixture(),request=f.request(),wire=clone(transported(request));
+  assert.notDeepEqual(Object.keys(wire.runtimeFunctionHashes),Object.keys(request.runtimeFunctionHashes));
+  assert.deepEqual(wire.runtimeFunctionHashes,request.runtimeFunctionHashes);
+  const result=clone(f.c.auroraExecutarProbeNuvemSinteticaHml(wire));
+  assert.equal(result.code,'PROBE_FORMATS_VERIFIED');assert.equal(result.status,'PASS');
+  assert.equal(result.createdFileCount,4);assert.equal(f.calls.http.length,8);assert.equal(result.cleanupVerified,true);
+  const safe=coordinator.sanitizeSummary(clone(transported({response:result})),request.runtimeFunctionHashes);
+  assert.equal(safe.status,'PASS');assert.deepEqual(safe.runtimeFunctionHashes,request.runtimeFunctionHashes);
+});
+for(const [name,change]of [
+  ['different hash',r=>r.runtimeFunctionHashes.sender='b'.repeat(64)],
+  ['missing key',r=>delete r.runtimeFunctionHashes.sender],
+  ['extra key',r=>r.runtimeFunctionHashes.unreviewed='b'.repeat(64)],
+  ['non-string hash',r=>r.runtimeFunctionHashes.sender=true]
+]){
+  test('reordered runtime map still rejects '+name+' before all effects',()=>{
+    const f=fixture(),result=f.execute(r=>{
+      r.runtimeFunctionHashes=Object.fromEntries(Object.entries(r.runtimeFunctionHashes).reverse());change(r);
+    });
+    assert.equal(result.code,'PROBE_RUNTIME_SOURCE_MISMATCH');assert.equal(result.status,'FAIL');
+    assert.equal(f.calls.configReads,0);assert.equal(f.calls.filesCreated,0);assert.equal(f.calls.foldersCreated,0);
+    assert.equal(f.calls.http.length,0);assert.equal(result.cleanupVerified,false);
+  });
+}
 test('deadline cannot be extended by request',()=>{
   const f=fixture({now:DEADLINE+1000}),result=f.execute();assert.equal(result.code,'PROBE_REQUEST_REJECTED');assert.equal(f.calls.configReads,0);
 });
