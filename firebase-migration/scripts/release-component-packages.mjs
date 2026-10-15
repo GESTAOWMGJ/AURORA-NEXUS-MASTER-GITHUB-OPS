@@ -6,6 +6,7 @@ import {resolve, dirname, relative} from 'node:path';
 
 const require=createRequire(import.meta.url);
 const {readRegularFile}=require('../../desktop/ia-master/safe-read.cjs');
+const WINDOWS_INTEGRATION_VERSION='1.0.4';
 export const WINDOWS_INTEGRATION_FILES=Object.freeze(['aurora_cloud_sync.py','aurora_deployment.py','client_agent.py',
   'client_secret_store.py','install_client_agent.py','provider_connectors.py','published_release.py']);
 export const IA_MASTER_FILES=Object.freeze([
@@ -67,7 +68,7 @@ export async function readComponentPackage(directory,component,expectedSourceSha
     &&manifest.clientAgent?.component==='AURORA_CLIENT_AGENT'&&manifest.clientAgent.version==='1.0.2'
     &&manifest.clientAgent.configured===false&&manifest.clientAgent.sourceAuthorizationRequired===true
     &&manifest.clientAgent.providerConnectionsVerified===false,'COMPONENT_IDENTITY_CONFLICT');
-  else demand(manifest.schemaVersion===1&&manifest.component==='AURORA_WINDOWS_INTEGRATION'&&manifest.version==='1.0.3'
+  else demand(manifest.schemaVersion===1&&manifest.component==='AURORA_WINDOWS_INTEGRATION'&&manifest.version===WINDOWS_INTEGRATION_VERSION
     &&manifest.platform==='windows','COMPONENT_IDENTITY_CONFLICT');
   const actualNames=await packageNames(directory);
   demand(sameNames(actualNames,[...expected,'manifest.json'])&&new Set(actualNames.map(name=>name.toLowerCase())).size===actualNames.length,
@@ -87,7 +88,7 @@ export function windowsIntegrationPackage(iaMasterPackage,expectedSourceSha){
     const bytes=iaMasterPackage.fileBytes['client-agent/'+name];
     demand(bytes instanceof Uint8Array,'COMPONENT_FILES_CONFLICT');fileBytes[name]=bytes;
   }
-  const manifest={schemaVersion:1,component:'AURORA_WINDOWS_INTEGRATION',version:'1.0.3',sourceSha:expectedSourceSha,
+  const manifest={schemaVersion:1,component:'AURORA_WINDOWS_INTEGRATION',version:WINDOWS_INTEGRATION_VERSION,sourceSha:expectedSourceSha,
     platform:'windows',files:Object.fromEntries(WINDOWS_INTEGRATION_FILES.map(name=>[name,digest(fileBytes[name])]))};
   return {manifest,manifestBytes:Buffer.from(JSON.stringify(manifest,null,2)+'\n'),fileBytes};
 }

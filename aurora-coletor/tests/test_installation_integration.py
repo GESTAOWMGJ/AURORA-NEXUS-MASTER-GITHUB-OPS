@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock,patch
+from unittest.mock import Mock,call,patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import aurora_cloud_sync as sync
@@ -36,8 +36,8 @@ def accepted_response(payload,duplicate=False,configured=True,method='API_TOKEN'
         'providerAccessVerified':False,'localCollectionVerified':False,'agentExecutionVerified':False,
         'processedFormat':'CANONICAL_STRUCTURED_JSON','globalDocumentAcquisitionVerified':False,
         'acquisitionModes':{'CLOUD_OAUTH':'PENDING_ADAPTER_EVIDENCE','LOCAL_AGENT':'PENDING_ADAPTER_EVIDENCE',
-                            'API_TOKEN':'CANONICAL_PIPELINE_VERIFIED' if ready else 'PENDING_CONFIGURATION',
-                            'MANUAL':'PENDING_CONFIGURATION'},
+                            'API_TOKEN':'CANONICAL_PIPELINE_VERIFIED' if ready and method=='API_TOKEN' else 'PENDING_CONFIGURATION',
+                            'MANUAL':'CANONICAL_PIPELINE_VERIFIED' if ready and method=='MANUAL' else 'PENDING_CONFIGURATION'},
         'limitations':['PROVIDER_ACCESS_NOT_VERIFIED','LOCAL_COLLECTION_NOT_VERIFIED',
                        'AGENT_EXECUTION_NOT_VERIFIED','GLOBAL_EXTRACTION_NOT_VERIFIED']}
     return result
@@ -79,16 +79,12 @@ class InstallationIntegrationTests(unittest.TestCase):
                 state=Path(tmp);state.chmod(0o700)
                 with self.assertRaisesRegex(sync.SyncError,code):
                     deployment.integrate_installation(fixture(),ORIGIN,ORG,state,'synthetic',transport=transport)
-    def test_method_hint_cannot_certify_oauth_local_or_manual(self):
+    def test_method_hint_cannot_certify_oauth_or_local(self):
         for method in ('CLOUD_OAUTH','LOCAL_AGENT'):
             transport=Mock()
             with self.assertRaisesRegex(sync.SyncError,'REAL_SOURCE_ADAPTER_REQUIRED'):
                 deployment.integrate_installation(fixture(),ORIGIN,ORG,Path('/unused'),'synthetic',method,transport)
             transport.assert_not_called()
-        with tempfile.TemporaryDirectory() as tmp:
-            state=Path(tmp);state.chmod(0o700)
-            with self.assertRaisesRegex(sync.SyncError,'AUTHORITATIVE_AUTOMATION'):
-                deployment.integrate_installation(fixture(),ORIGIN,ORG,state,'synthetic','MANUAL',CanonicalTransport())
     def test_installation_proof_cannot_be_issued_by_an_alternate_https_origin(self):
         transport=Mock()
         with self.assertRaisesRegex(sync.SyncError,'CANONICAL_INSTALLATION_ORIGIN_REQUIRED'):
@@ -129,6 +125,126 @@ class InstallationIntegrationTests(unittest.TestCase):
                 value={**copy.deepcopy(baseline),**change}
                 with self.assertRaisesRegex(sync.SyncError,'ACCEPTANCE_MISMATCH'):
                     sync.installation_acceptance(fixture(),ORG,value,sync.processing_proof(fixture(),ORG,proof))
+
+
+def manual_readback(payload=None, revision=1):
+    payload=fixture() if payload is None else payload
+    result=accepted_response(payload,True,method='MANUAL')
+    proof=processed_response(payload,True,revision=revision)['installation']
+    acceptance=result['installation']['acceptance']
+    acceptance.update({key:proof[key] for key in
+        ('documentId','versionId','sourceVersion','canonicalSnapshotHash','verifiedAt')})
+    return {'ok':True,'service':'aurora-nexus-integration','orgId':ORG,'keyId':'ik_'+'c'*16,
+            'installation':{**proof,'acceptance':acceptance}}
+
+
+class ManualInstallationReadbackTests(unittest.TestCase):
+    def verify(self,transport,state=None,payload=None,token='synthetic-read-only'):
+        return deployment.integrate_installation(fixture() if payload is None else payload,
+            ORIGIN,ORG,state,token,'MANUAL',transport)
+    def test_exact_manual_receipt_is_read_twice_without_post_or_checkpoint_access(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state=Path(tmp);checkpoint=state/deployment.STATE_NAME
+            checkpoint.write_bytes(b'unrelated checkpoint must remain untouched')
+            anchor=state/'ia-master';anchor.mkdir();(anchor/'installation.json').write_bytes(b'preserved identity')
+            before={str(path.relative_to(state)):path.read_bytes() for path in state.rglob('*') if path.is_file()}
+            first=manual_readback();second=copy.deepcopy(first)
+            second['installation']['verifiedAt']='2026-01-01T01:00:01.000Z'
+            second['installation']['acceptance']['verifiedAt']='2026-01-01T01:00:02.000Z'
+            transport=Mock(side_effect=[(200,first),(200,second)])
+            with patch.object(deployment,'run',side_effect=AssertionError('manual cannot send or write')), \
+                 patch.object(deployment,'checkpoint_lock',side_effect=AssertionError('manual cannot lock state')), \
+                 patch.object(deployment,'atomic_json',side_effect=AssertionError('manual cannot write')):
+                result=self.verify(transport,state)
+            expected=sync.synchronize(fixture(),ORIGIN,ORG)
+            url=ORIGIN+'/api/integration/ping?documentId='+expected['documentId']
+            self.assertEqual(transport.call_args_list,[call(url,'synthetic-read-only'),call(url,'synthetic-read-only')])
+            self.assertEqual(before,{str(path.relative_to(state)):path.read_bytes() for path in state.rglob('*') if path.is_file()})
+            self.assertTrue(result['eligible']);self.assertEqual(result['method'],'MANUAL')
+            for flag in REQUIRED:self.assertIs(result[flag],True)
+            self.assertTrue(result['replayPersistedVerified']);self.assertFalse(result['documentReplayPerformedByInstaller'])
+            for flag in ('installationComplete','checkpointChanged','globalIngestionVerified','sourceAcquisitionCertified'):
+                self.assertIs(result[flag],False)
+            self.assertEqual(result['proofScope'],'AUTHENTICATED_MANUAL_RECEIPT_READBACK')
+            self.assertNotIn('synthetic-read-only',json.dumps(result))
+            self.assertNotIn('amountCents',json.dumps(result))
+    def test_manual_does_not_need_or_create_a_state_directory(self):
+        for state in (None,Path('not-an-authorized-state-directory')):
+            transport=Mock(side_effect=[(200,manual_readback()),(200,manual_readback())])
+            with patch.object(deployment,'safe_path',side_effect=AssertionError('manual must ignore state')):
+                self.assertTrue(self.verify(transport,state)['eligible'])
+    def test_invalid_input_origin_or_missing_credential_never_calls_transport(self):
+        for payload,token in [(dict(fixture(),patientName='forbidden'),'synthetic'),
+                              (fixture(),None),(fixture(),''),(fixture(),'bad token')]:
+            with self.subTest(payload=sorted(payload),token=token):
+                transport=Mock()
+                with self.assertRaises(sync.SyncError):self.verify(transport,payload=payload,token=token)
+                transport.assert_not_called()
+        transport=Mock()
+        with self.assertRaisesRegex(sync.SyncError,'CANONICAL_INSTALLATION_ORIGIN_REQUIRED'):
+            deployment.integrate_installation(fixture(),'https://other.example.invalid',ORG,None,
+                'synthetic','MANUAL',transport)
+        transport.assert_not_called()
+    def test_authentication_failure_or_wrong_reader_tenant_service_is_rejected(self):
+        cases=[(status,manual_readback()) for status in (401,403,500)]
+        for change in ({'ok':False},{'ok':1},{'orgId':'other-org'},{'service':'other-service'},
+                       {'keyId':'web_'+'a'*32},{'keyId':None}):
+            cases.append((200,{**manual_readback(),**change}))
+        cases.extend([(200,None),(200,[])])
+        for response in cases:
+            with self.subTest(status=response[0],response_type=type(response[1]).__name__):
+                transport=Mock(return_value=response)
+                with self.assertRaisesRegex(sync.SyncError,'ORGANIZATION_MISMATCH'):self.verify(transport)
+                self.assertEqual(transport.call_count,1)
+    def test_pending_processing_or_missing_receipt_is_rejected(self):
+        cases=[None,{'state':'PENDING_PROJECTION','firstIngestionVerified':False,'operationalComplete':False}]
+        for proof in cases:
+            result=manual_readback();result['installation']=proof
+            with self.subTest(proof=proof),self.assertRaisesRegex(sync.SyncError,'AUTHENTICATED_PROCESSING_REQUIRED'):
+                self.verify(Mock(return_value=(200,result)))
+        result=manual_readback();del result['installation']['acceptance']
+        with self.assertRaisesRegex(sync.SyncError,'AUTHORITATIVE_AUTOMATION'):self.verify(Mock(return_value=(200,result)))
+    def test_document_payload_identity_and_immutable_version_must_match(self):
+        changes=[{'documentId':'f'*48},{'sourceSystem':'TASY'},{'sourceVersion':2},
+                 {'revision':True},{'versionId':'f'*48},{'canonicalSnapshotHash':'f'*64}]
+        for change in changes:
+            result=manual_readback();result['installation'].update(change)
+            with self.subTest(change=change),self.assertRaisesRegex(sync.SyncError,'CLOUD_PROCESSING_PROOF_MISMATCH'):
+                self.verify(Mock(return_value=(200,result)))
+        for payload in (dict(fixture(),externalDocumentId='different-export'),dict(fixture(),amountCents=12346)):
+            with self.subTest(payload=payload),self.assertRaisesRegex(sync.SyncError,'CLOUD_PROCESSING_PROOF_MISMATCH'):
+                self.verify(Mock(return_value=(200,manual_readback())),payload=payload)
+    def test_manual_cannot_adopt_api_or_unverified_processing_replay_and_automation(self):
+        changes=[{'method':'API_TOKEN'},{'eligible':False}]+[{flag:False} for flag in REQUIRED]
+        changes.append({'acquisitionModes':{**manual_readback()['installation']['acceptance']['acquisitionModes'],
+                                           'MANUAL':'PENDING_CONFIGURATION'}})
+        for change in changes:
+            result=manual_readback();result['installation']['acceptance'].update(change)
+            with self.subTest(change=change),self.assertRaises(sync.SyncError):self.verify(Mock(return_value=(200,result)))
+    def test_acceptance_schema_tenant_version_and_flags_are_checked_strictly(self):
+        changes=[{'orgId':'other-org'},{'documentId':'f'*48},{'versionId':'f'*48},
+                 {'sourceVersion':2},{'canonicalSnapshotHash':'f'*64},{'configurationHash':'bad'},
+                 {'receiptId':'bad'},{'verifiedAt':'not-a-date'},{'automationVerified':'true'},
+                 {'providerAccessVerified':True},{'rawDocument':'forbidden'}]
+        for change in changes:
+            result=manual_readback();result['installation']['acceptance'].update(change)
+            with self.subTest(change=change),self.assertRaisesRegex(sync.SyncError,'INSTALLATION_ACCEPTANCE_MISMATCH'):
+                self.verify(Mock(return_value=(200,result)))
+    def test_reader_revision_receipt_or_configuration_change_between_reads_is_rejected(self):
+        changed_reader=manual_readback();changed_reader['keyId']='ik_'+'d'*16
+        changed_configuration=manual_readback();changed_configuration['installation']['acceptance']['configurationHash']='d'*64
+        changed_receipt=manual_readback();changed_receipt['installation']['acceptance']['receiptId']='d'*64
+        for second in (changed_reader,changed_configuration,changed_receipt,manual_readback(revision=2)):
+            transport=Mock(side_effect=[(200,manual_readback()),(200,second)])
+            with self.subTest(second=second),self.assertRaisesRegex(sync.SyncError,'MANUAL_INSTALLATION_READBACK_CHANGED'):
+                self.verify(transport)
+            self.assertEqual(transport.call_count,2)
+    def test_second_read_revocation_or_missing_replay_cannot_use_first_read(self):
+        missing_replay=manual_readback();missing_replay['installation']['acceptance']['replayVerified']=False
+        for second in ((401,{'ok':False}),(200,missing_replay)):
+            transport=Mock(side_effect=[(200,manual_readback()),second])
+            with self.subTest(second=second),self.assertRaises(sync.SyncError):self.verify(transport)
+            self.assertEqual(transport.call_count,2)
 
 
 class SourceContinuationTests(unittest.TestCase):
