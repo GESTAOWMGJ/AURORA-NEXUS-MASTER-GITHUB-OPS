@@ -42,34 +42,36 @@ o certificado público verificado à mesma candidata. A identidade comum é
 componentes preservam sua linhagem. Disponibilidade do ZIP e recibos de adoção
 são estados próprios: dispositivo offline permanece pendente.
 
-Incremento candidato de 15/10/2026: a rota privada fixa
-`/downloads/Aurora-Nexus-Beta-One.zip` usa a sessão, membership e permissão de
-downloads já existentes. Não consulta GitHub com segredo, não cria storage, banco,
-autoridade ou executor. O processo captura o candidato empacotado e exige os cinco
-manifestos/payloads correspondentes ao pin e ao runtime atuais. Chave pública vem
-da configuração independente do runtime; a chave incluída no pacote não é autoridade.
-Pin, candidato e permissão são revalidados também sob cache de uma única entrada.
-Há uma única operação de pacote em voo por processo, mantida até a checagem final
-e liberada também em erro. Concorrente recebe 503 com Retry-After, sem fila nem
-nova leitura de arquivos. O limite não altera a concorrência das rotas de login.
+Incremento candidato client-only de 15/10/2026: a entrega proposta passa a ser
+`/downloads/Aurora-Nexus-Client-Atual.zip`, na mesma sessao, membership e permissao.
+A pagina anuncia somente esse client/patch. URLs individuais anteriores continuam
+restritas para compatibilidade e recuperacao; a rota do ZIP completo nao e servida.
+O pacote completo permanece somente como evidencia interna, nunca como atualizacao
+necessaria de todo o sistema.
 
-Publisher e endpoint compartilham `auroraUnifiedBetaArchive.ts`; o comando
-`firebase-migration/scripts/finalize-unified-beta.mjs` é o finalizador oficial.
-O comando Python `finalize` apenas delega a ele e requer o build Functions atual.
-O candidato e o ZIP externo usam STORED e índice canônico para obter os mesmos bytes em CI e no endpoint, sem depender
-da versão de zlib. Isso altera tamanho/hash do arquivo externo; preserva os bytes
-e hashes dos payloads e os requisitos de aceite. `VERIFY.py` permanece compatível.
-Os hashes dos helpers README/VERIFY são fixados no código revisado; alteração dos
-helpers requer atualizar esses pins e suas regressões, nunca confiar no índice do ZIP.
+O leitor continua exigindo a referencia assinada e o runtime atuais, os cinco
+manifestos e seus payloads, chave publica configurada independentemente, uma unica
+operacao em voo, reautorizacao final e nova verificacao do ponteiro antes da resposta.
+So depois seleciona `satellite` e `windowsIntegration` para o ZIP de cliente.
+Nenhum payload server/web/iaMaster, modelo, credencial ou documento entra na entrega.
+Os mesmos componentes conservam suas versoes e identidades; nao sao recompilados
+ou renomeados como nova versao nativa. A atualizacao in-place e seus aceites nao sao
+implementados por essa embalagem. O original Mac e os checkpoints nao sao alterados.
 
-Perfil deliberadamente limitado aos caminhos ASCII dos pacotes atuais: ZIP32,
-arquivos regulares, sem extras/comentários/descritores, criptografia ou ZIP64;
-entrada pode usar STORED/DEFLATE. Limites: 16 MiB por ZIP, 8 MiB por arquivo,
-32 MiB expandidos e 2.048 entradas cumulativas incluindo arquivos aninhados.
-A rodada A27 mede cerca de 7,4 MB expandidos no ZIP externo. Crescimento acima dos
-limites fica indisponível até revisão, não reduz checagens. `complete=false` e os
-aceites Mac/iOS/Windows permanecem separados. Esta documentação não comprova deploy,
-disponibilidade HTTP ou atualização dos dispositivos.
+O finalizador existente recebe `--client-only` para reproduzir os bytes entregues
+pelo endpoint. Sem a opcao, conserva o ZIP completo para evidencia interna.
+`client-patch-manifest.json` usa `aurora.unified-client-patch.v1`, inclui hashes dos
+arquivos, referencia de origem e certificado publico; `complete=false` e
+`installationExecuted=false`. O antigo `VERIFY.py` nao acompanha o ZIP reduzido,
+pois seu contrato exige a release completa. O certificado Ed25519 nao se torna
+assinatura do ZIP, Authenticode, notarizacao Apple ou aceite nativo.
+
+ZIP32 deterministico STORED, caminhos limitados e os limites anteriores permanecem:
+16 MiB por ZIP, 8 MiB por arquivo, 32 MiB expandidos e 2.048 entradas cumulativas.
+Tamanho comprimido anterior nao e comparacao direta com esse formato deterministico.
+Sem referencia atual validada, o endpoint falha fechado. Nao altera politicas, cria
+banco/executor, concede OAuth ou ativa ingestao. Codigo/CI nao comprovam publicacao
+nem instalacao. O escopo exclui as alteracoes OAuth/aquisicao dos PRs #269/#270.
 
 A instalação exige processamento autenticado, persistência do recibo, repetição
 idempotente e integração da automação comprovada no tenant. Login, ping, extração

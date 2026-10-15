@@ -9,8 +9,9 @@ import { deflateRawSync } from 'node:zlib';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import { activeReleaseSigningBytes } from '../src/auroraActiveRelease.ts';
-import { finalizeUnifiedBeta,verifyUnifiedCandidate,canonical,readUnifiedZip,writeUnifiedZip,unifiedDigest,unifiedCrc32,UNIFIED_MAX_EXPANDED,UNIFIED_MAX_ENTRIES,UNIFIED_HELPERS,UNIFIED_NAME } from '../src/auroraUnifiedBetaArchive.ts';
+import { finalizeUnifiedBeta,verifyUnifiedCandidate,canonical,readUnifiedZip,writeUnifiedZip,unifiedDigest,unifiedCrc32,UNIFIED_MAX_EXPANDED,UNIFIED_MAX_ENTRIES,UNIFIED_HELPERS } from '../src/auroraUnifiedBetaArchive.ts';
 import { createUnifiedBetaReader,UnifiedBetaBusyError } from '../src/auroraUnifiedBetaDownload.ts';
+import { finalizeClientPatch,CLIENT_PATCH_NAME as UNIFIED_NAME } from '../src/auroraClientPatchArchive.ts';
 import { servePrivateDownloads } from '../src/auroraDownloads.ts';
 
 const SOURCE='a'.repeat(40),OTHER='b'.repeat(40),NOW=Date.parse('2026-10-15T12:00:00.000Z');
@@ -32,13 +33,14 @@ async function fixture(){
   const envelope=signed(cert);
   const finalize=(changes:Record<string,any>={})=>finalizeUnifiedBeta({candidate,envelope,publicKeySpkiPem:publicKey,trustedPublicKeySha256:fingerprint,sourceSha:SOURCE,expectedCandidateSha256:unifiedDigest(candidate),now:NOW,...changes});
   const proof=finalize();
+  const patch=finalizeClientPatch({candidate,envelope,publicKeySpkiPem:publicKey,trustedPublicKeySha256:fingerprint,sourceSha:SOURCE,expectedCandidateSha256:unifiedDigest(candidate),now:NOW});
   const runtime={verification:{status:'VERIFIED_ACTIVE_PIN',certificateSha256:proof.certificateSha256},runtimeBuild:{sourceSha:SOURCE,manifestSha256:cert.components.server.manifestSha256,fileIntegrityVerified:true},runtimeBuildWeb:{sourceSha:SOURCE,manifestSha256:cert.components.web.manifestSha256,fileIntegrityVerified:true},localServer:{fileIntegrityVerified:true},localWeb:{fileIntegrityVerified:true}};
   let currentEnvelope:any=envelope,currentCandidate=candidate,currentRuntime:any=runtime;
   const reader=createUnifiedBetaReader({publicKey:()=>publicKey,readCandidate:async()=>currentCandidate,readFixedEnvelope:async()=>currentEnvelope,readRuntime:async()=>currentRuntime,now:()=>NOW});
   const current=()=>reader();
   const callbacks={read:current,reauthorize:async()=>admin};
   const clean=()=>rm(root,{recursive:true,force:true});
-  return {root,candidate,index,envelope,cert,proof,finalize,current,callbacks,runtime,signed,clean,
+  return {root,candidate,index,envelope,cert,proof,patch,finalize,current,callbacks,runtime,signed,clean,
     setEnvelope:(e:any)=>{currentEnvelope=e;},setCandidate:(b:Buffer)=>{currentCandidate=b;},setRuntime:(r:any)=>{currentRuntime=r;}};
 }
 async function using(fn:(f:Awaited<ReturnType<typeof fixture>>)=>Promise<void>|void){const f=await fixture();try{await fn(f);}finally{await f.clean();}}
@@ -51,11 +53,11 @@ test('current synthetic candidate finalizes reproducibly and retains all payload
   assert.equal(f.proof.bytes.readUInt16LE(8),0,'outer output uses stored entries, independent of zlib');
 }));
 
-test('the exact official CLI output equals runtime bytes and passes independent VERIFY.py',()=>using(async f=>{
+test('the full internal evidence CLI output retains independent VERIFY.py compatibility',()=>using(async f=>{
   const env=join(f.root,'envelope.json'),trust=join(f.root,'public-trust.json'),output=join(f.root,'from-cli.zip');
   await writeFile(env,json(f.envelope));await writeFile(trust,json({publicKeySpkiPem:publicKey,publicKeySha256:fingerprint}));
   execFileSync(process.execPath,[join(repo,'firebase-migration/scripts/finalize-unified-beta.mjs'),'--candidate',join(f.root,'candidate.zip'),'--public-envelope',env,'--public-trust',trust,'--source-sha',SOURCE,'--expected-candidate-sha256',unifiedDigest(f.candidate),'--trusted-public-key-sha256',fingerprint,'--output',output],{stdio:'pipe',windowsHide:true});
-  const current=await f.current();try{assert.deepEqual(await readFile(output),current.bytes);}finally{current.release();}
+  assert.deepEqual(await readFile(output),f.proof.bytes);
   // CI installs the declared crypto backend globally; this Windows QA host has
   // that same public dependency in its user site, explicitly admitted under -I.
   const script="import sys,json,zipfile,site;from pathlib import Path;sys.path.append(site.getusersitepackages());sys.path.insert(0,sys.argv[1]);import verify_unified_beta as v;r=Path(sys.argv[2]);z=zipfile.ZipFile(r/'from-cli.zip');z.extractall(r/'verified');p=v.verify(r/'verified',sys.argv[3]);assert p['integrityVerified'] and p['signatureVerified'] and p['trustedPublisherVerified'] and p['allDeclaredPayloadsPresent'],p;print(json.dumps({'verified':True,'complete':p['complete']}))";
@@ -130,8 +132,8 @@ test('cached public bytes still recheck a concurrent pin and candidate',()=>usin
 test('GET and HEAD return the same current metadata, with no HEAD body',()=>using(async f=>{
   const get=response(),head=response();await servePrivateDownloads({method:'GET',path:'/downloads/'+UNIFIED_NAME},get,admin,undefined,f.callbacks);
   await servePrivateDownloads({method:'HEAD',path:'/downloads/'+UNIFIED_NAME},head,admin,undefined,f.callbacks);
-  assert.equal(get.statusCode,200);assert.deepEqual(get.body,f.proof.bytes);assert.equal(head.statusCode,200);assert.equal(head.body,'');assert.deepEqual(head.headers,get.headers);
-  assert.equal(get.headers['Content-Type'],'application/zip');assert.equal(get.headers['X-Aurora-Archive-Sha256'],f.proof.sha256);assert.match(get.headers['Cache-Control'],/private, no-store/);assert.equal(get.headers.ETag,undefined);
+  assert.equal(get.statusCode,200);assert.deepEqual(get.body,f.patch.bytes);assert.equal(head.statusCode,200);assert.equal(head.body,'');assert.deepEqual(head.headers,get.headers);
+  assert.equal(get.headers['Content-Type'],'application/zip');assert.equal(get.headers['X-Aurora-Archive-Sha256'],f.patch.sha256);assert.match(get.headers['Cache-Control'],/private, no-store/);assert.equal(get.headers.ETag,undefined);
 }));
 
 test('real Express GET and HEAD do not synthesize ETag or cache the package',()=>using(async f=>{
@@ -141,7 +143,7 @@ test('real Express GET and HEAD do not synthesize ETag or cache the package',()=
   try{
     const address=server.address();assert.ok(address&&typeof address==='object');const url='http://127.0.0.1:'+address.port+'/downloads/'+UNIFIED_NAME;
     const get=await fetch(url);assert.equal(get.status,200);assert.equal(get.headers.get('etag'),null);assert.match(get.headers.get('cache-control')!,/private, no-store/);
-    assert.equal(get.headers.get('content-length'),String(f.proof.bytes.length));assert.deepEqual(Buffer.from(await get.arrayBuffer()),f.proof.bytes);
+    assert.equal(get.headers.get('content-length'),String(f.patch.bytes.length));assert.deepEqual(Buffer.from(await get.arrayBuffer()),f.patch.bytes);
     const head=await fetch(url,{method:'HEAD'});assert.equal(head.status,200);assert.equal(head.headers.get('etag'),null);assert.equal(head.headers.get('content-length'),get.headers.get('content-length'));assert.equal((await head.arrayBuffer()).byteLength,0);
   }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
 }));
@@ -199,11 +201,11 @@ test('listing separates product identity from legacy component versions',()=>usi
   for(const item of manifest.files)item.label=item.name;
   await writeFile(join(dir,'manifest.json'),JSON.stringify(manifest));
   const r=response();await servePrivateDownloads({method:'GET',path:'/downloads'},r,admin,dir,f.callbacks);assert.equal(r.statusCode,200);
-  assert.match(r.body,/Beta One — entrega única/);assert.match(r.body,new RegExp('href="/downloads/'+UNIFIED_NAME.replaceAll('.','\\.')+'"'));
-  assert.match(r.body,/Versão do produto 1\.1\.0-beta\.1/);assert.match(r.body,/Componente satélite 0\.2\.0-hml\.20261001/);assert.match(r.body,/Pacote preparado; validações de distribuição em andamento/);assert.doesNotMatch(r.body,/complete=false/);
+  assert.match(r.body,/Client\/patch \u2014 vers\u00e3o atual/);assert.match(r.body,new RegExp('href="/downloads/'+UNIFIED_NAME.replaceAll('.','\\.')+'"'));
+  assert.match(r.body,/Versão do produto 1\.1\.0-beta\.1/);assert.doesNotMatch(r.body,/href="\/downloads\/AURORA-NEXUS-/);assert.match(r.body,/Somente client\/patch; sem servidor, web ou IA Master/);assert.doesNotMatch(r.body,/complete=false/);
   assert.doesNotMatch(r.body,/storage\.googleapis|github\.com|signedUrl|token=/);assert.equal(rows.version,'0.2.0-hml.20261001');
   const changed=response();await servePrivateDownloads({method:'GET',path:'/downloads'},changed,admin,dir,{...f.callbacks,reauthorize:async()=>{f.setEnvelope(undefined);return admin;}});
-  assert.equal(changed.statusCode,503);assert.ok(typeof changed.body!=='string'||!changed.body.includes('Baixar Beta One'));
+  assert.equal(changed.statusCode,503);assert.ok(typeof changed.body!=='string'||!changed.body.includes('Baixar client atual'));
 }));
 
 test('strict JSON rejects duplicate keys, unsafe numbers and invalid unicode',async()=>{
@@ -248,3 +250,38 @@ test('bounded deflate input is supported for existing nested component archives'
   local.writeUInt16LE(8,8);local.writeUInt32LE(encoded.length,18);central.writeUInt16LE(8,10);central.writeUInt32LE(encoded.length,20);end.writeUInt32LE(local.length+encoded.length,16);
   assert.deepEqual(readUnifiedZip(Buffer.concat([local,encoded,central,end])).get('a.txt'),Buffer.from('abc'));
 });
+
+
+test('client delivery is deterministic, exact subset, and never a full installation',()=>using(f=>{
+  const files=readUnifiedZip(f.patch.bytes), full=readUnifiedZip(f.proof.bytes);
+  const index=JSON.parse(files.get('client-patch-manifest.json')!.toString());
+  assert.equal(index.scope,'CLIENT_ONLY');assert.equal(index.installationExecuted,false);
+  assert.equal(index.complete,false);assert.equal(index.sourceSha,SOURCE);
+  assert.deepEqual(index.includedComponents,['satellite','windowsIntegration']);
+  assert.deepEqual(index.excludedPayloadComponents,['server','web','iaMaster']);
+  for(const [name,record] of Object.entries(index.files) as [string,any][]){
+    assert.equal(files.get(name)!.length,record.size);assert.equal(unifiedDigest(files.get(name)!),record.sha256);
+    if(name!=='README-CLIENT.md')assert.deepEqual(files.get(name),full.get(name));
+  }
+  assert.equal(files.size,Object.keys(index.files).length+2);
+  assert.ok([...files.keys()].every(n=>!/^payloads\/(server|web|iaMaster)\//.test(n)));
+  assert.equal(files.has('VERIFY.py'),false);assert.equal(files.has('candidate-manifest.json'),false);
+  assert.equal(index.components.windowsIntegration.manifestSha256,f.cert.components.windowsIntegration.manifestSha256);
+  assert.deepEqual(files.get('trust/release-envelope-signed.json'),full.get('trust/release-envelope-signed.json'));
+  const sums=files.get('SHA256SUMS')!.toString().trim().split('\n');
+  assert.equal(sums.length,files.size-1);
+  for(const line of sums){const [hash,name]=line.split('  ');assert.equal(unifiedDigest(files.get(name!)!),hash);}
+}));
+
+test('client-only CLI equals authenticated runtime bytes and preserves full evidence',()=>using(async f=>{
+  const env=join(f.root,'client-envelope.json'),trust=join(f.root,'client-trust.json'),output=join(f.root,'client.zip');
+  await writeFile(env,json(f.envelope));await writeFile(trust,json({publicKeySpkiPem:publicKey,publicKeySha256:fingerprint}));
+  const result=JSON.parse(execFileSync(process.execPath,[join(repo,'firebase-migration/scripts/finalize-unified-beta.mjs'),'--client-only','--candidate',join(f.root,'candidate.zip'),'--public-envelope',env,'--public-trust',trust,'--source-sha',SOURCE,'--expected-candidate-sha256',unifiedDigest(f.candidate),'--trusted-public-key-sha256',fingerprint,'--output',output],{encoding:'utf8',windowsHide:true}));
+  const current=await f.current();try{assert.deepEqual(await readFile(output),current.bytes);assert.deepEqual(current.bytes,f.patch.bytes);}finally{current.release();}
+  assert.equal(result.scope,'CLIENT_ONLY');assert.equal(result.complete,false);
+}));
+
+test('full Beta One archive is not exposed by the client-only route',()=>using(async f=>{
+  const r=response();await servePrivateDownloads({method:'GET',path:'/downloads/Aurora-Nexus-Beta-One.zip'},r,admin,undefined,f.callbacks);
+  assert.equal(r.statusCode,404);assert.ok(!Buffer.isBuffer(r.body));
+}));
