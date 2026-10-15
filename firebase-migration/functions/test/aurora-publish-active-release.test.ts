@@ -35,7 +35,7 @@ function fixture() {
     const fileBytes=Object.fromEntries(names.map(name=>[name,Buffer.from('// synthetic '+name)]));
     const files=Object.fromEntries(Object.entries(fileBytes).map(([name,bytes])=>[name,createHash('sha256').update(bytes).digest('hex')]));
     const metadata=component==='iaMaster'?{component:'AURORA_IA_MASTER',version:'1.1.0',sourceRevision:sourceSha,dirty:false,nodeMinimumMajor:22,externalAiEnabled:false,files}:
-      {schemaVersion:1,component:'AURORA_WINDOWS_INTEGRATION',version:'1.0.4',sourceSha,platform:'windows',files};
+      {schemaVersion:1,component:'AURORA_WINDOWS_INTEGRATION',version:'1.0.5',sourceSha,platform:'windows',files};
     return {manifestBytes:Buffer.from(JSON.stringify(metadata)),fileBytes};
   };
   const packages:any={iaMaster:makePackage('iaMaster'),windowsIntegration:makePackage('windowsIntegration')};
@@ -52,7 +52,7 @@ test('publisher derives gates from exact trusted GitHub records and signs only a
   assert.equal('privateKey' in f.envelope(),false);assert.equal(JSON.stringify(f.envelope()).includes('PRIVATE KEY'),false);
   assert.equal(f.envelope().certificate.schemaVersion,2);
   assert.deepEqual(Object.keys(f.envelope().certificate.components),['server','web','satellite','iaMaster','windowsIntegration']);
-  assert.equal(f.envelope().certificate.components.windowsIntegration.version,'1.0.4');
+  assert.equal(f.envelope().certificate.components.windowsIntegration.version,'1.0.5');
 });
 
 for(const missing of ['AURORA_ACTIVE_RELEASE_PUBLIC_KEY','AURORA_ACTIVE_RELEASE_PRIVATE_KEY','AURORA_ACTIVE_RELEASE_PREVIOUS_SHA256']) test(`publisher missing ${missing} cannot mutate`,async()=>{

@@ -563,7 +563,7 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         manifests.mkdir(parents=True)
         f.manifest_path = manifests / 'windowsIntegration-manifest.json'
         f.win_manifest = {'schemaVersion': 1, 'platform': 'windows', 'component': 'AURORA_WINDOWS_INTEGRATION',
-                          'version': '1.0.4', 'sourceSha': source,
+                          'version': '1.0.5', 'sourceSha': source,
                           'files': {name: release.digest(value) for name, value in self.asset_bytes.items()}}
         f.manifest_path.write_bytes(self.encode(f.win_manifest))
         archive = io.BytesIO()
@@ -592,7 +592,7 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         for name, pin in f.env['certificate']['components'].items():
             pin['sourceSha'] = source
             if name == 'windowsIntegration':
-                pin['version'] = '1.0.4'
+                pin['version'] = '1.0.5'
         f.resign(f.env)
         f.cert_sha = release.digest(release.signing_bytes(f.env['certificate']))
         suffix = '1' if source == self.old_source else '2'
@@ -871,7 +871,7 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         self.assertEqual(len(self.f.transport.posts), 2)
         metadata = json.loads(self.manifest.read_bytes())
         self.assertEqual(metadata['reviewedMainSha'], self.new_source)
-        self.assertEqual(metadata['integrationComponent']['version'], '1.0.4')
+        self.assertEqual(metadata['integrationComponent']['version'], '1.0.5')
         self.assertEqual(json.loads(self.f.active.read_bytes())['receipt']['status'], 'DUPLICATE')
         self.assertEqual((Path(result['rollbackBackup']) / 'before-manifest.json').read_bytes(), self.snapshots['manifest'])
         self.assertNotIn('SYNTHETIC_PROCESS_ONLY', output.getvalue())

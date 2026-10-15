@@ -13,7 +13,7 @@ function fixture(t:any){
   const directory=join(temporary,'ia-master');mkdirSync(directory);
   const fileBytes=Object.fromEntries(IA_MASTER_FILES.map((name:string)=>[name,Buffer.from('synthetic public '+name+'\n')]));
   const manifest:any={component:'AURORA_IA_MASTER',version:'1.1.0',sourceRevision:sourceSha,dirty:false,nodeMinimumMajor:22,externalAiEnabled:false,
-    clientAgent:{component:'AURORA_CLIENT_AGENT',version:'1.0.2',configured:false,sourceAuthorizationRequired:true,providerConnectionsVerified:false},
+    clientAgent:{component:'AURORA_CLIENT_AGENT',version:'1.0.3',configured:false,sourceAuthorizationRequired:true,providerConnectionsVerified:false},
     files:Object.fromEntries(Object.entries(fileBytes).map(([name,bytes])=>[name,hash(bytes as Uint8Array)]))};
   const rewrite=()=>writeFileSync(join(directory,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
   for(const [name,bytes] of Object.entries(fileBytes)){const file=join(directory,...name.split('/'));mkdirSync(dirname(file),{recursive:true});writeFileSync(file,bytes as Uint8Array);}
@@ -25,17 +25,17 @@ test('existing package closure yields separate real IA34 and Windows7 manifests 
   assert.deepEqual(Object.keys(windows.fileBytes).sort(),[...WINDOWS_INTEGRATION_FILES].sort());
   for(const name of WINDOWS_INTEGRATION_FILES)assert.ok(Buffer.from(windows.fileBytes[name]).equals(Buffer.from(ia.fileBytes['client-agent/'+name])));
   assert.equal(windows.manifest.sourceSha,sourceSha);assert.equal(windows.manifest.component,'AURORA_WINDOWS_INTEGRATION');
-  assert.equal(windows.manifest.version,'1.0.4');assert.equal(ia.manifest.clientAgent.version,'1.0.2');
+  assert.equal(windows.manifest.version,'1.0.5');assert.equal(ia.manifest.clientAgent.version,'1.0.3');
   assert.equal('configured' in windows.manifest,false);assert.equal('installationVerified' in windows.manifest,false);
 });
-test('Windows Integration1.0.4 round-trips the seven-file package and rejects prior component versions',async t=>{
+test('Windows Integration1.0.5 round-trips the seven-file package and rejects prior component versions',async t=>{
   const f=fixture(t),ia=await readComponentPackage(f.directory,'iaMaster',sourceSha),windows=windowsIntegrationPackage(ia,sourceSha);
   const directory=await retainComponentPackage(join(f.temporary,'retained'),'windows-integration-package',windows);
   const retained=await readComponentPackage(directory,'windowsIntegration',sourceSha);
-  assert.equal(retained.manifest.version,'1.0.4');assert.equal(retained.manifest.sourceSha,sourceSha);
+  assert.equal(retained.manifest.version,'1.0.5');assert.equal(retained.manifest.sourceSha,sourceSha);
   assert.ok(retained.manifestBytes.equals(windows.manifestBytes));
   for(const name of WINDOWS_INTEGRATION_FILES)assert.ok(retained.fileBytes[name].equals(ia.fileBytes['client-agent/'+name]));
-  for(const version of ['1.0.2','1.0.3']){
+  for(const version of ['1.0.2','1.0.3','1.0.4']){
     const old={...windows.manifest,version};
     writeFileSync(join(directory,'manifest.json'),JSON.stringify(old,null,2)+'\n');
     await assert.rejects(readComponentPackage(directory,'windowsIntegration',sourceSha),/COMPONENT_IDENTITY_CONFLICT/);
@@ -48,14 +48,27 @@ test('generated Windows component version agrees with the packaged deployment mo
   writeFileSync(join(f.directory,...name.split('/')),module);f.rewrite();
   const ia=await readComponentPackage(f.directory,'iaMaster',sourceSha),windows=windowsIntegrationPackage(ia,sourceSha);
   const version=/^VERSION = '([^']+)'\r?$/m.exec(windows.fileBytes['aurora_deployment.py'].toString('utf8'))?.[1];
-  assert.equal(version,'1.0.4');assert.equal(windows.manifest.version,version);
+  assert.equal(version,'1.0.5');assert.equal(windows.manifest.version,version);
   const directory=await retainComponentPackage(join(f.temporary,'retained'),'windows-integration-package',windows);
   const retained=await readComponentPackage(directory,'windowsIntegration',sourceSha);
   assert.ok(retained.fileBytes['aurora_deployment.py'].equals(module));
 });
-test('Windows Integration release rejects the prior IA clientAgent version contract',async t=>{
-  const f=fixture(t);f.manifest.clientAgent.version='1.0.1';f.rewrite();
-  await assert.rejects(readComponentPackage(f.directory,'iaMaster',sourceSha),/COMPONENT_IDENTITY_CONFLICT/);
+test('IA clientAgent identity agrees with the actual packaged client module',async t=>{
+  const f=fixture(t),module=readFileSync(new URL('../../../aurora-coletor/client_agent.py',import.meta.url));
+  const name='client-agent/client_agent.py';
+  f.fileBytes[name]=module;f.manifest.files[name]=hash(module);
+  writeFileSync(join(f.directory,...name.split('/')),module);f.rewrite();
+  const ia=await readComponentPackage(f.directory,'iaMaster',sourceSha),windows=windowsIntegrationPackage(ia,sourceSha);
+  const version=/^VERSION\s*=\s*'([^']+)'\r?$/m.exec(windows.fileBytes['client_agent.py'].toString('utf8'))?.[1];
+  assert.equal(version,'1.0.3');assert.equal(ia.manifest.clientAgent.version,version);
+  assert.ok(windows.fileBytes['client_agent.py'].equals(module));
+});
+test('Windows Integration release rejects prior IA clientAgent version contracts',async t=>{
+  const f=fixture(t);
+  for(const version of ['1.0.1','1.0.2']){
+    f.manifest.clientAgent.version=version;f.rewrite();
+    await assert.rejects(readComponentPackage(f.directory,'iaMaster',sourceSha),/COMPONENT_IDENTITY_CONFLICT/);
+  }
 });
 for(const scenario of ['wrong source','dirty','configured agent','extra claimed path','missing claim','changed bytes','missing public file','extra private file'])test(`component closure rejects ${scenario}`,async t=>{
   const f=fixture(t);

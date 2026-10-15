@@ -159,7 +159,7 @@ class DeploymentTests(unittest.TestCase):
         self.assertFalse(result['processingVerifiedThisRun'])
 
     def test_historical_receipts_migrate_without_changing_payload_or_key(self):
-        for version in ('1.0.0', '1.0.1', '1.0.2', '1.0.3'):
+        for version in ('1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4'):
             with self.subTest(version=version):
                 (self.state / deployment.STATE_NAME).unlink(missing_ok=True)
                 first = self.run_setup(token='test-token', send=True, transport=Mock(
@@ -170,7 +170,7 @@ class DeploymentTests(unittest.TestCase):
                 network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}),
                                            (200, processed_response(self.payload, True))])
                 result = self.run_setup(token='test-token', send=True, transport=network)
-                self.assertEqual(result['componentVersion'], '1.0.4')
+                self.assertEqual(result['componentVersion'], '1.0.5')
                 self.assertEqual(result['sampleKey'], first['sampleKey'])
                 self.assertTrue(result['processingVerifiedThisRun'])
 
@@ -323,7 +323,7 @@ class DeploymentTests(unittest.TestCase):
         sentinel.write_bytes(b'# synthetic legacy bundle')
         before = sentinel.read_bytes()
         result = deployment.install_assets(ROOT, self.state)
-        self.assertEqual(result['version'], '1.0.4')
+        self.assertEqual(result['version'], '1.0.5')
         manifest = deployment.read_json(self.state / 'integration' / deployment.VERSION / 'manifest.json')
         self.assertEqual(manifest['schemaVersion'], deployment.SCHEMA)
         self.assertEqual(manifest['version'], deployment.VERSION)
@@ -360,11 +360,11 @@ class DeploymentTests(unittest.TestCase):
             first = deployment.install_assets(ROOT, self.state)
             second = deployment.install_assets(ROOT, self.state)
             self.assertEqual(old_accesses, [])
-            self.assertEqual(first, {'version': '1.0.4', 'alreadyInstalled': False})
-            self.assertEqual(second, {'version': '1.0.4', 'alreadyInstalled': True})
-            current = self.state / 'integration' / '1.0.4'
+            self.assertEqual(first, {'version': '1.0.5', 'alreadyInstalled': False})
+            self.assertEqual(second, {'version': '1.0.5', 'alreadyInstalled': True})
+            current = self.state / 'integration' / '1.0.5'
             manifest = deployment.read_json(current / 'manifest.json')
-            self.assertEqual(manifest['version'], '1.0.4')
+            self.assertEqual(manifest['version'], '1.0.5')
             for name in deployment.ASSETS:
                 self.assertEqual((current / name).read_bytes(), (ROOT / name).read_bytes())
         self.assertEqual({name: (legacy / name).read_bytes() for name in old_files}, old_files)

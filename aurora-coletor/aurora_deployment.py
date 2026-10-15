@@ -21,8 +21,8 @@ import time
 
 import aurora_cloud_sync as sync
 
-VERSION = '1.0.4'
-CHECKPOINT_VERSIONS = ('1.0.0', '1.0.1', '1.0.2', '1.0.3', VERSION)
+VERSION = '1.0.5'
+CHECKPOINT_VERSIONS = ('1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', VERSION)
 SCHEMA = 'aurora.install.integration.v1'
 STATE_NAME = 'integration-setup.json'
 ASSETS = ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',

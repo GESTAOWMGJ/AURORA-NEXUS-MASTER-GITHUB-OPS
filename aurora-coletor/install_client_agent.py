@@ -3,14 +3,19 @@ import argparse
 from contextlib import contextmanager
 import getpass
 import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
 import plistlib
 import shutil
+import socket
 import subprocess
 import sys
+import time
+from urllib import parse
 import uuid
+import webbrowser
 
 from aurora_deployment import safe_path,read_json,atomic_json
 import aurora_cloud_sync as sync
@@ -18,6 +23,7 @@ from aurora_cloud_sync import SyncError
 import client_agent as agent
 from client_agent import validate,SCHEMA,VERSION
 from provider_connectors import pull
+import provider_connectors as providers
 from client_secret_store import store
 
 ASSETS=('client_agent.py','provider_connectors.py','client_secret_store.py','aurora_cloud_sync.py','aurora_deployment.py','install_client_agent.py','published_release.py')
@@ -49,7 +55,7 @@ def install(target,config,source=None,startup=False,configure_secrets=False,star
         'existingApplicationPreserved':True,'installationComplete':False,'globalIngestionVerified':False}
     atomic_json(target/'installation.json',prepared)
     if configure_secrets:
-        aliases={config['tokenEnv'],*(p['tokenEnv'] for p in config.get('providers',[]))}
+        aliases={config['tokenEnv'],*(p['tokenEnv'] for p in config.get('providers',[]) if 'tokenEnv' in p)}
         for alias in sorted(aliases):store(target/'state',config['org'],alias,getpass.getpass('Credencial protegida '+alias+': '))
     if verify_integration or start_now:
         return continue_installation(target,environment,transport,provider_pull)
@@ -98,6 +104,170 @@ def verify_existing_integration(target,environment=os.environ,transport=sync.req
         readiness=report.get('installationReadiness',{})
         if readiness.get('eligible') is not True:raise SyncError('REAL_SOURCE_AUTOMATION_INTEGRATION_REQUIRED')
         return readiness
+
+
+GOOGLE_CALLBACK_PATH='/aurora-google-oauth/callback'
+GOOGLE_CALLBACK_MAX_SECONDS=180
+GOOGLE_CALLBACK_MAX_REQUESTS=8
+GOOGLE_CALLBACK_MAX_QUERY=4096
+
+
+def _oauth_public_status(state,protected=False):
+    # This is consent status, never an installation or document-acquisition proof.
+    return {'state':state,'provider':'GOOGLE_DRIVE','grantProtected':protected,
+            'installationComplete':False,'globalIngestionVerified':False}
+
+
+def _google_source_context(config,index):
+    sources=config.get('providers',[])
+    if type(index) is not int or not 0<=index<len(sources):
+        raise SyncError('GOOGLE_OAUTH_SOURCE_REQUIRED')
+    source=sources[index]
+    if source.get('provider')!='GOOGLE_DRIVE' or 'oauth' not in source:
+        raise SyncError('GOOGLE_OAUTH_SOURCE_REQUIRED')
+    return providers.google_oauth_context(source,config['org'],config['instanceId'])
+
+
+def _google_aurora_access(target,config,environment,transport):
+    token=environment.get(config['tokenEnv'])
+    if not token:token=agent.load_secret(target/'state',config['org'],config['tokenEnv']) or ''
+    sync.connect(config['origin'],config['org'],token,transport)
+
+
+def _google_staging_unchanged(target,receipt,config):
+    current,current_config=verified_staging(target,allow_installed=True)
+    if current!=receipt or current_config!=config:raise SyncError('AGENT_CONFIGURATION_CHANGED')
+
+
+def google_oauth_status(target,source_index,environment=os.environ,transport=sync.request_json):
+    """Read only this staged source's protected grant after Aurora authorization."""
+    target=safe_path(target)
+    with installation_guard(target):
+        receipt,config=verified_staging(target,allow_installed=True)
+        context=_google_source_context(config,source_index)
+        if context['clientId'] is None:return _oauth_public_status('PENDING_CONFIGURATION')
+        _google_aurora_access(target,config,environment,transport)
+        _google_staging_unchanged(target,receipt,config)
+        record=providers.google_oauth_load_record(target/'state',context)
+        _google_staging_unchanged(target,receipt,config)
+        return _oauth_public_status('PROTECTED_GRANT_PRESENT' if record is not None else 'PENDING_AUTHORIZATION',record is not None)
+
+
+def _google_callback_parameters(connection,peer,host,expected_state,deadline,monotonic):
+    """Read one bounded HTTP request; authorization material stays in memory."""
+    if peer[0]!='127.0.0.1':raise SyncError('GOOGLE_OAUTH_CALLBACK_REJECTED')
+    raw=b''
+    while b'\r\n\r\n' not in raw:
+        remaining=deadline-monotonic()
+        if remaining<=0:raise SyncError('GOOGLE_OAUTH_CALLBACK_TIMEOUT')
+        connection.settimeout(min(1,remaining))
+        chunk=connection.recv(min(1024,8193-len(raw)))
+        if not chunk or len(raw)+len(chunk)>8192:raise SyncError('GOOGLE_OAUTH_CALLBACK_REJECTED')
+        raw+=chunk
+    head,body=raw.split(b'\r\n\r\n',1)
+    if body:raise SyncError('GOOGLE_OAUTH_CALLBACK_REJECTED')
+    try:
+        lines=head.decode('ascii').split('\r\n')
+        method,target,version=lines[0].split(' ')
+        headers={}
+        for line in lines[1:]:
+            name,value=line.split(':',1);name=name.lower()
+            if (not name or name in headers or name.strip()!=name
+                    or any(ord(c)<32 or ord(c)==127 for c in line)):
+                raise ValueError()
+            headers[name]=value.strip()
+        address=parse.urlsplit(target)
+        if (method!='GET' or version not in ('HTTP/1.0','HTTP/1.1') or headers.get('host')!=host
+                or 'content-length' in headers or 'transfer-encoding' in headers
+                or address.scheme or address.netloc or address.fragment or address.path!=GOOGLE_CALLBACK_PATH
+                or len(address.query)>GOOGLE_CALLBACK_MAX_QUERY
+                or any(ord(c)<33 or ord(c)>126 for c in target)):
+            raise ValueError()
+        pairs=parse.parse_qsl(address.query,keep_blank_values=True,strict_parsing=True,
+                             encoding='utf-8',errors='strict',max_num_fields=8)
+        params=dict(pairs)
+        allowed={'state','code','error','scope','authuser','prompt','iss','error_description'}
+        if (len(params)!=len(pairs) or set(params)-allowed or 'state' not in params
+                or ('code' in params)==('error' in params)
+                or not all(value and len(value)<=2048 for value in params.values())
+                or not hmac.compare_digest(params['state'],expected_state)):
+            raise ValueError()
+        return params
+    except (ValueError,UnicodeError,TypeError):raise SyncError('GOOGLE_OAUTH_CALLBACK_REJECTED') from None
+
+
+def _google_callback_response(connection,accepted,deadline,monotonic):
+    # Never interpolate a query, code, error description or token into this page.
+    body=b'AURORA: return to the installer.'
+    status=b'200 OK' if accepted else b'400 Bad Request'
+    response=(b'HTTP/1.1 '+status+b'\r\nContent-Type: text/plain; charset=utf-8\r\n'
+              b'Cache-Control: no-store\r\nPragma: no-cache\r\nReferrer-Policy: no-referrer\r\n'
+              b"Content-Security-Policy: default-src 'none'; frame-ancestors 'none'\r\n"
+              b'X-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: '
+              +str(len(body)).encode()+b'\r\n\r\n'+body)
+    remaining=deadline-monotonic()
+    if remaining<=0:return
+    try:
+        connection.settimeout(min(.25,remaining))
+        connection.sendall(response)
+    except OSError:pass
+
+
+def _google_consent_callback(context,browser_opener,clock,monotonic,timeout_seconds):
+    if type(timeout_seconds) not in (int,float) or not 0<timeout_seconds<=GOOGLE_CALLBACK_MAX_SECONDS:
+        raise SyncError('GOOGLE_OAUTH_CALLBACK_LIMIT_REQUIRED')
+    deadline=monotonic()+timeout_seconds
+    # Bind before opening the browser. A context manager closes every terminal path.
+    with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as listener:
+        if hasattr(socket,'SO_EXCLUSIVEADDRUSE'):
+            listener.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
+        listener.bind(('127.0.0.1',0));listener.listen(GOOGLE_CALLBACK_MAX_REQUESTS)
+        host='127.0.0.1:'+str(listener.getsockname()[1])
+        attempt=providers.google_oauth_begin(context,'http://'+host+GOOGLE_CALLBACK_PATH,clock=clock)
+        try:opened=browser_opener(attempt['authorizationUrl'])
+        except Exception:raise SyncError('GOOGLE_OAUTH_BROWSER_REQUIRED') from None
+        if opened is not True:raise SyncError('GOOGLE_OAUTH_BROWSER_REQUIRED')
+        requests=0
+        while requests<GOOGLE_CALLBACK_MAX_REQUESTS:
+            remaining=deadline-monotonic()
+            if remaining<=0:raise SyncError('GOOGLE_OAUTH_CALLBACK_TIMEOUT')
+            listener.settimeout(min(.25,remaining))
+            try:connection,peer=listener.accept()
+            except socket.timeout:continue
+            requests+=1
+            with connection:
+                try:params=_google_callback_parameters(connection,peer,host,attempt['state'],deadline,monotonic)
+                except (SyncError,OSError):
+                    _google_callback_response(connection,False,deadline,monotonic)
+                    continue
+                _google_callback_response(connection,True,deadline,monotonic)
+                return attempt,params
+        raise SyncError('GOOGLE_OAUTH_CALLBACK_LIMIT')
+
+
+def authorize_google_drive(target,source_index,environment=os.environ,transport=sync.request_json,
+                           token_transport=None,browser_opener=webbrowser.open,clock=time.time,
+                           monotonic=time.monotonic,timeout_seconds=GOOGLE_CALLBACK_MAX_SECONDS):
+    """Explicit opt-in consent for one staged source; no install, queue or startup."""
+    target=safe_path(target)
+    with installation_guard(target):
+        receipt,config=verified_staging(target,allow_installed=True)
+        context=_google_source_context(config,source_index)
+        if context['clientId'] is None:return _oauth_public_status('PENDING_CONFIGURATION')
+        _google_aurora_access(target,config,environment,transport)
+        _google_staging_unchanged(target,receipt,config)
+        existing=providers.google_oauth_load_record(target/'state',context)
+        expected_digest=providers.google_oauth_record_digest(existing)
+        try:attempt,params=_google_consent_callback(context,browser_opener,clock,monotonic,timeout_seconds)
+        except OSError:raise SyncError('GOOGLE_OAUTH_CALLBACK_UNAVAILABLE') from None
+        _google_staging_unchanged(target,receipt,config)
+        kwargs={'clock':clock}
+        if token_transport is not None:kwargs['transport']=token_transport
+        record=providers.google_oauth_complete(attempt,params,**kwargs)
+        _google_staging_unchanged(target,receipt,config)
+        providers.google_oauth_save_record(target/'state',context,record,expected_digest=expected_digest)
+        _google_staging_unchanged(target,receipt,config)
+        return _oauth_public_status('AUTHORIZED',True)
 
 
 def startup_payload(target,config):
@@ -182,12 +352,24 @@ def disable(target):
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--target',required=True);parser.add_argument('--config');parser.add_argument('--disable',action='store_true')
+    parser=argparse.ArgumentParser();parser.add_argument('--target',required=True);parser.add_argument('--config')
+    modes=parser.add_mutually_exclusive_group()
+    modes.add_argument('--disable',action='store_true')
+    modes.add_argument('--authorize-google-drive',type=int,metavar='SOURCE_INDEX',help='Authorize one existing Google Drive source using the system browser')
+    modes.add_argument('--google-oauth-status',type=int,metavar='SOURCE_INDEX',help='Read protected consent status for one existing source')
     parser.add_argument('--startup',action='store_true');parser.add_argument('--configure-secrets',action='store_true')
     parser.add_argument('--start-now',action='store_true')
     parser.add_argument('--verify-integration',action='store_true',help='Read the approved source and require processing plus replay before promotion')
-    parser.add_argument('--continue-integration',action='store_true',help='Resume the same staged configuration, instance and queue')
+    modes.add_argument('--continue-integration',action='store_true',help='Resume the same staged configuration, instance and queue')
     args=parser.parse_args()
+    if args.authorize_google_drive is not None or args.google_oauth_status is not None:
+        if args.config or args.startup or args.configure_secrets or args.start_now or args.verify_integration:
+            raise SyncError('EXISTING_STAGED_CONFIGURATION_REQUIRED')
+        action=authorize_google_drive if args.authorize_google_drive is not None else google_oauth_status
+        index=args.authorize_google_drive if args.authorize_google_drive is not None else args.google_oauth_status
+        result=action(args.target,index)
+        print(json.dumps(result))
+        return 0 if result['state'] in ('AUTHORIZED','PROTECTED_GRANT_PRESENT') else 2
     if args.disable:print(json.dumps(disable(args.target)));return
     if args.continue_integration:
         if args.config or args.startup or args.configure_secrets or args.start_now or args.verify_integration:

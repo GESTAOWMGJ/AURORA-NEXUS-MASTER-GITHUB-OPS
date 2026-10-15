@@ -19,11 +19,11 @@ import time
 
 import aurora_cloud_sync as sync
 from aurora_deployment import safe_path
-from provider_connectors import pull, exports, EXPORT_SUFFIXES, MAX_PROVIDER_BYTES
+from provider_connectors import pull, exports, EXPORT_SUFFIXES, MAX_PROVIDER_BYTES, google_oauth_context, google_oauth_resolve, ProviderAuthenticationError
 from client_secret_store import load as load_secret
 import published_release as release
 
-VERSION='1.0.2'
+VERSION='1.0.3'
 SCHEMA='aurora.client-agent.v1'
 MAX_ENTRIES=200
 SOURCE_PROOF_TTL_SECONDS=300
@@ -64,8 +64,9 @@ def validate(config):
             raise sync.SyncError('SOURCE_STATE_OVERLAP')
         checked.append(root)
     for source in providers:
-        if not isinstance(source,dict) or set(source)-{'provider','tokenEnv','folderId','labelId','host','user','folder'}:
+        if not isinstance(source,dict) or set(source)-{'provider','tokenEnv','folderId','labelId','host','user','folder','oauth'}:
             raise sync.SyncError('PROVIDER_CONFIG_INVALID')
+        if 'oauth' in source:google_oauth_context(source,org,config['instanceId'])
     return checked,state
 
 
@@ -157,6 +158,13 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
     if verify_installation and sync.origin_url(config['origin'])!='https://auroranexus.com.br':
         raise sync.SyncError('CANONICAL_INSTALLATION_ORIGIN_REQUIRED')
     if (state/'disabled.json').exists():raise sync.SyncError('AGENT_DISABLED')
+    sources=config.get('providers',[])
+    if not roots and sources and all('oauth' in source and source['oauth']['clientId'] is None for source in sources):
+        return {'schemaVersion':SCHEMA,'componentVersion':VERSION,'orgId':config['org'],'state':'PENDING_CONFIGURATION',
+                'connectionVerified':False,'receiptsConfirmed':0,'fullSynchronizationVerified':False,
+                'providerPendingCodes':[{'provider':'GOOGLE_DRIVE','code':'GOOGLE_OAUTH_CONFIGURATION_REQUIRED'}],
+                'installationReadiness':{'status':'PENDING_CONFIGURATION','eligible':False,'installationComplete':False,
+                    'globalIngestionVerified':False,'oauthEnrollmentOrRefreshPerformed':False}}
     environment=dict(environment)
     aliases={config['tokenEnv']}
     for alias in aliases:
@@ -176,7 +184,7 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
         if source_configuration_hash(config)!=configuration_hash:raise sync.SyncError('SOURCE_CONFIGURATION_CHANGED_DURING_CYCLE')
         if (state/'disabled.json').exists():raise sync.SyncError('AGENT_DISABLED')
     conn=queue(state);accepted=0;verified=0;waiting=0;provider_states=[];provider_errors=[]
-    replays=0;fresh_processed=0;acceptances=[];source_modes=set();verified_source_groups=set()
+    replays=0;fresh_processed=0;acceptances=[];source_modes=set();verified_source_groups=set();oauth_refreshed=False
     source_access_at={};page_cursors={};page_hashes={};revalidations=set()
     try:
         conn.execute('CREATE TABLE IF NOT EXISTS binding (id INTEGER PRIMARY KEY, hash TEXT NOT NULL)')
@@ -213,6 +221,9 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                 provider_states.append({'provider':source['provider'],'state':'CONNECTION_PENDING'})
                 continue
             try:
+                oauth_context=google_oauth_context(source,config['org'],config['instanceId']) if 'oauth' in source else None
+                if oauth_context is not None and oauth_context['clientId'] is None:
+                    raise sync.SyncError('GOOGLE_OAUTH_CONFIGURATION_REQUIRED')
                 proof=conn.execute('SELECT request_cursor,page_hash,configuration_hash,checked_at FROM provider_page_proofs WHERE id=?',(key,)).fetchone()
                 inflight=conn.execute('SELECT hash FROM provider_inflight WHERE id=?',(key,)).fetchone()
                 age=time.time()-proof[3] if proof else None
@@ -230,7 +241,20 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                 revalidating=bool(verify_installation and checkpoint and checkpoint[1])
                 cursor=json.loads(checkpoint[0]) if checkpoint and checkpoint[0] is not None else None
                 if revalidating:cursor=json.loads(proof[0]) if proof[0] is not None else None
-                result=provider_pull(source,environment=environment,cursor=cursor)
+                if oauth_context is None:
+                    result=provider_pull(source,environment=environment,cursor=cursor)
+                else:
+                    access,oauth_proof=google_oauth_resolve(state,oauth_context)
+                    oauth_refreshed|=oauth_proof['refreshPerformedThisRun']
+                    current_source_authorization()
+                    try:result=provider_pull(source,environment={},cursor=cursor,oauth_access_token=access)
+                    except sync.SyncError as exc:
+                        if not isinstance(exc,ProviderAuthenticationError) or exc.status!=401:raise
+                        current_source_authorization()
+                        access,oauth_proof=google_oauth_resolve(state,oauth_context,force_refresh=True)
+                        oauth_refreshed|=oauth_proof['refreshPerformedThisRun']
+                        current_source_authorization()
+                        result=provider_pull(source,environment={},cursor=cursor,oauth_access_token=access)
                 current_source_authorization()
                 source_access_at[key]=time.time()
                 if len(result['documents'])>budget:raise sync.SyncError('PROVIDER_PAGE_BUDGET_EXCEEDED')
@@ -308,7 +332,7 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                'processingReceiptsVerifiedThisRun':fresh_processed,'idempotentReplaysVerifiedThisRun':replays,
                'automationScope':'AURORA_CANONICAL_PIPELINE','installationComplete':False,
                'proofScope':'DIRECT_ADAPTER_EXECUTION_THIS_RUN',
-               'globalIngestionVerified':False,'oauthEnrollmentOrRefreshPerformed':False}
+               'globalIngestionVerified':False,'oauthEnrollmentOrRefreshPerformed':oauth_refreshed}
     required_groups=set(ids)|({'LOCAL_ROOTS'} if roots else set())
     source_proofs_fresh=all(key in source_access_at and 0<=time.time()-source_access_at[key]<SOURCE_PROOF_TTL_SECONDS for key in required_groups)
     readiness.update(sourceProofsFreshThisRun=source_proofs_fresh,sourceProofTtlSeconds=SOURCE_PROOF_TTL_SECONDS)
