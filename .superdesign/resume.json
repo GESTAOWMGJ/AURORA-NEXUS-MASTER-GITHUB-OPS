@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "/portal#access-art-deco": {
+      "targetKind": "existing-ui",
+      "projectId": "8a568784-32a5-4339-bc1a-d510e220cb99",
+      "activeDraftId": "f738f2c5-b299-4623-b4ee-dfdbbf24998a",
+      "designSystemPath": ".superdesign/design-system.md",
+      "referenceIds": [
+        "firebase-migration-hosting-aurora-nexus-aurora-icon-svg"
+      ],
+      "brandAssets": {
+        "logo": {
+          "assetKey": "firebase-migration-hosting-aurora-nexus-aurora-icon-svg",
+          "url": "https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/8a568784-32a5-4339-bc1a-d510e220cb99/brand-assets/firebase-migration-hosting-aurora-nexus-aurora-icon-svg/aurora-icon.svg",
+          "sourcePath": "firebase-migration/hosting/aurora-nexus/aurora-icon.svg"
+        }
+      },
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        ".superdesign/context/access-art-deco.html"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "3d33c163511b007073089b1df88c69252e5702cccc434525be0e8b64e2cd689c",
+        ".superdesign/context/access-art-deco.html": "017d30f784406e322fddf52d5241a65a155da6e8f902c6508749a80db46c8785"
+      },
+      "drafts": {
+        "f738f2c5-b299-4623-b4ee-dfdbbf24998a": {
+          "title": "Art Déco — acesso e fluxo demonstrativo",
+          "visualDirection": "Art Déco creme/petróleo/ouro",
+          "currentVersion": 4
+        }
+      },
+      "promotionState": "DESIGN_CANDIDATE_NOT_OPERATIONAL_RELEASE",
+      "updatedAt": "2026-10-15T09:03:28.721961+00:00"
+    },
+    "/portal#access-warm": {
+      "targetKind": "existing-ui",
+      "projectId": "8a568784-32a5-4339-bc1a-d510e220cb99",
+      "activeDraftId": "8127eaf0-89a1-4059-b74a-ee29fa6db158",
+      "designSystemPath": ".superdesign/design-system.md",
+      "referenceIds": [
+        "firebase-migration-hosting-aurora-nexus-aurora-icon-svg"
+      ],
+      "brandAssets": {
+        "logo": {
+          "assetKey": "firebase-migration-hosting-aurora-nexus-aurora-icon-svg",
+          "url": "https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/8a568784-32a5-4339-bc1a-d510e220cb99/brand-assets/firebase-migration-hosting-aurora-nexus-aurora-icon-svg/aurora-icon.svg",
+          "sourcePath": "firebase-migration/hosting/aurora-nexus/aurora-icon.svg"
+        }
+      },
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        ".superdesign/context/access-warm.html"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "3d33c163511b007073089b1df88c69252e5702cccc434525be0e8b64e2cd689c",
+        ".superdesign/context/access-warm.html": "892a8da4847f0e8546a0abc72cb9268b699860d929e8160339c985c43ee454be"
+      },
+      "drafts": {
+        "8127eaf0-89a1-4059-b74a-ee29fa6db158": {
+          "title": "Acesso acolhedor",
+          "visualDirection": "Creme, bronze e cantos suaves",
+          "currentVersion": 2
+        }
+      },
+      "promotionState": "DESIGN_CANDIDATE_NOT_OPERATIONAL_RELEASE",
+      "updatedAt": "2026-10-15T09:03:28.733994+00:00"
+    },
+    "/portal#access-geometric": {
+      "targetKind": "existing-ui",
+      "projectId": "8a568784-32a5-4339-bc1a-d510e220cb99",
+      "activeDraftId": "fec6666e-5339-4344-ac54-e37100a02ae8",
+      "designSystemPath": ".superdesign/design-system.md",
+      "referenceIds": [
+        "firebase-migration-hosting-aurora-nexus-aurora-icon-svg"
+      ],
+      "brandAssets": {
+        "logo": {
+          "assetKey": "firebase-migration-hosting-aurora-nexus-aurora-icon-svg",
+          "url": "https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/8a568784-32a5-4339-bc1a-d510e220cb99/brand-assets/firebase-migration-hosting-aurora-nexus-aurora-icon-svg/aurora-icon.svg",
+          "sourcePath": "firebase-migration/hosting/aurora-nexus/aurora-icon.svg"
+        }
+      },
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        ".superdesign/context/access-geometric.html"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "3d33c163511b007073089b1df88c69252e5702cccc434525be0e8b64e2cd689c",
+        ".superdesign/context/access-geometric.html": "840490ce33acd5731053e87a28d5a20224b10519937428dfb75f629d7a729ec4"
+      },
+      "drafts": {
+        "fec6666e-5339-4344-ac54-e37100a02ae8": {
+          "title": "Acesso geométrico",
+          "visualDirection": "Petróleo escuro e ouro",
+          "currentVersion": 2
+        }
+      },
+      "promotionState": "DESIGN_CANDIDATE_NOT_OPERATIONAL_RELEASE",
+      "updatedAt": "2026-10-15T09:03:28.745658+00:00"
+    },
+    "/portal#overview": {
+      "targetKind": "existing-ui",
+      "projectId": "8a568784-32a5-4339-bc1a-d510e220cb99",
+      "activeDraftId": "f78aec2c-60bb-4c42-a6bd-13c9fbbac9f6",
+      "designSystemPath": ".superdesign/design-system.md",
+      "referenceIds": [
+        "firebase-migration-hosting-aurora-nexus-aurora-icon-svg"
+      ],
+      "brandAssets": {
+        "logo": {
+          "assetKey": "firebase-migration-hosting-aurora-nexus-aurora-icon-svg",
+          "url": "https://vgbujcuwptvheqijyjbe.supabase.co/storage/v1/object/public/hmac-uploads/projects/8a568784-32a5-4339-bc1a-d510e220cb99/brand-assets/firebase-migration-hosting-aurora-nexus-aurora-icon-svg/aurora-icon.svg",
+          "sourcePath": "firebase-migration/hosting/aurora-nexus/aurora-icon.svg"
+        }
+      },
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "firebase-migration/functions/src/auroraDesignSystem.ts",
+        "firebase-migration/functions/src/auroraFrontend.ts:40:62"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "3d33c163511b007073089b1df88c69252e5702cccc434525be0e8b64e2cd689c",
+        "firebase-migration/functions/src/auroraDesignSystem.ts": "e8c0ffaf41540d4b581802daad5e0216bb86ae035b92a772471d0ed2be8e4082",
+        "firebase-migration/functions/src/auroraFrontend.ts": "49f19a60cdda67b788ecd024ac64a5aa32147b75d5fb08d6a8e6e394b9f06d74"
+      },
+      "drafts": {
+        "f78aec2c-60bb-4c42-a6bd-13c9fbbac9f6": {
+          "title": "Gestão clara — prévia ilustrativa",
+          "visualDirection": "Creme, petróleo, ouro; valor e próxima ação antes do detalhe",
+          "currentVersion": 2
+        }
+      },
+      "promotionState": "DESIGN_CANDIDATE_NOT_OPERATIONAL_RELEASE",
+      "updatedAt": "2026-10-15T09:03:28.756477+00:00",
+      "baselineDraftId": "f78aec2c-60bb-4c42-a6bd-13c9fbbac9f6",
+      "components": [
+        {
+          "name": "AuroraTopBar",
+          "id": "e8c4b739-d293-4e60-a476-60d87c9d31fc",
+          "sourcePath": ".superdesign/components/aurora-topbar-component.html",
+          "logoAssetKey": "firebase-migration-hosting-aurora-nexus-aurora-icon-svg"
+        },
+        {
+          "name": "AuroraOperationalSidebar",
+          "id": "9143be00-d360-4506-b7c7-385f5803aba4",
+          "sourcePath": ".superdesign/components/aurora-sidebar-component.html"
+        }
+      ]
+    }
+  }
+}
