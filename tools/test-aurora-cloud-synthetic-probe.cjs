@@ -203,7 +203,12 @@ test('deadline cannot be extended by request',()=>{
 });
 test('renewed Cloud hard deadline agrees with the explicit owner decision and permits the former cutoff',()=>{
   const decision=JSON.parse(fs.readFileSync(path.join(ROOT,'firebase-migration/policy/hml-owner-release-approval-v1.json'),'utf8'));
-  const renewal=decision.reaffirmations.at(-1);
+  // A later scope decision is not a deadline renewal. Match the current window
+  // explicitly and reject ambiguous history rather than relying on list order.
+  const renewals=decision.reaffirmations.filter(item=>item.riskReviewDeadlineExtended===true
+    && item.validUntilUtc===decision.scope.validUntilUtc);
+  assert.equal(renewals.length,1);
+  const renewal=renewals[0];
   assert.equal(DEADLINE,Date.parse(decision.scope.validUntilUtc));
   assert.equal(renewal.riskReviewDeadlineExtended,true);assert.equal(renewal.laterMainCodeReviewClaimed,false);
   const previous=Date.parse(renewal.previousValidUntilUtc),f=fixture({now:previous});

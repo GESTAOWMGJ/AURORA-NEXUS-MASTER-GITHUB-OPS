@@ -26,6 +26,13 @@ de emitir prova de sucesso quando o runtime posterior ainda usa a versão 3.
 Deploy, teste real de quatro formatos, recibo, replay e limpeza continuam gates
 distintos; os resultados serão registrados com o SHA/run efetivamente executado.
 
+O primeiro probe posterior à implantação do vínculo 4 foi interrompido pelo teste
+do harness, antes de autenticar a nuvem ou criar documentos: a regressão de prazo
+assumia que a última decisão histórica era sempre uma renovação. A seleção passou
+a exigir uma única renovação explícita da janela atual; decisões posteriores de
+escopo não renovam o prazo. Os 46 testes offline do harness integram agora a CI
+principal antes de qualquer deploy. Prazo e guardas operacionais não foram ampliados.
+
 Em falha, conservar a baseline e os recibos anteriores. Não destruir versões de
 segredo nem reativar automaticamente a versão 3; eventual reversão de escopo exige
 decisão explícita e publicação verificada. A referência oficial anterior permanece
