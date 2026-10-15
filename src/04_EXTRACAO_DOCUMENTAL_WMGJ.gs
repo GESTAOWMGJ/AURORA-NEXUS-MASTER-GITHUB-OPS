@@ -24,7 +24,7 @@ function executarExtracaoRealWMGJ_V1(limite) {
   var processamento = processarFilaComExtracaoRealWMGJ_V1(limite || 20);
 
   var resultado = {
-    ok: true,
+    ok: preparo.ok !== false && processamento.ok === true,
     versao: WMGJ_EXTRACAO_VERSAO,
     etapa: "executarExtracaoRealWMGJ_V1",
     preparo: preparo,
@@ -52,6 +52,7 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
       erros: 0,
       duplicados: 0,
       revisar: 0,
+      pendentesExtracao: 0,
       mensagem: "Fila vazia"
     };
     registrarLogWMGJ_Compat_("OK", "processarFilaComExtracaoRealWMGJ_V1", "AppsScript", JSON.stringify(vazio));
@@ -67,6 +68,7 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
   var erros = 0;
   var duplicados = 0;
   var revisar = 0;
+  var pendentesExtracao = 0;
 
   for (var i = 1; i < dados.length && avaliados < max; i++) {
     var linha = dados[i];
@@ -118,6 +120,19 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
 
       var extracao = extrairConteudoArquivoWMGJ_V1_(file);
       registrarExtracaoDocumentalWMGJ_V1_(file, hash, extracao);
+
+      // Metadata and a successful listing are not extracted document contents.
+      // Keep the existing queue resumable; do not classify, mirror or mark memory.
+      if (!extracaoDocumentalCompletaWMGJ_(extracao)) {
+        atualizarLinhaFilaWMGJ_Compat_(fila, i + 1, idx, {
+          STATUS: "ERRO_REPROCESSAR",
+          TENTATIVAS: Number(linha[idx.TENTATIVAS] || 0) + 1,
+          ULTIMO_ERRO: "PENDING_EXTRACTION",
+          OBSERVACAO: "Extração não comprovada; revisar formato, autorização e serviço de extração"
+        });
+        pendentesExtracao++;
+        continue;
+      }
 
       atualizarLinhaFilaWMGJ_Compat_(fila, i + 1, idx, {
         STATUS: "CLASSIFICANDO",
@@ -180,14 +195,15 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
   }
 
   var resultado = {
-    ok: true,
+    ok: erros === 0 && revisar === 0 && pendentesExtracao === 0,
     versao: WMGJ_EXTRACAO_VERSAO,
     etapa: "processarFilaComExtracaoRealWMGJ_V1",
     avaliados: avaliados,
     processados: processados,
     erros: erros,
     duplicados: duplicados,
-    revisar: revisar
+    revisar: revisar,
+    pendentesExtracao: pendentesExtracao
   };
 
   registrarLogWMGJ_Compat_("OK", "processarFilaComExtracaoRealWMGJ_V1", "AppsScript", JSON.stringify(resultado));
@@ -302,6 +318,19 @@ function calcularSlaDocumentoFilaWMGJ_(linha, idx) {
   }
 }
 
+function extracaoDocumentalCompletaWMGJ_(extracao) {
+  var metodos = {
+    google_docs_text: true,
+    google_sheets_values: true,
+    blob_text: true,
+    drive_api_ocr_convert: true
+  };
+  return !!extracao && extracao.ok === true
+    && Object.prototype.hasOwnProperty.call(metodos, extracao.metodo)
+    && typeof extracao.texto === "string" && extracao.texto.trim().length > 0
+    && extracao.tamanhoTexto === extracao.texto.length;
+}
+
 function extrairConteudoArquivoWMGJ_V1_(file) {
   var mime = file.getMimeType();
   var resultado = {
@@ -354,6 +383,7 @@ function extrairConteudoArquivoWMGJ_V1_(file) {
     resultado.observacao = erro && erro.message ? erro.message : String(erro);
   }
 
+  resultado.ok = false;
   resultado.texto = [
     "NOME_ARQUIVO: " + file.getName(),
     "MIME_TYPE: " + mime,
@@ -424,6 +454,9 @@ function extrairTextoGoogleSheetsWMGJ_V1_(spreadsheetId) {
 
   ss.getSheets().forEach(function(sheet) {
     var dados = sheet.getDataRange().getDisplayValues();
+    if (!dados.some(function(linha) {
+      return linha.some(function(valor) { return String(valor).trim().length > 0; });
+    })) return;
     partes.push("ABA: " + sheet.getName());
 
     dados.slice(0, 200).forEach(function(linha) {

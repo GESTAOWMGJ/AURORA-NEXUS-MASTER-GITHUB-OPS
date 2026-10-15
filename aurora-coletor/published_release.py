@@ -261,7 +261,7 @@ def _public_bytes(value, maximum):
     target = safe_path(value)
     path_before = target.stat()
     demand(target.is_file() and path_before.st_nlink == 1 and path_before.st_size <= maximum, 'PUBLIC_PACKAGE_FILE_REQUIRED')
-    fd = os.open(target, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    fd = os.open(target, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0))
     try:
         before = os.fstat(fd)
         data = os.read(fd, maximum + 1)

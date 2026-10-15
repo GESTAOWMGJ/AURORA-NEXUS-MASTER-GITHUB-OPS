@@ -206,6 +206,12 @@ class PublishedReleaseTests(unittest.TestCase):
             self.assertFalse(result['activated'])
             self.assertFalse(result['ingestTargetChanged'])
 
+    def test_public_package_read_preserves_crlf_and_ctrl_z_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path=Path(temporary)/'synthetic-public-bytes.bin'
+            raw=b'A\r\nB\x1aC';path.write_bytes(raw)
+            self.assertEqual(release._public_bytes(path,64),raw)
+
 
 class ExistingEntryPointTests(unittest.TestCase):
     def config(self, base):

@@ -45,7 +45,7 @@ test('resume waits for the projection; completion cannot survive a changed sourc
     versionId:immutableEntityVersionId('sourceDocument',next.entityKey,2),canonicalSnapshotHash:hash}]};
   assert.equal(installationReadiness(org,checkpoint,next,replay,nextVersion).state,'FIRST_INGESTION_VERIFIED');
   const completion={orgId:org,state:'COMPLETE',documentId:id,versionId,sourceVersion:1,canonicalSnapshotHash:hash};
-  assert.equal(installationReadiness(org,checkpoint,document,projection,version,completion).operationalComplete,true);
+  assert.equal(installationReadiness(org,checkpoint,document,projection,version,completion).operationalComplete,false);
   assert.equal(installationReadiness(org,checkpoint,next,replay,nextVersion,completion).operationalComplete,false);
 });
 test('test-marked sources cannot complete onboarding through an unrelated operational projection',()=>{

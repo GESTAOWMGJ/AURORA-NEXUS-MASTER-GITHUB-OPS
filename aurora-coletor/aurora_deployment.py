@@ -24,6 +24,10 @@ SCHEMA = 'aurora.install.integration.v1'
 STATE_NAME = 'integration-setup.json'
 ASSETS = ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
           'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py')
+CHECKPOINT_FIELDS = {'schemaVersion', 'componentVersion', 'targetBinding', 'sampleKey', 'attempt', 'updatedAt',
+                     'status', 'nextAction', 'connectionVerified', 'receiptVerifiedThisRun',
+                     'processingVerifiedThisRun', 'processingProof', 'previousReceiptCached', 'receipt',
+                     'fullSynchronizationVerified', 'productionReleased', 'code', 'installationAcceptance'}
 
 
 def _trusted_platform_alias(part):
@@ -122,7 +126,9 @@ def run(raw, origin, org, state_dir, token=None, connect=False, send=False,
     with checkpoint_lock(state_dir) as state_path:
         previous = read_json(state_path) if state_path.exists() or state_path.is_symlink() else None
         if previous is not None:
-            if not isinstance(previous, dict) or previous.get('schemaVersion') != SCHEMA:
+            if (not isinstance(previous, dict) or set(previous) - CHECKPOINT_FIELDS
+                    or previous.get('schemaVersion') != SCHEMA
+                    or previous.get('componentVersion') not in ('1.0.0', VERSION)):
                 raise sync.SyncError('CHECKPOINT_SCHEMA_CONFLICT')
             if previous.get('targetBinding') != binding:
                 raise sync.SyncError('CHECKPOINT_TARGET_CONFLICT')
@@ -163,6 +169,7 @@ def run(raw, origin, org, state_dir, token=None, connect=False, send=False,
                     # Replay the same canonical payload/key so the existing server can resume projection.
                     receipt = sync.synchronize(raw, origin, org, token, True, transport)
                     proof = receipt.pop('processing')
+                    acceptance = receipt.pop('installationAcceptance', None)
                     result.update(connectionVerified=True, receiptVerifiedThisRun=True, receipt=receipt,
                                   processingProof=proof, processingVerifiedThisRun=proof['firstIngestionVerified'],
                                   status='SAMPLE_RECEIPT_VERIFIED',
@@ -170,6 +177,8 @@ def run(raw, origin, org, state_dir, token=None, connect=False, send=False,
                                               if not proof['firstIngestionVerified'] else
                                               'VERIFY_CONTINUITY_WITH_SUBSEQUENT_EVENTS'
                                               if proof['operationalComplete'] else 'COMPLETE_AUTHENTICATED_SETUP'))
+                    if acceptance is not None:
+                        result['installationAcceptance'] = acceptance
                 else:
                     sync.connect(origin, org, token, transport)
                     result.update(connectionVerified=True, status='CONNECTION_VERIFIED',
@@ -182,8 +191,43 @@ def run(raw, origin, org, state_dir, token=None, connect=False, send=False,
                 if not re.fullmatch(r'[A-Z][A-Z0-9_]{0,79}', code):
                     code = 'INTEGRATION_FAILED'
                 result.update(status='BLOCKED', code=code, nextAction=next_action(code))
-        atomic_json(state_path, result)
+        saved = dict(result)
+        if 'installationAcceptance' in saved:
+            # The checkpoint keeps opaque bindings, not a tenant/origin identifier or an authorization cache.
+            saved['installationAcceptance'] = {key: value for key, value in saved['installationAcceptance'].items()
+                                               if key not in ('orgId', 'canonicalOrigin')}
+        atomic_json(state_path, saved)
         return result
+
+
+def integrate_installation(raw, origin, org, state_dir, token=None, method='API_TOKEN', transport=sync.request_json):
+    """Current authenticated processing + replay gate; cloud/local require their real source adapter."""
+    if method not in ('API_TOKEN', 'MANUAL'):
+        raise sync.SyncError('REAL_SOURCE_ADAPTER_REQUIRED')
+    if sync.origin_url(origin)!='https://auroranexus.com.br':
+        raise sync.SyncError('CANONICAL_INSTALLATION_ORIGIN_REQUIRED')
+    first = run(raw, origin, org, state_dir, token=token, send=True, transport=transport)
+    if (first.get('connectionVerified') is not True or first.get('receiptVerifiedThisRun') is not True
+            or first.get('processingVerifiedThisRun') is not True):
+        raise sync.SyncError('AUTHENTICATED_PROCESSING_REQUIRED')
+    replay = run(raw, origin, org, state_dir, token=token, send=True, transport=transport)
+    if (replay.get('connectionVerified') is not True or replay.get('receiptVerifiedThisRun') is not True
+            or replay.get('processingVerifiedThisRun') is not True
+            or replay.get('targetBinding') != first['targetBinding'] or replay.get('sampleKey') != first['sampleKey']
+            or replay.get('receipt', {}).get('status') != 'DUPLICATE'
+            or any(replay['receipt'].get(key) != first['receipt'].get(key)
+                   for key in ('payloadSha256', 'idempotencyKey', 'documentId'))):
+        raise sync.SyncError('CURRENT_PROCESSING_REPLAY_REQUIRED')
+    acceptance = replay.get('installationAcceptance')
+    if (not isinstance(acceptance, dict) or acceptance.get('eligible') is not True
+            or acceptance.get('method') != method
+            or not all(acceptance.get(key) is True for key in
+                       ('processingVerified', 'receiptPersisted', 'replayVerified', 'automationConfigured', 'automationVerified'))):
+        raise sync.SyncError('AUTHORITATIVE_AUTOMATION_INTEGRATION_REQUIRED')
+    # This is authorization to promote the selected installation, not an installation receipt.
+    return {**acceptance, 'installationComplete': False,
+            'targetBinding': replay['targetBinding'], 'sampleKey': replay['sampleKey'],
+            'globalIngestionVerified': False, 'sourceAcquisitionCertified': False}
 
 
 def install_assets(source, target):

@@ -27,6 +27,7 @@ import { authorizeDocumentIngestion, canImportNativeDocuments, NATIVE_INGESTION_
 import { ACTIVE_RELEASE_READ_PATH, createActiveReleaseReadHandler } from './auroraActiveReleaseRead.js';
 import { ACTIVE_RELEASE_SOURCE } from './auroraActiveRelease.js';
 import { readRuntimeActiveRelease } from './auroraActiveReleaseRuntime.js';
+import { configureCanonicalAutomation, integrationReplayPatch,publicAutomationConfiguration } from './auroraInstallationAcceptance.js';
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -121,11 +122,14 @@ export const auroraNexusIntegrationKeys = onRequest(
           providers:Array.isArray(data.providers)?data.providers:[],pendingExtraction:data.pendingExtraction,
           connectionReported:true,physicalInstallationVerified:false};
       }));
+      const manual = await auroraDb.doc(`organizations/${member.orgId}/runtimeCheckpoints/installation`).get();
+      const manualBinding = manual.data()?.automation;
       res.status(200).json({
         ok:true,
         orgId:member.orgId,
         installation:await loadInstallationReadiness(member.orgId),
         agents:agents.filter(Boolean),
+        manualAutomationRevision:manualBinding === undefined ? 0 : publicAutomationConfiguration(manualBinding)?.revision ?? null,
         credentials:snapshot.docs.map((doc) => {
           const data=doc.data();
           return {
@@ -134,7 +138,8 @@ export const auroraNexusIntegrationKeys = onRequest(
             scopes:Array.isArray(data.scopes)?data.scopes:[],
             active:data.active===true,
             expiresAt:timestampIso(data.expiresAt),
-            createdAt:timestampIso(data.createdAt)
+            createdAt:timestampIso(data.createdAt),
+            automation:publicAutomationConfiguration(data.automation)
           };
         })
       });
@@ -156,6 +161,25 @@ export const auroraNexusIntegrationKeys = onRequest(
     }
 
     const action=typeof req.body?.action==="string"?req.body.action:"";
+    if (action === 'CONFIGURE_AUTOMATION') {
+      if (req.get('origin') !== 'https://auroranexus.com.br' || req.get('sec-fetch-site') !== 'same-origin') {
+        res.status(403).json({ok:false,code:'CROSS_SITE_REJECTED'});return;
+      }
+      try {
+        const configured=await auroraDb.runTransaction(async tx => configureCanonicalAutomation(member,req.body,{
+          read:async path => {const value=await tx.get(auroraDb.doc(path));return value.exists ? value.data() ?? null : null;},
+          merge:(path,data)=>{tx.set(auroraDb.doc(path),data,{merge:true});}, timestamp:FieldValue.serverTimestamp()
+        }));
+        res.status(200).json({ok:true,...configured});
+      } catch (error) {
+        const code=error instanceof Error ? error.message : '';
+        const known=['INVALID_AUTOMATION_CONFIGURATION','ADAPTER_EVIDENCE_REQUIRED','AUTOMATION_PIPELINE_DISABLED',
+          'AUTOMATION_CREDENTIAL_INACTIVE','AUTOMATION_CONFIGURATION_CONFLICT','MEMBERSHIP_REVOKED','MFA_AND_INTEGRATION_ADMIN_REQUIRED'];
+        res.status(code==='INVALID_AUTOMATION_CONFIGURATION'?400:code==='AUTOMATION_CONFIGURATION_CONFLICT'?409:412)
+          .json({ok:false,code:known.includes(code)?code:'AUTOMATION_CONFIGURATION_PENDING'});
+      }
+      return;
+    }
     if (action === "CREATE") {
       const name=typeof req.body?.name==="string"?req.body.name.trim():"";
       const scopes=normalizeScopes(req.body?.scopes);
@@ -402,6 +426,13 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
     }
     if (idemSnap.exists) {
       if (idemSnap.data()?.bodyHash !== bodyHash) return {kind:"ERROR" as const,code:"IDEMPOTENCY_CONFLICT"};
+      const storedVersionId=idemSnap.data()?.versionId;
+      const storedVersion=typeof storedVersionId==='string' && /^[a-f0-9]{48}$/.test(storedVersionId)
+        ? await tx.get(auroraDb.doc(`${base}/entityVersions/${storedVersionId}`)) : null;
+      const replay=integrationReplayPatch(principal.orgId,principal,idemSnap.data() ?? null,currentSnap.data() ?? null,
+        storedVersion?.exists ? {...storedVersion.data(),_readVersionId:storedVersionId} : null,
+        bodyHash,canonical.id,FieldValue.serverTimestamp());
+      if(replay) tx.set(idemRef,replay,{merge:true});
       return {kind:"DUPLICATE" as const,documentId:String(idemSnap.data()?.documentId || canonical.id)};
     }
     const current=currentSnap.exists ? currentSnap.data() ?? {} : null;
@@ -476,9 +507,11 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
       occurredAt:patch.occurredAt, createdAt:FieldValue.serverTimestamp()
     });
     tx.create(idemRef,{
+      schemaVersion:'aurora.ingestion.receipt.v1',orgId:principal.orgId,
       bodyHash,documentId:docRef.id,keyId:principal.keyId,
       sourceVersion:payload.sourceVersion,
-      versionId, revision,
+      versionId, revision,canonicalSnapshotHash:canonical.canonicalSnapshotHash,
+      acceptedAt:FieldValue.serverTimestamp(),replayCount:0,
       createdAt:FieldValue.serverTimestamp()
     });
     tx.create(auditRef,{

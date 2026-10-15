@@ -11,6 +11,7 @@ on:
       - 'firebase-migration/functions/tsconfig.json'
       - 'firebase-migration/scripts/build-release-manifests.mjs'
       - 'firebase-migration/scripts/release-component-packages.mjs'
+      - 'firebase-migration/scripts/export-public-unified-release*'
       - 'docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md'
       - 'firebase-migration/functions/test/aurora-downloads.test.ts'
       - '.github/workflows/validate-aurora-installers.yml'
@@ -48,6 +49,7 @@ jobs:
           python3 -m unittest discover -s firebase-migration/scripts -p test_hosting_runtime.py -v
           python3 -m py_compile desktop/install_windows_beta.py
           python3 -m unittest discover -s desktop -p test_windows_beta_bundle.py -v
+          node --test firebase-migration/scripts/export-public-unified-release.test.mjs
       - name: Build and test authenticated local IA Master without model downloads
         run: |
           set -euo pipefail
@@ -159,6 +161,7 @@ jobs:
           set -euo pipefail
           python3 -m pip install -r aurora-coletor/requirements-release-verification.txt
           python3 -m unittest discover -s aurora-coletor/tests -p test_published_release.py -v
+          python3 -m unittest discover -s desktop -p test_unified_beta.py -v
       - name: Retain local IA Master candidate with exact source manifest
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -198,6 +201,7 @@ jobs:
           shutil.copyfile(source / 'manifest.json', destination / 'manifest.json')
           PY
           node firebase-migration/scripts/build-release-manifests.mjs
+          cp firebase-migration/functions/runtime-release/unified-beta-candidate.zip "${RUNNER_TEMP}/aurora-hml-installers/AURORA-NEXUS-Beta-CANDIDATE.zip"
       - name: Capture exact source and toolchain for restricted review
         run: |
           set -euo pipefail

@@ -1,9 +1,10 @@
 import { auroraDesignStyles } from "./auroraDesignSystem.js";
 import type { AuroraMember } from './auroraAccess.js';
 import { nativeIngestionSection, nativeIngestionClient } from './auroraNativeIngestionView.js';
+import { installationAcceptanceClientGuard } from './auroraInstallationAcceptance.js';
 
 /** Render only after the existing session and membership checks. No new identity store. */
-export function setupPage(member: { orgId: string; mfaVerified: boolean } & Partial<AuroraMember>, refreshCsrf = '', ingestCsrf = ''): string {
+export function setupPage(member: { orgId: string; mfaVerified: boolean } & Partial<AuroraMember>, refreshCsrf = '', ingestCsrf = '', integrationCsrf = ''): string {
   const actor: AuroraMember={uid:'',email:'',role:'viewer',permissions:[],facilityIds:[],allFacilities:false,...member};
   const org = member.orgId.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aurora Nexus | Instalação e conexões</title><style>${auroraDesignStyles()}
@@ -11,10 +12,10 @@ export function setupPage(member: { orgId: string; mfaVerified: boolean } & Part
   <p class="eyebrow">Instalação guiada</p><h1>Vamos preparar seu acesso</h1><p>Conclua cada etapa. Este assistente usa a conta e a operação existentes da sua empresa.</p>
   <article><h2>1. Sua conta</h2><p>Sessão e vínculo com a empresa <strong>${org}</strong> verificados.</p><p>${member.mfaVerified ? 'Segundo fator confirmado neste acesso.' : 'Segundo fator não confirmado neste acesso. Entre novamente e selecione a configuração do autenticador.'}</p><small>A sessão pode expirar ou ser revogada. Use seu próprio acesso AURORA; contas administrativas de infraestrutura não são necessárias.</small></article>
   <article><h2>2. Confirmar comunicação</h2><p id="connection" role="status" aria-live="polite">Aguardando verificação do acesso à operação.</p><button id="check" type="button">Verificar agora</button></article>
-  <article><h2>3. Conectar as fontes da empresa</h2><p>Abra Integrações no painel para verificar as credenciais AURORA e fontes autorizadas. Uma configuração salva ainda precisa de teste de leitura.</p><p class="pending">Login OAuth de plataformas externas ainda não está disponível neste assistente. Não digite senhas dessas plataformas no instalador.</p><a href="/portal#integrations">Abrir integrações</a></article>
+  <article><h2>3. Conectar as fontes da empresa</h2><p>API técnica, envio manual, nuvem/OAuth e coleta local possuem autorizações e provas próprias. Configure o processamento canônico em Integrações e confirme recibo e repetição do mesmo envio.</p><p class="pending">Login OAuth de plataformas externas ainda não está disponível neste assistente. Conexão e extração de PDF, planilha ou e-mail precisam dos adaptadores reais. Exportações JSON já estruturadas não comprovam essa extração. Não digite senhas dessas plataformas no instalador.</p><a href="/portal#integrations">Abrir integrações</a></article>
   <article><h2>4. Conhecer a operação</h2><p>O Assistente Aurora analisa as leituras disponíveis e aponta pendências com evidências. A memória operacional é separada por empresa. A instalação não lê automaticamente seus documentos.</p><p>O processamento local da IA Master e a operação na nuvem têm verificações próprias. Confira a conexão de cada serviço antes de usar a leitura.</p><a href="/portal#native-intelligence">Abrir Assistente Aurora</a></article>
   <article><h2>5. Atualizações e segundo plano</h2><p>Patches do portal usam o atualizador existente. Novos instaladores ficam em Downloads. Esta versão do cliente de acesso ainda não instala execução automática em segundo plano; o componente IA Master do servidor possui seu próprio gerenciador.</p><small>Esta página não comprova instalação no dispositivo, sincronização do servidor físico ou funcionamento sem conexão.</small></article>
-  <article><h2>6. Primeiros dados da empresa</h2><p id="ingestion" role="status" aria-live="polite">Verificando a primeira ingestão…</p><small>O cadastro preserva seu acesso. A preparação operacional só conclui após dados autorizados persistidos e processados pela operação da sua empresa. Sem fonte configurada, abra Integrações.</small></article>
+  <article><h2>6. Primeiros dados da empresa</h2><p id="ingestion" role="status" aria-live="polite">Verificando a primeira ingestão…</p><small>O cadastro preserva seu acesso. A integração do processamento só conclui com configuração autorizada, dados canônicos, recibo persistido e replay confirmado. Isso não comprova um coletor em execução nem acesso OAuth ou local.</small></article>
   ${nativeIngestionSection(actor)}
   <button id="complete" type="button" disabled>Concluir e abrir a operação</button><script>
   const button=document.getElementById('check'), status=document.getElementById('connection');
@@ -24,6 +25,7 @@ export function setupPage(member: { orgId: string; mfaVerified: boolean } & Part
   const refreshCsrf=${JSON.stringify(refreshCsrf).replace(/</g,'\\u003c')};
   const MAX_ATTEMPTS=12;
   let attempts=0,timer=null,checking=false,importing=false;
+  ${installationAcceptanceClientGuard()}
   window.addEventListener?.('aurora:ingestion-started',()=>{importing=true;complete.disabled=true;clearTimeout(timer)});
   window.addEventListener?.('aurora:documents-imported',()=>{importing=false;attempts=0;retry()});
   function verified(proof){return proof?.state==='FIRST_INGESTION_VERIFIED'&&proof.firstIngestionVerified===true&&/^[a-f0-9]{48}$/.test(proof.documentId||'')&&Number.isSafeInteger(proof.sourceVersion)&&proof.sourceVersion>0&&Number.isSafeInteger(proof.revision)&&proof.revision>0&&/^[a-f0-9]{48}$/.test(proof.versionId||'')&&/^[a-f0-9]{64}$/.test(proof.canonicalSnapshotHash||'')&&typeof proof.sourceSystem==='string'&&proof.sourceSystem.trim().length>0&&typeof proof.verifiedAt==='string'&&Number.isFinite(Date.parse(proof.verifiedAt))}
@@ -58,15 +60,16 @@ export function setupPage(member: { orgId: string; mfaVerified: boolean } & Part
         await refresh({});
         proof=(await bootstrap()).installation;
       }
-      if(verified(proof)){
+      if(verified(proof)&&acceptanceReady(proof,expectedOrg)){
         ingestion.textContent='Primeira ingestão e processamento confirmados. Registrando conclusão…';
         const result=await refresh({operation:'COMPLETE_INSTALLATION'});
         const committed=result.installation;
-        if(result.orgId!==expectedOrg||!verified(committed)||committed.operationalComplete!==true||committed.documentId!==proof.documentId||committed.sourceVersion!==proof.sourceVersion||['revision','versionId','canonicalSnapshotHash','sourceSystem'].some(key=>committed[key]!==proof[key]))throw Error('COMPLETION_UNCONFIRMED');
+        if(result.orgId!==expectedOrg||!verified(committed)||!acceptanceReady(committed,expectedOrg)||committed.operationalComplete!==true||committed.documentId!==proof.documentId||committed.sourceVersion!==proof.sourceVersion||['revision','versionId','canonicalSnapshotHash','sourceSystem'].some(key=>committed[key]!==proof[key])||['configurationHash','receiptId','method'].some(key=>committed.acceptance[key]!==proof.acceptance[key]))throw Error('COMPLETION_UNCONFIRMED');
         complete.disabled=false;
-        ingestion.textContent='Primeira ingestão, processamento e conclusão operacional confirmados para sua empresa.';
+        ingestion.textContent='Ingestão, processamento canônico, recibo, replay e configuração autorizada confirmados para sua empresa. Fontes OAuth, coleta local e extração global exigem provas próprias.';
       }else{
-        ingestion.textContent=messages[proof?.state]||'Aguardando evidência atual da primeira ingestão.';
+        const pending={PENDING_RECEIPT:'Processamento confirmado; aguardando recibo persistido.',PENDING_REPLAY:'Recibo persistido; aguardando repetição real do mesmo envio.',PENDING_AUTOMATION:'Processamento confirmado; configure a automação canônica em Integrações.',PENDING_AUTHORITY:'Configuração sem autoridade atual confirmada.',PENDING_ADAPTER_EVIDENCE:'Aguardando prova do adaptador e da fonte autorizada.'};
+        ingestion.textContent=pending[proof?.acceptance?.state]||messages[proof?.state]||'Aguardando evidência atual da integração e da primeira ingestão.';
         retry();
       }
     }catch(error){
@@ -79,6 +82,6 @@ export function setupPage(member: { orgId: string; mfaVerified: boolean } & Part
   button.addEventListener('click',()=>{if(!checking){attempts=0;check()}});
   complete.addEventListener('click',()=>{if(!complete.disabled)window.location.assign('/portal')});
   check();
-  ${nativeIngestionClient(actor,{ingest:ingestCsrf,refresh:refreshCsrf},false)}
+  ${nativeIngestionClient(actor,{ingest:ingestCsrf,refresh:refreshCsrf,integrationKey:integrationCsrf},false)}
   </script></main></body></html>`;
 }

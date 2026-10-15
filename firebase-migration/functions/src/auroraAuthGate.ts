@@ -250,7 +250,9 @@ export const auroraNexusAuthGate = onRequest(
       }
       const ingestCsrf=csrfTokenForSession(req.get('cookie'),AURORA_NEXUS_CSRF_HMAC_KEY.value(),CSRF_PURPOSES.documentIngest);
       if(!ingestCsrf){res.status(503).type('html').send(loginPage('Configuração de segurança indisponível.'));return;}
-      res.status(200).type("html").send(req.method === "HEAD" ? "" : setupPage(member, refreshCsrf, ingestCsrf));
+      const integrationCsrf=csrfTokenForSession(req.get('cookie'),AURORA_NEXUS_CSRF_HMAC_KEY.value(),CSRF_PURPOSES.integrationKey);
+      if(!integrationCsrf){res.status(503).type('html').send(loginPage('Configuração de segurança indisponível.'));return;}
+      res.status(200).type("html").send(req.method === "HEAD" ? "" : setupPage(member, refreshCsrf, ingestCsrf,integrationCsrf));
       return;
     }
     if (isDownload) {

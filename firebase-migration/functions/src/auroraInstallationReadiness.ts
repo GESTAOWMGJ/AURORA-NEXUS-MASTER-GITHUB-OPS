@@ -1,5 +1,6 @@
 import { immutableEntityVersionId, persistedDocumentHash } from './auroraCanonicalVersions.js';
 import { isOperationalRecord } from './auroraEngine.js';
+import { readInstallationAcceptance, type InstallationAcceptance } from './auroraInstallationAcceptance.js';
 
 type RecordData = Record<string, any>;
 export type InstallationReadiness = {
@@ -13,6 +14,7 @@ export type InstallationReadiness = {
   canonicalSnapshotHash: string | null;
   sourceSystem: string | null;
   verifiedAt: string | null;
+  acceptance?: InstallationAcceptance;
 };
 const validId = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{48}$/.test(value);
 
@@ -54,7 +56,9 @@ export function installationReadiness(orgId: string, checkpoint: RecordData | nu
     || projection.state !== 'SHADOW' || projection.dataQuality?.complete !== true
     || projection.dataQuality?.sourcePresent !== true || !proof
     || !(date instanceof Date) || !Number.isFinite(date.getTime())) return pending('PENDING_PROJECTION');
+  // A legacy completion records canonical processing only, not integrated automation.
   const operationalComplete = completion?.orgId === orgId && completion.state === 'COMPLETE'
+    && completion.acceptanceSchemaVersion === 'aurora.installation.acceptance.v1'
     && completion.documentId === id && completion.versionId === versionId
     && completion.sourceVersion === document.sourceVersion
     && completion.canonicalSnapshotHash === document.canonicalSnapshotHash;
@@ -94,7 +98,11 @@ export async function readInstallationReadiness(orgId: string,
     const version = versionId ? await read(`${base}/entityVersions/${versionId}`) : null;
     result = installationReadiness(orgId, {orgId,state:'HEALTHY',lastDocumentId:id},
       document, projection, version, completion);
-    if (result.firstIngestionVerified) return result;
+    if (result.firstIngestionVerified) {
+      const acceptance = await readInstallationAcceptance(orgId,result,document,version,completion,read);
+      return {...result, acceptance, operationalComplete:result.operationalComplete && acceptance.eligible
+        && completion?.configurationHash === acceptance.configurationHash && completion?.receiptId === acceptance.receiptId};
+    }
   }
-  return result;
+  return {...result, acceptance:await readInstallationAcceptance(orgId,result,null,null,completion,read)};
 }

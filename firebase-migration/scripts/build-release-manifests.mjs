@@ -76,3 +76,8 @@ try{
   if(dirname(temporary)!==resolve(tmpdir())||!basename(temporary).startsWith('aurora-release-components-'))throw Error('COMPONENT_TEMP_PATH_REJECTED');
   await rm(temporary,{recursive:true,force:true});
 }
+
+// Close every declared platform payload before a protected publisher can promote it.
+execFileSync(python,[resolve(repo,'desktop/build_unified_beta.py'),'build','--functions',functions,
+  '--source-sha',sourceSha,'--output',resolve(output,'unified-beta-candidate.zip')],
+  {cwd:repo,stdio:'inherit',windowsHide:true});

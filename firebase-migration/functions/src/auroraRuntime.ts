@@ -51,12 +51,17 @@ export async function completeInstallation(orgId: string, uid: string) {
       return snap.exists ? snap.data() ?? null : null;
     });
     if (!proof.firstIngestionVerified) throw new Error('FIRST_INGESTION_PENDING');
+    if (proof.acceptance?.eligible !== true || proof.acceptance.state !== 'INSTALLATION_INTEGRATION_VERIFIED') {
+      throw new Error('INSTALLATION_INTEGRATION_PENDING');
+    }
     if (!proof.operationalComplete) {
       tx.set(auroraDb.doc(`organizations/${orgId}/runtimeCheckpoints/installation`), {
         orgId, state:'COMPLETE', documentId:proof.documentId, versionId:proof.versionId,
         sourceVersion:proof.sourceVersion, canonicalSnapshotHash:proof.canonicalSnapshotHash,
+        acceptanceSchemaVersion:proof.acceptance.schemaVersion,
+        configurationHash:proof.acceptance.configurationHash, receiptId:proof.acceptance.receiptId,
         completedBy:uid, completedAt:FieldValue.serverTimestamp()
-      });
+      },{merge:true});
     }
     return {...proof, operationalComplete:true};
   });
@@ -316,10 +321,10 @@ export const auroraNexusBootstrap = onRequest(
       masterEngine: buildMasterOperationalState(visibleProjection(rawProjection, member), {
         actionSummary,
         financialStatus,
-        release: buildReleaseStatus(org.data() ?? {})
+        release: buildReleaseStatus(org.data() ?? {}, canonicalVersion.unifiedBeta)
       }),
       financialStatus,
-      release: buildReleaseStatus(org.data() ?? {}),
+      release: buildReleaseStatus(org.data() ?? {}, canonicalVersion.unifiedBeta),
       canonicalVersion,
       actions: safeActions,
       actionSummary,
@@ -423,7 +428,7 @@ export const auroraNexusMasterEngine = onRequest(
       ? await loadFinancialClosingStatus(member.orgId, competence)
       : null;
     const canonicalVersion = await readRuntimeActiveRelease();
-    const release = { ...buildReleaseStatus(org.data() ?? {}), canonicalVersion };
+    const release = { ...buildReleaseStatus(org.data() ?? {}, canonicalVersion.unifiedBeta), canonicalVersion };
     res.status(200).json({
       ok: true,
       environment: authenticatedOrganizationEnvironment(org.exists ? org.data() : undefined),
@@ -459,7 +464,7 @@ export const auroraNexusRefresh = onRequest(
       res.status(200).json({ ok: true, projection: visibleProjection(projection, member) });
     } catch (error) {
       const code = error instanceof Error ? error.message : "PROJECTION_FAILED";
-      const status = ["PROJECTION_DISABLED", "PROJECTION_NO_SOURCE", "PROJECTION_DATA_QUALITY_BLOCKED", "PROJECTION_COMPETENCE_REQUIRED", "FIRST_INGESTION_PENDING", "ORGANIZATION_DISABLED"].includes(code) ? 409 : 500;
+      const status = ["PROJECTION_DISABLED", "PROJECTION_NO_SOURCE", "PROJECTION_DATA_QUALITY_BLOCKED", "PROJECTION_COMPETENCE_REQUIRED", "FIRST_INGESTION_PENDING", "INSTALLATION_INTEGRATION_PENDING", "ORGANIZATION_DISABLED"].includes(code) ? 409 : 500;
       if (status === 500) logger.error("Aurora projection failed", { code });
       res.status(status).json({ ok: false, code: status === 500 ? "PROJECTION_FAILED" : code });
     }

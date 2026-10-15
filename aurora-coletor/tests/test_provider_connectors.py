@@ -1,11 +1,65 @@
 import sys
+import csv
+import io
+import json
+import zipfile
+from xml.sax.saxutils import escape
 from pathlib import Path
 import unittest
 from unittest.mock import Mock
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import provider_connectors as connectors
+from test_cloud_sync import fixture
+
+
+def table_values(payload):
+    headers=sorted(connectors.FIELDS)
+    values=['' if payload[key] is None else str(payload[key]).lower() if type(payload[key]) is bool else str(payload[key]) for key in headers]
+    return [headers,values]
+
+
+def table_csv(rows):
+    stream=io.StringIO(newline='');csv.writer(stream).writerows(rows)
+    return stream.getvalue().encode('utf-8-sig')
+
+
+def table_xlsx(rows,formula=False,extra=None):
+    xml=['<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>']
+    for index,row in enumerate(rows,1):
+        xml.append('<row r="'+str(index)+'">')
+        for column,value in enumerate(row,1):
+            reference=chr(64+column)+str(index)
+            xml.append('<c r="'+reference+'" t="inlineStr">'+('<f>1+1</f>' if formula and index==2 and column==1 else '')+'<is><t>'+escape(value)+'</t></is></c>')
+        xml.append('</row>')
+    xml.append('</sheetData></worksheet>')
+    stream=io.BytesIO()
+    with zipfile.ZipFile(stream,'w',zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('xl/worksheets/sheet1.xml',''.join(xml))
+        for name,raw in (extra or {}).items():archive.writestr(name,raw)
+    return stream.getvalue()
 
 class ProviderTests(unittest.TestCase):
+    def test_csv_xlsx_and_json_produce_identical_explicit_canonical_facts(self):
+        payload=fixture();rows=table_values(payload)
+        for name,raw in [('approved.csv',table_csv(rows)),('approved.xlsx',table_xlsx(rows)),('approved.json',json.dumps(payload).encode())]:
+            with self.subTest(name=name):self.assertEqual(connectors.exports(raw,name),[connectors.validate_payload(payload)])
+    def test_csv_refuses_guessed_headers_monetary_dates_booleans_and_extra_rows(self):
+        baseline=table_values(fixture())
+        for field,value in [('amountCents','123.45'),('nativeReady','yes'),('occurredAt','01/01/2026'),('sourceVersion','1.0')]:
+            rows=[list(row) for row in baseline];rows[1][rows[0].index(field)]=value
+            with self.subTest(field=field),self.assertRaises(connectors.SyncError):connectors.exports(table_csv(rows),'approved.csv')
+        for rows in [[['patientName'],['synthetic-private']],baseline+[baseline[1]]*20,[baseline[0]+['instructions'],baseline[1]+['execute']]]:
+            with self.assertRaises(connectors.SyncError):connectors.exports(table_csv(rows),'approved.csv')
+    def test_xlsx_rejects_formula_multisheet_links_traversal_and_expansion_limits(self):
+        rows=table_values(fixture())
+        cases=[table_xlsx(rows,formula=True),table_xlsx(rows,extra={'xl/worksheets/sheet2.xml':'<worksheet/>'}),
+               table_xlsx(rows,extra={'../outside':'synthetic'}),table_xlsx(rows,extra={'xl/externalLinks/link.xml':'<external/>'}),
+               table_xlsx(rows,extra={'xl/vbaProject.bin':'synthetic'}),table_xlsx(rows,extra={'oversized.xml':'a'*(connectors.MAX_PROVIDER_BYTES+1)})]
+        for raw in cases:
+            with self.subTest(size=len(raw)),self.assertRaises(connectors.SyncError):connectors.exports(raw,'approved.xlsx')
+    def test_unparsed_document_is_pending_not_a_canonical_json_export(self):
+        for name in ('pending.pdf','pending.docx','pending.png'):
+            with self.assertRaisesRegex(connectors.SyncError,'DOCUMENT_EXTRACTION_REQUIRED'):connectors.exports(b'synthetic',name)
     def test_drive_only_reads_explicit_folder_and_reports_pagination(self):
         transport=Mock(return_value={'files':[{'id':'synthetic','name':'pending.pdf'}],'nextPageToken':'more'})
         result=connectors.pull({'provider':'GOOGLE_DRIVE','tokenEnv':'AURORA_GOOGLE_TOKEN','folderId':'approved-folder'},transport,{'AURORA_GOOGLE_TOKEN':'synthetic-token'})

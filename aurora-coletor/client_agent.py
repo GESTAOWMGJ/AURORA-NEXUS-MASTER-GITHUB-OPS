@@ -19,7 +19,7 @@ import time
 
 import aurora_cloud_sync as sync
 from aurora_deployment import safe_path
-from provider_connectors import pull, exports
+from provider_connectors import pull, exports, EXPORT_SUFFIXES, MAX_PROVIDER_BYTES
 from client_secret_store import load as load_secret
 import published_release as release
 
@@ -110,15 +110,18 @@ def local_documents(roots):
                 examined+=1
                 if entry.is_symlink() or not entry.is_file(follow_symlinks=False):continue
                 path=safe_path(Path(entry.path));info=path.stat()
-                if info.st_nlink!=1 or info.st_size==0 or info.st_size>262144 or time.time()-info.st_mtime<2:continue
-                if path.suffix.lower()=='.json':
-                    fd=os.open(path,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0))
+                if info.st_nlink!=1:pending+=1;continue
+                if info.st_size==0 or info.st_size>MAX_PROVIDER_BYTES or time.time()-info.st_mtime<2:
+                    if path.suffix.lower() in FORMATS:pending+=1
+                    continue
+                if path.suffix.lower() in EXPORT_SUFFIXES:
+                    fd=os.open(path,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_BINARY',0))
                     try:
                         current=os.fstat(fd)
                         if current.st_ino!=info.st_ino or current.st_nlink!=1:raise sync.SyncError('SOURCE_CHANGED')
-                        raw=os.read(fd,16385)
-                        if len(raw)>16384:pending+=1;continue
-                        try:rows.extend(exports(raw))
+                        raw=os.read(fd,MAX_PROVIDER_BYTES+1)
+                        if len(raw)>MAX_PROVIDER_BYTES:pending+=1;continue
+                        try:rows.extend(exports(raw,path.name))
                         except sync.SyncError:pending+=1
                     finally:os.close(fd)
                 elif path.suffix.lower() in FORMATS:pending+=1
@@ -126,8 +129,11 @@ def local_documents(roots):
     return rows[:MAX_ENTRIES],pending,limited
 
 
-def cycle(config,environment=os.environ,transport=sync.request_json,provider_pull=pull):
+def cycle(config,environment=os.environ,transport=sync.request_json,provider_pull=pull,verify_installation=False):
+    if type(verify_installation) is not bool:raise sync.SyncError('EXPLICIT_INSTALLATION_VERIFICATION_REQUIRED')
     roots,state=validate(config)
+    if verify_installation and sync.origin_url(config['origin'])!='https://auroranexus.com.br':
+        raise sync.SyncError('CANONICAL_INSTALLATION_ORIGIN_REQUIRED')
     if (state/'disabled.json').exists():raise sync.SyncError('AGENT_DISABLED')
     environment=dict(environment)
     aliases={config['tokenEnv']}
@@ -143,6 +149,7 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
     # Verify the tenant before any source-content or provider access.
     sync.connect(config['origin'],config['org'],token,transport)
     conn=queue(state);accepted=0;verified=0;waiting=0;provider_states=[];provider_errors=[]
+    replays=0;fresh_processed=0;acceptances=[];source_modes=set();verified_source_groups=set()
     try:
         conn.execute('CREATE TABLE IF NOT EXISTS binding (id INTEGER PRIMARY KEY, hash TEXT NOT NULL)')
         binding=sync.digest(json.dumps({k:config.get(k) for k in ('org','origin','roots','providers')},sort_keys=True))
@@ -198,7 +205,7 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                 payload=sync.validate_payload(raw)
                 identity=sync.digest(config['org']+':'+json.dumps(payload,sort_keys=True,separators=(',',':')))
                 previous=conn.execute('SELECT state,attempts,next_attempt FROM intake WHERE hash=?',(identity,)).fetchone()
-                if previous and previous[0]=='PROCESSING_VERIFIED':verified+=1;continue
+                if previous and previous[0]=='PROCESSING_VERIFIED' and not verify_installation:verified+=1;continue
                 if previous and previous[2]>time.time():waiting+=1;page_done=False;continue
                 attempts=(previous[1] if previous else 0)+1
                 # Reserve before transport. A crash replays the same canonical key.
@@ -207,6 +214,15 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                 try:
                     receipt=sync.synchronize(payload,config['origin'],config['org'],token,True,transport)
                     done=receipt['processing']['firstIngestionVerified'] is True
+                    if verify_installation and done:
+                        replay=sync.synchronize(payload,config['origin'],config['org'],token,True,transport)
+                        if (replay['status']!='DUPLICATE' or replay['processing']['firstIngestionVerified'] is not True
+                                or any(replay[field]!=receipt[field] for field in ('documentId','idempotencyKey','payloadSha256'))):
+                            raise sync.SyncError('CURRENT_PROCESSING_REPLAY_REQUIRED')
+                        receipt=replay;replays+=1;fresh_processed+=1
+                        acceptances.append(receipt.get('installationAcceptance'))
+                        source_modes.add('CLOUD_OAUTH' if key else 'LOCAL_AGENT')
+                        verified_source_groups.add(key or 'LOCAL_ROOTS')
                     state_name='PROCESSING_VERIFIED' if done else 'PROCESSING_PENDING'
                     conn.execute('UPDATE intake SET state=?,receipt=?,next_attempt=0 WHERE hash=?',(state_name,json.dumps({
                         'documentId':receipt['documentId'],'idempotencyKey':receipt['idempotencyKey'],
@@ -233,11 +249,25 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
         report_status,report=transport(config['origin'].rstrip('/')+'/api/integration/ping',token,{'component':'AURORA_CLIENT_AGENT','instanceId':config['instanceId'],'pendingExtraction':min(pending,10000),'providers':provider_states})
         report_confirmed=report_status==200 and report.get('ok') is True and report.get('reportAccepted') is True and report.get('orgId')==config['org']
     except (sync.SyncError,OSError):pass
+    readiness={'schemaVersion':'aurora.installation.source-readiness.v1','status':'PENDING','eligible':False,
+               'sourceAdapterVerifiedThisRun':bool(fresh_processed),'sourceModesVerifiedThisRun':sorted(source_modes),
+               'processingReceiptsVerifiedThisRun':fresh_processed,'idempotentReplaysVerifiedThisRun':replays,
+               'automationScope':'AURORA_CANONICAL_PIPELINE','installationComplete':False,
+               'proofScope':'DIRECT_ADAPTER_EXECUTION_THIS_RUN',
+               'globalIngestionVerified':False,'oauthEnrollmentOrRefreshPerformed':False}
+    required_groups=set(ids)|({'LOCAL_ROOTS'} if roots else set())
+    if (verify_installation and fresh_processed and replays==fresh_processed and report_confirmed
+            and waiting==0 and pending==0 and not limited and not provider_errors
+            and required_groups<=verified_source_groups
+            and all(isinstance(item,dict) and item.get('eligible') is True for item in acceptances)):
+        readiness.update(status='INSTALLATION_INTEGRATION_VERIFIED',eligible=True,
+                         canonicalPipelineAcceptance=acceptances[-1])
     return {'schemaVersion':SCHEMA,'componentVersion':VERSION,'orgId':config['org'],'connectionVerified':True,'agentReportConfirmed':report_confirmed,
             'receiptsConfirmed':accepted,'processingReceiptsCached':verified,'pending':waiting,'pendingExtraction':pending,
             'coverageLimited':limited,'cloudEnumerationComplete':complete,'cloudSnapshotVerified':cloud_verified,
             'cloudPagesCommitted':sum(row[2] for row in progress if row),'providers':provider_states,
-            'providerPendingCodes':provider_errors,'publishedRelease':published,'fullSynchronizationVerified':False}
+            'providerPendingCodes':provider_errors,'publishedRelease':published,'fullSynchronizationVerified':False,
+            'installationReadiness':readiness}
 
 
 def main(argv=None):

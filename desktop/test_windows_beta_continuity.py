@@ -148,6 +148,8 @@ class WindowsContinuityTests(unittest.TestCase):
         self.os_patch = patch.object(installer, 'os', fake_os)
         self.os_patch.start()
         self.addCleanup(self.os_patch.stop)
+        self.source_patch=patch.object(installer,'package_source',return_value=installer.SOURCE_SHA)
+        self.source_patch.start();self.addCleanup(self.source_patch.stop)
         self.proof = {'atUtc': '2026-10-07T12:00:00+00:00', 'loginReachable': True,
                       'anonymousAccessDenied': True, 'probedPortal': installer.BASE,
                       'sameOriginBootstrapVerified': True, 'authenticatedSyncVerified': False,
@@ -169,8 +171,9 @@ class WindowsContinuityTests(unittest.TestCase):
                                        'workingDirectory': str(self.target)}))
         return SimpleNamespace(returncode=0, stdout='')
 
-    def run_install(self, probe=None, shell=None):
+    def run_install(self, probe=None, shell=None, integration=None):
         with patch.object(installer, 'probe', side_effect=probe or (lambda:self.proof)), \
+             patch.object(installer,'verify_installation_integration',side_effect=integration or (lambda *args:{'eligible':True,'automationVerified':True})), \
              patch.object(installer.subprocess, 'run', side_effect=shell or self.shell), \
              contextlib.redirect_stdout(io.StringIO()):
             return installer.install()
@@ -207,6 +210,23 @@ class WindowsContinuityTests(unittest.TestCase):
         self.assertEqual(self.manifest_path.read_bytes(), self.original_manifest)
         self.assertEqual(self.link.read_bytes(), self.original_link)
         self.assertFalse((self.root / 'installation-rollbacks').exists())
+
+    def test_unverified_integration_does_not_backup_replace_or_claim_installed(self):
+        def pending(*args):raise ValueError('AUTHENTICATED_AUTOMATION_INTEGRATION_REQUIRED')
+        with self.assertRaisesRegex(ValueError,'AUTHENTICATED_AUTOMATION'):
+            self.run_install(integration=pending)
+        self.assert_original();self.assertFalse((self.root/'installation-rollbacks').exists())
+
+    def test_method_hint_without_real_source_agent_is_rejected_before_state_creation(self):
+        for method in ('CLOUD_OAUTH','LOCAL_AGENT'):
+            with self.assertRaisesRegex(ValueError,'EXISTING_AUTHORIZED_SOURCE_AGENT_REQUIRED'):
+                installer.verify_installation_integration(self.root,None,None,None,method)
+        self.assert_original()
+
+    def test_no_approved_sample_does_not_create_another_checkpoint(self):
+        with self.assertRaisesRegex(ValueError,'AUTHENTICATED_AUTOMATION'):
+            installer.verify_installation_integration(self.root,None,None,None,'API_TOKEN')
+        self.assertFalse((self.data/'integration-setup.json').exists());self.assert_original()
 
     def test_unknown_identity_or_promoted_gate_is_rejected_before_probe(self):
         fields = [('portal', 'https://other.example/portal'), ('reviewedMainSha', '0' * 40),

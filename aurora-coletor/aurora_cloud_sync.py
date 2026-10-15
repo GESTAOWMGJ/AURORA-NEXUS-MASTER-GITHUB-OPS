@@ -193,6 +193,73 @@ def connect(origin, org, token, transport=request_json):
     return {'connectionVerified': True}
 
 
+def installation_acceptance(payload, org, value, processing):
+    """Validate the same-response server pipeline proof, never a client method hint."""
+    if value is None:
+        return None
+    flags = ('processingVerified', 'receiptPersisted', 'replayVerified',
+             'automationConfigured', 'automationVerified', 'providerAccessVerified',
+             'localCollectionVerified', 'agentExecutionVerified')
+    fields = {'schemaVersion', 'orgId', 'canonicalOrigin', 'state', 'eligible', 'automationScope',
+              'method', 'configurationHash', 'receiptId', 'documentId', 'versionId', 'sourceVersion',
+              'canonicalSnapshotHash', 'verifiedAt', 'acquisitionModes', 'limitations',
+              'processedFormat', 'globalDocumentAcquisitionVerified', *flags}
+    methods = {'CLOUD_OAUTH', 'API_TOKEN', 'LOCAL_AGENT', 'MANUAL', 'UNCONFIGURED'}
+    if (not isinstance(value, dict) or set(value) != fields
+            or value.get('schemaVersion') != 'aurora.installation.acceptance.v1'
+            or value.get('orgId') != org or value.get('canonicalOrigin') != 'https://auroranexus.com.br'
+            or value.get('automationScope') != 'AURORA_CANONICAL_PIPELINE'
+            or value.get('processedFormat') != 'CANONICAL_STRUCTURED_JSON'
+            or value.get('globalDocumentAcquisitionVerified') is not False
+            or value.get('method') not in methods or type(value.get('eligible')) is not bool
+            or any(type(value.get(flag)) is not bool for flag in flags)
+            or any(value[flag] is not False for flag in ('providerAccessVerified', 'localCollectionVerified', 'agentExecutionVerified'))):
+        raise SyncError('INSTALLATION_ACCEPTANCE_MISMATCH')
+    for key, size in (('configurationHash', 64), ('receiptId', 64), ('documentId', 48),
+                      ('versionId', 48), ('canonicalSnapshotHash', 64)):
+        item = value.get(key)
+        if item is not None and (not isinstance(item, str) or not re.fullmatch('[a-f0-9]{' + str(size) + '}', item)):
+            raise SyncError('INSTALLATION_ACCEPTANCE_MISMATCH')
+    source_version = value.get('sourceVersion')
+    if source_version is not None and (type(source_version) is not int or not 1 <= source_version <= 9007199254740991):
+        raise SyncError('INSTALLATION_ACCEPTANCE_MISMATCH')
+    modes = value.get('acquisitionModes')
+    if (not isinstance(modes, dict) or set(modes) != methods - {'UNCONFIGURED'}
+            or any(not isinstance(code, str) or not re.fullmatch('[A-Z][A-Z0-9_]{0,79}', code) for code in modes.values())):
+        raise SyncError('INSTALLATION_ACCEPTANCE_MISMATCH')
+    limitations = value.get('limitations')
+    if (not isinstance(limitations, list) or len(limitations) > 20
+            or any(not isinstance(code, str) or not re.fullmatch('[A-Z][A-Z0-9_]{0,79}', code) for code in limitations)):
+        raise SyncError('INSTALLATION_ACCEPTANCE_MISMATCH')
+    result = {key: value[key] for key in fields if key in value}
+    if value['verifiedAt'] is not None:
+        try:result['verifiedAt']=timestamp(value['verifiedAt'])
+        except (TypeError,SyncError):raise SyncError('INSTALLATION_ACCEPTANCE_MISMATCH') from None
+    if not value['eligible']:
+        if value.get('state') not in ('PENDING_PROCESSING','PENDING_RECEIPT','PENDING_REPLAY',
+                                     'PENDING_AUTOMATION','PENDING_AUTHORITY','PENDING_ADAPTER_EVIDENCE'):
+            raise SyncError('INSTALLATION_ACCEPTANCE_MISMATCH')
+        return result
+    if (value.get('state') != 'INSTALLATION_INTEGRATION_VERIFIED'
+            or not all(value[flag] is True for flag in flags[:5])
+            or value['method'] not in ('API_TOKEN', 'MANUAL')
+            or processing.get('firstIngestionVerified') is not True):
+        raise SyncError('INSTALLATION_ACCEPTANCE_MISMATCH')
+    for key in ('documentId', 'versionId', 'sourceVersion', 'canonicalSnapshotHash'):
+        if type(value.get(key)) is not type(processing.get(key)) or value.get(key) != processing.get(key):
+            raise SyncError('INSTALLATION_ACCEPTANCE_MISMATCH')
+    if (not isinstance(value.get('configurationHash'), str)
+            or not re.fullmatch(r'[a-f0-9]{64}', value['configurationHash'])
+            or not isinstance(value.get('receiptId'), str)
+            or not re.fullmatch(r'[a-f0-9]{64}', value['receiptId'])):
+        raise SyncError('INSTALLATION_ACCEPTANCE_MISMATCH')
+    try:
+        result['verifiedAt'] = timestamp(value['verifiedAt'])
+    except (KeyError, SyncError):
+        raise SyncError('INSTALLATION_ACCEPTANCE_MISMATCH') from None
+    return result
+
+
 def synchronize(raw, origin, org, token=None, send=False, transport=request_json):
     origin = origin_url(origin)
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]{1,62}', org):
@@ -224,6 +291,9 @@ def synchronize(raw, origin, org, token=None, send=False, transport=request_json
         raise SyncError('CLOUD_PROCESSING_PROOF_MISMATCH')
     receipt.update(status='DUPLICATE' if result['duplicate'] else 'ACCEPTED', cloudReceiptVerified=True,
                    processing=proof)
+    acceptance = installation_acceptance(payload, org, (result.get('installation') or {}).get('acceptance'), proof)
+    if acceptance is not None:
+        receipt['installationAcceptance'] = acceptance
     return receipt
 
 
