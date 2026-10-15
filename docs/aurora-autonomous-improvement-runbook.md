@@ -54,3 +54,13 @@ Run safe autonomous improvement cycles for AURORA NEXUS with Firebase as the sou
 3. Turn it into a deterministic rule or self-hosted capability.
 4. Keep external AI as fallback only.
 5. Record the result in the backlog and KPI baseline.
+
+## AURORA-RESOURCE-OPT-001 — diretriz de 15/10/2026
+
+Aplicar `docs/AURORA_RESOURCE_OPTIMIZATION_001.md` na mesma manutenção existente.
+Confrontar cadeia financeira, repetição de contadores e conflitos por efeito;
+preferir avaliação determinística por delta, processamento pesado no Xeon e
+reaproveitamento de evidências com invalidação. Reescrita apenas com necessidade
+comprovada, regressões, revisão independente no SHA final e rollback. Nenhum
+novo scheduler, cancelamento por suspeita ou custo efetivo sem evidência de cobrança.
+Registrar cobertura, SLA e adoção runtime separadamente da política e dos testes.

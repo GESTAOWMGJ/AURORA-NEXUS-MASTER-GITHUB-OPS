@@ -1,5 +1,19 @@
 # AURORA-MO-001 — Modus Operandi Mestre WMGJ → AURORA NEXUS
 
+## Manutenção contínua de recursos e conflitos — 15/10/2026
+
+AURORA-RESOURCE-OPT-001 incorpora permanentemente ao mesmo robô a conciliação
+execução → requisições/modelos → modalidade → tarifa vigente → débito/extrato → fatura;
+a classificação de repetição evitável, conflitos de workflows e revisão incremental
+de algoritmos, fluxos e processos. Processamento pesado no Xeon, contexto delimitado
+e evidência reutilizável sem alterar segurança ou aprovação. Reescrita é autorizada
+quando justificada, testada, revisada e reversível; não é reconstrução indiscriminada.
+Reutilizar AURORA-DAILY-UPDATES-001 e os mecanismos canônicos, sem segundo executor.
+SLA é objetivo mensurável, não garantia de limpeza/tempo real. O avaliador read-only
+candidato não demonstra integração runtime. Contrato e critérios de promoção em
+[AURORA_RESOURCE_OPTIMIZATION_001.md](AURORA_RESOURCE_OPTIMIZATION_001.md).
+
+
 Incremento de 04/10/2026: `AURORA-USER-PROFILES-001` incorpora criação/retomada/revogação de perfis por administrador com MFA, por organização e sem banco paralelo. `AURORA-DAILY-UPDATES-001` representa a manutenção diária autorizada de cliente, web e mobile, ainda executada pela rotina hospedada existente e marcada LEGACY_MIRRORED. Contrato, evidências, gates e rollback em [AURORA_USER_PROFILES_1_0_0.md](AURORA_USER_PROFILES_1_0_0.md). A autorização antecipada de futuras versões evita repetir consentimento no mesmo escopo; não equivale a validação técnica ou implantação comprovada.
 
 ## Adendo permanente de autonomia resolutiva — robô e IA de desenvolvimento
