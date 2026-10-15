@@ -497,6 +497,16 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git rev-parse refs/remotes/origin/main)" = "$GITHUB_SHA"
           node firebase-migration/scripts/promote-hml-authgate-traffic.mjs promote
+      - name: Promote exact ready IntegrationPing traffic after full canonical preflight
+        if: ${{ inputs.publish_active_release }}
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          PUBLISH_ACTIVE_RELEASE: ${{ inputs.publish_active_release }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse refs/remotes/origin/main)" = "$GITHUB_SHA"
+          node firebase-migration/scripts/promote-hml-integration-ping-traffic.mjs promote
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -919,6 +929,12 @@ jobs:
           PROJECT_ID: ${{ inputs.project_id }}
           PUBLISH_ACTIVE_RELEASE: ${{ inputs.publish_active_release }}
         run: node firebase-migration/scripts/promote-hml-authgate-traffic.mjs rollback
+      - name: Restore owned IntegrationPing traffic when deploy or smoke fails
+        if: ${{ always() && inputs.publish_active_release && (failure() || cancelled()) }}
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          PUBLISH_ACTIVE_RELEASE: ${{ inputs.publish_active_release }}
+        run: node firebase-migration/scripts/promote-hml-integration-ping-traffic.mjs rollback
 
   publish-active-release:
     name: Publish verified canonical active release

@@ -113,8 +113,10 @@ Main/PR/CI exatos, aprovação real do futuro run protegido, smokes, pair Ed2551
 tráfego pronto/CAS/readback, predecessor explícito e histórico create-only
 permanecem. A revisão humana das quatro candidatas/gateway/R029 continua resolvida
 no escopo registrado; este código posterior não recebe revisão independente
-retroativa. R029 não foi prorrogada: corte `2026-10-15T03:00:00.000Z`, fim de 14/10
-em São Paulo, ferramentas de teste HML somente. Produção e dado clínico não são
+retroativa. Por renovação humana expressa em 14/10, R029 tem novo corte
+`2026-10-16T03:00:00.000Z`, fim de 15/10 em São Paulo, mantendo os 11 riscos
+aceitos e ferramentas de teste HML somente. A decisão anterior permanece no
+histórico; não há extensão automática. Produção e dado clínico não são
 autorizados por esta candidata.
 
 Regressões cobrem v1 parcial/v2 obrigatório, domínio de assinatura, fontes e roles

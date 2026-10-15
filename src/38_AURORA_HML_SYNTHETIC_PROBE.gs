@@ -2,7 +2,7 @@
 var AURORA_HML_SYNTHETIC_PROJECT = 'wmgj-hml-jfn-20260927';
 var AURORA_HML_SYNTHETIC_ENDPOINT = 'https://southamerica-east1-wmgj-hml-jfn-20260927.cloudfunctions.net/ingestWmgjEvent';
 var AURORA_HML_SYNTHETIC_MASTER_HASH = 'bb3a1e4a24554f0cd324e0fb8a14559df4fe22a1f3b40e8d7d1f454f9d2ffc09';
-var AURORA_HML_SYNTHETIC_DEADLINE = '2026-10-15T03:00:00.000Z';
+var AURORA_HML_SYNTHETIC_DEADLINE = '2026-10-16T03:00:00.000Z';
 
 function auroraExecutarProbeNuvemSinteticaHml(request) {
   var result = {

@@ -12,7 +12,7 @@ const ROOT = path.resolve(__dirname,'..');
 const MODULES = ['04_EXTRACAO_DOCUMENTAL_WMGJ','35_AURORA_FIRESTORE_BRIDGE_WMGJ','38_AURORA_HML_SYNTHETIC_PROBE'];
 const NONCE = '0123456789abcdef0123456789abcdef';
 const NOW = Date.parse('2026-10-15T00:00:00Z');
-const DEADLINE = Date.parse('2026-10-15T03:00:00Z');
+const DEADLINE = Date.parse('2026-10-16T03:00:00Z');
 const WINDOW = {expiresAt:new Date(NOW+600000).toISOString(),deadline:DEADLINE,now:()=>NOW};
 const hash = canonical.sha;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -167,7 +167,18 @@ test('runtime function mismatch fails before config or creation rather than echo
   assert.equal(result.code,'PROBE_RUNTIME_SOURCE_MISMATCH');assert.equal(f.calls.configReads,0);assert.equal(f.calls.filesCreated,0);
 });
 test('deadline cannot be extended by request',()=>{
-  const f=fixture({now:Date.parse('2026-10-15T03:00:01Z')}),result=f.execute();assert.equal(result.code,'PROBE_REQUEST_REJECTED');assert.equal(f.calls.configReads,0);
+  const f=fixture({now:DEADLINE+1000}),result=f.execute();assert.equal(result.code,'PROBE_REQUEST_REJECTED');assert.equal(f.calls.configReads,0);
+});
+test('renewed Cloud hard deadline agrees with the explicit owner decision and permits the former cutoff',()=>{
+  const decision=JSON.parse(fs.readFileSync(path.join(ROOT,'firebase-migration/policy/hml-owner-release-approval-v1.json'),'utf8'));
+  const renewal=decision.reaffirmations.at(-1);
+  assert.equal(DEADLINE,Date.parse(decision.scope.validUntilUtc));
+  assert.equal(renewal.riskReviewDeadlineExtended,true);assert.equal(renewal.laterMainCodeReviewClaimed,false);
+  const previous=Date.parse(renewal.previousValidUntilUtc),f=fixture({now:previous});
+  assert.equal(f.c.AURORA_HML_SYNTHETIC_DEADLINE,decision.scope.validUntilUtc);
+  assert.equal(f.execute().status,'PASS');
+  assert.doesNotThrow(()=>canonical.assertWindow({expiresAt:new Date(previous+600000).toISOString(),deadline:DEADLINE,now:()=>previous}));
+  assert.throws(()=>canonical.assertWindow({expiresAt:new Date(DEADLINE+600000).toISOString(),deadline:DEADLINE,now:()=>DEADLINE}),/PROBE_WINDOW_EXPIRED/);
 });
 for(const [name,options]of [
   ['lease after an in-flight extractor',{expireAfterOperation:'extraction'}],
@@ -320,7 +331,7 @@ test('readback expiry blocks the next request and a late final PASS',async()=>{
     await assert.rejects(canonical.readback(value.canonicalReadbackPlan,NONCE,'synthetic-access-token',fetcher,{...WINDOW,now:()=>now}),/PROBE_WINDOW_EXPIRED/);
     assert.equal(requests.length,mode==='first-response'?1:12);
   }
-  assert.throws(()=>canonical.assertWindow({expiresAt:'2026-10-15T03:10:00Z',deadline:DEADLINE+600000,now:()=>DEADLINE}),/PROBE_WINDOW_EXPIRED/);
+  assert.throws(()=>canonical.assertWindow({expiresAt:new Date(DEADLINE+600000).toISOString(),deadline:DEADLINE+600000,now:()=>DEADLINE}),/PROBE_WINDOW_EXPIRED/);
 });
 test('coordinator binds immutable source, actual runtime hashes, exact readback and unchanged deployment',async()=>{
   const f=fixture(),value=f.execute(),temporary=fs.mkdtempSync(path.join(os.tmpdir(),'aurora-probe-coordinator-fixture-'));

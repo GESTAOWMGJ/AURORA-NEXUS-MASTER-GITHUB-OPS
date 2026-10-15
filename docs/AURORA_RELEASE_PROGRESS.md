@@ -102,7 +102,9 @@ runtime coerentes. O registro e o Cockpit mantêm v1 PARCIAL, dispositivos/Mac
 UNVERIFIED e `allClientsSynchronized=false`; não criam executor ou auto-instalação.
 Esta candidata ainda está NOT_DEPLOYED, sem CI/publicação v2 ou recibo instalado.
 Contrato, autoridade existente, testes e rollback em
-`AURORA_ACTIVE_RELEASE_COMPONENTS_V2.md`. R029 conserva prazo e escopo originais.
+`AURORA_ACTIVE_RELEASE_COMPONENTS_V2.md`. R029 conserva o escopo original; o titular
+renovou expressamente seu prazo até `2026-10-16T03:00:00.000Z`, com revisão até
+15/10/2026, sem revisão independente ou extensão automática implícitas.
 
 ### 14/10/2026 — alimentação financeira estruturada
 
