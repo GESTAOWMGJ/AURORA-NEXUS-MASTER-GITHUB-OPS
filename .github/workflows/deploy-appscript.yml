@@ -116,6 +116,21 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+      - name: Preview reuse of the existing WMGJ source without configuring or activating
+        run: |
+          set -euo pipefail
+          node --test tools/test-aurora-wmgj-reuse-preview.cjs
+          node tools/aurora-wmgj-reuse-preview.cjs
+
+      - name: Preserve metadata-only existing-source preview
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: appscript-existing-source-preview
+          path: ${{ runner.temp }}/connector-reuse-preview.json
+          retention-days: 14
+          if-no-files-found: ignore
+
       - name: Preserve deploy-operation separation
         run: |
           echo "Apps Script source deployed and Execution API validated."

@@ -23,9 +23,10 @@ from provider_connectors import pull, exports, EXPORT_SUFFIXES, MAX_PROVIDER_BYT
 from client_secret_store import load as load_secret
 import published_release as release
 
-VERSION='1.0.1'
+VERSION='1.0.2'
 SCHEMA='aurora.client-agent.v1'
 MAX_ENTRIES=200
+SOURCE_PROOF_TTL_SECONDS=300
 FORMATS={'.pdf','.doc','.docx','.odt','.rtf','.xls','.xlsx','.ods','.csv','.json','.jsonl','.xml','.txt','.md','.png','.jpg','.jpeg','.tif','.tiff'}
 
 
@@ -129,6 +130,27 @@ def local_documents(roots):
     return rows[:MAX_ENTRIES],pending,limited
 
 
+def source_configuration_hash(config):
+    # Only the closed public configuration and credential aliases, never tokens.
+    public={key:config.get(key) for key in
+        ('org','origin','roots','providers','tokenEnv','instanceId','releaseControl')}
+    public['authorization']={key:config.get('authorization',{}).get(key) for key in
+        ('approved','actorRef','documentRef','expiresAt')}
+    return sync.digest(json.dumps(public,sort_keys=True))
+
+
+def provider_page_hash(page):
+    return sync.digest(json.dumps({'documents':sorted(sync.digest(json.dumps(row,sort_keys=True)) for row in page['documents']),
+        'pendingExtraction':page['pendingExtraction'],'nextCursor':page.get('nextCursor')},sort_keys=True))
+
+
+def record_provider_page_proof(conn,key,cursor,page_hash,configuration_hash):
+    # The caller commits this metadata with its in-flight reservation or cursor.
+    # It never replaces the fresh processing/replay required by installation.
+    conn.execute('INSERT INTO provider_page_proofs VALUES (?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET request_cursor=excluded.request_cursor,page_hash=excluded.page_hash,configuration_hash=excluded.configuration_hash,checked_at=excluded.checked_at',
+                 (key,json.dumps(cursor) if cursor is not None else None,page_hash,configuration_hash,time.time()))
+
+
 def cycle(config,environment=os.environ,transport=sync.request_json,provider_pull=pull,verify_installation=False):
     if type(verify_installation) is not bool:raise sync.SyncError('EXPLICIT_INSTALLATION_VERIFICATION_REQUIRED')
     roots,state=validate(config)
@@ -148,8 +170,14 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
         if alias and not environment.get(alias):environment[alias]=load_secret(state,config['org'],alias) or ''
     # Verify the tenant before any source-content or provider access.
     sync.connect(config['origin'],config['org'],token,transport)
+    configuration_hash=source_configuration_hash(config)
+    def current_source_authorization():
+        validate(config)
+        if source_configuration_hash(config)!=configuration_hash:raise sync.SyncError('SOURCE_CONFIGURATION_CHANGED_DURING_CYCLE')
+        if (state/'disabled.json').exists():raise sync.SyncError('AGENT_DISABLED')
     conn=queue(state);accepted=0;verified=0;waiting=0;provider_states=[];provider_errors=[]
     replays=0;fresh_processed=0;acceptances=[];source_modes=set();verified_source_groups=set()
+    source_access_at={};page_cursors={};page_hashes={};revalidations=set()
     try:
         conn.execute('CREATE TABLE IF NOT EXISTS binding (id INTEGER PRIMARY KEY, hash TEXT NOT NULL)')
         binding=sync.digest(json.dumps({k:config.get(k) for k in ('org','origin','roots','providers')},sort_keys=True))
@@ -158,40 +186,63 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
         conn.execute('INSERT OR IGNORE INTO binding VALUES (1,?)',(binding,))
         conn.execute('CREATE TABLE IF NOT EXISTS provider_pages (id TEXT PRIMARY KEY, cursor TEXT, completed INTEGER NOT NULL, pending_extraction INTEGER NOT NULL, pages INTEGER NOT NULL)')
         conn.execute('CREATE TABLE IF NOT EXISTS provider_inflight (id TEXT PRIMARY KEY, hash TEXT NOT NULL)')
+        conn.execute('CREATE TABLE IF NOT EXISTS provider_page_proofs (id TEXT PRIMARY KEY, request_cursor TEXT, page_hash TEXT NOT NULL, configuration_hash TEXT NOT NULL, checked_at REAL NOT NULL)')
         conn.commit()
         sources=config.get('providers',[])
         ids=[sync.digest(config['org']+':'+json.dumps(source,sort_keys=True)) for source in sources]
         checkpoints={key:conn.execute('SELECT cursor,completed,pending_extraction,pages FROM provider_pages WHERE id=?',(key,)).fetchone() for key in ids}
         # A completed traversal is rescanned next cycle to discover later arrivals/changes.
         # Canonical receipts and idempotency remain in the existing intake table.
-        if ids and all(checkpoints[key] and checkpoints[key][1] for key in ids):
-            conn.executemany('DELETE FROM provider_pages WHERE id=?',[(key,) for key in ids]);conn.commit()
+        if not verify_installation and ids and all(checkpoints[key] and checkpoints[key][1] for key in ids):
+            conn.executemany('DELETE FROM provider_pages WHERE id=?',[(key,) for key in ids])
+            conn.executemany('DELETE FROM provider_page_proofs WHERE id=?',[(key,) for key in ids]);conn.commit()
             checkpoints={key:None for key in ids}
         documents,pending,limited=local_documents(roots)
+        if roots:source_access_at['LOCAL_ROOTS']=time.time()
         if sources and len(documents)>MAX_ENTRIES//2:
             documents=documents[:MAX_ENTRIES//2];limited=True
         groups=[(None,documents,None)]
         budget=MAX_ENTRIES-len(documents)
         for source,key in zip(sources,ids):
-            validate(config)
-            if (state/'disabled.json').exists():raise sync.SyncError('AGENT_DISABLED')
+            current_source_authorization()
             checkpoint=checkpoints[key]
-            if checkpoint and checkpoint[1]:
+            if checkpoint and checkpoint[1] and not verify_installation:
                 provider_states.append({'provider':source['provider'],'state':'READ_CONFIRMED','coverageLimited':False})
                 continue
             if budget<20:
                 provider_states.append({'provider':source['provider'],'state':'CONNECTION_PENDING'})
                 continue
             try:
+                proof=conn.execute('SELECT request_cursor,page_hash,configuration_hash,checked_at FROM provider_page_proofs WHERE id=?',(key,)).fetchone()
+                inflight=conn.execute('SELECT hash FROM provider_inflight WHERE id=?',(key,)).fetchone()
+                age=time.time()-proof[3] if proof else None
+                invalid=not proof or proof[2]!=configuration_hash or not age>=0
+                stale=invalid or age>=SOURCE_PROOF_TTL_SECONDS
+                if inflight and invalid:raise sync.SyncError('PROVIDER_SOURCE_PROOF_RECONCILIATION_REQUIRED')
+                if verify_installation and checkpoint:
+                    if stale and not inflight:
+                        # Old EOF or changed consent cannot certify this closure. Keep
+                        # intake/history. An expired in-flight page instead needs a
+                        # fresh read at the same cursor and the identical hash below.
+                        conn.execute('DELETE FROM provider_pages WHERE id=?',(key,))
+                        conn.execute('DELETE FROM provider_page_proofs WHERE id=?',(key,));conn.commit()
+                        checkpoint=None;checkpoints[key]=None;proof=None
+                revalidating=bool(verify_installation and checkpoint and checkpoint[1])
                 cursor=json.loads(checkpoint[0]) if checkpoint and checkpoint[0] is not None else None
+                if revalidating:cursor=json.loads(proof[0]) if proof[0] is not None else None
                 result=provider_pull(source,environment=environment,cursor=cursor)
+                current_source_authorization()
+                source_access_at[key]=time.time()
                 if len(result['documents'])>budget:raise sync.SyncError('PROVIDER_PAGE_BUDGET_EXCEEDED')
                 if result['coverageLimited'] and result.get('nextCursor') is None:raise sync.SyncError('PROVIDER_CURSOR_REQUIRED')
-                page_hash=sync.digest(json.dumps({'documents':sorted(sync.digest(json.dumps(row,sort_keys=True)) for row in result['documents']),
-                    'pendingExtraction':result['pendingExtraction'],'nextCursor':result.get('nextCursor')},sort_keys=True))
-                inflight=conn.execute('SELECT hash FROM provider_inflight WHERE id=?',(key,)).fetchone()
+                page_hash=provider_page_hash(result)
+                if revalidating and (result.get('nextCursor') is not None or result['coverageLimited'] or page_hash!=proof[1]):
+                    raise sync.SyncError('PROVIDER_PAGE_CHANGED_RECONCILIATION_REQUIRED')
                 if inflight and inflight[0]!=page_hash:raise sync.SyncError('PROVIDER_PAGE_CHANGED_RECONCILIATION_REQUIRED')
-                conn.execute('INSERT OR IGNORE INTO provider_inflight VALUES (?,?)',(key,page_hash));conn.commit()
+                conn.execute('INSERT OR IGNORE INTO provider_inflight VALUES (?,?)',(key,page_hash))
+                record_provider_page_proof(conn,key,cursor,page_hash,configuration_hash);conn.commit()
+                page_cursors[key]=cursor;page_hashes[key]=page_hash
+                if revalidating:revalidations.add(key)
                 groups.append((key,result['documents'],result));budget-=len(result['documents'])
                 provider_states.append({'provider':source['provider'],'state':'READ_CONFIRMED','coverageLimited':result['coverageLimited']})
             except (sync.SyncError,OSError,ValueError) as exc:
@@ -200,8 +251,7 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
         for key,documents,page in groups:
             page_done=True
             for raw in documents:
-                validate(config)
-                if (state/'disabled.json').exists():raise sync.SyncError('AGENT_DISABLED')
+                current_source_authorization()
                 payload=sync.validate_payload(raw)
                 identity=sync.digest(config['org']+':'+json.dumps(payload,sort_keys=True,separators=(',',':')))
                 previous=conn.execute('SELECT state,attempts,next_attempt FROM intake WHERE hash=?',(identity,)).fetchone()
@@ -232,11 +282,13 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                     conn.execute('UPDATE intake SET state=?,next_attempt=? WHERE hash=?',('RETRY',time.time()+min(3600,30*2**min(attempts-1,7)),identity));conn.commit();waiting+=1;page_done=False
             if key and page_done:
                 cursor=page.get('nextCursor')
-                conn.execute('INSERT INTO provider_pages VALUES (?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET cursor=excluded.cursor,completed=excluded.completed,pending_extraction=provider_pages.pending_extraction+excluded.pending_extraction,pages=provider_pages.pages+1',
-                             (key,json.dumps(cursor) if cursor is not None else None,int(cursor is None),page['pendingExtraction']))
+                if key not in revalidations:
+                    conn.execute('INSERT INTO provider_pages VALUES (?,?,?,?,1) ON CONFLICT(id) DO UPDATE SET cursor=excluded.cursor,completed=excluded.completed,pending_extraction=provider_pages.pending_extraction+excluded.pending_extraction,pages=provider_pages.pages+1',
+                                 (key,json.dumps(cursor) if cursor is not None else None,int(cursor is None),page['pendingExtraction']))
+                record_provider_page_proof(conn,key,page_cursors[key],page_hashes[key],configuration_hash)
                 conn.execute('DELETE FROM provider_inflight WHERE id=?',(key,))
                 conn.commit()
-            elif key:
+            elif key and key not in revalidations:
                 pending+=page['pendingExtraction']
         progress=[conn.execute('SELECT completed,pending_extraction,pages FROM provider_pages WHERE id=?',(key,)).fetchone() for key in ids]
         pending+=sum(row[1] for row in progress if row)
@@ -244,11 +296,13 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
         cloud_verified=complete and pending==0 and waiting==0 and conn.execute("SELECT 1 FROM intake WHERE state='PROCESSING_VERIFIED' LIMIT 1").fetchone() is not None
         limited|=bool(ids) and not complete
     finally:conn.close()
+    current_source_authorization()
     report_confirmed=False
     try:
         report_status,report=transport(config['origin'].rstrip('/')+'/api/integration/ping',token,{'component':'AURORA_CLIENT_AGENT','instanceId':config['instanceId'],'pendingExtraction':min(pending,10000),'providers':provider_states})
         report_confirmed=report_status==200 and report.get('ok') is True and report.get('reportAccepted') is True and report.get('orgId')==config['org']
     except (sync.SyncError,OSError):pass
+    current_source_authorization()
     readiness={'schemaVersion':'aurora.installation.source-readiness.v1','status':'PENDING','eligible':False,
                'sourceAdapterVerifiedThisRun':bool(fresh_processed),'sourceModesVerifiedThisRun':sorted(source_modes),
                'processingReceiptsVerifiedThisRun':fresh_processed,'idempotentReplaysVerifiedThisRun':replays,
@@ -256,9 +310,11 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                'proofScope':'DIRECT_ADAPTER_EXECUTION_THIS_RUN',
                'globalIngestionVerified':False,'oauthEnrollmentOrRefreshPerformed':False}
     required_groups=set(ids)|({'LOCAL_ROOTS'} if roots else set())
+    source_proofs_fresh=all(key in source_access_at and 0<=time.time()-source_access_at[key]<SOURCE_PROOF_TTL_SECONDS for key in required_groups)
+    readiness.update(sourceProofsFreshThisRun=source_proofs_fresh,sourceProofTtlSeconds=SOURCE_PROOF_TTL_SECONDS)
     if (verify_installation and fresh_processed and replays==fresh_processed and report_confirmed
             and waiting==0 and pending==0 and not limited and not provider_errors
-            and required_groups<=verified_source_groups
+            and required_groups<=verified_source_groups and source_proofs_fresh
             and all(isinstance(item,dict) and item.get('eligible') is True for item in acceptances)):
         readiness.update(status='INSTALLATION_INTEGRATION_VERIFIED',eligible=True,
                          canonicalPipelineAcceptance=acceptances[-1])

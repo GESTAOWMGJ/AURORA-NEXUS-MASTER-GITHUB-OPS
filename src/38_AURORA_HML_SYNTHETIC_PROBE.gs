@@ -156,7 +156,8 @@ function auroraHmlSyntheticRuntimeHashes_() {
     checkReceipt: auroraHmlSyntheticCheckReceipt_, extraction: extrairConteudoArquivoWMGJ_V1_,
     extractionComplete: extracaoDocumentalCompletaWMGJ_, ocr: converterArquivoParaGoogleDocWMGJ_V1_,
     sheets: extrairTextoGoogleSheetsWMGJ_V1_, event: wmgjFirestoreEventoArquivo_,
-    sender: wmgjFirestoreEnviarEventoComConfig_, canonicalHmac: wmgjFirestoreCanonicalHmacV2_,
+    sender: wmgjFirestoreEnviarEventoComConfig_, publicFailure: wmgjFirestorePublicFailure_, safeCode: auroraHmlSyntheticSafeCode_,
+    canonicalHmac: wmgjFirestoreCanonicalHmacV2_,
     hmac: wmgjFirestoreHmacHex_, config: wmgjFirestoreConfig_, parents: auroraHmlSyntheticParents_
   };
   var result = {};
@@ -298,5 +299,13 @@ function auroraHmlSyntheticSafeCode_(error) {
     'PROBE_WINDOW_EXPIRED',
     'PROBE_HML_CONFIG_REJECTED', 'PROBE_FILE_SCOPE_REJECTED', 'PROBE_EXTRACTION_PENDING',
     'PROBE_EVENT_REJECTED', 'PROBE_CANONICAL_WRITE_UNCONFIRMED', 'PROBE_REPLAY_UNCONFIRMED'];
-  return error && allowed.indexOf(error.message) >= 0 ? error.message : 'PROBE_DEPENDENCY_FAILED';
+  if (error && allowed.indexOf(error.message) >= 0) return error.message;
+  var match = error && typeof error.message === 'string'
+    ? /^FIRESTORE_INGEST_FAILED:(HTTP_([1-5][0-9]{2}|OTHER)):([A-Z_0-9]+)$/.exec(error.message) : null;
+  if (match) {
+    var status = match[2] === 'OTHER' ? null : Number(match[2]);
+    var response = match[3] === 'NO_STRUCTURED_RESPONSE' ? null : {code: match[3]};
+    if (wmgjFirestorePublicFailure_(status, response) === match[1] + ':' + match[3]) return 'PROBE_' + match[1] + '_' + match[3];
+  }
+  return 'PROBE_DEPENDENCY_FAILED';
 }

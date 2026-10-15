@@ -122,7 +122,7 @@ function wmgjFirestoreEnviarEventoComConfig_(event, cfg, logger, beforeRequest) 
       return parsed;
     }
 
-    lastError = 'HTTP_' + code + ':' + String(text || '').slice(0, 300);
+    lastError = wmgjFirestorePublicFailure_(code, parsed);
     if (code !== 429 && code < 500) break;
     Utilities.sleep(attempt * 750);
   }
@@ -133,6 +133,19 @@ function wmgjFirestoreEnviarEventoComConfig_(event, cfg, logger, beforeRequest) 
     error: lastError
   });
   throw new Error('FIRESTORE_INGEST_FAILED:' + lastError);
+}
+
+// Closed public diagnostics only. Never copy response text, validation details,
+// credentials, source identifiers or an arbitrary remote "code" into logs/errors.
+function wmgjFirestorePublicFailure_(status, response) {
+  var allowed = ['METHOD_NOT_ALLOWED', 'UNSUPPORTED_MEDIA_TYPE', 'SECURITY_CONFIGURATION_ERROR',
+    'INVALID_SIGNATURE', 'INVALID_JSON', 'VALIDATION_ERROR', 'SIGNED_HEADER_BODY_MISMATCH',
+    'KEY_SCOPE_VIOLATION', 'REPLAY_DETECTED', 'IDEMPOTENCY_CONFLICT'];
+  var http = typeof status === 'number' && Number.isSafeInteger(status) && status >= 100 && status <= 599 ? String(status) : 'OTHER';
+  var code = response && typeof response === 'object' && !Array.isArray(response)
+    ? (allowed.indexOf(response.code) >= 0 ? response.code
+      : (typeof response.raw === 'string' ? 'NO_STRUCTURED_RESPONSE' : 'UNRECOGNIZED_RESPONSE')) : 'NO_STRUCTURED_RESPONSE';
+  return 'HTTP_' + http + ':' + code;
 }
 
 function wmgjFirestoreRespostaAceita_(response) {

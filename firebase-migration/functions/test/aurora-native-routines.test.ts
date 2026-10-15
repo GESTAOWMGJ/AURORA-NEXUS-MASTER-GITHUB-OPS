@@ -71,6 +71,11 @@ test("instalação canônica é governada e está presente na projeção, sem no
   assert.equal(cloud.executorState, "IMPLEMENTED_PENDING_RUNTIME_VALIDATION");
   assert.equal(cloud.continuation, "PERSISTED_CURSOR_AFTER_PROCESSED_PAGE_RECEIPTS");
   assert.equal(cloud.providerConsentRequired, true);
+  assert.equal(cloud.reuseExistingAuthorizedConfiguration, true);
+  assert.equal(cloud.metadataPreviewIsSourceIngestion, false);
+  assert.equal(cloud.inactiveRegistrationActivatesSource, false);
+  assert.equal(cloud.completedSourcesRequireFreshInstallationRevalidation, true);
+  assert.equal(cloud.differentProviderPageCountsMustRemainResumable, true);
   assert.equal(cloud.pendingExtractionBlocksCompletion, true);
   assert.equal(cloud.firstDocumentEqualsFullIngestion, false);
   assert.equal(cloud.permissionsGranted, false);

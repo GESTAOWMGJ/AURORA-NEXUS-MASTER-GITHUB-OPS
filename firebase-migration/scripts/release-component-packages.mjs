@@ -64,10 +64,10 @@ export async function readComponentPackage(directory,component,expectedSourceSha
     &&sameNames(Object.keys(manifest.files),expected),'COMPONENT_MANIFEST_INVALID');
   if(component==='iaMaster')demand(manifest.component==='AURORA_IA_MASTER'&&manifest.version==='1.1.0'&&manifest.dirty===false
     &&manifest.nodeMinimumMajor===22&&manifest.externalAiEnabled===false
-    &&manifest.clientAgent?.component==='AURORA_CLIENT_AGENT'&&manifest.clientAgent.version==='1.0.1'
+    &&manifest.clientAgent?.component==='AURORA_CLIENT_AGENT'&&manifest.clientAgent.version==='1.0.2'
     &&manifest.clientAgent.configured===false&&manifest.clientAgent.sourceAuthorizationRequired===true
     &&manifest.clientAgent.providerConnectionsVerified===false,'COMPONENT_IDENTITY_CONFLICT');
-  else demand(manifest.schemaVersion===1&&manifest.component==='AURORA_WINDOWS_INTEGRATION'&&manifest.version==='1.0.2'
+  else demand(manifest.schemaVersion===1&&manifest.component==='AURORA_WINDOWS_INTEGRATION'&&manifest.version==='1.0.3'
     &&manifest.platform==='windows','COMPONENT_IDENTITY_CONFLICT');
   const actualNames=await packageNames(directory);
   demand(sameNames(actualNames,[...expected,'manifest.json'])&&new Set(actualNames.map(name=>name.toLowerCase())).size===actualNames.length,
@@ -87,7 +87,7 @@ export function windowsIntegrationPackage(iaMasterPackage,expectedSourceSha){
     const bytes=iaMasterPackage.fileBytes['client-agent/'+name];
     demand(bytes instanceof Uint8Array,'COMPONENT_FILES_CONFLICT');fileBytes[name]=bytes;
   }
-  const manifest={schemaVersion:1,component:'AURORA_WINDOWS_INTEGRATION',version:'1.0.2',sourceSha:expectedSourceSha,
+  const manifest={schemaVersion:1,component:'AURORA_WINDOWS_INTEGRATION',version:'1.0.3',sourceSha:expectedSourceSha,
     platform:'windows',files:Object.fromEntries(WINDOWS_INTEGRATION_FILES.map(name=>[name,digest(fileBytes[name])]))};
   return {manifest,manifestBytes:Buffer.from(JSON.stringify(manifest,null,2)+'\n'),fileBytes};
 }

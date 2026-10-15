@@ -27,6 +27,20 @@ Microsoft com paginação de anexos bloqueia avanço, sem omissão silenciosa.
 
 ## Provisionamento necessário por cliente
 
+Incremento de 15/10/2026: reutilizar primeiro a fonte e a autorização já existentes
+na mesma organização. O preview de reaproveitamento da WMGJ verifica somente
+configuração, acesso aos metadados e gatilhos existentes; não lê documentos,
+não concede OAuth e não instala outro executor. Registro inativo não equivale
+a ingestão ou ativação. Conflitos de pasta, tenant, configuração e gatilhos exigem
+reconciliação, preservando a fonte original.
+
+No aceite de instalação, todas as fontes configuradas precisam de acesso atual,
+processamento e replay verificados. Fontes com paginações de tamanhos diferentes
+devem continuar pelo mesmo estado, sem perder recibos. EOF ou recibo em cache não
+substitui revalidação; autorização vencida, extração pendente e mudança da página
+em curso impedem a conclusão. Essa regra integra a rotina existente no motor;
+implantação e teste real dos provedores continuam sendo evidências próprias.
+
 1. Identidade autenticada e vínculo empresarial vigente no destino aprovado.
 2. Fontes explícitas: pasta Drive, label Gmail, pasta Microsoft ou pasta IMAP.
 3. Credencial AURORA com `documents.ingest`, emitida pela API administrativa

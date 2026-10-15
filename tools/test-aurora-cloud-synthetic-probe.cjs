@@ -95,6 +95,8 @@ function fixture(options={}) {
       const canonicalHmac=['WMGJ-HMAC-V2','POST','application/json',config.headers['X-WMGJ-Timestamp'],config.headers['X-WMGJ-Nonce'],props.WMGJ_FIRESTORE_HMAC_KEY_ID,'wmgj',event.idempotencyKey,bodyHash].join('\n');
       assert.equal(config.headers['X-WMGJ-Signature'],crypto.createHmac('sha256',Buffer.from(props.WMGJ_FIRESTORE_HMAC_SECRET,'hex')).update(canonicalHmac).digest('hex'));
       if(options.httpFail)return {getResponseCode:()=>403,getContentText:()=>JSON.stringify({ok:false,code:'KEY_SCOPE_VIOLATION',private:'must-not-leak'})};
+      if(options.failureResponse)return {getResponseCode:()=>options.failureResponse.status,
+        getContentText:()=>typeof options.failureResponse.body==='string'?options.failureResponse.body:JSON.stringify(options.failureResponse.body)};
       if(options.retryThenExpire)return {getResponseCode:()=>503,getContentText:()=>JSON.stringify({ok:false})};
       const entityId=hash('sourceDocument:'+event.entityKey).slice(0,48);
       const versionId=hash('v1:sourceDocument:'+event.entityKey+':revision:1').slice(0,48);
@@ -267,7 +269,44 @@ test('missing nonce cannot become a document fact',()=>{
 });
 test('HMAC scope rejection is failure, sanitized, with no config or global log changes',()=>{
   const f=fixture({httpFail:true}),result=f.execute();assert.equal(result.status,'FAIL');assert.ok(result.formats.every(row=>!row.canonicalCommitAcknowledged));
-  assert.equal(result.cleanupVerified,true);assert.equal(f.calls.globalLogs,0);assert.equal(f.calls.propertiesWritten,0);assert.doesNotMatch(JSON.stringify(result),/must-not-leak|KEY_SCOPE/);
+  assert.ok(result.formats.every(row=>row.code==='PROBE_HTTP_403_KEY_SCOPE_VIOLATION'&&!row.replayVerified));
+  assert.equal(result.cleanupVerified,true);assert.equal(f.calls.globalLogs,0);assert.equal(f.calls.propertiesWritten,0);assert.doesNotMatch(JSON.stringify(result),/must-not-leak/);
+  assert.equal(coordinator.sanitizeSummary({response:result},f.request().runtimeFunctionHashes).status,'FAIL');
+});
+for(const [status,backend]of [[403,'SIGNED_HEADER_BODY_MISMATCH'],[401,'INVALID_SIGNATURE'],[503,'SECURITY_CONFIGURATION_ERROR'],[400,'VALIDATION_ERROR']]){
+  test('public transport diagnostic retains only HTTP '+status+' and closed code '+backend,()=>{
+    const f=fixture({failureResponse:{status,body:{ok:false,code:backend,private:'sensitive-response-marker',errors:['private-validation-detail']}}}),result=f.execute();
+    assert.equal(result.status,'FAIL');assert.equal(result.cleanupVerified,true);
+    assert.ok(result.formats.every(row=>row.code==='PROBE_HTTP_'+status+'_'+backend&&!row.canonicalCommitAcknowledged&&!row.replayVerified));
+    const safe=coordinator.sanitizeSummary({response:result},f.request().runtimeFunctionHashes);
+    assert.doesNotMatch(JSON.stringify(safe),/sensitive-response-marker|private-validation-detail/);
+    assert.equal(f.calls.globalLogs,0);assert.equal(f.calls.propertiesWritten,0);
+  });
+}
+test('arbitrary response codes, HTML and nested secrets never enter bridge errors, logs or probe evidence',()=>{
+  for(const [body,code]of [[{code:'PRIVATE_TOKEN_123',token:'sensitive-response-marker'},'UNRECOGNIZED_RESPONSE'],
+    [{code:{secret:'sensitive-response-marker'}},'UNRECOGNIZED_RESPONSE'],['<html>sensitive-response-marker</html>','NO_STRUCTURED_RESPONSE']]){
+    const f=fixture({failureResponse:{status:403,body}}),result=f.execute();
+    assert.ok(result.formats.every(row=>row.code==='PROBE_HTTP_403_'+code));
+    assert.doesNotMatch(JSON.stringify(result),/PRIVATE_TOKEN_123|sensitive-response-marker/);
+    const logs=[],cfg=f.c.wmgjFirestoreConfig_();cfg.dryRun=false;
+    let error;
+    try{f.c.wmgjFirestoreEnviarEventoComConfig_({orgId:'wmgj',eventId:'fixture',idempotencyKey:'fixture',entityType:'sourceDocument'},cfg,(...args)=>logs.push(args));}catch(value){error=value;}
+    assert.equal(error.message,'FIRESTORE_INGEST_FAILED:HTTP_403:'+code);
+    assert.doesNotMatch(JSON.stringify(logs),/PRIVATE_TOKEN_123|sensitive-response-marker/);
+    assert.equal(coordinator.sanitizeSummary({response:result},f.request().runtimeFunctionHashes).status,'FAIL');
+  }
+});
+test('diagnostic normalizer and coordinator refuse unrecognized codes or invented success',()=>{
+  const f=fixture({httpFail:true}),result=f.execute();
+  assert.equal(f.c.auroraHmlSyntheticSafeCode_({message:'FIRESTORE_INGEST_FAILED:HTTP_403:PRIVATE_TOKEN_123'}),'PROBE_DEPENDENCY_FAILED');
+  assert.equal(f.c.auroraHmlSyntheticSafeCode_({message:'FIRESTORE_INGEST_FAILED:HTTP_999:KEY_SCOPE_VIOLATION'}),'PROBE_DEPENDENCY_FAILED');
+  for(const code of ['PROBE_HTTP_403_PRIVATE_TOKEN_123','PROBE_HTTP_999_KEY_SCOPE_VIOLATION']){
+    const changed=clone(result);changed.formats[0].code=code;
+    assert.throws(()=>coordinator.sanitizeSummary({response:changed},f.request().runtimeFunctionHashes),/PROBE_SUMMARY_REJECTED/);
+  }
+  const forged=clone(result);forged.formats[0].status='PASS';
+  assert.throws(()=>coordinator.sanitizeSummary({response:forged},f.request().runtimeFunctionHashes),/PROBE_SUMMARY_REJECTED/);
 });
 test('incomplete canonical ACK and nonduplicate replay cannot pass',()=>{
   for(const options of [{badReceipt:true},{badReplay:true}]){const f=fixture(options),result=f.execute();assert.equal(result.status,'FAIL');assert.ok(result.formats.every(row=>!row.replayVerified));}

@@ -14,6 +14,12 @@ const normalize = value => value.replace(/\r\n/g, '\n');
 const fail = code => { throw new Error(code); };
 const stable = value => JSON.stringify(value, (_, item) => item && !Array.isArray(item) && typeof item === 'object'
   ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
+const publicTransportCode = value => {
+  const match = typeof value === 'string' && /^PROBE_HTTP_([1-5][0-9]{2}|OTHER)_([A-Z_0-9]+)$/.exec(value);
+  return !!match && ['METHOD_NOT_ALLOWED','UNSUPPORTED_MEDIA_TYPE','SECURITY_CONFIGURATION_ERROR','INVALID_SIGNATURE',
+    'INVALID_JSON','VALIDATION_ERROR','SIGNED_HEADER_BODY_MISMATCH','KEY_SCOPE_VIOLATION','REPLAY_DETECTED',
+    'IDEMPOTENCY_CONFLICT','UNRECOGNIZED_RESPONSE','NO_STRUCTURED_RESPONSE'].includes(match[2]);
+};
 
 function command(executable, args, cwd, runner = cp.spawnSync) {
   const result = runner(executable, args, {cwd, encoding: 'utf8', timeout: 400000, maxBuffer: 12000000,
@@ -97,7 +103,7 @@ function sanitizeSummary(envelope, expected) {
   for (const row of value.formats) {
     if (!row || Object.keys(row).sort().join(',') !== formatKeys.sort().join(',') || !Object.hasOwn(methods, row.format)
       || seen.has(row.format) || !['PASS','FAIL'].includes(row.status)
-      || (!codes.includes(row.code) && !['PROBE_FORMAT_PENDING','PROBE_FORMAT_VERIFIED'].includes(row.code))
+      || (!codes.includes(row.code) && !['PROBE_FORMAT_PENDING','PROBE_FORMAT_VERIFIED'].includes(row.code) && !publicTransportCode(row.code))
       || (row.method !== null && row.method !== methods[row.format])
       || ['extractionVerified','canonicalCommitAcknowledged','replayVerified'].some(key => typeof row[key] !== 'boolean')
       || ['extractedContentSha256','eventSha256','receiptSha256'].some(key => row[key] !== null && !/^[a-f0-9]{64}$/.test(row[key]))) fail('PROBE_SUMMARY_REJECTED');

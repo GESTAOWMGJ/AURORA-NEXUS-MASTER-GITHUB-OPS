@@ -13,7 +13,7 @@ function fixture(t:any){
   const directory=join(temporary,'ia-master');mkdirSync(directory);
   const fileBytes=Object.fromEntries(IA_MASTER_FILES.map((name:string)=>[name,Buffer.from('synthetic public '+name+'\n')]));
   const manifest:any={component:'AURORA_IA_MASTER',version:'1.1.0',sourceRevision:sourceSha,dirty:false,nodeMinimumMajor:22,externalAiEnabled:false,
-    clientAgent:{component:'AURORA_CLIENT_AGENT',version:'1.0.1',configured:false,sourceAuthorizationRequired:true,providerConnectionsVerified:false},
+    clientAgent:{component:'AURORA_CLIENT_AGENT',version:'1.0.2',configured:false,sourceAuthorizationRequired:true,providerConnectionsVerified:false},
     files:Object.fromEntries(Object.entries(fileBytes).map(([name,bytes])=>[name,hash(bytes as Uint8Array)]))};
   const rewrite=()=>writeFileSync(join(directory,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
   for(const [name,bytes] of Object.entries(fileBytes)){const file=join(directory,...name.split('/'));mkdirSync(dirname(file),{recursive:true});writeFileSync(file,bytes as Uint8Array);}
@@ -25,22 +25,22 @@ test('existing package closure yields separate real IA34 and Windows7 manifests 
   assert.deepEqual(Object.keys(windows.fileBytes).sort(),[...WINDOWS_INTEGRATION_FILES].sort());
   for(const name of WINDOWS_INTEGRATION_FILES)assert.ok(Buffer.from(windows.fileBytes[name]).equals(Buffer.from(ia.fileBytes['client-agent/'+name])));
   assert.equal(windows.manifest.sourceSha,sourceSha);assert.equal(windows.manifest.component,'AURORA_WINDOWS_INTEGRATION');
-  assert.equal(windows.manifest.version,'1.0.2');assert.equal(ia.manifest.clientAgent.version,'1.0.1');
+  assert.equal(windows.manifest.version,'1.0.3');assert.equal(ia.manifest.clientAgent.version,'1.0.2');
   assert.equal('configured' in windows.manifest,false);assert.equal('installationVerified' in windows.manifest,false);
 });
-test('Windows Integration1.0.2 round-trips the seven-file package and rejects the protected old component version',async t=>{
+test('Windows Integration1.0.3 round-trips the seven-file package and rejects the protected old component version',async t=>{
   const f=fixture(t),ia=await readComponentPackage(f.directory,'iaMaster',sourceSha),windows=windowsIntegrationPackage(ia,sourceSha);
   const directory=await retainComponentPackage(join(f.temporary,'retained'),'windows-integration-package',windows);
   const retained=await readComponentPackage(directory,'windowsIntegration',sourceSha);
-  assert.equal(retained.manifest.version,'1.0.2');assert.equal(retained.manifest.sourceSha,sourceSha);
+  assert.equal(retained.manifest.version,'1.0.3');assert.equal(retained.manifest.sourceSha,sourceSha);
   assert.ok(retained.manifestBytes.equals(windows.manifestBytes));
   for(const name of WINDOWS_INTEGRATION_FILES)assert.ok(retained.fileBytes[name].equals(ia.fileBytes['client-agent/'+name]));
-  const old={...windows.manifest,version:'1.0.1'};
+  const old={...windows.manifest,version:'1.0.2'};
   writeFileSync(join(directory,'manifest.json'),JSON.stringify(old,null,2)+'\n');
   await assert.rejects(readComponentPackage(directory,'windowsIntegration',sourceSha),/COMPONENT_IDENTITY_CONFLICT/);
 });
-test('Windows Integration version bump does not change the IA clientAgent version contract',async t=>{
-  const f=fixture(t);f.manifest.clientAgent.version='1.0.2';f.rewrite();
+test('Windows Integration release rejects the prior IA clientAgent version contract',async t=>{
+  const f=fixture(t);f.manifest.clientAgent.version='1.0.1';f.rewrite();
   await assert.rejects(readComponentPackage(f.directory,'iaMaster',sourceSha),/COMPONENT_IDENTITY_CONFLICT/);
 });
 for(const scenario of ['wrong source','dirty','configured agent','extra claimed path','missing claim','changed bytes','missing public file','extra private file'])test(`component closure rejects ${scenario}`,async t=>{

@@ -7,6 +7,7 @@ on:
       - 'desktop/install_windows_beta.py'
       - 'desktop/test_windows_beta_continuity.py'
       - 'desktop/test_windows_checkpoint_transition.py'
+      - 'src/00_CORE_WMGJ.gs'
       - 'src/01_PIPELINE_CONFIABILIDADE_WMGJ.gs'
       - 'src/04_EXTRACAO_DOCUMENTAL_WMGJ.gs'
       - 'src/35_AURORA_FIRESTORE_BRIDGE_WMGJ.gs'
@@ -14,6 +15,10 @@ on:
       - 'src/38_AURORA_HML_SYNTHETIC_PROBE.gs'
       - 'tools/aurora-cloud-synthetic-*.cjs'
       - 'tools/test-aurora-cloud-synthetic-probe.cjs'
+      - 'tools/*wmgj-reuse-preview.cjs'
+      - 'tools/test-gmail-drive-onboarding.cjs'
+      - 'tools/test-gmail-connector-status.cjs'
+      - '.github/workflows/deploy-appscript.yml'
       - '.github/workflows/validate-aurora-onboarding.yml'
   push:
     branches: [main]
@@ -22,10 +27,16 @@ on:
       - 'desktop/install_windows_beta.py'
       - 'desktop/test_windows_beta_continuity.py'
       - 'desktop/test_windows_checkpoint_transition.py'
+      - 'src/00_CORE_WMGJ.gs'
+      - 'src/37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'
       - 'src/35_AURORA_FIRESTORE_BRIDGE_WMGJ.gs'
       - 'src/38_AURORA_HML_SYNTHETIC_PROBE.gs'
       - 'tools/aurora-cloud-synthetic-*.cjs'
       - 'tools/test-aurora-cloud-synthetic-probe.cjs'
+      - 'tools/*wmgj-reuse-preview.cjs'
+      - 'tools/test-gmail-drive-onboarding.cjs'
+      - 'tools/test-gmail-connector-status.cjs'
+      - '.github/workflows/deploy-appscript.yml'
       - '.github/workflows/validate-aurora-onboarding.yml'
   workflow_dispatch:
 
@@ -40,7 +51,7 @@ jobs:
   cloud-sync:
     name: Canonical sync transport (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    timeout-minutes: 15
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -62,7 +73,7 @@ jobs:
       - name: Collector SQLite lifecycle and persisted receipt regression
         run: python -m unittest discover -s aurora-coletor/tests -p test_collector_lifecycle.py -v
       - name: First-client agent isolation and reversible installation
-        run: python -m unittest discover -s aurora-coletor/tests -p test_client_agent.py -v
+        run: python -m unittest discover -s aurora-coletor/tests -p 'test_client_agent*.py' -v
       - name: Scoped provider read and pending extraction contracts
         run: python -m unittest discover -s aurora-coletor/tests -p test_provider_connectors.py -v
       - name: Canonical portal gate, beta.4 continuity and rollback tests
@@ -92,6 +103,8 @@ jobs:
         run: python -m unittest discover -s aurora-coletor/tests -p 'test_connector_setup.py' -v
       - name: Test isolated synthetic Cloud probe without credentials or cloud access
         run: node --test tools/test-aurora-cloud-synthetic-probe.cjs
+      - name: Test existing-source reuse and connector status without activation
+        run: node --test tools/test-aurora-wmgj-reuse-preview.cjs tools/test-gmail-drive-onboarding.cjs tools/test-gmail-connector-status.cjs
       - name: Parse Apps Script connector path
         run: |
           cp src/01_PIPELINE_CONFIABILIDADE_WMGJ.gs "$RUNNER_TEMP/pipeline.js"

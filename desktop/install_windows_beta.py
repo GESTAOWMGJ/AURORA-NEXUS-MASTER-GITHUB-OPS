@@ -10,10 +10,12 @@ from contextlib import contextmanager
 import datetime as dt
 import hashlib
 from html.parser import HTMLParser
+import io
 import json
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -21,6 +23,8 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
 import uuid
+import weakref
+import zipfile
 
 COLLECTOR_SOURCE = Path(__file__).resolve().parents[1] / "aurora-coletor"
 sys.path.insert(0, str(COLLECTOR_SOURCE))
@@ -259,7 +263,221 @@ def current_identity_matches(previous, expected):
     return True
 
 
-def known_identity(previous, expected):
+# A disk receipt/flag is provenance, never authority. Only this invocation can
+# hold the capability after current authenticated pin and local CAS checks.
+# Historical signatures bind old bytes; current authority is renewed separately.
+_CLIENT_PREDECESSORS = weakref.WeakKeyDictionary()
+
+
+class _ClientPredecessor:
+    def revalidate(self, acceptance=None):
+        return _refresh_client_predecessor(self, acceptance)
+
+    def require_fresh(self):
+        data = _CLIENT_PREDECESSORS.get(self)
+        if data is None:
+            raise ValueError('VERIFIED_CLIENT_PREDECESSOR_REQUIRED')
+        data['release'].require_active(data['pin'], expected_org=data['plan']['orgId'])
+        if data.get('authority') is not None:
+            integration_deployment._transition_fresh_acceptance(data['authority'])
+
+
+def _client_read(data, path, maximum=MAX_BYTES):
+    path = safe_path(Path(path))
+    value = integration_deployment._transition_bytes(path, maximum)
+    key = str(path)
+    if key in data['files'] and data['files'][key] != value:
+        raise ValueError('CLIENT_PREDECESSOR_EVIDENCE_CHANGED')
+    data['files'][key] = value
+    return value
+
+
+def _client_json(data, path):
+    return integration_deployment._transition_json(_client_read(data, path))
+
+
+def _client_cas(data):
+    for label, path in data['paths'].items():
+        require_unchanged(path, data['snapshots'][label])
+    for path, value in list(data['files'].items()):
+        if integration_deployment._transition_bytes(path, max(MAX_BYTES, len(value))) != value:
+            raise ValueError('CLIENT_PREDECESSOR_EVIDENCE_CHANGED')
+    for path in data['absent']:
+        require_unchanged(Path(path), None)
+
+
+def _signed_client_bundle(data, plan, candidate):
+    """Use the existing unified layout; never search arbitrary directories."""
+    manifest_path = safe_path(Path(plan['publicReleaseControl']['manifestPath']))
+    if manifest_path.parent.name != 'manifests':
+        raise ValueError('SIGNED_CLIENT_ARTIFACT_LOCATION_REQUIRED')
+    satellite_bytes = _client_read(data, manifest_path.parent / 'satellite-manifest.json')
+    satellite = integration_deployment._transition_json(satellite_bytes)
+    pin = candidate.certificate['components']['satellite']
+    if (fingerprint(satellite_bytes) != pin['manifestSha256'] or satellite.get('sourceCommit') != plan['expectedSourceSha']
+            or satellite.get('portalUrl') != BASE or not isinstance(satellite.get('files'), list)):
+        raise ValueError('SIGNED_CLIENT_SATELLITE_CONFLICT')
+    entries = [entry for entry in satellite['files'] if isinstance(entry, dict)
+               and entry.get('name') == 'AURORA-NEXUS-Windows-Beta.zip']
+    if len(entries) != 1:
+        raise ValueError('SIGNED_WINDOWS_CLIENT_ZIP_REQUIRED')
+    archive_bytes = _client_read(data, manifest_path.parent.parent / 'payloads/satellite/AURORA-NEXUS-Windows-Beta.zip',
+                                 16 * 1024 * 1024)
+    if entries[0].get('size') != len(archive_bytes) or entries[0].get('sha256') != fingerprint(archive_bytes):
+        raise ValueError('SIGNED_WINDOWS_CLIENT_ZIP_CONFLICT')
+    with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+        infos = archive.infolist()
+        expected_names = set(PACKAGE_SOURCES) | {'INSTALAR-AURORA-NEXUS.cmd', 'LEIA-PRIMEIRO.txt'}
+        names = [entry.filename for entry in infos]
+        if (len(names) != len(set(name.casefold() for name in names)) or set(names) != expected_names | {'manifest.json'}
+                or sum(entry.file_size for entry in infos) > 16 * 1024 * 1024
+                or any(entry.is_dir() or entry.flag_bits & 1 or entry.file_size > 1024 * 1024
+                       or stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG) for entry in infos)):
+            raise ValueError('SIGNED_CLIENT_ZIP_CLOSURE_CONFLICT')
+        files = {entry.filename: archive.read(entry) for entry in infos}
+    manifest = integration_deployment._transition_json(files['manifest.json'])
+    if (manifest.get('schemaVersion') != 1 or manifest.get('clientVersion') != VERSION
+            or manifest.get('sourceCommit') != plan['expectedSourceSha'] or set(manifest.get('files', {})) != expected_names
+            or any(not re.fullmatch('[a-f0-9]{64}', value or '') or fingerprint(files[name]) != value
+                   for name, value in manifest['files'].items())):
+        raise ValueError('SIGNED_CLIENT_BUNDLE_CONFLICT')
+    bundle = safe_path(Path(plan['packageDirectory']).parent)
+    for name, value in files.items():
+        if _client_read(data, bundle / name, 1024 * 1024) != value:
+            raise ValueError('SIGNED_CLIENT_BUNDLE_BYTES_CHANGED')
+    return fingerprint(files['desktop/install_windows_beta.py'])
+
+
+def _client_record(data, reference):
+    state, org = Path(data['plan']['stateDirectory']), data['plan']['orgId']
+    if not isinstance(reference, dict) or set(reference) != {'directory', 'commitSha256'}:
+        raise ValueError('CLIENT_CHECKPOINT_REFERENCE_REQUIRED')
+    plan, commit = integration_deployment._transition_record(reference['directory'], reference['commitSha256'], state, org)
+    directory = Path(reference['directory'])
+    for name in ('plan.json', 'commit.json', 'checkpoint.previous', 'checkpoint.next', 'proof.json'):
+        _client_read(data, directory / name)
+    trust = data['plan']['publicReleaseControl']['trust']
+    if plan['publicReleaseControl']['trust']['publicKeySha256'] != trust['publicKeySha256']:
+        raise ValueError('CLIENT_PREDECESSOR_TRUST_CONFLICT')
+    candidate = data['release'].verify_candidate(plan['envelope'], trust, plan['expectedSourceSha'])
+    if not candidate.complete_signed_set or candidate.certificate_sha256 != plan['expectedCertificateSha256']:
+        raise ValueError('CLIENT_PREDECESSOR_SIGNATURE_CONFLICT')
+    next_value = _client_json(data, directory / 'checkpoint.next')
+    if next_value['componentVersion'] != candidate.certificate['components']['windowsIntegration']['version']:
+        raise ValueError('CLIENT_CHECKPOINT_COMPONENT_CONFLICT')
+    return plan, commit, candidate
+
+
+def _refresh_client_predecessor(proof, acceptance=None):
+    data = _CLIENT_PREDECESSORS.get(proof)
+    if data is None:
+        raise ValueError('VERIFIED_CLIENT_PREDECESSOR_REQUIRED')
+    _client_cas(data)
+    release, candidate, pin = integration_deployment._transition_authority(data['plan'], os.environ.get('AURORA_INTEGRATION_TOKEN'))
+    integration_deployment._transition_local(data['plan'], release, candidate)
+    data.update(release=release, pin=pin)
+    _client_cas(data)  # Recheck the actual client after the authenticated await.
+    journal = _client_json(data, Path(data['plan']['iaAnchor']['attemptDirectory']) / 'journal.json')
+    current_script = _signed_client_bundle(data, data['plan'], candidate)
+    if current_script != fingerprint(_client_read(data, Path(__file__))):
+        raise ValueError('CURRENT_SIGNED_INSTALLER_BYTES_REQUIRED')
+    old_plan, old_commit, old_candidate = _client_record(data, data['reference'])
+    if (old_plan['expectedSourceSha'] != data['previous']['reviewedMainSha']
+            or _signed_client_bundle(data, old_plan, old_candidate) != data['previous']['sourceScriptSha256']):
+        raise ValueError('SIGNED_PREVIOUS_INSTALLER_BYTES_REQUIRED')
+    if acceptance is not None:
+        reference = acceptance.get('checkpointTransition') if isinstance(acceptance, dict) else None
+        current_plan, commit, _ = _client_record(data, reference)
+        if current_plan != data['plan']:
+            raise ValueError('CURRENT_CLIENT_CHECKPOINT_PLAN_REQUIRED')
+        data['currentReference'] = dict(reference)
+        data['currentCheckpoint'] = commit['nextSha256']
+    active = _client_read_active(data)
+    needed = fingerprint(active)
+    if needed != data.get('currentCheckpoint', data['plan']['expectedPreviousSha256']):
+        raise ValueError('CURRENT_CLIENT_CHECKPOINT_HEAD_REQUIRED')
+    reference = data.get('currentReference') or data['plan']['previousTransition']
+    bridge = journal.get('checkpointTransitionFromPrevious') or journal.get('checkpointTransition')
+    seen = set()
+    while needed != old_commit['nextSha256']:
+        if reference is None and needed == journal['identity']['checkpoint']:
+            reference, bridge = bridge, None
+        if reference is None or reference['directory'] in seen or len(seen) >= 64:
+            raise ValueError('CLIENT_CHECKPOINT_LINEAGE_REQUIRED')
+        seen.add(reference['directory'])
+        prior, commit, _ = _client_record(data, reference)
+        if commit['nextSha256'] != needed:
+            raise ValueError('CLIENT_CHECKPOINT_LINEAGE_CONFLICT')
+        needed, reference = commit['previousSha256'], prior['previousTransition']
+    if data.get('currentReference') is not None:
+        directory = Path(data['currentReference']['directory'])
+        saved = _client_json(data, directory / 'proof.json')
+        data['authority'] = integration_deployment._transition_current_server(data['plan'], data['raw'],
+            os.environ.get('AURORA_INTEGRATION_TOKEN'), integration_deployment.sync.request_json, saved)
+        _client_cas(data)
+        release, candidate, pin = integration_deployment._transition_authority(data['plan'], os.environ.get('AURORA_INTEGRATION_TOKEN'))
+        integration_deployment._transition_local(data['plan'], release, candidate)
+        data.update(release=release, pin=pin)
+    if _client_read_active(data) != active:
+        raise ValueError('CLIENT_CHECKPOINT_CHANGED_DURING_AUTHORITY')
+    _client_cas(data)
+    proof.require_fresh()
+
+
+def _client_read_active(data):
+    return integration_deployment._transition_bytes(Path(data['plan']['stateDirectory']) / integration_deployment.STATE_NAME)
+
+
+def verified_client_predecessor(root, target, edge, shortcuts, previous, expected, snapshots,
+                               transition_plan_path, input_path):
+    if not transition_plan_path or not input_path:
+        raise ValueError('SIGNED_CLIENT_PREDECESSOR_PROOF_REQUIRED')
+    data = {'files': {}, 'absent': set(),
+            'previous': json.loads(json.dumps(previous, allow_nan=False)),
+            'expected': dict(expected), 'snapshots': dict(snapshots),
+            'paths': {'manifest': target / 'installation.json', **{f'shortcut-{i}': p for i, p in enumerate(shortcuts)}}}
+    if data['previous'] != integration_deployment._transition_json(snapshots['manifest']):
+        raise ValueError('ACTUAL_CLIENT_METADATA_REQUIRED')
+    data['plan'] = _client_json(data, transition_plan_path)
+    data['raw'] = _client_json(data, input_path)
+    integration_deployment.checkpoint_transition_plan(data['plan'], data['raw'])
+    if (Path(data['plan']['stateDirectory']) != root / 'integration/state'
+            or Path(data['plan']['packageDirectory']) != COLLECTOR_SOURCE
+            or data['plan']['expectedSourceSha'] != expected['reviewedMainSha']
+            or not current_identity_matches(previous, {**expected, 'reviewedMainSha': previous.get('reviewedMainSha')})):
+        raise ValueError('SAME_SIGNED_CLIENT_INSTALLATION_REQUIRED')
+    reference = previous.get('probe', {}).get('installationAcceptance', {}).get('checkpointTransition')
+    data['reference'] = reference
+    identifier = previous.get('rollbackBackupId')
+    if not isinstance(identifier, str) or not re.fullmatch('[a-f0-9]{32}', identifier):
+        raise ValueError('COMMITTED_CLIENT_RECEIPT_REQUIRED')
+    backup = root / 'installation-rollbacks' / identifier
+    receipt = _client_json(data, backup / 'receipt.json')
+    if (receipt.get('schemaVersion') != 1 or receipt.get('clientVersion') != VERSION or receipt.get('state') != 'COMMITTED'
+            or not isinstance(receipt.get('artifacts'), dict) or set(receipt['artifacts']) != set(snapshots)):
+        raise ValueError('COMMITTED_CLIENT_RECEIPT_REQUIRED')
+    for label, value in receipt['artifacts'].items():
+        if (not isinstance(value, dict) or set(value) != {'beforeSha256', 'afterSha256'}
+                or value['afterSha256'] != fingerprint(snapshots[label])):
+            raise ValueError('COMMITTED_CLIENT_METADATA_OR_SHORTCUT_CHANGED')
+        before = file_bytes(backup / backup_name(label))
+        if fingerprint(before) != value['beforeSha256']:
+            raise ValueError('COMMITTED_CLIENT_BACKUP_CHANGED')
+        if before is not None:
+            _client_read(data, backup / backup_name(label))
+        else:
+            data['absent'].add(str(backup / backup_name(label)))
+    proof = _ClientPredecessor()
+    _CLIENT_PREDECESSORS[proof] = data
+    try:
+        proof.revalidate()
+    except Exception:
+        del _CLIENT_PREDECESSORS[proof]
+        raise
+    return proof
+
+
+def known_identity(previous, expected, predecessor=None):
     if not isinstance(previous, dict) or previous.get("offlineBusinessApp") is not False:
         raise ValueError("INSTALLATION_IDENTITY_CONFLICT")
     for key in ("gatewayDatabaseChanged", "cloudDeploymentPerformed", "productionReleased", "macUpdated", "iosNativeAppBuilt"):
@@ -279,6 +497,11 @@ def known_identity(previous, expected):
     if (current_identity_matches(previous, expected)
             and previous.get("sourceScriptSha256") in CANONICAL_SCRIPT_HASHES | current_script_hashes()):
         return "CURRENT_BETA4"
+    data = _CLIENT_PREDECESSORS.get(predecessor) if isinstance(predecessor, _ClientPredecessor) else None
+    if data is not None and data['previous'] == previous and data['expected'] == expected:
+        predecessor.require_fresh()
+        _client_cas(data)
+        return 'SIGNED_PUBLISHED_PREDECESSOR'
     raise ValueError("INSTALLATION_IDENTITY_CONFLICT")
 
 
@@ -329,7 +552,7 @@ def replace_unchanged(path, before, after):
             temporary.unlink(missing_ok=True)
 
 
-def update_client(root, target, edge, shortcuts, previous, expected, proof, snapshots):
+def update_client(root, target, edge, shortcuts, previous, expected, proof, snapshots, predecessor=None):
     # The canonical gate has already passed; no backup or install lock is made before it.
     paths = {"manifest": target / "installation.json", **{f"shortcut-{i}":p for i,p in enumerate(shortcuts)}}
     with installation_lock(root):
@@ -349,9 +572,13 @@ def update_client(root, target, edge, shortcuts, previous, expected, proof, snap
         # Stage WScript output before replacing any registered shortcut.
         staged = [backup / f"after-shortcut-{i}.lnk" for i in range(len(shortcuts))]
         write_shortcuts(target, edge, staged)
+        if predecessor is not None:
+            predecessor.revalidate(proof['installationAcceptance'])
         for path in (root / "integration", root / "integration/state", root / "integration/1.0.0"):
             safe_path(path)
         integration = install_integration_assets(COLLECTOR_SOURCE, root)
+        if predecessor is not None:
+            predecessor.revalidate(proof['installationAcceptance'])
         manifest = {**(previous or {}), **expected, "installedAtUtc": (previous or {}).get("installedAtUtc", proof["atUtc"]),
                     "updatedAtUtc": proof["atUtc"], "shortcuts": [str(p) for p in shortcuts], "launchTarget": str(edge),
                     "probe": proof, "sourceScriptSha256": fingerprint(Path(__file__).read_bytes()),
@@ -374,6 +601,10 @@ def update_client(root, target, edge, shortcuts, previous, expected, proof, snap
             for label, value in replacements.items():
                 replace_unchanged(paths[label], snapshots[label], value)
                 applied.append(label)
+            for label, value in replacements.items():
+                require_unchanged(paths[label], value)
+            if predecessor is not None:
+                predecessor.require_fresh()
             receipt["state"] = "COMMITTED"
             replace_unchanged(receipt_path, receipt_bytes, json.dumps(receipt, indent=2).encode("utf-8"))
         except Exception:
@@ -536,7 +767,13 @@ def install(integration_input=None, integration_org=None, integration_origin=Non
         manifest_bytes = file_bytes(manifest_file)
         previous = read_json(manifest_file)
         require_unchanged(manifest_file, manifest_bytes)
-        known_identity(previous, expected)
+        try:
+            known_identity(previous, expected)
+            needs_predecessor = False
+        except ValueError as error:
+            if str(error) != 'INSTALLATION_IDENTITY_CONFLICT' or not integration_transition_plan:
+                raise
+            needs_predecessor = True
     elif target.exists():
         raise ValueError("EXISTING_INSTALLATION_REQUIRES_REVIEW")
     elif any(p.exists() for p in shortcuts):
@@ -552,16 +789,25 @@ def install(integration_input=None, integration_org=None, integration_origin=Non
         for path in shortcuts:
             if path.exists():
                 verify_shortcut(path, target, edge, old_portal)
+    predecessor = None
+    if existed and needs_predecessor:
+        predecessor = verified_client_predecessor(root, target, edge, shortcuts, previous, expected, snapshots,
+                                                   integration_transition_plan, integration_input)
+        known_identity(previous, expected, predecessor)
     proof = probe()
     # Bind approval to precisely the URL used by the client, never a fallback probe.
     if (proof.get("probedPortal") != BASE or proof.get("sameOriginBootstrapVerified") is not True
             or proof.get("sameOriginAuthProjectVerified") is not True):
         raise ValueError("CANONICAL_PORTAL_PROOF_REQUIRED")
+    if predecessor is not None:
+        predecessor.revalidate()
     acceptance = verify_installation_integration(root, integration_input, integration_org, integration_origin,
                                                  integration_method, integration_agent_target,
                                                  integration_transition_plan, integration_transition_recover, source_sha)
     proof["installationAcceptance"] = acceptance
-    backup = update_client(root, target, edge, shortcuts, previous if existed else None, expected, proof, snapshots)
+    if predecessor is not None:
+        predecessor.revalidate(acceptance)
+    backup = update_client(root, target, edge, shortcuts, previous if existed else None, expected, proof, snapshots, predecessor)
     print(json.dumps({"status": "CLIENT_INSTALLED", "idempotent": existed,
                       "installationComplete": True, "automationIntegrationVerified": True,
                       "globalIngestionVerified": False,

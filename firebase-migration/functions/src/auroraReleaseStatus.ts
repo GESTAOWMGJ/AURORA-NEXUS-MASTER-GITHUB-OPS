@@ -93,7 +93,9 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}, p
     productVersionSource: unifiedBeta.reference ? "VERIFIED_ACTIVE_REFERENCE" : "ENGINEERING_DEFAULT_UNVERIFIED",
     releaseTrain: AURORA_RELEASE_TRAIN,
     target: "SELLABLE_GA",
-    iaMaster: { routineId: "AURORA-IA-MASTER-001", version: "1.0.0", status: "IMPLEMENTED_PENDING_DEVICE_ATTESTATION", externalAiEnabled: false, cloudSyncVerified: false, autonomousDevelopmentPromoted: false },
+    iaMaster: { routineId: "AURORA-IA-MASTER-001", version: unifiedBeta.platforms.windows.technicalVersions.iaMaster ?? null,
+      versionSource: unifiedBeta.reference ? "VERIFIED_ACTIVE_REFERENCE" : "PENDING_VERIFIED_REFERENCE",
+      status: "IMPLEMENTED_PENDING_DEVICE_ATTESTATION", externalAiEnabled: false, cloudSyncVerified: false, autonomousDevelopmentPromoted: false },
     userProfiles: { routineId: "AURORA-USER-PROFILES-001", version: "1.0.0", status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", verifiedEmailRequired: true, mfaRequired: true, tenantOptInRequired: true, productionVerified: false },
     dailyUpdates: { routineId: "AURORA-DAILY-UPDATES-001", webPwaCheckIntervalHours: 24, status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", desktopBinaryUpdateVerified: false, mobileDeviceVerified: false, productionVerified: false },
     releaseConvergence: {
@@ -105,16 +107,20 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}, p
       nativeMacAcceptance: "UNVERIFIED",
       allClientsSynchronized: false,
       unifiedBeta,
-      detail: "Referência v1 cobre parte dos componentes. A candidata v2 exige cinco manifestos e leitura privada atual; instalação, recibos e aceite do Mac permanecem gates próprios."
+      detail: "A referência v2 exige cinco manifestos e leitura privada atual. Instalação, recibos por fonte e aceite de cada dispositivo permanecem gates próprios."
     },
     installerIntegration: {
       routineId: "AURORA-INSTALL-INTEGRATION-001",
-      componentVersion: "1.0.0",
+      componentVersion: unifiedBeta.platforms.windows.technicalVersions.windowsIntegration ?? null,
+      versionSource: unifiedBeta.reference ? "VERIFIED_ACTIVE_REFERENCE" : "PENDING_VERIFIED_REFERENCE",
       status: "IMPLEMENTED_PENDING_LIVE_VALIDATION",
       credentialProvisioning: "EXISTING_ADMIN_MFA_FLOW",
       sampleReceiptRequired: true,
+      reuseExistingAuthorizedConfiguration: true,
+      providerConsentRequired: true,
+      allConfiguredSourcesRequireCurrentProof: true,
       fullSynchronizationVerified: false,
-      detail: "Instalação retomável e recibo por amostra; credencial, IAM, deploy e reconciliação real continuam sujeitos aos gates existentes."
+      detail: "Reutilizar fontes autorizadas e retomar pelo recibo existente. Conexão, processamento e replay atuais são exigidos por fonte; metadados ou EOF em cache não concluem a instalação."
     },
     engineeringReadinessPercent: Math.round((doneWeight / totalWeight) * 100),
     metricNote: "Progresso dos requisitos de desenvolvimento. A validação comercial, regulatória e financeira exige evidências próprias.",
