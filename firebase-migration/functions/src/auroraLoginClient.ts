@@ -14,10 +14,15 @@ const entryPath = ['/setup','/account-security'].includes(location.pathname) ? l
 const element = id => document.getElementById(id);
 const form = element('login-form'), status = element('status'), submit = element('submit');
 const normalizeIdentityEmail = value => String(value || '').trim().toLowerCase();
-let auth, resolver = null, setupUser = null, totpSecret = null;
+// Capture and remove action material before the first asynchronous Firebase initialization.
+let recoveryQueryAtEntry = String(location.search || '');
+const recoveryEntryParams = new URLSearchParams(recoveryQueryAtEntry);
+const recoveryQueryPresent = recoveryEntryParams.has('oobCode') || recoveryEntryParams.getAll('mode').includes('resetPassword');
+if (recoveryQueryPresent) history.replaceState(null, '', location.pathname);
+let auth, resolver = null, setupUser = null, totpSecret = null, mfaSessionRetryUser = null;
 let onboardingUser = null, onboardingRetrySession = false;
 const clearSetup = () => { totpSecret = null; element('enrollment-key').textContent = ''; element('enrollment-code').value = ''; };
-window.addEventListener('pagehide', () => { clearSetup(); onboardingUser = null; onboardingRetrySession = false; const input = element('registration-password'); if (input) input.value = ''; });
+window.addEventListener('pagehide', () => { clearSetup(); mfaSessionRetryUser = null; onboardingUser = null; onboardingRetrySession = false; const input = element('registration-password'); if (input) input.value = ''; });
 try {
   const config = await fetch('/__/firebase/init.json', {cache:'no-store'});
   if (!config.ok) throw new Error('CONFIG_UNAVAILABLE');
@@ -40,7 +45,10 @@ async function createSession(user) {
       throw new Error('SESSION_TEMPORARY_UNAVAILABLE');
     }
     if (response.ok) break;
-    if (response.status >= 500 && attempt === 0) continue;
+    if (response.status >= 500) {
+      if (attempt === 0) continue;
+      throw new Error('SESSION_TEMPORARY_UNAVAILABLE');
+    }
     let code = 'SESSION_DENIED';
     try { code = (await response.json())?.code || code; } catch { /* Keep a generic, non-sensitive denial. */ }
     throw new Error(code);
@@ -55,6 +63,8 @@ function accessIssueMessage(error) {
   if (code === 'COMPANY_ACCESS_DENIED') return 'Conta autenticada, mas não autorizada para a empresa selecionada.';
   if (code === 'SESSION_DENIED' || code === 'INVALID_LOGIN') return 'Segundo fator aceito, mas a sessão privada foi negada pela autorização do ambiente.';
   if (code === 'SESSION_TEMPORARY_UNAVAILABLE') return 'A autenticação foi aceita, mas o serviço de sessão está temporariamente indisponível. Tente novamente.';
+  if (error?.code === 'auth/network-request-failed') return 'Falha de conexão ao confirmar a autenticação. Verifique a internet e tente novamente.';
+  if (error?.code === 'auth/too-many-requests') return 'Muitas tentativas em sequência. Aguarde e tente novamente.';
   return 'Segundo fator inválido ou expirado. Gere um novo código no autenticador e tente novamente.';
 }
 async function completeLogin(user) {
@@ -88,7 +98,7 @@ async function completeLogin(user) {
   }
 }
 form.addEventListener('submit', async event => {
-  event.preventDefault(); if (!auth) return; submit.disabled = true; status.textContent = 'Validando acesso...';
+  event.preventDefault(); if (!auth) return; mfaSessionRetryUser = null; submit.disabled = true; status.textContent = 'Validando acesso...';
   try {
     const email = normalizeIdentityEmail(element('email').value);
     element('email').value = email;
@@ -103,6 +113,8 @@ form.addEventListener('submit', async event => {
       for (const hint of hints) { const option = document.createElement('option'); option.value = hint.uid; option.textContent = hint.displayName || 'Autenticador'; element('mfa-factor').appendChild(option); }
       if (hints.length) { form.hidden = true; element('mfa-panel').hidden = false; return; }
       status.textContent = 'O segundo fator cadastrado não é suportado neste ambiente.';
+    } else if (error?.message === 'SESSION_TEMPORARY_UNAVAILABLE') {
+      status.textContent = accessIssueMessage(error);
     } else if (error?.code === 'auth/network-request-failed') {
       status.textContent = 'Falha de conexão. Verifique a internet e tente novamente.';
     } else if (error?.code === 'auth/too-many-requests') {
@@ -116,12 +128,26 @@ form.addEventListener('submit', async event => {
 element('mfa-submit').addEventListener('click', async () => {
   const button = element('mfa-submit'); button.disabled = true;
   try {
-    if (!resolver) throw new Error('MFA_REQUIRED');
-    const assertion = TotpMultiFactorGenerator.assertionForSignIn(element('mfa-factor').value, element('mfa-code').value.trim());
-    const credential = await resolver.resolveSignIn(assertion);
-    element('mfa-code').value = ''; await completeLogin(credential.user);
+    if (!resolver && !mfaSessionRetryUser) throw new Error('MFA_REQUIRED');
+    // A verified second factor may be reused in memory solely to recheck an unavailable app session.
+    // Firebase and the server still validate a fresh token and current organization membership.
+    let credential;
+    if (mfaSessionRetryUser) {
+      credential = {user:mfaSessionRetryUser};
+    } else {
+      const assertion = TotpMultiFactorGenerator.assertionForSignIn(element('mfa-factor').value, element('mfa-code').value.trim());
+      credential = await resolver.resolveSignIn(assertion);
+    }
+    try {
+      await completeLogin(credential.user);
+      mfaSessionRetryUser = null;
+    } catch (error) {
+      mfaSessionRetryUser = error?.message === 'SESSION_TEMPORARY_UNAVAILABLE' || error?.code === 'auth/network-request-failed'
+        ? credential.user : null;
+      throw error;
+    }
   } catch (error) { element('mfa-status').textContent = accessIssueMessage(error); }
-  finally { button.disabled = false; }
+  finally { element('mfa-code').value = ''; button.disabled = false; }
 });
 element('onboarding-submit')?.addEventListener('click', async () => {
   const button = element('onboarding-submit'); button.disabled = true;

@@ -12,21 +12,22 @@ class Element {
   replaceChildren(){this.children=[];}
   appendChild(child:Element){this.children.push(child);}
 }
-async function fixture(managed=true, sessionLoginResponse:any={ok:true,status:204,json:async()=>({})}) {
+async function fixture(managed=true, sessionLoginResponse:any={ok:true,status:204,json:async()=>({})}, search='') {
   const elements=new Map<string,Element>();const el=(id:string)=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id)!;};
   const calls:any[]=[]; const redirects:string[]=[];let claims:any=managed?{auroraProfileVersion:1}:{};
   const user={emailVerified:false,getIdToken:async()=> 'synthetic-id-token'};
   let signIn:any=async()=>({user}); let redemption:any={ok:true,json:async()=>({})};
   let currentSessionResponses=Array.isArray(sessionLoginResponse)?[...sessionLoginResponse]:[sessionLoginResponse];
   const factors:any[]=[]; const winHandlers=new Map();
-  const sandbox={URL,URLSearchParams,history:{replaceState:()=>{}},document:{getElementById:el,createElement:()=>new Element()},window:{addEventListener:(n:string,h:any)=>{const previous=winHandlers.get(n);winHandlers.set(n,()=>{previous?.();h();});}},navigator:{},
-    location:{origin:'https://auroranexus.com.br',hostname:'auroranexus.com.br',pathname:'/portal',search:'',replace:(path:string)=>redirects.push(path)},
+  const sandbox={URL,URLSearchParams,history:{replaceState:(_state:any,_title:any,path:string)=>calls.push({name:'history',path})},document:{getElementById:el,createElement:()=>new Element()},window:{addEventListener:(n:string,h:any)=>{const previous=winHandlers.get(n);winHandlers.set(n,()=>{previous?.();h();});}},navigator:{},
+    location:{origin:'https://auroranexus.com.br',hostname:'auroranexus.com.br',pathname:'/portal',search,replace:(path:string)=>redirects.push(path)},
     fetch:async(url:string,options:any)=>{calls.push({name:'fetch',url,options});if(url==='/__sessionLogin'){const value=currentSessionResponses.length>1?currentSessionResponses.shift():currentSessionResponses[0];return typeof value==='function'?await value():value;}return url==='/api/user-profiles'?(typeof redemption==='function'?await redemption():redemption):{ok:true,status:200,json:async()=>({})};},
     initializeApp:()=>({}),getAuth:()=>({languageCode:null}),setPersistence:async()=>{},inMemoryPersistence:{},
     signInWithEmailAndPassword:async(_auth:any,email:string)=>{calls.push({name:'passwordSignIn',email});return signIn();},getIdTokenResult:async()=>({claims}),signOut:async()=>{calls.push({name:'signOut'});},
+    verifyPasswordResetCode:async(_auth:any,code:string)=>{calls.push({name:'recoveryVerify',code});return 'synthetic@example.invalid';},confirmPasswordReset:async()=>{},
     sendPasswordResetEmail:async(_auth:any,email:string)=>{calls.push({name:'reset',email});},sendEmailVerification:async()=>{calls.push({name:'verify'});},reload:async()=>{},
     multiFactor:()=>({enrolledFactors:factors,getSession:async()=>({}),enroll:async()=>{calls.push({name:'enroll'});}}),
-    getMultiFactorResolver:()=>({hints:[{factorId:'totp',uid:'synthetic-factor'}],resolveSignIn:async()=>{claims={...claims,firebase:{sign_in_second_factor:'totp'}};return {user};}}),
+    getMultiFactorResolver:()=>({hints:[{factorId:'totp',uid:'synthetic-factor'}],resolveSignIn:async()=>{calls.push({name:'mfaResolve'});claims={...claims,firebase:{sign_in_second_factor:'totp'}};return {user};}}),
     TotpMultiFactorGenerator:{FACTOR_ID:'totp',assertionForSignIn:()=>({}),assertionForEnrollment:()=>({}),generateSecret:async()=>({secretKey:'SYNTHETIC-NOT-A-SECRET'})}};
   const executable=ts.transpileModule(script,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
   // Strip only static SDK imports; all behavior below is the emitted product code.
@@ -82,6 +83,63 @@ test('session exchange retries one transient server failure and then continues',
   const f=await fixture(false,[{ok:false,status:503,json:async()=>({code:'TEMPORARY'})},{ok:true,status:204,json:async()=>({})}]);
   f.el('email').value='user@example.invalid';f.el('password').value='synthetic-password';await f.submit();
   assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,2);assert.deepEqual(f.redirects,['/portal']);
+});
+
+test('direct recovery query is scrubbed before Firebase initialization and uses strict parsing',async()=>{
+  const f=await fixture(false,undefined,'?mode=resetPassword&oobCode=synthetic-code');
+  assert.equal(f.calls[0].name,'history');
+  assert.equal(f.calls[0].path,'/portal');
+  assert.equal(f.calls[1].url,'/__/firebase/init.json');
+  assert.deepEqual(f.calls.filter(c=>c.name==='recoveryVerify').map(c=>c.code),['synthetic-code']);
+  const invalid=await fixture(false,undefined,'?mode=resetPassword&oobCode=first&oobCode=second');
+  assert.equal(invalid.calls[0].name,'history');
+  assert.equal(invalid.calls.filter(c=>c.name==='recoveryVerify').length,0);
+  assert.match(invalid.el('recovery-status').textContent,/Link inválido/);
+});
+
+test('exhausted session 5xx retries report temporary outage rather than invalid login or MFA',async()=>{
+  const outage={ok:false,status:503,json:async()=>({code:'ACCESS_LIST_NOT_CONFIGURED'})};
+  const f=await fixture(false,[outage,outage]);await f.submit();
+  assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,2);
+  assert.match(f.el('status').textContent,/sessão está temporariamente indisponível/);
+  assert.equal(f.redirects.length,0);
+  const mfa=await fixture(true,[outage,outage]);
+  mfa.user.emailVerified=true;
+  mfa.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});
+  await mfa.submit();mfa.el('mfa-code').value='123456';await mfa.click('mfa-submit');
+  assert.equal(mfa.calls.filter(c=>c.url==='/__sessionLogin').length,2);
+  assert.match(mfa.el('mfa-status').textContent,/sessão está temporariamente indisponível/);
+  assert.equal(mfa.el('mfa-code').value,'');
+  assert.equal(mfa.redirects.length,0);
+  assert.equal(mfa.calls.filter(c=>c.name==='mfaResolve').length,1);
+  // Retry must use the Firebase-authenticated user already in memory, not replay TOTP.
+  mfa.sessionResponse({ok:true,status:204,json:async()=>({})});
+  await mfa.click('mfa-submit');
+  assert.equal(mfa.calls.filter(c=>c.name==='mfaResolve').length,1);
+  assert.equal(mfa.calls.filter(c=>c.url==='/__sessionLogin').length,3);
+  assert.deepEqual(mfa.redirects,['/portal']);
+});
+
+test('verified MFA survives a Firebase token-refresh network outage without replaying the factor',async()=>{
+  const f=await fixture(true);f.user.emailVerified=true;
+  let tokenCalls=0;
+  f.user.getIdToken=async()=>{if(tokenCalls++===0)throw {code:'auth/network-request-failed'};return 'synthetic-id-token';};
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});
+  await f.submit();await f.click('mfa-submit');
+  assert.match(f.el('mfa-status').textContent,/Falha de conexão/);
+  assert.equal(f.calls.filter(c=>c.name==='mfaResolve').length,1);
+  assert.equal(f.redirects.length,0);
+  await f.click('mfa-submit');
+  assert.equal(f.calls.filter(c=>c.name==='mfaResolve').length,1);
+  assert.equal(tokenCalls,2);
+  assert.deepEqual(f.redirects,['/portal']);
+});
+
+test('authorization denial is terminal and never retried as a transient network failure',async()=>{
+  const denied=await fixture(false,{ok:false,status:403,json:async()=>({code:'COMPANY_ACCESS_DENIED'})});
+  await denied.submit();
+  assert.equal(denied.calls.filter(c=>c.url==='/__sessionLogin').length,1);
+  assert.equal(denied.redirects.length,0);
 });
 
 test('password recovery normalizes email and suppresses immediate duplicate requests',async()=>{
