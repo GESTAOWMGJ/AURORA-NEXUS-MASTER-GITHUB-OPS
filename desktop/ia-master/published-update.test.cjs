@@ -244,6 +244,58 @@ test('interrupted recovery retries after package restore and journal save failur
   assert.deepEqual(fs.readFileSync(path.join(f.state,'installation.json')),f.metadata);
   assert.equal((await f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt,trust:f.pair.trust})).alreadyRecovered,true);
 });
+function concurrentRestoredInput(f, kind, attempt) {
+  const filename=kind==='package'?path.join(f.pkg,'concurrent.txt'):
+    kind==='metadata'?path.join(f.state,'installation.json'):path.join(attempt,'journal.json');
+  const bytes=kind==='package'?Buffer.from('synthetic legitimate writer during runtime proof'):
+    Buffer.concat([fs.readFileSync(filename),Buffer.from(' ')]);
+  fs.writeFileSync(filename,bytes);
+  return {filename,bytes};
+}
+for(const window of ['owned-rollback','before-package-move'])for(const kind of ['package','metadata','journal'])
+test('post-await '+window+' rejects concurrent '+kind+' without false rollback success',async t=>{
+  const f=transactionFixture(t);let changed;
+  if(window==='owned-rollback')f.controls.failStartOnce=true;
+  else f.controls.managerEvent=operation=>{if(operation==='stop')f.controls.canonicalStatus=403;};
+  f.controls.localEvent=port=>{
+    const starts=f.commands.filter(command=>command==='start').length;
+    if(!changed&&port===11435&&starts===(window==='owned-rollback'?2:1))
+      changed=concurrentRestoredInput(f,kind,attemptOf(f));
+  };
+  await assert.rejects(f.api.activatePublished(await f.options()),/LOCAL_APPLICATION_ROLLBACK_INCOMPLETE/);
+  assert.ok(changed);assert.deepEqual(fs.readFileSync(changed.filename),changed.bytes);
+  assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),true);
+  const attempt=attemptOf(f),journal=JSON.parse(fs.readFileSync(path.join(attempt,'journal.json')));
+  assert.notEqual(journal.phase,'ROLLED_BACK_LOCAL_PREVIOUS');assert.notEqual(journal.phase,'COMPLETED');
+  assert.deepEqual(fs.readFileSync(path.join(attempt,'metadata.previous')),f.metadata);f.assertIdentity();
+});
+for(const locked of [false,true])for(const kind of ['package','metadata','journal'])
+test('post-await recovery locked='+locked+' rejects concurrent '+kind+' and preserves recovery evidence',async t=>{
+  const f=transactionFixture(t);let interrupt=true;
+  if(locked)f.controls.fault=(when,a,b)=>{
+    if(interrupt&&when==='after-rename'&&String(b).endsWith('component.previous'))throw Error('SYNTHETIC_INTERRUPTION');
+    if(interrupt&&when==='after-rename'&&b===f.pkg&&String(a).endsWith('component.previous'))throw Error('SYNTHETIC_RESTORE_INTERRUPTION');
+  };
+  else f.controls.failStartOnce=true;
+  await assert.rejects(f.api.activatePublished(await f.options()),locked?/ROLLBACK_INCOMPLETE/:/OWNED_MANAGER_OPERATION_FAILED/);
+  interrupt=false;const attempt=attemptOf(f);let changed;
+  f.controls.localEvent=port=>{if(!changed&&port===11435)changed=concurrentRestoredInput(f,kind,attempt);};
+  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt,trust:f.pair.trust}),
+    kind==='journal'?/ROLLBACK_JOURNAL_CHANGED/:locked?/ROLLBACK_READBACK_CHANGED/:/RECOVERED_BYTES_CHANGED/);
+  assert.ok(changed);assert.deepEqual(fs.readFileSync(changed.filename),changed.bytes);
+  assert.equal(fs.existsSync(path.join(f.root,'published-update.lock')),locked);
+  assert.deepEqual(fs.readFileSync(path.join(attempt,'metadata.previous')),f.metadata);f.assertIdentity();
+  if(locked)assert.notEqual(JSON.parse(fs.readFileSync(path.join(attempt,'journal.json'))).phase,'ROLLED_BACK_LOCAL_PREVIOUS');
+});
+test('already-recovered runtime proof cannot ignore a newly acquired update lock',async t=>{
+  const f=transactionFixture(t);f.controls.failStartOnce=true;
+  await assert.rejects(f.api.activatePublished(await f.options()),/OWNED_MANAGER_OPERATION_FAILED/);
+  const attempt=attemptOf(f),lock=path.join(f.root,'published-update.lock'),bytes=encode({syntheticConcurrentOwner:true});let inserted=false;
+  f.controls.localEvent=port=>{if(!inserted&&port===11435){inserted=true;fs.writeFileSync(lock,bytes);}};
+  await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt,trust:f.pair.trust}),/RECOVERY_LOCK_CHANGED/);
+  assert.equal(inserted,true);assert.deepEqual(fs.readFileSync(lock),bytes);f.assertIdentity();
+});
+
 test('pre-stop guards reject owner, helper hash, private stage ACL, foreign listener and nested staging',async t=>{
   for(const mutation of [f=>f.controls.denyOwner=true,f=>fs.writeFileSync(f.layout.helperPath,'changed helper'),
     f=>f.controls.denyStage=true,f=>f.controls.foreignListener=true,f=>f.layout.expectedCheckpointSha256='f'.repeat(64)]){
