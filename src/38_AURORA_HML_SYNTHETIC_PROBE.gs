@@ -22,7 +22,8 @@ function auroraExecutarProbeNuvemSinteticaHml(request) {
     result.callerAuthorized = true;
     auroraHmlSyntheticValidateRequest_(request);
     var hashes = auroraHmlSyntheticRuntimeHashes_();
-    if (JSON.stringify(hashes) !== JSON.stringify(request.runtimeFunctionHashes)) throw new Error('PROBE_RUNTIME_SOURCE_MISMATCH');
+    // Execution API objects may arrive in a different property order; every exact hash still must match.
+    if (!Object.keys(hashes).every(function(name) { return hashes[name] === request.runtimeFunctionHashes[name]; })) throw new Error('PROBE_RUNTIME_SOURCE_MISMATCH');
     result.runtimeFunctionHashes = hashes;
     auroraHmlSyntheticAssertLive_(request.expiresAt);
     var cfg = wmgjFirestoreConfig_();
@@ -138,7 +139,7 @@ function auroraHmlSyntheticValidateRequest_(value) {
     || Date.now() >= Date.parse(AURORA_HML_SYNTHETIC_DEADLINE)) throw new Error('PROBE_REQUEST_REJECTED');
   var expected = Object.keys(auroraHmlSyntheticRuntimeHashes_());
   if (!value.runtimeFunctionHashes || typeof value.runtimeFunctionHashes !== 'object' || Array.isArray(value.runtimeFunctionHashes)
-    || Object.keys(value.runtimeFunctionHashes).join(',') !== expected.join(',')
+    || Object.keys(value.runtimeFunctionHashes).sort().join(',') !== expected.sort().join(',')
     || !expected.every(function(name) { return typeof value.runtimeFunctionHashes[name] === 'string' && /^[a-f0-9]{64}$/.test(value.runtimeFunctionHashes[name]); })) {
     throw new Error('PROBE_RUNTIME_SOURCE_MISMATCH');
   }
