@@ -4,7 +4,9 @@ import { lstat, open } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { resolve } from 'node:path';
 import { ACTIVE_RELEASE_SOURCE, verifyActiveReleaseEnvelope } from './auroraActiveRelease.js';
-import { finalizeUnifiedBeta, UNIFIED_MAX_ARCHIVE, unifiedDigest, type UnifiedFinalization } from './auroraUnifiedBetaArchive.js';
+import { UNIFIED_MAX_ARCHIVE, unifiedDigest, type UnifiedFinalization } from './auroraUnifiedBetaArchive.js';
+
+import { finalizeClientPatch } from './auroraClientPatchArchive.js';
 
 type Runtime = {
   verification: {status:string;certificateSha256?:string};
@@ -43,7 +45,7 @@ export function createUnifiedBetaReader(deps:Dependencies):()=>Promise<CurrentUn
       &&runtime.runtimeBuild.fileIntegrityVerified&&runtime.runtimeBuildWeb.fileIntegrityVerified&&runtime.localServer.fileIntegrityVerified&&runtime.localWeb?.fileIntegrityVerified
       &&runtime.runtimeBuild.sourceSha===certificate.sourceSha&&runtime.runtimeBuildWeb.sourceSha===certificate.sourceSha
       &&runtime.runtimeBuild.manifestSha256===certificate.components.server.manifestSha256&&runtime.runtimeBuildWeb.manifestSha256===certificate.components.web.manifestSha256,'CURRENT_RUNTIME_REQUIRED');
-    if(!cached||cached.certificateSha256!==checked.certificateSha256)cached=finalizeUnifiedBeta({candidate:current,envelope:raw,publicKeySpkiPem:publicKey!,trustedPublicKeySha256:trustedHash,
+    if(!cached||cached.certificateSha256!==checked.certificateSha256)cached=finalizeClientPatch({candidate:current,envelope:raw,publicKeySpkiPem:publicKey!,trustedPublicKeySha256:trustedHash,
       sourceSha:certificate.sourceSha,expectedCandidateSha256:unifiedDigest(startup),now:deps.now?.()});
     const result=cached;
     const assertCurrent=async()=>{
