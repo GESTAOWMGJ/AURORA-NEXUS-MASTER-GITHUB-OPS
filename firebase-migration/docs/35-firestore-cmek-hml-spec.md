@@ -139,3 +139,8 @@ O banco `aurora-hml-cmek` nasce exclusivamente sintético. Dados pessoais reais 
 ## 11. Gate para CLINICAL_SENSITIVE
 
 Continua bloqueado até: envelope AES-256-GCM HML_VERIFIED, CMEK HML_VERIFIED, restore test, key-failure recovery, RIPD/DPIA quando aplicável, pentest independente, exercício de incidente e aceite formal do risco residual.
+
+
+## Reconciliacao de 15/10/2026 ? recursos existentes, recuperacao pendente
+
+A coleta autenticada de 13:23-13:25 (Brasilia) confirmou `aurora-hml-cmek` existente desde 03/10 com CMEK, PITR, delete protection, backup diario/14 dias, 11 backups READY e leitura sintetica. A indicacao historica de banco nao criado/PREPARED_NOT_APPLIED acima nao descreve a existencia dos recursos nessa data. O controle integral segue sem `HML_VERIFIED`: restore CMEK e key-failure recovery pendentes. O titular autorizou adocao produtiva em 15/10, sem promover evidencias ausentes. Ver `docs/AURORA_CMEK_PRODUCTION_AUTHORIZATION_20261015.md` na raiz do repositorio.

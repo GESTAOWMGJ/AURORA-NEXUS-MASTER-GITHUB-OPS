@@ -1,0 +1,28 @@
+{
+  "id": "AURORA-CMEK-PROD-OWNER-AUTHORIZATION-20261015",
+  "recordedAt": "2026-10-15T16:48:41.384144+00:00",
+  "authorizationDate": "2026-10-15",
+  "approvalSource": "DIRECT_OWNER_CHAT",
+  "authorizationState": "OWNER_AUTHORIZED",
+  "statement": "Libero produção . Cmek e pendencias autónomas validas para resolver",
+  "projectId": "wmgj-prod-jfn-20261005",
+  "businessAdoptionAuthorized": true,
+  "autonomousRemediationAuthorized": true,
+  "technicalReadiness": "PENDING_RECOVERY_AND_PRODUCTION_VALIDATION",
+  "defaultDatabaseMutationAllowed": false,
+  "clinicalSensitiveEnabled": false,
+  "realClinicalDataMigrationAllowed": false,
+  "productionKeyDisableAllowed": false,
+  "keyDestructionAllowed": false,
+  "independentReviewClaimed": false,
+  "futureRunApprovalClaimed": false,
+  "otherExceptionsExtended": false,
+  "sourceCommentId": 6197336877,
+  "requirementsBeforeCutover": [
+    "HML_CMEK_RESTORE_VERIFIED",
+    "HML_KEY_FAILURE_RECOVERY_VERIFIED",
+    "KEY_DEPENDENCIES_AND_LEAST_PRIVILEGE_VERIFIED",
+    "PRODUCTION_CMEK_DATABASE_CONTROLS_VERIFIED",
+    "APPLICABLE_CHANGE_APPROVAL_AND_ROLLBACK_VERIFIED"
+  ]
+}
