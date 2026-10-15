@@ -3,7 +3,7 @@ name: Aurora CMEK HML
 on:
   push:
     branches:
-      - feat/aurora-sec-002-cmek-lgpd-pack-20261001
+      - main
     paths:
       - ".github/requests/aurora-cmek-hml.json"
   workflow_dispatch:
@@ -22,6 +22,11 @@ on:
         description: "Exact confirmation required for mutating modes"
         required: false
         type: string
+      cmek_access_confirmed:
+        description: "Confirm Google has granted Firestore CMEK access for the HML project"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -56,24 +61,29 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_MODE: ${{ inputs.mode }}
           INPUT_CONFIRMATION: ${{ inputs.confirmation }}
+          INPUT_CMEK_ACCESS: ${{ inputs.cmek_access_confirmed }}
         run: |
           set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
           if [ "$EVENT_NAME" = "push" ]; then
-            test "$GITHUB_REF_NAME" = "feat/aurora-sec-002-cmek-lgpd-pack-20261001"
             test -f "$REQUEST_FILE"
             jq -e '
+              .requestVersion==1 and
               .projectId=="wmgj-hml-jfn-20260927" and
               .databaseId=="aurora-hml-cmek" and
               .productionMutation==false and
               .clinicalSensitiveEnabled==false and
               .realDataAllowed==false and
+              (.cmekAccessConfirmed | type=="boolean") and
               (.mode=="plan" or .mode=="apply" or .mode=="restore-test" or .mode=="key-failure-test")
             ' "$REQUEST_FILE" >/dev/null
             mode="$(jq -r '.mode' "$REQUEST_FILE")"
             confirmation="$(jq -r '.confirmation // ""' "$REQUEST_FILE")"
+            cmek_access="$(jq -r '.cmekAccessConfirmed' "$REQUEST_FILE")"
           else
             mode="$INPUT_MODE"
             confirmation="$INPUT_CONFIRMATION"
+            cmek_access="$INPUT_CMEK_ACCESS"
           fi
 
           case "$mode" in
@@ -81,12 +91,15 @@ jobs:
               test -z "$confirmation"
               ;;
             apply)
+              test "$cmek_access" = "true"
               test "$confirmation" = "APPLY_AURORA_CMEK_HML"
               ;;
             restore-test)
+              test "$cmek_access" = "true"
               test "$confirmation" = "RESTORE_AURORA_CMEK_HML"
               ;;
             key-failure-test)
+              test "$cmek_access" = "true"
               test "$confirmation" = "TEST_AURORA_CMEK_KEY_FAILURE_HML"
               ;;
             *)
@@ -97,6 +110,11 @@ jobs:
           {
             echo "MODE=$mode"
             echo "AURORA_CMEK_CONFIRMATION=$confirmation"
+            if [ "$cmek_access" = "true" ]; then
+              echo "AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED=YES"
+            else
+              echo "AURORA_FIRESTORE_CMEK_ACCESS_CONFIRMED=NO"
+            fi
           } >> "$GITHUB_ENV"
 
       - name: Static safety gates
