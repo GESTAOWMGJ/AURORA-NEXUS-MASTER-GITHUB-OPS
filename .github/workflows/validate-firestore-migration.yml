@@ -142,7 +142,9 @@ jobs:
       - name: Build Functions and run Security Rules tests
         env:
           WMGJ_FIREBASE_TEST_PROJECT_ID: wmgj-firestore-rules-test
-        run: bash firebase-migration/scripts/bootstrap-homologacao.sh
+        run: |
+          python3 -m pip install -r aurora-coletor/requirements-release-verification.txt
+          bash firebase-migration/scripts/bootstrap-homologacao.sh
 
       - name: Block high or critical production dependency advisories
         working-directory: firebase-migration/functions
@@ -151,7 +153,6 @@ jobs:
       - name: Validate signed release desktop and Windows integration consumers
         run: |
           set -euo pipefail
-          python3 -m pip install -r aurora-coletor/requirements-release-verification.txt
           node --test desktop/ia-master/published-update.test.cjs
           python3 -m unittest discover -s aurora-coletor/tests -p test_published_release.py -v
 
