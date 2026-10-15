@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {sanitizePreview,run} = require('./aurora-wmgj-reuse-preview.cjs');
+const {sanitizePreview,readPreview,run} = require('./aurora-wmgj-reuse-preview.cjs');
 function sample() {
   return {ok:true,code:'AURORA_CONNECTOR_REUSE_CONFIG_ONLY_VERIFIED',state:'PENDING_TRIGGER_REVIEW',
     scope:'WMGJ_EXISTING_SOURCE_CONFIG_ONLY',sourceIdentified:true,sourceCount:1,metadataAccessVerified:true,
@@ -23,6 +23,55 @@ test('reject unknown fields and secret-bearing remote codes, errors, hash fields
     assert.throws(()=>sanitizePreview({response:{...sample(),...change}}),/^Error: CONNECTOR_REUSE_PREVIEW_REJECTED$/);
   }
   assert.throws(()=>sanitizePreview({response:sample(),error:{message:secret}}),/PREVIEW_REJECTED/);
+});
+
+test('descriptor reader bounds bytes, rejects hardlinks, and closes after invalid JSON or a concurrent write',()=>{
+  const root = fs.mkdtempSync(path.join(os.tmpdir(),'aurora-preview-reader-test-'));
+  const file = path.join(root,'preview.json'), alias = path.join(root,'alias.json');
+  const originalRead = fs.readSync, originalClose = fs.closeSync;
+  let closed = 0;
+  try {
+    fs.closeSync = fd => {closed++; return originalClose(fd);};
+    fs.writeFileSync(file,JSON.stringify({response:sample()}));
+    assert.deepEqual(readPreview(file),sample());
+    assert.equal(closed,1);
+    fs.linkSync(file,alias);
+    assert.throws(()=>readPreview(file),/PREVIEW_REJECTED/);
+    fs.unlinkSync(alias);
+    fs.writeFileSync(file,' '.repeat(65537));
+    assert.throws(()=>readPreview(file),/PREVIEW_REJECTED/);
+    fs.writeFileSync(file,'{');
+    assert.throws(()=>readPreview(file),SyntaxError);
+    fs.writeFileSync(file,JSON.stringify({response:sample()}));
+    let changed = false;
+    fs.readSync = (...args) => {
+      if (!changed) {changed=true; fs.appendFileSync(file,' '.repeat(70000));}
+      return originalRead(...args);
+    };
+    assert.throws(()=>readPreview(file),/PREVIEW_REJECTED/);
+    assert.equal(closed,5);
+  } finally {
+    fs.readSync=originalRead; fs.closeSync=originalClose;
+    assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));
+    assert.match(path.basename(root),/^aurora-preview-reader-test-/);
+    assert.equal(fs.lstatSync(root).isSymbolicLink(),false);
+    fs.rmSync(root,{recursive:true,force:true});
+  }
+});
+
+test('Linux runner refuses a symbolic-link output before reading its target',
+  {skip:typeof fs.constants.O_NOFOLLOW !== 'number'},()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'aurora-preview-nofollow-test-'));
+  try {
+    const target=path.join(root,'target.json'), link=path.join(root,'preview.json');
+    fs.writeFileSync(target,JSON.stringify({response:sample()})); fs.symlinkSync(target,link);
+    assert.throws(()=>readPreview(link),{code:'ELOOP'});
+  } finally {
+    assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));
+    assert.match(path.basename(root),/^aurora-preview-nofollow-test-/);
+    assert.equal(fs.lstatSync(root).isSymbolicLink(),false);
+    fs.rmSync(root,{recursive:true,force:true});
+  }
 });
 test('execute only PREVIEW in a source-verified version and re-read the same deployment afterwards',()=>{
   const root = fs.mkdtempSync(path.join(os.tmpdir(),'aurora-reuse-preview-test-'));

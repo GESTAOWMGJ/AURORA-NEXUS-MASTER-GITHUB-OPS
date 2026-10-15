@@ -20,6 +20,27 @@ const stable = value => JSON.stringify(value, (_, item) => item && !Array.isArra
   ? Object.fromEntries(Object.entries(item).sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
 const hex = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
+function readPreview(output) {
+  const limit = 65536;
+  // Inspect and read one opened object. Linux runners also refuse links/FIFOs
+  // at open; never re-open a pathname after checking its metadata.
+  const fd = fs.openSync(output, fs.constants.O_RDONLY
+    | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0));
+  try {
+    const before = fs.fstatSync(fd, {bigint:true});
+    if (!before.isFile() || before.size > BigInt(limit) || before.nlink !== 1n) reject();
+    const bytes = Buffer.alloc(limit + 1);
+    let length = 0, count;
+    while (length < bytes.length && (count = fs.readSync(fd, bytes, length, bytes.length - length, null)) > 0) length += count;
+    const after = fs.fstatSync(fd, {bigint:true});
+    if (length > limit || BigInt(length) !== before.size || !after.isFile() || after.nlink !== 1n
+      || ['dev','ino','size','mtimeNs','ctimeNs'].some(key => before[key] !== after[key])) reject();
+    return sanitizePreview(JSON.parse(bytes.subarray(0, length).toString('utf8')));
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function sanitizePreview(envelope) {
   const v = envelope?.response;
   if (envelope?.error != null || !v || Array.isArray(v) || typeof v !== 'object'
@@ -93,9 +114,7 @@ function run({repo = path.resolve(__dirname,'..'), temporary = process.env.RUNNE
     expectedConfigurationSha256:null};
   const output = path.join(workspace,'preview.raw.json');
   gate(); exec('bash',[path.join(repo,'tools/run-clasp-checked.sh'),'auroraReaproveitarFonteWmgjConfigOnly',output,JSON.stringify([request])],workspace); gate();
-  const info = fs.statSync(output);
-  if (!info.isFile() || info.size > 65536 || info.nlink !== 1) reject();
-  const summary = sanitizePreview(JSON.parse(fs.readFileSync(output,'utf8')));
+  const summary = readPreview(output);
   const after = read(); gate();
   if (stable(before) !== stable(after)) reject();
   return {schemaVersion:'aurora.wmgj.existing-source-preview-evidence.v1',sourceSha,publishedVersionStable:true,
@@ -104,7 +123,7 @@ function run({repo = path.resolve(__dirname,'..'), temporary = process.env.RUNNE
     providerIngestionOrInstallationVerified:false,complete:false};
 }
 
-module.exports = {sanitizePreview,run};
+module.exports = {sanitizePreview,readPreview,run};
 if (require.main === module) {
   try {
     const proof = run();
