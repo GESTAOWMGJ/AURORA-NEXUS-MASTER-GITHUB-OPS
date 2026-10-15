@@ -1,10 +1,13 @@
-# Instalação canônica retomável — componente 1.0.1
+# Instalação canônica retomável — componente 1.0.2
 
 Baseline: `68ee776b5ce24520f8412448774efa468ab1ca35`. Produto permanece na
 linhagem atual; versão deste componente não altera a versão registral.
 
 Os instaladores Python do coletor e do cliente Windows incluem o transporte
-aprovado e `aurora_deployment.py` em `integration/1.0.1`, com manifesto SHA-256.
+aprovado e `aurora_deployment.py` em `integration/1.0.2`, com manifesto SHA-256.
+Essa versão usa destino próprio e preserva `integration/1.0.0` e
+`integration/1.0.1`, inclusive quando o componente anterior é protegido.
+Não lê, substitui ou altera as ACLs desses destinos anteriores para instalar o novo.
 O patch de retomada deriva da main `d5f502eaeb89d66c50024ecb4240ed021e76b676`;
 o componente anterior e o schema de checkpoint v1 permanecem compatíveis.
 O checkpoint fica em `integration/state/integration-setup.json`. Não há banco,
@@ -32,6 +35,14 @@ As opções são exclusivas. Ambas usam `AURORA_INTEGRATION_TOKEN` somente do
 ambiente do processo; a chave é provisionada no fluxo administrativo existente,
 com MFA e escopos `integration.read` e `documents.ingest`. Não passar segredo
 em argumento, arquivo de amostra, checkpoint, comentário ou log.
+
+Se `state/ia-master/installation.json` já existe, as operações genéricas são
+recusadas antes de rede/escrita. Use o plano explícito revisado
+`--checkpoint-transition-plan` com `--checkpoint-transition-execute` ou
+`--checkpoint-transition-recover`. O instalador Windows recebe o mesmo plano por
+`--integration-transition-plan`, sem novos envios genéricos fora da cadeia.
+Um plano local não concede autoridade; o produto revalida release, amostra,
+recibo, replay e automação atuais antes de registrar a transição.
 
 ## Retomada e evidência
 
@@ -66,11 +77,13 @@ em argumento, arquivo de amostra, checkpoint, comentário ou log.
 ## Rollback e limites
 
 O preparo é idempotente quando hashes coincidem. Conteúdo diferente na mesma
-versão é conflito: não sobrescrever. A versão 1.0.1 preserva `integration/1.0.0`
-e guarda a prova de processamento separada do recibo v1, permitindo retornar ao
-componente anterior sem alterar a identidade da amostra. Suspender invocações ou
-selecionar o componente anterior preserva checkpoint e fontes; não remove dados
-do gateway. O rollback não confirma processamento pendente.
+versão é conflito: não sobrescrever. A versão 1.0.2 preserva os componentes
+anteriores e o mesmo `integration/state/integration-setup.json`. Checkpoints
+históricos 1.0.0/1.0.1 continuam legíveis pelo componente novo. Quando há IA
+instalada, mudar destino/amostra exige plano de transição explícito, backup e
+autoridade atual; o journal anterior não é reescrito. Selecionar um executável
+anterior não reverte automaticamente o checkpoint novo: sua compatibilidade e
+autoridade precisam ser revalidadas. O rollback não confirma processamento pendente.
 
 O Release Cockpit e o registro nativo apresentam a capacidade como implementada,
 aguardando validação real. Testes cobrem Linux/Windows no CI; execução nesta

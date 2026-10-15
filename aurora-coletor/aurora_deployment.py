@@ -21,7 +21,8 @@ import time
 
 import aurora_cloud_sync as sync
 
-VERSION = '1.0.1'
+VERSION = '1.0.2'
+CHECKPOINT_VERSIONS = ('1.0.0', '1.0.1', VERSION)
 SCHEMA = 'aurora.install.integration.v1'
 STATE_NAME = 'integration-setup.json'
 ASSETS = ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
@@ -135,7 +136,7 @@ def run(raw, origin, org, state_dir, token=None, connect=False, send=False,
         if previous is not None:
             if (not isinstance(previous, dict) or set(previous) - CHECKPOINT_FIELDS
                     or previous.get('schemaVersion') != SCHEMA
-                    or previous.get('componentVersion') not in ('1.0.0', VERSION)):
+                    or previous.get('componentVersion') not in CHECKPOINT_VERSIONS):
                 raise sync.SyncError('CHECKPOINT_SCHEMA_CONFLICT')
             if previous.get('targetBinding') != binding:
                 raise sync.SyncError('CHECKPOINT_TARGET_CONFLICT')
@@ -343,7 +344,7 @@ def checkpoint_transition_plan(plan, raw=None):
 def _transition_checkpoint(data, plan, previous=False):
     value = _transition_json(data)
     _transition_demand(isinstance(value, dict) and not set(value) - CHECKPOINT_FIELDS
-                       and value.get('schemaVersion') == SCHEMA and value.get('componentVersion') in ('1.0.0', VERSION)
+                       and value.get('schemaVersion') == SCHEMA and value.get('componentVersion') in CHECKPOINT_VERSIONS
                        and type(value.get('attempt')) is int
                        and 1 <= value['attempt'] <= 9007199254740991 - int(previous),
                        'CHECKPOINT_SCHEMA_CONFLICT')
@@ -399,8 +400,9 @@ def _transition_local(plan, release, candidate):
     if os.name == 'posix':
         _transition_demand(not stat.S_IMODE(state.stat().st_mode) & 0o077, 'PRIVATE_STATE_DIRECTORY_REQUIRED')
     files = {name: _transition_bytes(package / name, 32 * 1024 * 1024) for name in ASSETS}
-    release.assess_manifest(candidate, 'windowsIntegration',
-                            _transition_bytes(plan['publicReleaseControl']['manifestPath']), files)
+    component = release.assess_manifest(candidate, 'windowsIntegration',
+                                        _transition_bytes(plan['publicReleaseControl']['manifestPath']), files)
+    _transition_demand(component['version'] == VERSION, 'CHECKPOINT_TRANSITION_COMPONENT_VERSION_CONFLICT')
     anchor = safe_path(plan['iaAnchor']['attemptDirectory'])
     _transition_demand(anchor.parent.name == 'installation-rollbacks'
                        and re.fullmatch(r'published-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}', anchor.name),

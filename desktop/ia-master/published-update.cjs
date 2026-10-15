@@ -370,7 +370,8 @@ function checkpointLineage(layout, fromSha256, toSha256, reference, anchor, trus
       && row(previous) && row(next) && [previous, next].every(value => Object.keys(value).every(key => CHECKPOINT_FIELDS.includes(key)))
       && previous.schemaVersion === 'aurora.install.integration.v1'
       && previous.targetBinding === plan.expectedPreviousTargetBinding && previous.sampleKey === plan.expectedPreviousSampleKey
-      && next.schemaVersion === 'aurora.install.integration.v1' && next.componentVersion === '1.0.1'
+      && next.schemaVersion === 'aurora.install.integration.v1'
+      && next.componentVersion === candidate.certificate.components.windowsIntegration.version
       && next.targetBinding === plan.nextTargetBinding && next.sampleKey === plan.nextSampleKey
       && next.status === 'SAMPLE_RECEIPT_VERIFIED' && next.receiptVerifiedThisRun === true
       && next.processingVerifiedThisRun === true, 'CHECKPOINT_TRANSITION_BYTES_CONFLICT');
