@@ -33,11 +33,13 @@ a ação de tentar a consulta novamente permanece no tratamento existente.
 
 ## Evidência e limites
 
-Verificação local: compilação TypeScript e 54 testes de frontend, runtime do
+Verificação local: compilação TypeScript e 55 testes de frontend, runtime do
 cliente, apresentação financeira, ingestão e configuração da automação passaram.
 O smoke visual usou exclusivamente valores sintéticos, em 1440 × 1000 e
 390 × 844. Os valores de exemplo não comprovam faturamento, saldo ou implantação
 WMGJ. CI deve ser conferido no SHA final do PR; teste local não o substitui.
+O harness de runtime reconhece tags de script sem diferenciar maiúsculas e
+minúsculas; a regressão confirma bootstrap, navegação e limpeza após HTTP 401.
 
 Estado deste registro: `IMPLEMENTED` e `TESTED` localmente. Não constitui recibo
 de publicação, instalação, autenticação real ou ingestão no ambiente hospedado.

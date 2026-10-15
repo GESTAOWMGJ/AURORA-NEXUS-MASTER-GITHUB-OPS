@@ -13,7 +13,7 @@ function renderedShell(ready?: string, profile: Parameters<typeof auroraProtecte
   finally { if (previous === undefined) delete process.env.AURORA_CANONICAL_PORTAL_READY; else process.env.AURORA_CANONICAL_PORTAL_READY = previous; }
 }
 const html = renderedShell();
-const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]);
+const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)].map(match => match[1]);
 const snapshot = { projection: { competence: '2026-08', generatedAt: '2026-09-28T11:00:00Z', financialCents: { invoicedCents: 12345, receivedCents: 0, glossCents: null }, operations: { overdueActions: 0, openActions: 0 }, coverage: { evidencePercent: null, reconciliationPercent: 0 }, modules: [] }, actions: [] };
 
 const response = (status = 200, body: unknown = snapshot) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
@@ -25,7 +25,7 @@ async function fixture(first = response(), hash = '', markup = html) {
   let fetcher = async (_url: string, _options: any): Promise<any> => first;
   const location = { origin: 'https://auroranexus.com.br', hostname: 'auroranexus.com.br', search: '', hash, replace: (url: string) => redirects.push(url) };
   const context = createContext({ document, window: { addEventListener: (name: string, callback: Handler) => addHandler(winHandlers, name, callback), dispatchEvent: (event: Event) => { winHandlers.get(event.type)?.(event); return true; } }, navigator: { onLine: true }, location, history: { pushState: (_state: unknown, _unused: string, value: string) => { location.hash = value; } }, matchMedia: () => ({ matches: false }), Event, Intl, Date, AbortController, crypto: { randomUUID: () => 'synthetic-idempotency-key' }, setInterval: (fn: Handler, ms: number) => intervals.push({ fn, ms }), setTimeout: (fn: Handler) => { const id = ++timerId; timeouts.set(id, fn); return id; }, clearTimeout: (id: number) => timeouts.delete(id), fetch: (url: string, options: any) => { calls.push({ url, options }); return fetcher(url, options); } });
-  [...markup.matchAll(/<script>([\s\S]*?)<\/script>/g)].forEach(match => new Script(match[1]).runInContext(context));
+  [...markup.matchAll(/<script>([\s\S]*?)<\/script>/gi)].forEach(match => new Script(match[1]).runInContext(context));
   await setImmediate();
   return { elements, document, calls, redirects, intervals, timeouts, docHandlers, winHandlers, context, fetchWith(fn: typeof fetcher) { fetcher = fn; }, run(code: string) { return new Script(code).runInContext(context); }, async click(id: string) { const element = elements.get(id)!; await element.handlers.get('click')!({ currentTarget: element }); }, async submit(id: string) { const element = elements.get(id)!; await element.handlers.get('submit')!({ currentTarget: element, preventDefault() {} }); } };
 }
@@ -36,6 +36,21 @@ test('the actual emitted browser script parses; missing regex delimiters fail th
   const appScript = scripts.find(script => script.includes('value=>!/^[A-Za-z0-9._:-]'));
   assert.ok(appScript, 'The actual operational script must retain evidence validation');
   assert.throws(() => new Script(appScript.replace('value=>!/^[A-Za-z0-9._:-]', 'value=>!^[A-Za-z0-9._:-]')), SyntaxError);
+});
+
+test('runtime harness executes mixed-case HTML script tags before authenticated bootstrap and navigation', async () => {
+  const markup = html.replaceAll('<script>', '<ScRiPt>').replaceAll('</script>', '</sCrIpT>');
+  const f = await fixture(response(), '', markup);
+  assert.equal(f.calls.filter(call => call.url === '/api/bootstrap').length, 1);
+  assert.equal(f.elements.get('content')!.hidden, false);
+  assert.equal(f.elements.get('received')!.textContent, 'R$\u00a00,00');
+  const link = f.elements.get('portal-navigation')!.querySelector('a[href="#monthly-closing-summary"]')!;
+  f.docHandlers.get('click')!({ target: link, preventDefault() {} });
+  assert.equal(f.elements.get('monthly-closing-summary')!.closest('[data-page]')!.hidden, false);
+  f.fetchWith(async () => response(401));
+  await f.run('load()');
+  assert.equal(f.elements.get('content')!.hidden, true);
+  assert.equal(f.elements.get('received')!.textContent, '—');
 });
 
 test('the six organization navigation groups target real views and do not expose the Master view', () => {
