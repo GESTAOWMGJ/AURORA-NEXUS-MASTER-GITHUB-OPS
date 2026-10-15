@@ -31,6 +31,22 @@
       "independentGithubPullRequestReviewClaimed": false,
       "productionAuthorized": false,
       "clinicalSensitiveAuthorized": false
+    },
+    {
+      "decisionId": "AURORA-HML-DOCUMENT-SCOPE-20261015",
+      "recordedOn": "2026-10-15",
+      "approvalSource": "DIRECT_OWNER_CHAT",
+      "statement": "Autorizar escopo documental em HML",
+      "specificScope": "Acrescentar somente sourceDocument a uma credencial HMAC ativa restrita a WMGJ na versão protegida 4, preservando valores secretos e validade; republicar e testar quatro formatos sintéticos.",
+      "validUntilUtc": "2026-10-16T03:00:00.000Z",
+      "riskReviewDeadlineExtended": false,
+      "iamChangeAuthorized": false,
+      "secretRotationAuthorized": false,
+      "realSourceActivationAuthorized": false,
+      "laterMainCodeReviewClaimed": false,
+      "independentGithubPullRequestReviewClaimed": false,
+      "productionAuthorized": false,
+      "clinicalSensitiveAuthorized": false
     }
   ],
   "scope": {

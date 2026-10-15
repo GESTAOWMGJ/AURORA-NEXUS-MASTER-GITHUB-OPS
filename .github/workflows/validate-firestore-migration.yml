@@ -78,6 +78,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: firebase-migration/api/uv.lock
 
+      - name: Test isolated cloud harness before any deployment
+        run: node --test tools/test-aurora-cloud-synthetic-probe.cjs
+
       - name: Test controlled HML IAM repair without cloud access
         run: python3 -m unittest discover -s firebase-migration/scripts -p test_hml_eventarc_iam.py -v
 
