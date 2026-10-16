@@ -437,17 +437,20 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
     required_groups=set(ids)|({'LOCAL_ROOTS'} if roots else set())
     source_proofs_fresh=all(key in source_access_at and 0<=time.time()-source_access_at[key]<SOURCE_PROOF_TTL_SECONDS for key in required_groups)
     readiness.update(sourceProofsFreshThisRun=source_proofs_fresh,sourceProofTtlSeconds=SOURCE_PROOF_TTL_SECONDS)
+    full_synchronization_verified=False
     if (verify_installation and fresh_processed and replays==fresh_processed and report_confirmed
             and waiting==0 and pending==0 and not limited and not provider_errors
-            and required_groups<=verified_source_groups and source_proofs_fresh
+            and complete and cloud_verified and required_groups<=verified_source_groups and source_proofs_fresh
             and all(isinstance(item,dict) and item.get('eligible') is True for item in acceptances)):
+        full_synchronization_verified=True
         readiness.update(status='INSTALLATION_INTEGRATION_VERIFIED',eligible=True,
-                         canonicalPipelineAcceptance=acceptances[-1])
+                         canonicalPipelineAcceptance=acceptances[-1],
+                         globalIngestionVerified=True)
     return {'schemaVersion':SCHEMA,'componentVersion':VERSION,'orgId':config['org'],'connectionVerified':True,'agentReportConfirmed':report_confirmed,
             'receiptsConfirmed':accepted,'processingReceiptsCached':verified,'pending':waiting,'pendingExtraction':pending,
             'coverageLimited':limited,'cloudEnumerationComplete':complete,'cloudSnapshotVerified':cloud_verified,
             'cloudPagesCommitted':sum(row[2] for row in progress if row),'providers':provider_states,
-            'providerPendingCodes':provider_errors,'publishedRelease':published,'fullSynchronizationVerified':False,
+            'providerPendingCodes':provider_errors,'publishedRelease':published,'fullSynchronizationVerified':full_synchronization_verified,
             'installationReadiness':readiness}
 
 
