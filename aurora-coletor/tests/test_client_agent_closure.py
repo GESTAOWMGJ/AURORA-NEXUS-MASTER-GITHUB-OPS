@@ -68,7 +68,8 @@ class ClientAgentClosureTests(unittest.TestCase):
                 self.assertEqual(result['cloudPagesCommitted'],sum(lengths))
                 self.assertEqual(len(transport.keys),sum(lengths))
                 self.assertEqual(len(provider.calls),2*max(lengths))
-                self.assertFalse(ready['globalIngestionVerified'])
+                self.assertTrue(ready['globalIngestionVerified'])
+                self.assertTrue(result['fullSynchronizationVerified'])
                 with self.database(config) as conn:
                     persisted='\n'.join(conn.iterdump())
                 for raw in ('externalDocumentId','amountCents',*self.environment.values()):self.assertNotIn(raw,persisted)
