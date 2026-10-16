@@ -124,5 +124,60 @@
       "DEFER_HEAVY_PROCESSING_TO_WINDOWS_XEON_WHEN_CONNECTED"
     ],
     "nonGuarantee": "No software policy can mathematically eliminate every interruption; this policy maximizes autonomous prevention, detection, correction and rollback."
+  },
+  "resourceOptimization": {
+    "id": "AURORA-RESOURCE-OPT-001",
+    "version": "1.0.0-candidate",
+    "decisionDate": "2026-10-15",
+    "parentRoutine": "AURORA-DAILY-UPDATES-001",
+    "state": "PURE_EVALUATOR_IMPLEMENTED_NOT_WIRED",
+    "standingScope": [
+      "RESOURCE_ACCOUNTING",
+      "ALGORITHM_FLOW_PROCESS_REVIEW",
+      "WORKFLOW_CONFLICT_DETECTION",
+      "EVIDENCE_REUSE",
+      "JUSTIFIED_REVERSIBLE_REWRITE"
+    ],
+    "financialChain": [
+      "EXECUTION",
+      "REQUEST_MODEL",
+      "BILLING_MODE",
+      "EFFECTIVE_RATE",
+      "DEBIT_STATEMENT",
+      "INVOICE"
+    ],
+    "billingEvidenceRequired": true,
+    "unknownCostIsZero": false,
+    "samePromptProvesDuplicateCharge": false,
+    "reuseExistingScheduler": true,
+    "nativeRealtimeVerified": false,
+    "independentReviewRequired": true,
+    "workloadTarget": "WINDOWS_XEON",
+    "macHeavyFallbackAllowed": false,
+    "proposedServiceObjectives": {
+      "status": "TARGETS_NOT_MEASURED_GUARANTEES",
+      "hostedCheckMinutes": 60,
+      "criticalTriage": "SAME_OBSERVING_PASS",
+      "highTriage": "NEXT_BUSINESS_DAY",
+      "routineReview": "EXISTING_WEEKLY_REVIEW",
+      "closure": "VERIFIED_OUTCOME_REQUIRED"
+    },
+    "runtimeIntegrationRequired": [
+      "CANONICAL_TENANT_TELEMETRY_ADAPTER",
+      "EXISTING_IDEMPOTENCY_AUDIT_CHECKPOINT",
+      "CURRENT_MEMBERSHIP_AND_PERMISSIONS",
+      "CONCURRENCY_FAILURE_RECOVERY_TESTS",
+      "EXACT_HEAD_CI_AND_INDEPENDENT_REVIEW",
+      "HML_READBACK_AND_ROLLBACK"
+    ],
+    "forbiddenShortcuts": [
+      "DELETE_WORKFLOW_BY_NAME",
+      "SUM_CUMULATIVE_AND_DELTA_COUNTERS",
+      "CANCEL_UNKNOWN_OWNER_JOB",
+      "BYPASS_LOCK_OR_REVIEW",
+      "RECOGNIZE_COST_WITHOUT_CHARGE_EVIDENCE",
+      "CLAIM_FULL_COVERAGE_FROM_SAMPLE"
+    ],
+    "documentation": "docs/AURORA_RESOURCE_OPTIMIZATION_001.md"
   }
 }
