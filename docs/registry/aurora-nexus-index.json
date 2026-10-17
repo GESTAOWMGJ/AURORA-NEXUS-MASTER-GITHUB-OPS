@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "recordType": "DOCUMENTARY_REGISTRY_LINKAGE",
+  "projectKey": "JFN-AUD-GOV-001",
+  "product": "AURORA NEXUS",
+  "indexedOn": "2026-10-04",
+  "repository": {
+    "id": 1224492398,
+    "currentFullName": "GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS",
+    "historicalFullNames": [
+      "GESTAOWMGJ/automacao-gestao-wmgj"
+    ],
+    "identityContinuity": "SAME_GITHUB_REPOSITORY_ID",
+    "observedMainSha": "5c868deaeafa76dbdcf6cfb093a5a68f19eb5269"
+  },
+  "registrationDossier": {
+    "existingPullRequest": 23,
+    "historicalBranch": "product/aurora-nexus-registro-20260918",
+    "historicalHeadSha": "006f086e84ddeb337bbc6e6195ca093f50829c10",
+    "auditedIntegrationSha": "7fac0be36abdbd53e741dfbc5f2ce6ed612f0ff0",
+    "consolidatedOn": "2026-09-18",
+    "canonicalObjects": [
+      {
+        "file": "AURORA_NEXUS_REGISTRATION_SOURCE_v1.0.0-RC1.txt",
+        "bytes": 29405,
+        "sha256": "c35ae4857b0b5aa86aa1bb32cb77dd85a96aeda73a680ec41eb0a3957cf2da9d",
+        "sha512": "cc1ff31d2985acb43b5ba94a3ff3309df8909b71c57ea2ffdd68140050720f3ec52cd01675432428aa99657c0b96cef4113361ac108130b9c553da9f461e3df4",
+        "version": "1.0.0-RC1",
+        "role": "PRESERVED_BASE",
+        "integrity": "BYTES_AND_BOTH_HASHES_VERIFIED_2026_10_04"
+      },
+      {
+        "file": "AURORA_NEXUS_REGISTRATION_SOURCE_1.0.1-SCOPE-ADD.txt",
+        "bytes": 35423,
+        "sha256": "39688c82dc5ae919f0cae19f0e50673c55cac4864cc3bf99860e975d5c8a2759",
+        "sha512": "986c1509121c923d4d3b5a3685649ca0099b2191452ca6d69a2b07b4761689ecf83c3f2ccaaaca2dc086e330d2d2fd7b8276000357c23920929f0a4e1561cac6",
+        "version": "1.0.1-SCOPE-ADD",
+        "role": "SCOPE_ADDENDUM",
+        "integrity": "BYTES_AND_BOTH_HASHES_VERIFIED_2026_10_04"
+      }
+    ],
+    "lineage": {
+      "baseVersion": "1.0.0-RC1",
+      "derivedVersion": "1.0.1-SCOPE-ADD",
+      "addendumId": "AURORA-NEXUS-SCOPE-ADD-2026-09-18-01",
+      "baseContainedByteForByte": true
+    },
+    "actuallyDepositedObject": null
+  },
+  "rights": {
+    "holderIndicatedInDossier": "JF NETO SERVICOS MEDICOS LTDA",
+    "projectResponsible": "JOAO DE FREITAS NETO",
+    "ownerDeclaration": {
+      "alreadyHomologated": true,
+      "recordedOn": "2026-10-04",
+      "source": "EXPLICIT_OWNER_INSTRUCTION",
+      "scope": "Direito autoral e propriedade intelectual do projeto-base Aurora Nexus; London Marcas e INPI"
+    },
+    "chainOfTitleEvidence": "NOT_ESTABLISHED_BY_POWER_OF_ATTORNEY_ALONE",
+    "softwareRegistration": {
+      "authority": "INPI",
+      "processNumber": null,
+      "certificateReference": null,
+      "verifiedGranted": false,
+      "documentaryStatus": "PROCESS_AND_CERTIFICATE_NOT_LOCATED_IN_CONSULTED_SOURCES"
+    },
+    "trademarkRegistration": {
+      "authority": "INPI",
+      "processNumber": null,
+      "certificateReference": null,
+      "verifiedGranted": false,
+      "documentaryStatus": "SEPARATE_TRADEMARK_EVIDENCE_NOT_LOCATED"
+    }
+  },
+  "representation": {
+    "office": "LONDON MARCAS & PATENTES S/S LTDA",
+    "principal": "JF NETO SERVICOS MEDICOS LTDA",
+    "powerOfAttorney": {
+      "reference": "LONDON_POA_20260923",
+      "documentTitle": "PROCURAÇAO SOFTWARE - AURORA NEXUS (2) - signed.pdf",
+      "documentDate": "2026-09-21",
+      "signedReportDate": "2026-09-23",
+      "status": "SIGNED_REPORT_PRESENT",
+      "sha256": "4a997c781f260ce8c81870dfae681745ee214b649ffb167642b90ae3a5c6f596",
+      "signatureCryptographicallyValidated": false,
+      "originalAccess": "RESTRICTED_NOT_COMMITTED"
+    }
+  },
+  "versionPolicy": {
+    "preserveOriginalHashes": true,
+    "clientAndRuntimeVersionsDoNotReplaceRegistryObjects": true,
+    "sameProductIdentityAcrossPlatforms": true,
+    "inpiProcessIsNotProjectKeyOrHash": true,
+    "newFilingCreated": false,
+    "rightsTransferred": false,
+    "runtimeOrDeploymentGateChanged": false
+  },
+  "sourceDocuments": [
+    "AURORA_NEXUS_FORMULARIO_LONDON_MARCAS.txt",
+    "MANIFESTO_AURORA_NEXUS_1.0.1-SCOPE-ADD.json",
+    "AURORA_NEXUS_REGISTRATION_SOURCE_v1.0.0-RC1.txt",
+    "AURORA_NEXUS_REGISTRATION_SOURCE_1.0.1-SCOPE-ADD.txt",
+    "LONDON_POA_20260923",
+    "GitHub repository metadata and existing registration PR #23"
+  ],
+  "evidenceBoundary": "A homologacao informada pelo titular foi preservada. Ausencia de protocolo/certificado no indice significa evidencia nao localizada, nao inexistencia de direitos ou de registro."
+}
