@@ -238,6 +238,8 @@ test("RC1.1 primary workflow repairs stale native routes before authenticated sm
   assert.match(workflow, /NATIVE_INSIGHT_TRANSPORT_FAILED/);
   assert.match(workflow, /native_transport_status/);
   assert.match(workflow, /native insight rejected/);
+  assert.match(workflow, /NATIVE_INSIGHT_CONTRACT_FAILED/);
+  assert.match(workflow, /responseSha256/);
   assert.match(workflow, /__\/firebase\/init\.json/);
   assert.match(workflow, /CUSTOM_TOKEN_AUTH_FAILED/);
   assert.match(workflow, /CUSTOM_TOKEN_AUTH_TRANSPORT_FAILED/);

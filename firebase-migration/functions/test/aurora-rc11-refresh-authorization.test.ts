@@ -115,6 +115,9 @@ test("post-ingest smoke uses the authenticated read path, not a privileged refre
   assert.match(smoke, /NATIVE_INSIGHT_TRANSPORT_FAILED/);
   assert.match(smoke, /native_transport_status/);
   assert.match(smoke, /native insight rejected/);
+  assert.match(smoke, /NATIVE_INSIGHT_CONTRACT_FAILED/);
+  assert.match(smoke, /responseKind:"NON_JSON"/);
+  assert.match(smoke, /native insight contract mismatch/);
   assert.match(smoke, /custom token exchange rejected/);
   assert.match(smoke, /auroraOrgId:\$org/);
   assert.match(smoke, /__sessionLogin/);
