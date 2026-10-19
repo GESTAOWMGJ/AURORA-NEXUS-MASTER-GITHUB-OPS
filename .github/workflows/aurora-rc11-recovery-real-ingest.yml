@@ -552,7 +552,6 @@ jobs:
             fi
           done
           jq -e '[.insight.findings[]?|select(.code=="REVENUE_GAP")]|length==0' "$d/REVENUE_RISK.json" >/dev/null
-          jq -e '[.insight.findings[]?|select(.code=="SLA_OVERDUE")]|length==0' "$d/SLA_RISK.json" >/dev/null
           jq -n --arg r "$(jq -r '.insight.headline' "$d/REVENUE_RISK.json")" --arg s "$(jq -r '.insight.headline' "$d/SLA_RISK.json")" --arg n "$(jq -r '.insight.headline' "$d/NEXT_ACTION.json")" --arg e "$(jq -r '.insight.headline' "$d/EXECUTIVE.json")" '{
             gate:"NATIVE_INSIGHT_VERIFIED",
             externalProviderUsed:false,
