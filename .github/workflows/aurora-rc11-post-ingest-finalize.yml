@@ -333,13 +333,25 @@ jobs:
             exit 92
           fi
           printf '::add-mask::%s\n' "$id_token"
+          jq -n --arg http "$auth_status" '{gate:"CUSTOM_TOKEN_AUTH_VERIFIED",configSource:"FIREBASE_HOSTING_INIT",httpStatus:$http}' > "$RUNNER_TEMP/rc11-post-evidence/auth-exchange.json"
           jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$d/session.json"
-          session_status="$(curl --silent --show-error --output "$d/session-response.json" --write-out '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${base_url}" -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$d/cookies.txt" --data-binary @"$d/session.json" "${base_url}/__sessionLogin")"
-          if [ "$session_status" != "204" ]; then
-            echo "SESSION_LOGIN_HTTP_${session_status}" >&2
-            cat "$d/session-response.json" >&2 || true
+          session_status=""
+          set +e
+          session_status="$(curl -4 --http1.1 --silent --show-error --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 10 --max-time 30 --output "$d/session-response.json" --write-out '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${base_url}" -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$d/cookies.txt" --data-binary @"$d/session.json" "${base_url}/__sessionLogin")"
+          session_transport_status=$?
+          set -e
+          if [ "$session_transport_status" -ne 0 ]; then
+            jq -n --argjson curlExit "$session_transport_status" '{gate:"SESSION_LOGIN_TRANSPORT_FAILED",curlExit:$curlExit}' > "$RUNNER_TEMP/rc11-post-evidence/session-login.json"
+            echo "::error title=RC1.1 session login transport failure::CURL_EXIT_${session_transport_status}"
             exit 93
           fi
+          if [ "$session_status" != "204" ]; then
+            session_error="$(jq -c '{code:(.code//.error.code//null),message:(.message//.error.message//"SESSION_LOGIN_FAILED")}' "$d/session-response.json" 2>/dev/null || printf '%s' '{"message":"UNPARSEABLE_SESSION_RESPONSE"}')"
+            jq -n --arg http "$session_status" --argjson error "$session_error" '{gate:"SESSION_LOGIN_FAILED",httpStatus:$http,error:$error}' > "$RUNNER_TEMP/rc11-post-evidence/session-login.json"
+            echo "::error title=RC1.1 session login rejected::HTTP ${session_status} ${session_error}"
+            exit 94
+          fi
+          jq -n --arg http "$session_status" '{gate:"SESSION_LOGIN_VERIFIED",httpStatus:$http}' > "$RUNNER_TEMP/rc11-post-evidence/session-login.json"
 
           native_snapshot_url="https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/organizations/wmgj/dashboardSnapshots/current"
           curl -fsS -H "Authorization: Bearer ${access_token}" "$native_snapshot_url" > "$d/native-snapshot.json"
