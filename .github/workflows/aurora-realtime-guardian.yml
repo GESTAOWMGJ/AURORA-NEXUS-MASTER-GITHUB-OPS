@@ -1,0 +1,69 @@
+name: AURORA Realtime Guardian
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+      - "ops/**"
+      - "auto/**"
+    paths:
+      - "scripts/aurora/**"
+      - "firebase-migration/**"
+      - ".github/workflows/**"
+  pull_request:
+    paths:
+      - "scripts/aurora/**"
+      - "firebase-migration/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-realtime-guardian-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guardian:
+    name: Realtime platform conflict guardian
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate policy JSON
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('firebase-migration/policy/realtime-platform-guardian-v1.json','utf8')); console.log('guardian policy json ok')"
+
+      - name: Test single-writer, dedup, circuit breaker and degraded mode
+        run: node scripts/aurora/test_realtime_platform_guardian.js
+
+      - name: Validate guardian runtime smoke
+        run: node scripts/aurora/realtime_platform_guardian.js
+
+      - name: Validate failsafe orchestrator
+        run: node scripts/aurora/windows_online_robot_orchestrator.js
+
+      - name: Validate security gate integration
+        run: node scripts/aurora/certification_security_gate.js
+
+      - name: Audit forbidden split-brain bypass patterns
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -RInE 'BYPASS_GUARDIAN|DISABLE_SINGLE_WRITER|ALLOW_SPLIT_BRAIN' scripts/aurora firebase-migration --exclude='test_realtime_platform_guardian.js'; then
+            echo "Forbidden guardian bypass marker detected."
+            exit 1
+          fi
+          echo "No guardian bypass markers detected."
