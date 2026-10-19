@@ -11,6 +11,7 @@ const requiredFiles = [
   "docs/AURORA_DIGITAL_SECURITY_CERTIFICATION_LAYER.md",
   "docs/AURORA_SECURITY_PRIVACY_UPDATE_BOT.md",
   "firebase-migration/docs/50-certification-control-matrix.md",
+  "firebase-migration/policy/realtime-platform-guardian-v1.json",
   "firebase-migration/policy/autonomous-bugfix-realtime-audit-v1.json",
   "firebase-migration/policy/certification-readiness-v1.json",
   "firebase-migration/policy/cloud-failsafe-robot-operation-v1.json",
@@ -23,7 +24,9 @@ const requiredFiles = [
   "firebase-migration/docs/32-security-risk-register.md",
   "firebase-migration/docs/33-incident-response-plan.md",
   "firebase-migration/docs/37-clinical-sensitive-release-gate.md",
-  "scripts/aurora/windows_online_robot_orchestrator.js"
+  "scripts/aurora/windows_online_robot_orchestrator.js",
+  "scripts/aurora/realtime_platform_guardian.js",
+  "scripts/aurora/test_realtime_platform_guardian.js"
 ];
 
 function absolute(filePath) {
@@ -47,11 +50,13 @@ const certificationProfile = readText("firebase-migration/policy/certification-r
 const digitalLayer = readText("firebase-migration/policy/digital-security-certification-layer-v1.json");
 const securityBaseline = readText("firebase-migration/policy/security-baseline-v1.json");
 const resolutivePolicy = readText("firebase-migration/policy/resolutive-algorithm-policy-v1.json");
+const guardianPolicy = readText("firebase-migration/policy/realtime-platform-guardian-v1.json");
+const guardianRuntime = readText("scripts/aurora/realtime_platform_guardian.js");
 const bugfixPolicy = readText("firebase-migration/policy/autonomous-bugfix-realtime-audit-v1.json");
 const cloudFailsafePolicy = readText("firebase-migration/policy/cloud-failsafe-robot-operation-v1.json");
 const learningPolicy = readText("firebase-migration/policy/intrinsic-cloud-ai-operational-learning-v1.json");
 const orchestrator = readText("scripts/aurora/windows_online_robot_orchestrator.js");
-const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy, bugfixPolicy, cloudFailsafePolicy, learningPolicy].join("\n");
+const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy, guardianPolicy, bugfixPolicy, cloudFailsafePolicy, learningPolicy].join("\n");
 
 const policyChecks = [
   {
@@ -116,6 +121,16 @@ const policyChecks = [
       && resolutivePolicy.includes("confirmed")
   },
   {
+    id: "realtime-platform-guardian",
+    ok: guardianPolicy.includes("AURORA-REALTIME-PLATFORM-GUARDIAN-001")
+      && guardianPolicy.includes("\"singleWriter\":true")
+      && guardianPolicy.includes("\"writerLeaseRequired\":true")
+      && guardianPolicy.includes("\"everyMutationPassesGuardian\":true")
+      && guardianRuntime.includes("SPLIT_BRAIN_PREVENTED")
+      && guardianRuntime.includes("IDEMPOTENT_DUPLICATE")
+      && guardianRuntime.includes("CIRCUIT_OPENED")
+  },
+  {
     id: "autonomous-bugfix-authorized",
     ok: bugfixPolicy.includes("AURORA-AUTO-BUGFIX-REALTIME-001")
       && bugfixPolicy.includes("AUTHORIZED_BY_OWNER")
@@ -141,6 +156,8 @@ const policyChecks = [
     ok: orchestrator.includes("AURORA_CLOUD_FAILSAFE_ROBOT_ORCHESTRATOR")
       && orchestrator.includes("CLOUD_HEALTH_OR_WINDOWS_XEON_ONLINE_CONFIRMED")
       && orchestrator.includes("CLIENT_SAFE_DEGRADED_MODE")
+      && orchestrator.includes("realtime-platform-guardian")
+      && orchestrator.includes("START_GUARDIAN_THEN_SAFE_ROBOTS_WITH_FAILOVER")
   }
 ];
 
@@ -148,7 +165,7 @@ const passed = fileChecks.every((check) => check.ok) && policyChecks.every((chec
 
 console.log(JSON.stringify({
   gate: "AURORA_CERTIFICATION_SECURITY_GATE",
-  version: "1.6.0",
+  version: "1.8.0",
   passed,
   fileChecks,
   policyChecks
