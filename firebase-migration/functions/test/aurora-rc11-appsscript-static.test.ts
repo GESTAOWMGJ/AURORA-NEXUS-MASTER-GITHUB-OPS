@@ -79,6 +79,10 @@ test("RC1.1 cleanup tolerates Firestore post-restore finalization", () => {
 test("RC1.1 rotates canonical HML HMAC only behind explicit approval", () => {
   const workflow = readText(new URL("../../../.github/workflows/aurora-rc11-recovery-real-ingest.yml", import.meta.url));
   assert.match(workflow, /Build and validate existing HMAC contract/);
+  const installIndex = workflow.indexOf("npm --prefix firebase-migration/functions ci");
+  const buildIndex = workflow.indexOf("npm --prefix firebase-migration/functions run build");
+  const testIndex = workflow.indexOf("npm --prefix firebase-migration/functions test");
+  assert.ok(installIndex >= 0 && buildIndex > installIndex && testIndex > buildIndex);
   assert.match(workflow, /auroraRc11InspecionarConfiguracao/);
   assert.match(workflow, /auroraRc11ConfigurarEndpointExistente/);
   assert.match(workflow, /auroraRc11ConfigurarIngestao/);
