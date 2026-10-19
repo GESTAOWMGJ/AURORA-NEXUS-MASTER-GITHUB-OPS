@@ -5,7 +5,8 @@ const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const stable = value => JSON.stringify(value, (_, item) => item && !Array.isArray(item) && typeof item === 'object'
   ? Object.fromEntries(Object.entries(item).sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
 const fail = () => { throw new Error('PROBE_CANONICAL_READBACK_UNCONFIRMED'); };
-const HARD_DEADLINE = Date.parse('2026-10-16T03:00:00.000Z');
+// Same explicit owner window; request input cannot extend this upper bound.
+const HARD_DEADLINE = Date.parse('2026-10-22T03:00:00.000Z');
 
 function assertWindow(window) {
   const expiry = Date.parse(window?.expiresAt);
