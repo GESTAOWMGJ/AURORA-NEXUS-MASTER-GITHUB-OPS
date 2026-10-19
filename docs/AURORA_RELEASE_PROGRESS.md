@@ -1,5 +1,32 @@
 # AURORA NEXUS — progresso até a versão vendável
 
+## Candidata de recuperação da sessão após MFA — 19/10/2026
+
+Produto `1.1.0-beta.2`, módulo M09, baseline
+`eaa9e20f537e1bd0ee9c9f9a6b79c35941853008`. O fluxo web existente distingue a
+confirmação do segundo fator da posterior troca de sessão. Após MFA aceito, uma
+falha dessa troca permite nova tentativa com o usuário SDK somente em memória,
+token renovado e as mesmas verificações de revogação, organização e membership
+no servidor. A tentativa não resolve novamente a asserção MFA já concluída.
+Reentrar e sair da página descartam a retomada. Nenhum cookie é produzido no
+cliente e não há mudança de autorização, IAM, duração de sessão ou armazenamento.
+
+Regressões sintéticas cobrem `TEMPORARY`, `CROSS_SITE_LOGIN_REJECTED`,
+`INVALID_LOGIN`, resposta HTML 403, negações de acesso, falha real de MFA,
+concorrência, retomada e descarte na saída. Em Node 24.19.0, os 58 testes focados
+de login, AuthGate, perfis, tenant e recuperação de senha passaram, assim como
+`tsc --noEmit`. A validação CI em Node 22 permanece separada.
+O gate privado do Release Cockpit
+mantém seus critérios; esta correção de recuperação não promove qualquer gate
+de CI/HML, distribuição, instalação ou produção. Testes, revisão e CI são
+registrados no SHA final da PR; publicação e validação real desta candidata
+permanecem pendentes. O acesso observado nesta sessão não prova que o patch
+tenha sido implantado. Aprendizado e limites em
+`AURORA_MASTER_KNOWHOW_TRANSFER_20261013.md`.
+
+Rollback: reverter somente os arquivos deste incremento pelo fluxo revisado;
+preservar contas, MFA, memberships, sessões existentes, documentos e recibos.
+
 ## Incremento HML documental — 15/10/2026
 
 Na baseline `c7c234cae263a4c2cb4fa854a5fa26a4ab0b3509`, o teste real isolado

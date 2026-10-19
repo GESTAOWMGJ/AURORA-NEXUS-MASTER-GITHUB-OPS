@@ -133,10 +133,12 @@ test("served second-factor controls share the submit form and retain separate re
   const response = await fixture().request("auroraNexusAuthGate", "/portal", "auroranexus.com.br");
   const { document } = fixtureDom(response.body);
   const form = document.getElementById("mfa-form")!;
-  for (const id of ["mfa-factor", "mfa-code", "mfa-submit", "mfa-recovery-help"]) {
+  for (const id of ["mfa-factor", "mfa-code", "mfa-submit", "mfa-login-again", "mfa-recovery-help"]) {
     assert.equal(document.getElementById(id)!.closest("form"), form);
   }
   assert.equal(document.getElementById("mfa-submit")!.getAttribute("type"), "submit");
+  assert.equal(document.getElementById("mfa-login-again")!.getAttribute("type"), "button");
+  assert.equal(document.getElementById("mfa-login-again")!.getAttribute("hidden"), "");
   assert.equal(document.getElementById("mfa-recovery-help")!.getAttribute("type"), "button");
   const code = document.getElementById("mfa-code")!;
   assert.equal(code.getAttribute("required"), "");
