@@ -124,6 +124,8 @@ test("post-ingest smoke uses the authenticated read path, not a privileged refre
   assert.match(smoke, /--cookie "\$d\/cookies\.txt"/);
   assert.match(smoke, /for intent in REVENUE_RISK SLA_RISK NEXT_ACTION EXECUTIVE/);
   assert.match(smoke, /CANONICAL_NATIVE_SNAPSHOT_VERIFIED/);
+  assert.match(smoke, /select\(\.code=="REVENUE_GAP"\)\]\|length==0/);
+  assert.doesNotMatch(smoke, /select\(\.code=="SLA_OVERDUE"\)\]\|length==0/);
   assert.match(smoke, /nativeDataPlane\.mapValue\.fields\.storage\.stringValue=="FIRESTORE"/);
   assert.match(smoke, /sourceAccessDuringInference\.booleanValue==false/);
   assert.doesNotMatch(smoke, /api\/refresh|X-Aurora-CSRF|refresh_csrf|setCustomUserClaims|dashboard\.refresh/);
