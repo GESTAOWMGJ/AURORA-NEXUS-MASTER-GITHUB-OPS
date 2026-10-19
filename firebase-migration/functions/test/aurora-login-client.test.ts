@@ -7,7 +7,7 @@ import { auroraProtectedShell } from '../src/auroraFrontend.js';
 
 const script=loginClient('synthetic-company');
 class Element {
-  value='';textContent='';hidden=false;disabled=false;checked=false;children:Element[]=[]; handlers=new Map<string,any>();
+  value='';textContent='';hidden=false;disabled=false;checked=false;required=false;children:Element[]=[]; handlers=new Map<string,any>();
   parentElement:Element|null=null; cssHidden=false; ownerDocument?:{activeElement:Element|null};
   nativeValid=true; requestSubmitCalls=0; submitTasks:Promise<unknown>[]=[]; nativeSubmitPrevented:boolean[]=[];
   addEventListener(event:string,handler:any){this.handlers.set(event,handler);}
@@ -24,11 +24,11 @@ class Element {
 }
 async function fixture(managed=true, sessionLoginResponse:any={ok:true,status:204,json:async()=>({})}) {
   const document={activeElement:null as Element|null,body:new Element(),getElementById:(id:string)=>el(id),createElement:()=>new Element()};
-  const parents:Record<string,string>={email:'login-form',password:'login-form',submit:'login-form','open-password-recovery':'login-form','mfa-form':'mfa-panel','mfa-code':'mfa-form','mfa-factor':'mfa-form','mfa-submit':'mfa-form','recovery-email':'password-recovery-panel','recovery-link':'password-recovery-panel','verify-recovery-link':'password-recovery-panel','recovery-back':'password-recovery-panel','new-password-form':'password-recovery-panel','recovery-new-password':'new-password-form','recovery-confirm-password':'new-password-form'};
+  const parents:Record<string,string>={email:'login-form',password:'login-form',submit:'login-form','open-password-recovery':'login-form','mfa-form':'mfa-panel','mfa-code':'mfa-form','mfa-factor':'mfa-form','mfa-submit':'mfa-form','mfa-login-again':'mfa-form','recovery-email':'password-recovery-panel','recovery-link':'password-recovery-panel','verify-recovery-link':'password-recovery-panel','recovery-back':'password-recovery-panel','new-password-form':'password-recovery-panel','recovery-new-password':'new-password-form','recovery-confirm-password':'new-password-form'};
   const elements=new Map<string,Element>();const el=(id:string):Element=>{if(!elements.has(id)){const node=new Element();node.ownerDocument=document;elements.set(id,node);if(parents[id])node.parentElement=el(parents[id]);}return elements.get(id)!;};
-  for(const id of ['mfa-panel','activation-panel','onboarding-panel','password-recovery-panel','new-password-form','totp-setup','enrollment-input'])el(id).hidden=true;
+  for(const id of ['mfa-panel','mfa-login-again','activation-panel','onboarding-panel','password-recovery-panel','new-password-form','totp-setup','enrollment-input'])el(id).hidden=true;
   const calls:any[]=[]; const redirects:string[]=[];let claims:any=managed?{auroraProfileVersion:1}:{};
-  const user={emailVerified:false,getIdToken:async()=> 'synthetic-id-token'};
+  const user={emailVerified:false,getIdToken:async(forceRefresh:boolean)=>{calls.push({name:'getIdToken',forceRefresh});return 'synthetic-id-token';}};
   let signIn:any=async()=>({user}); let redemption:any={ok:true,json:async()=>({})};
   let currentSessionResponses=Array.isArray(sessionLoginResponse)?[...sessionLoginResponse]:[sessionLoginResponse];
   const factors:any[]=[]; const winHandlers=new Map();
@@ -197,6 +197,84 @@ test('session exchange retries one transient server failure and then continues',
   const f=await fixture(false,[{ok:false,status:503,json:async()=>({code:'TEMPORARY'})},{ok:true,status:204,json:async()=>({})}]);
   f.el('email').value='user@example.invalid';f.el('password').value='synthetic-password';await f.submit();
   assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,2);assert.deepEqual(f.redirects,['/portal']);
+});
+
+test('accepted MFA session failures retain a memory-only retry and never label the code invalid',async()=>{
+  const cases=[
+    {name:'temporary',response:{ok:false,status:503,json:async()=>({code:'TEMPORARY'})},message:/sessão está temporariamente indisponível/,posts:2},
+    {name:'cross-site',response:{ok:false,status:403,json:async()=>({code:'CROSS_SITE_LOGIN_REJECTED'})},message:/neste endereço/,posts:1},
+    {name:'invalid-login',response:{ok:false,status:401,json:async()=>({code:'INVALID_LOGIN'})},message:/serviço não conseguiu validar a sessão/,posts:1},
+    {name:'upstream-html',response:{ok:false,status:403,json:async()=>{throw Error('sensitive-upstream-html');}},message:/serviço recusou a abertura da sessão/,posts:1},
+    {name:'unknown',response:{ok:false,status:409,json:async()=>({code:'sensitive-provider-detail'})},message:/não foi possível abrir a sessão/,posts:1}
+  ];
+  for(const item of cases){
+    const f=await fixture(true,item.response);f.user.emailVerified=true;
+    f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();f.el('mfa-code').value='123456';await f.submitMfa();
+    assert.match(f.el('mfa-status').textContent,item.message,item.name);
+    assert.doesNotMatch(f.el('mfa-status').textContent,/inválido|expirado|autorização do ambiente|sensitive/);
+    assert.equal(f.calls.filter(c=>c.name==='resolveMfa').length,1);
+    assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,item.posts);
+    assert.equal(f.el('mfa-code').value,'');assert.equal(f.el('mfa-code').disabled,true);assert.equal(f.el('mfa-code').required,false);
+    assert.equal(f.el('mfa-factor').disabled,true);assert.equal(f.el('mfa-submit').textContent,'Tentar abrir sessão');
+    assert.equal(f.el('mfa-login-again').hidden,false);assert.equal(f.redirects.length,0);
+    f.sessionResponse({ok:true,status:204,json:async()=>({})});await f.submitMfa();
+    assert.equal(f.calls.filter(c=>c.name==='resolveMfa').length,1,'session retry does not consume another MFA assertion');
+    assert.equal(f.calls.filter(c=>c.name==='getIdToken').length,2);assert.ok(f.calls.filter(c=>c.name==='getIdToken').every(c=>c.forceRefresh===true));
+    const posts=f.calls.filter(c=>c.url==='/__sessionLogin');assert.equal(posts.length,item.posts+1);
+    assert.ok(posts.every(c=>JSON.parse(c.options.body).orgId==='synthetic-company'));
+    assert.deepEqual(f.redirects,['/portal']);
+  }
+});
+
+test('session retry preserves explicit access denials without automatically retrying or bypassing them',async()=>{
+  for(const [code,message] of [['EMAIL_NOT_ALLOWED',/lista autorizada/],['MEMBERSHIP_NOT_PROVISIONED',/sem vínculo operacional/],['COMPANY_ACCESS_DENIED',/empresa selecionada/]] as const){
+    const f=await fixture(true,{ok:false,status:403,json:async()=>({code})});f.user.emailVerified=true;
+    f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();await f.submitMfa();
+    assert.match(f.el('mfa-status').textContent,message);assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,1);
+    await f.submitMfa();
+    assert.equal(f.calls.filter(c=>c.name==='resolveMfa').length,1);assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,2);
+    assert.match(f.el('mfa-status').textContent,message);assert.equal(f.redirects.length,0);
+  }
+});
+
+test('retry after session transport loss refreshes the token without resolving MFA again',async()=>{
+  const f=await fixture(true,async()=>{throw Error('sensitive-network-detail');});f.user.emailVerified=true;
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();await f.submitMfa();
+  assert.match(f.el('mfa-status').textContent,/sessão está temporariamente indisponível/);
+  assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,2);
+  f.sessionResponse({ok:true,status:204,json:async()=>({})});await f.submitMfa();
+  assert.equal(f.calls.filter(c=>c.name==='resolveMfa').length,1);assert.deepEqual(f.redirects,['/portal']);
+});
+
+test('accepted MFA session retry serializes concurrent attempts and offers fresh login',async()=>{
+  const f=await fixture(true,{ok:false,status:401,json:async()=>({code:'INVALID_LOGIN'})});f.user.emailVerified=true;
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();await f.submitMfa();
+  let resolve!:(value:any)=>void;f.sessionResponse(()=>new Promise(r=>{resolve=r;}));
+  const pending=f.submitMfa();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.el('mfa-submit').disabled,true);assert.equal(f.el('mfa-login-again').disabled,true);
+  await f.submitMfa();await f.click('mfa-login-again');
+  assert.equal(f.calls.filter(c=>c.name==='resolveMfa').length,1);
+  resolve({ok:false,status:401,json:async()=>({code:'INVALID_LOGIN'})});await pending;
+  await f.click('mfa-login-again');
+  assert.equal(f.el('mfa-panel').hidden,true);assert.equal(f.el('login-form').hidden,false);
+  assert.equal(f.el('mfa-code').disabled,false);assert.equal(f.el('mfa-code').required,true);
+  assert.equal(f.el('mfa-submit').textContent,'Confirmar segundo fator');assert.equal(f.el('mfa-login-again').hidden,true);
+  assert.equal(f.document.activeElement,f.el('password'));
+  f.sessionResponse({ok:false,status:401,json:async()=>({code:'INVALID_LOGIN'})});
+  await f.submit();await f.submitMfa();
+  assert.equal(f.calls.filter(c=>c.name==='resolveMfa').length,2,'fresh login requires a new MFA assertion');
+});
+
+test('page exit clears a cached session retry and ignores an MFA result that arrives after exit',async()=>{
+  const f=await fixture(true,{ok:false,status:401,json:async()=>({code:'INVALID_LOGIN'})});f.user.emailVerified=true;
+  f.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await f.submit();await f.submitMfa();
+  f.winHandlers.get('pagehide')();await f.submitMfa();
+  assert.equal(f.calls.filter(c=>c.url==='/__sessionLogin').length,1);assert.equal(f.el('mfa-login-again').hidden,true);
+  const late=await fixture();late.user.emailVerified=true;
+  late.signIn(async()=>{throw {code:'auth/multi-factor-auth-required'};});await late.submit();
+  let resolve!:(value:any)=>void;late.resolveMfa(()=>new Promise(r=>{resolve=r;}));const pending=late.submitMfa();
+  late.winHandlers.get('pagehide')();resolve({user:late.user});await pending;
+  assert.equal(late.calls.some(c=>c.url==='/__sessionLogin'),false);assert.equal(late.el('mfa-login-again').hidden,true);
 });
 
 test('password recovery normalizes email and suppresses immediate duplicate requests',async()=>{

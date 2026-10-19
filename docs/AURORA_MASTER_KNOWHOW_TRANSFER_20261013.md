@@ -6,6 +6,38 @@ regressão e memória isolada. O registro nativo já é usado pela projeção e 
 Master Engine; `learningCapturePolicy` explicita captura autorizada e preferência
 por regras determinísticas/Knowledge Registry/modelo privado, sem IA externa obrigatória.
 
+## Recuperação de sessão após MFA — candidata de 19/10/2026
+
+Desafio sanitizado, baseline `eaa9e20f537e1bd0ee9c9f9a6b79c35941853008`:
+o segundo fator é confirmado, mas a troca da sessão falha. A mensagem anterior
+atribuía `INVALID_LOGIN` e resposta sem JSON à autorização do ambiente. A mesma
+fixture demonstrou que dois 503 e uma rejeição de origem eram classificados
+como segundo fator inválido. Isso não estabelece a causa da ocorrência real:
+o servidor usa um catch genérico para token, leitura de membership e emissão
+de sessão; resposta HTML também pode vir da infraestrutura.
+
+Método reutilizável no cliente existente: separar as etapas; conservar somente
+o usuário SDK autenticado em RAM para uma retomada explícita; obter novo token
+e repetir o endpoint de sessão com as mesmas verificações do servidor; nunca
+reconsumir a asserção MFA após a confirmação. Falha efetiva do segundo fator
+permanece no fluxo de código inválido e não habilita essa retomada. Negação
+explícita de lista, vínculo ou empresa permanece negada; reenvio manual não
+confere acesso. Falhas de transporte/5xx têm no máximo duas tentativas por
+operação. Reentrar, novo login e saída da página descartam a referência em RAM;
+resposta MFA tardia após saída não a recria. Não há persistência de senha,
+token, cookie, segredo TOTP ou identidade entre aparelhos.
+
+Regressões executam o script emitido do produto com Firebase e transporte
+sintéticos, sem rede ou credenciais. Cobrem 401 `INVALID_LOGIN`, HTML 403,
+503 `TEMPORARY`, origem recusada, autorização ainda negada, renovação do token,
+uma única resolução MFA nas retomadas, concorrência e limpeza. Não comprovam
+login real, causa histórica, deploy ou ausência de falhas do provedor.
+Estado: candidata de código e regressão; CI, HML e adoção instalada exigem
+recibos próprios. O registro nativo existente já referencia esta fonte de
+know-how; não foi criado executor, banco ou autorização adicional, nem houve
+treinamento de pesos. Rollback: reverter este incremento, preservando identidade,
+MFA, memberships, dados e trilha. O cockpit mantém os gates existentes.
+
 ## Conhecimento da sessão incorporado ao método
 
 | Desafio/prompt disponível | Resolução ou fluxo | Evidência/estado |
