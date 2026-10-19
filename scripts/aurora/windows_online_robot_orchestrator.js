@@ -11,6 +11,11 @@ const ACTIVE_DELIVERABLE = "2026.10.07-dev.2";
 
 const robots = [
   {
+    id: "realtime-platform-guardian",
+    command: "node scripts/aurora/realtime_platform_guardian.js",
+    scope: ["platform", "cloud", "physical_server", "client", "engine", "audit", "split_brain_prevention"]
+  },
+  {
     id: "platform-unification-robot",
     command: "node scripts/aurora/platform_unification_robot.js",
     scope: ["platform", "policy", "cloud", "physical_server", "client", "conflict_certification"]
@@ -58,6 +63,7 @@ const robots = [
 ];
 
 const requiredPolicies = [
+  "firebase-migration/policy/realtime-platform-guardian-v1.json",
   "firebase-migration/policy/development-deliverable-v1.json",
   "firebase-migration/policy/manifest.json",
   "firebase-migration/policy/autonomous-bugfix-realtime-audit-v1.json",
@@ -117,7 +123,20 @@ const manifestText = readText("firebase-migration/policy/manifest.json");
 const hardeningText = readText("firebase-migration/policy/operational-delivery-hardening-v1.json");
 const unificationText = readText("firebase-migration/policy/platform-unification-conflict-certification-v1.json");
 
+const guardianPolicyText = readText("firebase-migration/policy/realtime-platform-guardian-v1.json");
+const guardianRuntimeText = readText("scripts/aurora/realtime_platform_guardian.js");
+
 const semanticChecks = [
+  {
+    id: "realtime-guardian-required",
+    ok: guardianPolicyText.includes("AURORA-REALTIME-PLATFORM-GUARDIAN-001")
+      && guardianPolicyText.includes("\"singleWriter\":true")
+      && guardianPolicyText.includes("\"writerLeaseRequired\":true")
+      && guardianPolicyText.includes("\"everyMutationPassesGuardian\":true")
+      && guardianRuntimeText.includes("SPLIT_BRAIN_PREVENTED")
+      && guardianRuntimeText.includes("IDEMPOTENT_DUPLICATE")
+      && guardianRuntimeText.includes("CIRCUIT_OPENED")
+  },
   {
     id: "active-deliverable-bound",
     ok: deliverableText.includes(ACTIVE_DELIVERABLE)
@@ -146,17 +165,32 @@ const semanticChecks = [
 
 const result = {
   orchestrator: "AURORA_CLOUD_FAILSAFE_ROBOT_ORCHESTRATOR",
-  version: "1.3.0",
+  version: "1.4.0",
   activeDeliverable: ACTIVE_DELIVERABLE,
   trigger: "CLOUD_HEALTH_OR_WINDOWS_XEON_ONLINE_CONFIRMED",
-  mode: "PLAN_ONLY",
+  mode: "GUARDIAN_FIRST_PLAN_ONLY",
   evidenceState: "SPECIFIED",
   operationalIntegrationVerified: false,
   failoverExecuted: false,
   passed: policyChecks.every((check) => check.ok) && semanticChecks.every((check) => check.ok),
   failoverPlan,
   startupOrder: robots,
+  guardian: {
+    id: "AURORA-REALTIME-PLATFORM-GUARDIAN-001",
+    startupPriority: 0,
+    singleWriterRequired: true,
+    leaseRequired: true,
+    everyMutationPassesGuardian: true,
+    splitBrainPrevention: true,
+    semanticDeduplication: true,
+    circuitBreaker: true,
+    appendOnlyAudit: true
+  },
   executionRules: [
+    "Start the realtime platform guardian before platform unification and any mutation-capable robot.",
+    "Every cross-platform mutation must be serialized by resource and protected by a current single-writer lease.",
+    "Reconcile uncertain commits by receipt before retrying and preserve the same semantic operation identity.",
+    "Open a circuit on repeated failures to avoid retry storms and switch to the next safe operating mode.",
     "Use cloud control plane as primary path when health checks pass.",
     "Run heavy builds, indexing and sync on the Windows Xeon physical server when connected or when cloud is degraded.",
     "Keep MacBook as light supervision/interface station.",
@@ -174,7 +208,7 @@ const result = {
 // This is a bounded local executor, not a remote dispatcher or a failover router.
 // Existing authenticated cloud ingestion remains in aurora_cloud_sync.py.
 const SAFE_ROBOTS = new Set([
-  "platform-unification-robot", "certification-security-gate",
+  "realtime-platform-guardian", "platform-unification-robot", "certification-security-gate",
   "security-privacy-update-bot", "organic-improvement-backlog"
 ]);
 

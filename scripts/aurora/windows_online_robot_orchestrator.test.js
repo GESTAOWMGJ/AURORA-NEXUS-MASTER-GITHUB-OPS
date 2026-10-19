@@ -8,14 +8,14 @@ const root = process.cwd();
 const success = (exe, args) => ({ status: 0, stdout: JSON.stringify(
   args[0].endsWith('generate_improvement_backlog.js') ? { dryRun: true, backlog: [] } : { passed: true }) });
 test('planning alone never verifies execution or failover', () => {
-  assert.equal(result.mode, 'PLAN_ONLY');
+  assert.equal(result.mode, 'GUARDIAN_FIRST_PLAN_ONLY');
   assert.equal(result.operationalIntegrationVerified, false);
   assert.equal(result.failoverExecuted, false);
 });
-test('real subprocesses execute four safe robots in order', () => {
+test('real subprocesses execute five safe robots in order', () => {
   const out = executeSafeRobots(result, { root });
   assert.equal(out.passed, true);
-  assert.equal(out.receipts.filter(r => r.state === 'LOCAL_EXECUTION_VERIFIED').length, 4);
+  assert.equal(out.receipts.filter(r => r.state === 'LOCAL_EXECUTION_VERIFIED').length, 5);
   assert.equal(out.receipts.filter(r => r.state === 'DECLARATIVE_POLICY').length, 4);
   assert.equal(out.receipts.at(-1).state, 'EXPLICIT_INPUT_REQUIRED');
   assert.equal(out.operationalIntegrationVerified, false);
@@ -33,7 +33,7 @@ test('executor uses fixed argv and hides credentials and output', () => {
     assert.equal(args[0].includes('evil.js'), false);
     return success(exe, args);
   } });
-  assert.equal(count, 4);
+  assert.equal(count, 5);
   assert.equal(out.passed, true);
   assert.match(out.receipts[0].outputSha256, /^[a-f0-9]{64}$/);
   assert.equal('stdout' in out.receipts[0], false);
@@ -81,7 +81,7 @@ test('actual hanging child times out and stops later robots', () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-robot-test-'));
   try {
     fs.mkdirSync(path.join(temporary, 'scripts/aurora'), { recursive: true });
-    fs.writeFileSync(path.join(temporary, 'scripts/aurora/platform_unification_robot.js'), 'setInterval(() => {}, 1000);');
+    fs.writeFileSync(path.join(temporary, 'scripts/aurora/realtime_platform_guardian.js'), 'setInterval(() => {}, 1000);');
     const out = executeSafeRobots(result, { root: temporary, timeoutMs: 100 });
     assert.equal(out.passed, false);
     assert.equal(out.receipts[0].failure, 'TIMEOUT');
