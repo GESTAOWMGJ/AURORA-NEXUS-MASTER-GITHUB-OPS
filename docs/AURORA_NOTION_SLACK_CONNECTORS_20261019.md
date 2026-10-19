@@ -4,7 +4,7 @@ Baseline: main `cbeeb11df5ff0301a1276f5fc72e94199732f8e1`. Capacidade implementa
 
 ## Contrato de operação
 
-O assistente e a página Integrações mostram Notion/Slack desde o primeiro acesso. Administrador autorizado tem readback automático com isolamento pela organização da sessão; o portal reutiliza seu ciclo de consulta. Ausência de fonte é NOT_CONFIGURED; leitura relatada por agente recente é READ_REPORTED; comunicação antiga é STALE. Nenhum desses estados atesta instalação física ou sincronização integral. Logout e falha de reconfirmação retiram o status anterior.
+O assistente e a página Integrações mostram Notion/Slack desde o primeiro acesso. Administrador autorizado tem readback automático com isolamento pela organização da sessão; o portal reutiliza seu ciclo de consulta. Ausência de relato é NOT_REPORTED, sem inferir que não exista configuração no dispositivo; leitura relatada por agente recente é READ_REPORTED; comunicação antiga é STALE. Nenhum desses estados atesta instalação física ou sincronização integral. Logout e falha de reconfirmação retiram o status anterior.
 
 Cada cliente precisa da credencial própria do aplicativo e de fonte explicitamente autorizada na configuração protegida do agente. Conector do ChatGPT não é inscrição OAuth, token ou autorização herdada pelo AURORA. Não inserir tokens em navegador, chat, repositório ou argumentos. O instalador já usa DPAPI/Keychain e faz conferência/repetição dos recibos; estas capacidades são reutilizadas.
 

@@ -5,7 +5,7 @@ import {setupPage} from '../src/auroraSetup.ts';
 import {readFileSync} from 'node:fs';
 const agent=(state='CONNECTED_REPORTED',providerState='READ_CONFIRMED')=>({state,providers:[{provider:'NOTION',state:providerState,coverageLimited:true,token:'synthetic-secret',pageId:'private-page'}]});
 test('first login lists both connectors pending without inheriting a ChatGPT grant',()=>{
- const statuses=workspaceConnectorReadback([]);assert.deepEqual(statuses.map(x=>[x.provider,x.state]),[['NOTION','NOT_CONFIGURED'],['SLACK','NOT_CONFIGURED']]);
+ const statuses=workspaceConnectorReadback([]);assert.deepEqual(statuses.map(x=>[x.provider,x.state]),[['NOTION','NOT_REPORTED'],['SLACK','NOT_REPORTED']]);
  const html=setupPage({orgId:'synthetic-org',mfaVerified:true});assert.match(html,/workspace-connector-NOTION/);assert.match(html,/workspace-connector-SLACK/);assert.match(html,/Cada empresa autoriza seu próprio acesso/);
  assert.doesNotMatch(workspaceConnectorSection(),/type="password"|apiKey|access_token|onclick=/);
 });
@@ -17,7 +17,7 @@ test('fresh read is reported only and cannot attest installation or synchronizat
 test('revoked or stale agent never leaves a connector connected',()=>{
  assert.equal(workspaceConnectorReadback([agent('OFFLINE_OR_STALE')])[0]!.state,'STALE');
  assert.equal(workspaceConnectorReadback([agent('CONNECTED_REPORTED','CONNECTION_PENDING')])[0]!.state,'CONNECTION_PENDING');
- assert.equal(workspaceConnectorReadback([])[0]!.state,'NOT_CONFIGURED');
+ assert.equal(workspaceConnectorReadback([])[0]!.state,'NOT_REPORTED');
 });
 test('workspace providers use the existing authenticated report and clear on logout',()=>{
  const runtime=readFileSync(new URL('../src/auroraIntegrationRuntime.ts',import.meta.url),'utf8');assert.match(runtime,/'IMAP','NOTION','SLACK'/);assert.match(runtime,/workspaceConnectorReadback\(agents/);

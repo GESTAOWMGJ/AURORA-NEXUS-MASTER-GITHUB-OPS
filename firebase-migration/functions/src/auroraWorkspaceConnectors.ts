@@ -11,7 +11,7 @@ export function workspaceConnectorReadback(agents: readonly {state?:string;provi
       .map(row=>({agent,row})):[]);
     const fresh=reports.filter(report=>report.agent.state==='CONNECTED_REPORTED');
     const confirmed=fresh.some(report=>report.row.state==='READ_CONFIRMED');
-    return {...connector,state:confirmed?'READ_REPORTED':fresh.length?'CONNECTION_PENDING':reports.length?'STALE':'NOT_CONFIGURED',
+    return {...connector,state:confirmed?'READ_REPORTED':fresh.length?'CONNECTION_PENDING':reports.length?'STALE':'NOT_REPORTED',
       scopeConfiguredReported:reports.length>0,coverageLimited:confirmed&&(fresh.some(report=>report.row.coverageLimited===true||report.row.state!=='READ_CONFIRMED')||reports.length!==fresh.length),
       physicalInstallationVerified:false,fullSynchronizationVerified:false,sourceMutationAllowed:false};
   });
