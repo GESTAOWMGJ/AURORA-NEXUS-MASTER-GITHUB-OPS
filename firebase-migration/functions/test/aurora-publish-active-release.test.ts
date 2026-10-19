@@ -183,8 +183,8 @@ test('HML owner mode consumes real deployment approval and preserves original ch
 
 test('explicit owner renewal preserves earlier decisions and still rejects promotion at the new deadline',async()=>{
   assert.equal(ownerDecision.recordedOn,'2026-10-08');
-  assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-16T03:00:00.000Z');
-  assert.equal(ownerDecision.riskAcceptance.reviewBy,'2026-10-15');
+  assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-22T03:00:00.000Z');
+  assert.equal(ownerDecision.riskAcceptance.reviewBy,'2026-10-21');
   assert.equal(ownerDecision.reaffirmations[0].recordedOn,'2026-10-12');
   assert.equal(ownerDecision.reaffirmations[0].originalScopeUnchanged,true);
   assert.equal(ownerDecision.reaffirmations[0].riskReviewDeadlineExtended,false);
@@ -192,17 +192,35 @@ test('explicit owner renewal preserves earlier decisions and still rejects promo
   assert.equal(renewal.decisionId,'AURORA-HML-OWNER-RENEWAL-20261014');
   assert.equal(renewal.approvalSource,'DIRECT_OWNER_CHAT');
   assert.equal(renewal.previousValidUntilUtc,'2026-10-15T03:00:00.000Z');
-  assert.equal(renewal.validUntilUtc,ownerDecision.scope.validUntilUtc);
-  assert.equal(renewal.reviewBy,ownerDecision.riskAcceptance.reviewBy);
+  assert.equal(renewal.validUntilUtc,'2026-10-16T03:00:00.000Z');
+  assert.equal(renewal.reviewBy,'2026-10-15');
   assert.equal(renewal.originalScopeUnchanged,true);assert.equal(renewal.riskReviewDeadlineExtended,true);
   assert.equal(renewal.protectedRunOwnerApprovalStillRequired,true);
   assert.equal(renewal.laterMainCodeReviewClaimed,false);assert.equal(renewal.independentGithubPullRequestReviewClaimed,false);
   assert.equal(renewal.productionAuthorized,false);assert.equal(renewal.clinicalSensitiveAuthorized,false);
   assert.deepEqual(renewal.residual,{critical:0,high:7,moderate:4,total:11});
+  const documentScope=ownerDecision.reaffirmations[2];
+  assert.equal(documentScope.decisionId,'AURORA-HML-DOCUMENT-SCOPE-20261015');
+  assert.equal(documentScope.validUntilUtc,'2026-10-16T03:00:00.000Z');
+  assert.equal(documentScope.riskReviewDeadlineExtended,false);
+  const latest=ownerDecision.reaffirmations[3];
+  assert.equal(latest.decisionId,'AURORA-HML-OWNER-RENEWAL-20261019');
+  assert.equal(latest.statement,'Sim, renovar HML/R029 nesse escopo');
+  assert.equal(latest.previousValidUntilUtc,renewal.validUntilUtc);
+  assert.equal(latest.validUntilUtc,ownerDecision.scope.validUntilUtc);
+  assert.equal(latest.reviewBy,ownerDecision.riskAcceptance.reviewBy);
+  assert.equal(latest.approvalSource,'DIRECT_OWNER_CHAT');
+  assert.equal(latest.protectedRunOwnerApprovalStillRequired,true);
+  for(const field of ['productionAuthorized','clinicalSensitiveAuthorized','realSourceActivationAuthorized',
+    'iamChangeAuthorized','secretRotationAuthorized','laterMainCodeReviewClaimed',
+    'independentGithubPullRequestReviewClaimed']) assert.equal(latest[field],false,field);
+  assert.deepEqual(latest.residual,renewal.residual);
   const current=ownerFixture();current.deps.now=()=>Date.parse('2026-10-12T18:00:00Z');
   await publishActiveRelease(current.env,current.deps);assert.equal(current.writes(),1);
   const renewed=ownerFixture();renewed.deps.now=()=>Date.parse(renewal.previousValidUntilUtc);
   await publishActiveRelease(renewed.env,renewed.deps);assert.equal(renewed.writes(),1);
+  const explicitlyRenewed=ownerFixture();explicitlyRenewed.deps.now=()=>Date.parse('2026-10-19T23:00:00Z');
+  await publishActiveRelease(explicitlyRenewed.env,explicitlyRenewed.deps);assert.equal(explicitlyRenewed.writes(),1);
   const expired=ownerFixture();expired.deps.now=()=>Date.parse(ownerDecision.scope.validUntilUtc);
   await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(expired.writes(),0);
 });

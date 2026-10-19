@@ -128,3 +128,11 @@ gates independentes. Ver `AURORA_STRUCTURED_FINANCIAL_FEEDING.md`.
 ## 15/10/2026 ? CMEK autorizado para producao; recuperacao candidata
 
 Autorizacao direta do titular registrada (comentario 6197336877, PR #99). Correcao reaproveitada em nova branch sobre a27d606, com grupo CLI KMS valido, backup por UID, restore concluido, reativacao obrigatoria e erros sem falso positivo. `IMPLEMENTED_PENDING_RECOVERY_VERIFICATION`: nao equivale a restore/deploy/cutover. Mantem `(default)` e CLINICAL_SENSITIVE inalterados. Documento: `docs/AURORA_CMEK_PRODUCTION_AUTHORIZATION_20261015.md`. SHA/testes/CI finais no PR.
+
+### 19/10/2026 — renovação HML/R029 expressa
+
+Decisão direta do titular renova o mesmo escopo HML de publicação da beta e testes
+sintéticos Windows/nuvem até `2026-10-22T03:00:00.000Z`, com revisão até 21/10.
+Histórico e 11 riscos residuais preservados; produção, dados clínicos e pasta real
+continuam excluídos. Registro de autorização não comprova CI, deploy, ingestão ou
+convergência dos dispositivos. Gates e revisão independente permanecem inalterados.
