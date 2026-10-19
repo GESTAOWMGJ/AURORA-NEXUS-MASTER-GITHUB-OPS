@@ -15,9 +15,18 @@ const element = id => document.getElementById(id);
 const form = element('login-form'), status = element('status'), submit = element('submit');
 const normalizeIdentityEmail = value => String(value || '').trim().toLowerCase();
 let auth, resolver = null, setupUser = null, totpSecret = null;
+let mfaSessionUser = null, mfaRevision = 0;
 let onboardingUser = null, onboardingRetrySession = false;
 const clearSetup = () => { totpSecret = null; element('enrollment-key').textContent = ''; element('enrollment-code').value = ''; };
-window.addEventListener('pagehide', () => { clearSetup(); onboardingUser = null; onboardingRetrySession = false; const input = element('registration-password'); if (input) input.value = ''; });
+function clearMfaSession() {
+  mfaSessionUser = null; mfaRevision++; resolver = null;
+  element('mfa-code').disabled = false; element('mfa-code').required = true;
+  element('mfa-factor').disabled = false; element('mfa-code').value = '';
+  element('mfa-status').textContent = '';
+  element('mfa-submit').textContent = 'Confirmar segundo fator';
+  element('mfa-login-again').hidden = true;
+}
+window.addEventListener('pagehide', () => { clearSetup(); clearMfaSession(); setupUser = null; onboardingUser = null; onboardingRetrySession = false; const input = element('registration-password'); if (input) input.value = ''; });
 try {
   const config = await fetch('/__/firebase/init.json', {cache:'no-store'});
   if (!config.ok) throw new Error('CONFIG_UNAVAILABLE');
@@ -40,7 +49,10 @@ async function createSession(user) {
       throw new Error('SESSION_TEMPORARY_UNAVAILABLE');
     }
     if (response.ok) break;
-    if (response.status >= 500 && attempt === 0) continue;
+    if (response.status >= 500) {
+      if (attempt === 0) continue;
+      throw new Error('SESSION_TEMPORARY_UNAVAILABLE');
+    }
     let code = 'SESSION_DENIED';
     try { code = (await response.json())?.code || code; } catch { /* Keep a generic, non-sensitive denial. */ }
     throw new Error(code);
@@ -54,8 +66,11 @@ function accessIssueMessage(error) {
   if (code === 'EMAIL_NOT_ALLOWED') return 'E-mail autenticado, mas fora da lista autorizada deste ambiente.';
   if (code === 'MEMBERSHIP_NOT_PROVISIONED') return 'Conta autenticada, mas ainda sem vínculo operacional provisionado na organização.';
   if (code === 'COMPANY_ACCESS_DENIED') return 'Conta autenticada, mas não autorizada para a empresa selecionada.';
-  if (code === 'SESSION_DENIED' || code === 'INVALID_LOGIN') return 'Segundo fator aceito, mas a sessão privada foi negada pela autorização do ambiente.';
+  if (code === 'CROSS_SITE_LOGIN_REJECTED') return 'A sessão não pôde ser aberta neste endereço. Reabra o portal e entre novamente.';
+  if (code === 'INVALID_LOGIN') return 'O segundo fator foi confirmado, mas o serviço não conseguiu validar a sessão. Tente abrir a sessão novamente ou entre novamente.';
+  if (code === 'SESSION_DENIED') return 'O segundo fator foi confirmado, mas o serviço recusou a abertura da sessão. Tente abrir a sessão novamente ou entre novamente.';
   if (code === 'SESSION_TEMPORARY_UNAVAILABLE') return 'A autenticação foi aceita, mas o serviço de sessão está temporariamente indisponível. Tente novamente.';
+  if (mfaSessionUser) return 'O segundo fator foi confirmado, mas não foi possível abrir a sessão. Tente abrir a sessão novamente ou entre novamente.';
   return 'Segundo fator inválido ou expirado. Gere um novo código no autenticador e tente novamente.';
 }
 async function completeLogin(user) {
@@ -90,6 +105,7 @@ async function completeLogin(user) {
 }
 form.addEventListener('submit', async event => {
   event.preventDefault(); if (!auth) return; submit.disabled = true; status.textContent = 'Validando acesso...';
+  clearMfaSession(); setupUser = null;
   const previousFocus = captureAuthFocus();
   try {
     const email = normalizeIdentityEmail(element('email').value);
@@ -118,13 +134,32 @@ form.addEventListener('submit', async event => {
 element('mfa-form').addEventListener('submit', async event => {
   event.preventDefault();
   const button = element('mfa-submit'); if (button.disabled) return; button.disabled = true;
+  const revision = mfaRevision;
+  element('mfa-login-again').disabled = true;
   try {
-    if (!resolver) throw new Error('MFA_REQUIRED');
-    const assertion = TotpMultiFactorGenerator.assertionForSignIn(element('mfa-factor').value, element('mfa-code').value.trim());
-    const credential = await resolver.resolveSignIn(assertion);
-    element('mfa-code').value = ''; await completeLogin(credential.user);
+    if (!mfaSessionUser) {
+      if (!resolver) throw new Error('MFA_REQUIRED');
+      const assertion = TotpMultiFactorGenerator.assertionForSignIn(element('mfa-factor').value, element('mfa-code').value.trim());
+      const credential = await resolver.resolveSignIn(assertion);
+      if (revision !== mfaRevision) return;
+      // Keep only the SDK user in memory; each retry obtains a fresh token and
+      // repeats the existing server-side membership/revocation checks.
+      mfaSessionUser = credential.user; resolver = null;
+      element('mfa-code').value = ''; element('mfa-code').disabled = true; element('mfa-code').required = false;
+      element('mfa-factor').disabled = true;
+      button.textContent = 'Tentar abrir sessão';
+    }
+    await completeLogin(mfaSessionUser);
   } catch (error) { element('mfa-status').textContent = accessIssueMessage(error); }
-  finally { button.disabled = false; }
+  finally { button.disabled = false; element('mfa-login-again').disabled = false; element('mfa-login-again').hidden = !mfaSessionUser; }
+});
+element('mfa-login-again').addEventListener('click', async () => {
+  if (element('mfa-submit').disabled) return;
+  clearMfaSession(); setupUser = null; clearSetup();
+  try { await signOut(auth); } catch { /* A fresh password login still revalidates the identity. */ }
+  element('mfa-panel').hidden = true; form.hidden = false; submit.disabled = false;
+  status.textContent = 'Entre novamente com sua senha e o autenticador.';
+  focusVisibleAuthField('password');
 });
 element('mfa-code').addEventListener('keydown', event => {
   if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return;
