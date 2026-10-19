@@ -1,0 +1,16 @@
+{
+  "id":"AURORA-REALTIME-PLATFORM-GUARDIAN-001",
+  "name":"Aurora Nexus Realtime Platform Guardian",
+  "version":"1.0.0",
+  "date":"2026-10-07",
+  "status":"ACTIVE_POLICY",
+  "objective":"Prevent cross-platform execution conflicts, duplicate work and split-brain writes while preserving continuous fail-safe operation.",
+  "authorityModel":{"singleWriter":true,"writerLeaseRequired":true,"leaseTtlSeconds":45,"heartbeatIntervalSeconds":15,"staleWriterMayBePreempted":true,"readersMayRunConcurrently":true},
+  "platformPriority":["CLOUD_CONTROL_PLANE","WINDOWS_XEON_PHYSICAL_SERVER","CLIENT_SAFE_DEGRADED_MODE"],
+  "operationIdentity":{"requiredFields":["orgId","operationType","resourceKey","semanticHash"],"deduplicationWindowSeconds":3600,"sameSemanticHash":"RETURN_EXISTING_RESULT_OR_RECEIPT","sameIdentityDifferentPayload":"CONFLICT_AND_AUDIT"},
+  "conflictRules":{"splitBrain":"BLOCK_SECOND_WRITER_AND_KEEP_CURRENT_VALID_LEASE","concurrentMutation":"SERIALIZE_BY_RESOURCE_KEY","duplicateDelivery":"DEDUPLICATE_BY_OPERATION_IDENTITY","staleResult":"REJECT_IF_REVISION_OR_EPOCH_IS_OLDER","uncertainCommit":"RECONCILE_RECEIPT_BEFORE_RETRY","platformClockSkew":"USE_SERVER_EPOCH_AND_MONOTONIC_SEQUENCE_WHERE_AVAILABLE"},
+  "circuitBreaker":{"enabled":true,"failureThreshold":3,"cooldownSeconds":60,"halfOpenProbeCount":1,"transientFailures":["TIMEOUT","NETWORK","RATE_LIMIT","UPSTREAM_5XX"],"permanentFailures":["AUTH_401_403","INVALID_CONTRACT","INTEGRITY_FAILURE"]},
+  "failSafe":{"unsafeWrites":"PAUSE_AND_QUEUE","safeReads":"ALLOW_AUTHORIZED_READ_ONLY","retry":"EXPONENTIAL_BACKOFF_WITH_JITTER_AND_IDEMPOTENCY","rollback":"REQUIRED_FOR_AUTONOMOUS_PROMOTION","humanReview":"ADVISORY_UNLESS_ABSOLUTE_MATERIAL_BLOCKER"},
+  "audit":{"appendOnlyEvents":true,"record":["guardianDecision","platform","leaseEpoch","operationIdentity","dedupDecision","circuitState","failoverReason","riskProfile","evidenceRefs"],"neverLog":["password","accessToken","refreshToken","secret","rawClinicalPayload"]},
+  "continuousMode":{"eventDriven":true,"heartbeatDriven":true,"schedulerCompatible":true,"startupArbitrationRequired":true,"everyMutationPassesGuardian":true}
+}
