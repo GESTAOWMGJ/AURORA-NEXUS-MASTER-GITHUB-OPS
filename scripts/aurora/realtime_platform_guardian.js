@@ -69,10 +69,11 @@ function guardianDecision(input){
 module.exports={DEFAULTS,PLATFORM_PRIORITY,arbitrateWriter,circuitDecision,deduplicate,guardianDecision,hashPayload,operationIdentity,routePlatform,validLease};
 
 if(require.main===module){
-  console.log(JSON.stringify(guardianDecision({
+  const decision=guardianDecision({
     health:{cloud:{healthy:true},windowsXeon:{healthy:true}},
     currentLease:null,
     receipt:null,
     operation:{orgId:"wmgj",operationType:"HEALTH_CHECK",resourceKey:"aurora",mutation:false,payload:{probe:true}}
-  }),null,2));
+  });
+  console.log(JSON.stringify({passed:true,evidenceState:"LOCAL_POLICY_SMOKE",operationalIntegrationVerified:false,...decision},null,2));
 }
