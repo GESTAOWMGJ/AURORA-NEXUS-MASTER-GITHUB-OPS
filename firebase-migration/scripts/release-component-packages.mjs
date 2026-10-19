@@ -65,7 +65,7 @@ export async function readComponentPackage(directory,component,expectedSourceSha
     &&sameNames(Object.keys(manifest.files),expected),'COMPONENT_MANIFEST_INVALID');
   if(component==='iaMaster')demand(manifest.component==='AURORA_IA_MASTER'&&manifest.version==='1.1.0'&&manifest.dirty===false
     &&manifest.nodeMinimumMajor===22&&manifest.externalAiEnabled===false
-    &&manifest.clientAgent?.component==='AURORA_CLIENT_AGENT'&&manifest.clientAgent.version==='1.0.4'
+    &&manifest.clientAgent?.component==='AURORA_CLIENT_AGENT'&&manifest.clientAgent.version==='1.0.5'
     &&manifest.clientAgent.configured===false&&manifest.clientAgent.sourceAuthorizationRequired===true
     &&manifest.clientAgent.providerConnectionsVerified===false,'COMPONENT_IDENTITY_CONFLICT');
   else demand(manifest.schemaVersion===1&&manifest.component==='AURORA_WINDOWS_INTEGRATION'&&manifest.version===WINDOWS_INTEGRATION_VERSION

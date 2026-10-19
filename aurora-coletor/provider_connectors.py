@@ -30,7 +30,7 @@ import client_secret_store as secret_store
 MAX_EXPORT_BYTES = 16384
 MAX_PROVIDER_BYTES = 1048576
 MAX_ITEMS = 20
-PROVIDERS = {'GOOGLE_DRIVE', 'GMAIL', 'MICROSOFT_MAIL', 'IMAP'}
+PROVIDERS = {'GOOGLE_DRIVE', 'GMAIL', 'MICROSOFT_MAIL', 'IMAP', 'NOTION', 'SLACK'}
 EXPORT_SUFFIXES = ('.json', '.csv', '.xlsx')
 GOOGLE_SCOPE='https://www.googleapis.com/auth/drive.readonly'
 GOOGLE_OAUTH_SCHEMA='aurora.google.oauth.source.v1'
@@ -369,9 +369,15 @@ class NoRedirect(request.HTTPRedirectHandler):
 
 def api(url, token, binary=False):
     parsed = parse.urlsplit(url)
-    if parsed.scheme != 'https' or parsed.hostname not in {'www.googleapis.com', 'gmail.googleapis.com', 'graph.microsoft.com'} or parsed.username or parsed.password or parsed.fragment or parsed.port not in (None,443):
+    if parsed.scheme != 'https' or parsed.hostname not in {'www.googleapis.com', 'gmail.googleapis.com', 'graph.microsoft.com', 'api.notion.com', 'slack.com'} or parsed.username or parsed.password or parsed.fragment or parsed.port not in (None,443):
         raise SyncError('PROVIDER_DESTINATION_REJECTED')
-    req = request.Request(url, headers={'Authorization':'Bearer '+token,'Accept':'application/json'})
+    headers={'Authorization':'Bearer '+token,'Accept':'application/json'}
+    if parsed.hostname=='api.notion.com':
+        if not re.fullmatch(r'/v1/(?:pages/[a-f0-9-]{36}|blocks/[a-f0-9-]{36}/children)',parsed.path):raise SyncError('PROVIDER_DESTINATION_REJECTED')
+        headers['Notion-Version']='2025-09-03'
+    if parsed.hostname=='slack.com' and parsed.path not in {'/api/auth.test','/api/conversations.info','/api/conversations.history'}:
+        raise SyncError('PROVIDER_DESTINATION_REJECTED')
+    req = request.Request(url, headers=headers, data=b'' if parsed.hostname=='slack.com' and parsed.path=='/api/auth.test' else None)
     try:
         with request.build_opener(NoRedirect(),request.HTTPSHandler(context=ssl.create_default_context())).open(req,timeout=20) as response:
             raw = response.read(MAX_PROVIDER_BYTES+1)
@@ -468,6 +474,95 @@ def drive_documents(folder, item, token, transport):
     return result, None
 
 
+
+def workspace_scope(source):
+    """Closed, explicit scope; a ChatGPT connector is not an app credential."""
+    provider=source.get('provider') if isinstance(source,dict) else None
+    fields={'NOTION':{'provider','tokenEnv','pageId'},'SLACK':{'provider','tokenEnv','workspaceId','channelId'}}
+    if provider not in fields or set(source)!=fields[provider]:raise SyncError('WORKSPACE_SOURCE_CONFIGURATION_REQUIRED')
+    if not isinstance(source['tokenEnv'],str) or not re.fullmatch(r'AURORA_[A-Z0-9_]{3,70}',source['tokenEnv']):
+        raise SyncError('PROTECTED_TOKEN_REFERENCE_REQUIRED')
+    if provider=='NOTION':
+        value=source['pageId']
+        if not isinstance(value,str) or not re.fullmatch(r'[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}',value):
+            raise SyncError('NOTION_PAGE_SCOPE_REQUIRED')
+    elif (not isinstance(source['workspaceId'],str) or not re.fullmatch(r'T[A-Z0-9]{8,32}',source['workspaceId'])
+          or not isinstance(source['channelId'],str) or not re.fullmatch(r'[CG][A-Z0-9]{8,32}',source['channelId'])):
+        raise SyncError('SLACK_WORKSPACE_CHANNEL_SCOPE_REQUIRED')
+
+
+def workspace_documents(source,token,transport,cursor):
+    workspace_scope(source);provider=source['provider'];rows=[];pending=0
+    def bounded(value,field,maximum=MAX_ITEMS):
+        items=value.get(field) if isinstance(value,dict) else None
+        if not isinstance(items,list) or len(items)>maximum or any(not isinstance(item,dict) for item in items):
+            raise SyncError('BOUNDED_PROVIDER_PAGE_REQUIRED')
+        return items
+    def canonical_text(text):
+        if not isinstance(text,str) or not text or len(text.encode('utf-8'))>MAX_EXPORT_BYTES:raise SyncError('CANONICAL_EXTRACTION_REQUIRED')
+        return exports(text.encode('utf-8'))
+    if provider=='NOTION':
+        page=source['pageId'].lower();prefix='https://api.notion.com/v1/'
+        before=transport(prefix+'pages/'+page,token)
+        def identity(value):
+            if (not isinstance(value,dict) or value.get('object')!='page' or not isinstance(value.get('id'),str) or value['id'].lower()!=page
+                    or value.get('archived') is not False or value.get('in_trash',False) is not False
+                    or not isinstance(value.get('last_edited_time'),str) or not value['last_edited_time']):
+                raise SyncError('PROVIDER_SCOPE_MISMATCH')
+            return value['last_edited_time']
+        version=identity(before)
+        params={'page_size':MAX_ITEMS}
+        if cursor is not None:params['start_cursor']=page_token(cursor)
+        result=transport(prefix+'blocks/'+page+'/children?'+parse.urlencode(params),token)
+        for block in bounded(result,'results'):
+            if block.get('parent')!={'type':'page_id','page_id':before['id']}:raise SyncError('PROVIDER_SCOPE_MISMATCH')
+            code=block.get('code')
+            if block.get('type')!='code' or block.get('has_children') is not False or not isinstance(code,dict) or code.get('language')!='json':
+                pending+=1;continue
+            parts=code.get('rich_text')
+            if not isinstance(parts,list) or len(parts)>100 or any(not isinstance(part,dict) or part.get('type')!='text' or not isinstance(part.get('text'),dict) or not isinstance(part['text'].get('content'),str) for part in parts):
+                pending+=1;continue
+            try:rows.extend(canonical_text(''.join(part['text']['content'] for part in parts)))
+            except SyncError:pending+=1
+        if identity(transport(prefix+'pages/'+page,token))!=version:raise SyncError('SOURCE_CHANGED_DURING_ACQUISITION')
+        more=result.get('has_more')
+        if type(more) is not bool:raise SyncError('BOUNDED_PROVIDER_PAGE_REQUIRED')
+        next_cursor=page_token(result.get('next_cursor')) if more else None
+    else:
+        prefix='https://slack.com/api/'
+        auth=transport(prefix+'auth.test',token)
+        if not isinstance(auth,dict) or auth.get('ok') is not True or auth.get('team_id')!=source['workspaceId']:
+            raise SyncError('PROVIDER_SCOPE_MISMATCH')
+        info=transport(prefix+'conversations.info?'+parse.urlencode({'channel':source['channelId']}),token)
+        channel=info.get('channel') if isinstance(info,dict) else None
+        if (not isinstance(info,dict) or info.get('ok') is not True or not isinstance(channel,dict) or channel.get('id')!=source['channelId']
+                or channel.get('is_member') is not True or channel.get('is_ext_shared') is True or channel.get('is_shared') is True
+                or channel.get('is_im') is True or channel.get('is_mpim') is True):raise SyncError('PROVIDER_SCOPE_MISMATCH')
+        params={'channel':source['channelId'],'limit':15}
+        if cursor is not None:params['cursor']=page_token(cursor)
+        result=transport(prefix+'conversations.history?'+parse.urlencode(params),token)
+        if not isinstance(result,dict) or result.get('ok') is not True:raise SyncError('PROVIDER_UNAVAILABLE')
+        for item in bounded(result,'messages',15):
+            text=item.get('text')
+            if isinstance(text,str):
+                match=re.fullmatch(r'```(?:json|aurora-json)\s*\n([\s\S]*?)\n```',text.strip())
+                if match:text=match[1]
+            try:rows.extend(canonical_text(text))
+            except SyncError:pending+=1
+            # Replies/files are never silently counted as acquired by channel history.
+            if item.get('reply_count') or item.get('files'):pending+=1
+        more=result.get('has_more',False)
+        if type(more) is not bool:raise SyncError('BOUNDED_PROVIDER_PAGE_REQUIRED')
+        metadata=result.get('response_metadata',{})
+        if not isinstance(metadata,dict):raise SyncError('BOUNDED_PROVIDER_PAGE_REQUIRED')
+        next_cursor=page_token(metadata.get('next_cursor') or None)
+        if more and next_cursor is None:raise SyncError('PROVIDER_CURSOR_REQUIRED')
+    if more and next_cursor is None:raise SyncError('PROVIDER_CURSOR_REQUIRED')
+    if next_cursor is not None and next_cursor==cursor:raise SyncError('PROVIDER_CURSOR_NOT_ADVANCING')
+    if len(rows)>MAX_ITEMS:raise SyncError('PROVIDER_EXPORT_LIMIT')
+    return {'documents':rows,'pendingExtraction':pending,'pendingDocuments':[],
+            'coverageLimited':next_cursor is not None,'nextCursor':next_cursor}
+
 def pull(source, transport=api, environment=os.environ, imap_factory=imaplib.IMAP4_SSL, cursor=None, oauth_access_token=None):
     provider=source.get('provider')
     if provider not in PROVIDERS:raise SyncError('PROVIDER_NOT_SUPPORTED')
@@ -484,6 +579,7 @@ def pull(source, transport=api, environment=os.environ, imap_factory=imaplib.IMA
     else:
         if oauth_access_token is not None:raise SyncError('GOOGLE_OAUTH_CONFIGURATION_REQUIRED')
         token=token_for(source,environment)
+    if provider in ('NOTION','SLACK'):return workspace_documents(source,token,transport,cursor)
     rows=[]; pending=0;next_cursor=None;pending_documents=[]
     if provider=='GOOGLE_DRIVE':
         folder=identifier(source.get('folderId'))

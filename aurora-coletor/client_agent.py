@@ -19,11 +19,11 @@ import time
 
 import aurora_cloud_sync as sync
 from aurora_deployment import safe_path
-from provider_connectors import pull, exports, EXPORT_SUFFIXES, MAX_PROVIDER_BYTES, google_oauth_context, google_oauth_resolve, ProviderAuthenticationError
+from provider_connectors import pull, exports, EXPORT_SUFFIXES, MAX_PROVIDER_BYTES, google_oauth_context, google_oauth_resolve, ProviderAuthenticationError, workspace_scope
 from client_secret_store import load as load_secret
 import published_release as release
 
-VERSION='1.0.4'
+VERSION='1.0.5'
 SCHEMA='aurora.client-agent.v1'
 MAX_ENTRIES=200
 SOURCE_PROOF_TTL_SECONDS=300
@@ -64,8 +64,9 @@ def validate(config):
             raise sync.SyncError('SOURCE_STATE_OVERLAP')
         checked.append(root)
     for source in providers:
-        if not isinstance(source,dict) or set(source)-{'provider','tokenEnv','folderId','labelId','host','user','folder','oauth'}:
+        if not isinstance(source,dict) or set(source)-{'provider','tokenEnv','folderId','labelId','host','user','folder','oauth','pageId','workspaceId','channelId'}:
             raise sync.SyncError('PROVIDER_CONFIG_INVALID')
+        if source.get('provider') in ('NOTION','SLACK'):workspace_scope(source)
         if 'oauth' in source:google_oauth_context(source,org,config['instanceId'])
     return checked,state
 

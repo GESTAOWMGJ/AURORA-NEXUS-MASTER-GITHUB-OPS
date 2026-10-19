@@ -74,6 +74,8 @@ jobs:
         run: python -m unittest discover -s aurora-coletor/tests -p test_collector_lifecycle.py -v
       - name: First-client agent isolation and reversible installation
         run: python -m unittest discover -s aurora-coletor/tests -p 'test_client_agent*.py' -v
+      - name: Notion and Slack scoped read, pagination and rejection contracts
+        run: python -m unittest discover -s aurora-coletor/tests -p test_workspace_connectors.py -v
       - name: Scoped provider read and pending extraction contracts
         run: python -m unittest discover -s aurora-coletor/tests -p test_provider_connectors.py -v
       - name: Canonical portal gate, beta.4 continuity and rollback tests
