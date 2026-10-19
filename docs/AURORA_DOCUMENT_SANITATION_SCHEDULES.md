@@ -24,3 +24,5 @@ Não repetir a cada passagem. Prazo solicitado é distinto de obrigação contra
 A validação deste incremento é de representação e segregação, com projeção sintética. Não demonstra execução de envio, concorrência de e-mails reais, adoção no dispositivo ou deploy. Integração de um executor requer testes de autorização/revogação, concorrência, envio incerto, deduplicação entre rotinas e recibo no ambiente autorizado. Recuperação da política pelo motor instalado requer evidência própria.
 
 Rollback: reverter o incremento de política/registro, preservando as pendências, envios e fontes privadas. Não altera release pointer nem instaladores.
+
+A política complementar versionada está em `firebase-migration/policy/document-sanitation-schedules-v1.json`. A baseline sanitizada histórica 2.3.0 e seus hashes permanecem intactos. A primeira tentativa de CI apontou a alteração indevida dessa baseline; este incremento foi separado sem enfraquecer o verificador.

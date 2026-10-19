@@ -1,0 +1,37 @@
+{
+  "schema": "aurora.document-sanitation.v1",
+  "sourceSkill": "aurora-nexus",
+  "sourceSkillVersion": "2.3.3",
+  "state": "SPECIFIED_PENDING_EXECUTOR_VALIDATION",
+  "supersedesHistoricalBaseline": false,
+  "version": 1,
+  "routineId": "AURORA-REV-SAN-001",
+  "competenceIssueAndCashDatesDistinct": true,
+  "summaryIsAdditionalRevenue": false,
+  "productionDifferenceIsAcceptedGloss": false,
+  "missingEvidenceIsZero": false,
+  "scheduleStates": [
+    "PLANNED_RECEIVED",
+    "CURRENT_VALIDATED",
+    "EXECUTED_VALIDATED",
+    "VALIDATION_NOT_LOCATED",
+    "COVERAGE_UNKNOWN"
+  ],
+  "ownerResolution": "VERIFIED_TENANT_CONFIGURATION",
+  "externalRequestAuthority": "EXISTING_EXPLICIT_TENANT_AUTHORIZATION",
+  "sharedIssueKey": [
+    "organization",
+    "competence",
+    "gapType",
+    "owner"
+  ],
+  "readLatestResponseBeforeSend": true,
+  "reuseExistingQueueAndExecutor": true,
+  "unknownSendOutcome": "RECONCILE_SENT_BEFORE_RETRY",
+  "sourceAccessError": "COVERAGE_UNKNOWN",
+  "closeOnlyWithEvidence": true,
+  "privateOwnerIdentityExported": false,
+  "runtimeVerified": false,
+  "sourcePolicySha256": "637b1d24a567f7faf3e4c9353de58bec233c6336082117663b7d7e0ee0cd1bf7",
+  "registrationOnly": true
+}
