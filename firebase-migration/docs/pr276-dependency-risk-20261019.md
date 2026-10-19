@@ -8,7 +8,7 @@ A atualização do Firebase CLI para `15.34.0` reduziu alertas, mas conservou du
 
 | Prioridade | Fato e impacto | Próximo passo verificável |
 |---|---|---|
-| 1. Dependências residuais | Override restrito corrige Core; auditoria dos testes passa de 3 HIGH/2 MODERATE para 3 HIGH/0 MODERATE. `braces` permanece vulnerável. | Concluir revisão e CI do novo SHA; conservar o risco sem supressão e acompanhar correção upstream. |
+| 1. Dependências residuais | Override exclusivo dos testes, com verificação de consumidores, corrige Core; auditoria passa de 3 HIGH/2 MODERATE para 3 HIGH/0 MODERATE. `braces` permanece vulnerável. | Concluir revisão e CI do novo SHA; conservar o risco sem supressão e acompanhar correção upstream. |
 | 2. Ferramenta de implantação | HML e produção executam CLI `14.17.0` fora do lockfile dos testes, após autenticação. Há também reparo HML com `15.32.1`. | Inventariar a árvore realmente instalada nesses jobs e validar atualização própria, sem estender o resultado deste patch aos deploys. |
 | 3. Governança | PR sem revisão humana registrada; proteção de `main` não comprovada como ativa; exceção R029 expirada. | Exigir proteção efetiva, revisão humana independente e gates aplicáveis antes de integrar ou publicar. |
 
@@ -50,7 +50,7 @@ Os [manifestos publicados do CLI][cli-manifest] e do [Pub/Sub][pubsub-manifest] 
 | `braces` | `latest = 3.0.3`; aviso sem versão corrigida | Não há atualização corretiva publicada para aplicar. |
 | `chokidar` | `latest = 5.0.0`; consumidor usa `3.6.0` | v4 remove globs; v5 acrescenta ESM e Node >=20.19. A [migração][chokidar-changelog] altera o contrato de filtros usado pelo CLI. |
 | Pub/Sub | `latest = 6.3.0`; linha `legacy-18 = 5.3.1` | v6 sai de `^5.2.0` e altera majors de `google-gax` e autenticação; não é a menor correção compatível demonstrada. |
-| OpenTelemetry Core | `latest = 2.12.0`; mínimo corrigido `2.8.0` | Fixar `2.8.0` somente no consumidor inspecionado; Node 22 satisfaz seus requisitos. |
+| OpenTelemetry Core | `latest = 2.12.0`; mínimo corrigido `2.8.0` | Fixar `2.8.0` nos testes e verificar que o grafo só contém o consumidor inspecionado; Node 22 satisfaz seus requisitos. |
 
 Essas versões são um retrato da consulta, não uma política de atualização permanente. A escolha do mínimo corrigido é acompanhada da auditoria atual e da validação do consumidor.
 
@@ -68,41 +68,42 @@ O [manifest das Functions][functions-manifest] declara `firebase-admin` e `fireb
 
 ## 4. Patch mínimo e reversível
 
-O override fica restrito às versões dos dois consumidores conhecidos:
+O override é declarado diretamente na raiz exclusiva de `firebase-migration/tests`. A proposta preliminar aninhada por CLI/PubSub funcionou no npm 11, mas o npm 10 da CI perdeu seu efeito e rejeitou o lockfile. A reprodução com Node `22.23.3` e npm `10.9.9` confirmou a diferença. A correção final preserva a versão do gerenciador e os workflows existentes:
 
 ```json
 {
-  "firebase-tools@15.34.0": {
-    "@google-cloud/pubsub@5.3.1": {
-      "@opentelemetry/core": "2.8.0"
-    }
+  "overrides": {
+    "@opentelemetry/core": "2.8.0"
   }
 }
 ```
 
-O CLI permanece `15.34.0` e Pub/Sub permanece `5.3.1`. No lockfile, um nó muda de Core `1.30.1` para `2.8.0`; desaparece o nó aninhado `semantic-conventions 1.28.0`, passando a ser reutilizada a cópia compatível `1.39.0` já existente. Não houve atualização global das dependências.
+O CLI permanece `15.34.0` e Pub/Sub permanece `5.3.1`. No lockfile, um nó muda de Core `1.30.1` para `2.8.0`; desaparece o nó aninhado `semantic-conventions 1.28.0`, passando a ser reutilizada a cópia compatível `1.39.0` já existente. A regeneração pelo npm 10 com override direto produziu o mesmo lockfile corrigido, sem atualização global das demais dependências.
 
-A mudança atravessa a versão principal do Core e ultrapassa a faixa original declarada pelo Pub/Sub. Seu fundamento é o override já adotado pelo upstream do CLI, acompanhado de resolução real e regressões do consumidor. Isso reduz incerteza, mas não dispensa CI. O escopo por versões exatas exige nova avaliação quando CLI ou Pub/Sub forem atualizados, evitando que a decisão se propague silenciosamente.
+A mudança atravessa a versão principal do Core e ultrapassa a faixa original declarada pelo Pub/Sub. Seu fundamento é o override já adotado pelo upstream do CLI, acompanhado de resolução real e regressões do consumidor. Sintaticamente, o override alcança toda a árvore deste pacote de testes. No grafo examinado há um único consumidor de Core: Pub/Sub `5.3.1`. Um novo teste verifica todos os registros do lockfile, inclusive a raiz, nos campos `dependencies`, `devDependencies`, `optionalDependencies` e `peerDependencies`; exige esse único consumidor e uma única cópia de Core `2.8.0`. A resolução real também exige CLI `15.34.0` e Pub/Sub `5.3.1`. Um consumidor novo, versão diferente ou cópia adicional faz o teste falhar e exige reavaliação da compatibilidade. Esses controles não dispensam a revisão humana e a CI.
 
 ## 5. Validação e estados de evidência
 
 | Verificação | Resultado desta revisão |
 |---|---|
-| `npm ci --ignore-scripts` nos testes | Concluído: 690 pacotes, aproximadamente 12 segundos. |
+| `npm ci --ignore-scripts` nos testes | Instalações limpas concluídas com npm 10.9.9/Node 22.23.3 e npm 11.9.0/Node 24.19.0: 690 pacotes em cada uma. |
 | `npm ls` e `npm explain` | Saída de sucesso; Core corrigido resolvido a partir do consumidor Pub/Sub. |
 | Versão do executável Firebase | `15.34.0`. |
 | Auditoria dos testes, antes/depois | 3 HIGH + 2 MODERATE → 3 HIGH + 0 MODERATE. |
 | Auditoria do conjunto de Functions | Zero vulnerabilidades na medição atual. |
-| Teste determinístico novo | 17/17 aprovados em Node 24.19.0, com relatório TAP completo e revisão técnica da cobertura. |
+| Teste determinístico novo | 18/18 aprovados em Node 22.23.3 e Node 24.19.0, após instalação limpa com os respectivos npm 10.9.9 e 11.9.0. |
 | Controle negativo | Seis cenários escalar/array reproduzem ausência de limites no extrator oficial 1.30.1 e passam no 2.8.0. |
+| Controle negativo do grafo | A inclusão sintética de um novo consumidor via peer dependency e de uma cópia vulnerável aninhada faz o novo teste falhar, com código 1. |
 | Nova CI / Rules / worker Windows | PENDING no corte anterior à submissão deste commit; consultar os checks do SHA final no PR. |
 | Integração, HML e produção | Não realizadas por esta correção. |
 
-`tooling-dependencies.test.mjs` resolve o Core a partir do módulo real de telemetria do Pub/Sub. Verifica versão, identidade compartilhada da API, propagação de trace, rejeição de contextos inválidos e ausência de leitura de baggage nessa rota. Exercita também o extrator corrigido com entradas sintéticas pequenas nos limites de 180 entradas, 4.096 bytes por entrada e 8.192 bytes totais, incluindo formatos escalar e array.
+`tooling-dependencies.test.mjs` resolve o Core a partir do módulo real de telemetria do Pub/Sub. Verifica o grafo de consumidores, versão, identidade compartilhada da API, propagação de trace, rejeição de contextos inválidos e ausência de leitura de baggage nessa rota. Exercita também o extrator corrigido com entradas sintéticas pequenas nos limites de 180 entradas, 4.096 bytes por entrada e 8.192 bytes totais, incluindo formatos escalar e array.
 
 Não há cliente Pub/Sub, exportador ou credenciais nesses testes. Aprovação dessas regressões não demonstra correção de `braces`, funcionamento do emulador ou execução do deploy. A suíte foi incluída nos scripts de teste existentes; o próximo gate é sua execução no Node 22 configurado na CI, junto das validações aplicáveis. Processamento pesado deve permanecer preferencialmente no worker Windows autorizado; sua execução continua pendente de recibo.
 
 O controle negativo usa os extratores oficiais com o mesmo peer API: a versão antiga aceita 181 entradas, uma entrada de 4.097 bytes e um total de 8.193 bytes; a corrigida limita ou descarta o excedente. O maior input desse controle foi de 8.193 bytes. Não foi executado teste de esgotamento de memória ou pilha. O runner padrão também propagou corretamente uma falha intencional; a apresentação detalhada local foi obtida com `--test-isolation=none`, sem alterar os scripts por essa diferença de apresentação.
+
+A [CI da candidata preliminar `c93d1e7`][ci-preliminar] falhou no `npm ci` por exigir Core `1.30.1` e semantic-conventions `1.28.0`, antes dos testes e emuladores. Esse resultado não foi ocultado ou convertido em exceção: motivou o ajuste do override e as instalações limpas em ambas as versões do npm. O novo commit precisa de nova CI. O CLI também foi validado no Node 22 com diretório de configuração temporário próprio, versão `15.34.0` e saída 0; uma tentativa anterior em configuração global somente leitura foi diagnosticada como erro de escrita, não contada como aprovação.
 
 ## 6. Mitigações observadas e recomendadas
 
@@ -124,7 +125,7 @@ Os 30 workflows inspecionados não têm `workflow_run` ou `pull_request_target`.
 
 ## 8. Reversão e aprendizado reutilizável
 
-Se surgir regressão, produzir **novo commit de reversão apenas deste incremento**, preservando a atualização `15.34.0` do PR #276 e mudanças concorrentes. Reinstalar pelo lockfile revertido, repetir testes/auditoria e registrar o retorno dos alertas moderados. Não reescrever histórico nem restaurar indiscriminadamente a branch.
+Se surgir regressão, produzir **novos commits de reversão dos incrementos desta investigação, em ordem inversa**, retornando os arquivos ao candidato original `ba6d083a11481045a62f2903f86893a198227bc5` e preservando sua atualização `15.34.0` e mudanças concorrentes. Reinstalar pelo lockfile revertido, repetir testes/auditoria e registrar o retorno dos alertas moderados. Não reescrever histórico nem restaurar indiscriminadamente a branch.
 
 O aprendizado registrado é: contagem de advisories, presença transitiva, caminho executável, contexto de credenciais e instalação publicada são provas distintas. O registro não habilita automação, não promove release e não declara risco encerrado.
 
@@ -146,3 +147,4 @@ O aprendizado registrado é: contagem de advisories, presença transitiva, camin
 [chokidar-source]: https://github.com/paulmillr/chokidar/blob/3.6.0/index.js
 [chokidar-changelog]: https://github.com/paulmillr/chokidar/blob/main/CHANGELOG.md
 [firestore-watcher]: https://github.com/firebase/firebase-tools/blob/v15.34.0/src/emulator/firestoreEmulator.ts
+[ci-preliminar]: https://github.com/GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS/actions/runs/39285772018/job/118171162619

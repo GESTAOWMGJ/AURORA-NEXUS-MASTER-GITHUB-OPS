@@ -1,6 +1,7 @@
 /**
- * Regression coverage for the scoped Firebase CLI 15.34.0 -> Pub/Sub 5.3.1 ->
- * OpenTelemetry core 2.8.0 override. Resolve from the actual consuming module:
+ * Regression coverage for Firebase CLI 15.34.0 -> Pub/Sub 5.3.1 ->
+ * OpenTelemetry core 2.8.0. Guard the test-only root override's consumer graph.
+ * Resolve from the actual consuming module:
  * an unrelated, corrected top-level copy must not hide a vulnerable nested copy.
  * These tests exercise local propagation only; no Pub/Sub client, exporter,
  * emulator, credentials, or network connection is needed.
@@ -43,7 +44,30 @@ test('the Firebase CLI consumer loads the pinned corrected OpenTelemetry core', 
     'Pub/Sub and the core it loads must share the compatible OpenTelemetry API');
 });
 
-test('Pub/Sub trace propagation remains compatible with the scoped override',
+test('the core override is limited to the reviewed Pub/Sub consumer graph', () => {
+  const lock = readManifest(new URL('./package-lock.json', import.meta.url));
+  const packages = Object.entries(lock.packages);
+  const dependencyFields = [
+    'dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'
+  ];
+  const coreName = '@opentelemetry/core';
+  const consumers = packages
+    .filter(([, entry]) => dependencyFields.some((field) =>
+      Object.hasOwn(entry[field] ?? {}, coreName)))
+    .map(([path, entry]) => ({
+      name: entry.name ?? path.split('node_modules/').at(-1),
+      version: entry.version
+    }));
+
+  assert.deepEqual(consumers, [{ name: '@google-cloud/pubsub', version: '5.3.1' }],
+    'a new core consumer requires a fresh compatibility review of the major override');
+  assert.deepEqual(packages
+    .filter(([path]) => path.endsWith(`node_modules/${coreName}`))
+    .map(([, entry]) => entry.version), ['2.8.0'],
+  'a vulnerable or additional core copy must not be hidden in the lockfile');
+});
+
+test('Pub/Sub trace propagation remains compatible with the corrected core',
   { concurrency: false }, async (t) => {
     const enabledBefore = pubsubTracing.isEnabled() !== pubsubTracing.OpenTelemetryLevel.None;
     pubsubTracing.setGloballyEnabled(true);

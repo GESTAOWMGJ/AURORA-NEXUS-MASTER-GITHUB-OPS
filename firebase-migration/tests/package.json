@@ -16,11 +16,7 @@
     "firebase-tools": "15.34.0"
   },
   "overrides": {
-    "firebase-tools@15.34.0": {
-      "@google-cloud/pubsub@5.3.1": {
-        "@opentelemetry/core": "2.8.0"
-      }
-    },
+    "@opentelemetry/core": "2.8.0",
     "@firebase/firestore": {
       "@grpc/grpc-js": "1.13.6"
     },
