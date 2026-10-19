@@ -6,6 +6,42 @@ regressão e memória isolada. O registro nativo já é usado pela projeção e 
 Master Engine; `learningCapturePolicy` explicita captura autorizada e preferência
 por regras determinísticas/Knowledge Registry/modelo privado, sem IA externa obrigatória.
 
+## Credencial renovada e checkpoint de versão comum — candidata de 19/10/2026
+
+Desafio sanitizado: a referência assinada atual pode ser lida e preparada, mas a
+ativação encontra um checkpoint cujo recibo foi emitido por credencial anterior
+expirada. A checagem não pode aceitar a chave nova como se tivesse produzido o
+recibo antigo. Foram identificadas duas dependências: o replay de documento
+inalterado por outra chave não gerava recibo completo atual; a transição exigia
+que a IA já instalada tivesse exatamente a versão ativa antes de atualizar seu
+checkpoint, criando um ciclo com a ativação seguinte.
+
+Regra reutilizável no mesmo motor: POST canônico autorizado pela nova chave e
+repetição idempotente produzem evidência própria vinculada ao documento/versão,
+hash do payload, revisão e snapshot já existentes. O registro anterior permanece
+imutável. O novo recibo deve ser selecionado explicitamente e pertencer à chave
+autenticada; `integration.read` sem `documents.ingest` e replay não basta. Escopos,
+validade/revogação, organização, emissor e automação são lidos no servidor. O
+recibo não concede acesso à origem nem prova ingestão global ou serviço instalado.
+
+A versão ativa autoriza os bytes do pacote Windows atual; a assinatura histórica
+e o estado instalado comprovam a linhagem da IA anterior. São provas distintas:
+não se exige instalar primeiro a IA nova para gerar a transição que ela própria
+exige. O mecanismo `checkpoint-transitions` existente preserva predecessor,
+recibo antigo, novo aceite, cadeia assinada e commit por CAS. Identidade, journal,
+metadata e todos os bytes da IA âncora continuam obrigatórios. A ativação lê o
+recibo novo com chave/tupla/configuração atuais e mantém a lease remota de 30s.
+
+Regressões sintéticas devem cobrir rotação A→B preservando a tupla, ausência de
+POST/replay, escopo insuficiente, expiração/revogação, emissor/automação inativos,
+recibo estrangeiro ou de outra versão, payload/hash alterados, âncora adulterada,
+concorrência e recuperação idempotente. Replay não pode criar entidade, versão,
+revisão, contagem de ingestão ou lançamento financeiro adicional. Estado desta
+entrada: implementação candidata e regressões; CI, HML, atualização instalada e
+publicação exigem recibos próprios. O registro nativo já referencia este know-how;
+não há outro motor, scheduler, banco ou treinamento de pesos. Rollback conserva
+histórico e fontes, revertendo somente o incremento revisado.
+
 ## Recuperação de sessão após MFA — candidata de 19/10/2026
 
 Desafio sanitizado, baseline `eaa9e20f537e1bd0ee9c9f9a6b79c35941853008`:

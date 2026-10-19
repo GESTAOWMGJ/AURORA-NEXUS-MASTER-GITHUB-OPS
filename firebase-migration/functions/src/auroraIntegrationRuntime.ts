@@ -28,6 +28,8 @@ import { ACTIVE_RELEASE_READ_PATH, createActiveReleaseReadHandler } from './auro
 import { ACTIVE_RELEASE_SOURCE } from './auroraActiveRelease.js';
 import { readRuntimeActiveRelease } from './auroraActiveReleaseRuntime.js';
 import { configureCanonicalAutomation, integrationReplayPatch,publicAutomationConfiguration } from './auroraInstallationAcceptance.js';
+import { buildIntegrationRevalidationReceipt, isLegacyMinimalIntegrationReceipt,
+  revalidationAuthorityActive } from './auroraIntegrationRevalidation.js';
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -355,13 +357,18 @@ export const auroraNexusIntegrationPing = onRequest({cors:false}, async (req,res
   if (documentId !== undefined && (typeof documentId !== 'string' || !/^[a-f0-9]{48}$/.test(documentId))) {
     res.status(400).json({ok:false,code:'INVALID_DOCUMENT_ID'}); return;
   }
+  const receiptId=req.query?.receiptId;
+  if (receiptId!==undefined && (typeof receiptId!=='string' || !/^[a-f0-9]{64}$/.test(receiptId) || documentId===undefined)) {
+    res.status(400).json({ok:false,code:'INVALID_RECEIPT_SELECTION'}); return;
+  }
   res.status(200).json({
     ok:true,
     service:"aurora-nexus-integration",
     orgId:principal.orgId,
     keyId:principal.keyId,
     connector:principal.name,
-    installation:await loadInstallationReadiness(principal.orgId, documentId),
+    installation:await loadInstallationReadiness(principal.orgId, documentId,
+      receiptId!==undefined ? {receiptId,keyId:principal.keyId} : undefined),
     time:new Date().toISOString()
   });
 });
@@ -425,21 +432,73 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
         permissions:Array.isArray(current.permissions)?current.permissions:[]
       })) return {kind:'ERROR' as const,code:'MEMBERSHIP_REVOKED'};
     }
+    // The initial bearer check precedes this transaction. Recheck revocation,
+    // expiry and tenant binding in the same snapshot that may write a receipt.
+    const credential=principal.member ? null
+      : (await tx.get(auroraDb.doc(`${base}/integrationCredentials/${principal.keyId}`))).data() ?? null;
+    if (!principal.member && (credential?.orgId!==principal.orgId || credential.keyId!==principal.keyId
+      || !credentialAllowsScope(credential,'documents.ingest'))) return {kind:'ERROR' as const,code:'INVALID_INTEGRATION_KEY'};
+    const issuer=credential && typeof credential.createdBy==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(credential.createdBy)
+      ? (await tx.get(auroraDb.doc(`${base}/members/${credential.createdBy}`))).data() ?? null : null;
+    const configuredBy=credential?.automation?.configuredBy;
+    const configurer=typeof configuredBy==='string' && /^[A-Za-z0-9_-]{1,128}$/.test(configuredBy)
+      ? configuredBy===credential?.createdBy ? issuer
+        : (await tx.get(auroraDb.doc(`${base}/members/${configuredBy}`))).data() ?? null : null;
+    const authority={org:orgSnap.data() ?? null,credential,issuer,configurer};
     if (idemSnap.exists) {
       if (idemSnap.data()?.bodyHash !== bodyHash) return {kind:"ERROR" as const,code:"IDEMPOTENCY_CONFLICT"};
-      const storedVersionId=idemSnap.data()?.versionId;
+      const current=currentSnap.data() ?? null;
+      const receipt=idemSnap.data() ?? null;
+      const minimal=isLegacyMinimalIntegrationReceipt(receipt,principal,bodyHash,canonical.id);
+      const storedVersionId=receipt?.versionId ?? (minimal && typeof current?.entityKey==='string'
+        && Number.isSafeInteger(current.revision) && current.revision>=1
+        ? immutableEntityVersionId('sourceDocument',current.entityKey,current.revision) : null);
       const storedVersion=typeof storedVersionId==='string' && /^[a-f0-9]{48}$/.test(storedVersionId)
         ? await tx.get(auroraDb.doc(`${base}/entityVersions/${storedVersionId}`)) : null;
-      const replay=integrationReplayPatch(principal.orgId,principal,idemSnap.data() ?? null,currentSnap.data() ?? null,
-        storedVersion?.exists ? {...storedVersion.data(),_readVersionId:storedVersionId} : null,
-        bodyHash,canonical.id,FieldValue.serverTimestamp());
+      const version=storedVersion?.exists ? {...storedVersion.data(),_readVersionId:storedVersionId} : null;
+      const originalReceiptId=storedVersion?.data()?.idempotencyId;
+      const originalData=(minimal || receipt?.revalidation!==undefined) && typeof originalReceiptId==='string'
+        && /^[a-f0-9]{64}$/.test(originalReceiptId)
+        ? (await tx.get(auroraDb.doc(`${base}/apiIdempotency/${originalReceiptId}`))).data() ?? null : null;
+      const original=originalData ? {...originalData,_readReceiptId:originalReceiptId} : null;
+      if (minimal && !principal.member) {
+        const upgraded=buildIntegrationRevalidationReceipt({orgId:principal.orgId,principal,receiptId:idemId,
+          documentId:canonical.id,document:current,version,originalReceipt:original,bodyHash,
+          timestamp:FieldValue.serverTimestamp(),authority});
+        if (!upgraded) return {kind:'ERROR' as const,code:'REVALIDATION_BINDING_CONFLICT'};
+        tx.set(idemRef,upgraded); // First validated POST upgrades metadata, never counts as replay.
+        return {kind:'DUPLICATE' as const,documentId:canonical.id,revalidation:true};
+      }
+      if (receipt?.revalidation!==undefined && !revalidationAuthorityActive(principal.orgId,principal.keyId,authority,undefined,current?.source?.system)) {
+        return {kind:'ERROR' as const,code:'REVALIDATION_AUTHORITY_INACTIVE'};
+      }
+      const replay=integrationReplayPatch(principal.orgId,principal,receipt,current,version,
+        bodyHash,canonical.id,FieldValue.serverTimestamp(),{receiptId:idemId,originalReceipt:original});
+      if (receipt?.revalidation!==undefined && !replay) return {kind:'ERROR' as const,code:'REVALIDATION_BINDING_CONFLICT'};
       if(replay) tx.set(idemRef,replay,{merge:true});
-      return {kind:"DUPLICATE" as const,documentId:String(idemSnap.data()?.documentId || canonical.id)};
+      return {kind:"DUPLICATE" as const,documentId:String(receipt?.documentId || canonical.id),
+        revalidation:receipt?.revalidation!==undefined};
     }
     const current=currentSnap.exists ? currentSnap.data() ?? {} : null;
     const versionDecision=integrationDocumentVersionDecision(current,payload,canonical.canonicalSnapshotHash,bodyHash,timestampIso(current?.occurredAt));
     if (versionDecision !== 'UPDATE') {
       if (versionDecision === 'DUPLICATE') {
+        if (!principal.member) {
+          const versionId=typeof current?.entityKey==='string' && Number.isSafeInteger(current.revision) && current.revision>=1
+            ? immutableEntityVersionId('sourceDocument',current.entityKey,current.revision) : null;
+          const versionSnap=versionId ? await tx.get(auroraDb.doc(`${base}/entityVersions/${versionId}`)) : null;
+          const originalReceiptId=versionSnap?.data()?.idempotencyId;
+          const originalData=typeof originalReceiptId==='string' && /^[a-f0-9]{64}$/.test(originalReceiptId)
+            ? (await tx.get(auroraDb.doc(`${base}/apiIdempotency/${originalReceiptId}`))).data() ?? null : null;
+          const original=originalData ? {...originalData,_readReceiptId:originalReceiptId} : null;
+          const receipt=buildIntegrationRevalidationReceipt({orgId:principal.orgId,principal,receiptId:idemId,
+            documentId:canonical.id,document:current,
+            version:versionSnap?.exists ? {...versionSnap.data(),_readVersionId:versionId} : null,
+            originalReceipt:original,bodyHash,timestamp:FieldValue.serverTimestamp(),authority});
+          if (!receipt) return {kind:'ERROR' as const,code:'REVALIDATION_BINDING_CONFLICT'};
+          tx.create(idemRef,receipt);
+          return {kind:'DUPLICATE' as const,documentId:docRef.id,revalidation:true};
+        }
         tx.create(idemRef,{
           bodyHash,documentId:docRef.id,keyId:principal.keyId,
           createdAt:FieldValue.serverTimestamp()
@@ -550,10 +609,12 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
   }
   // Resume the same native pipeline after a duplicate or an uncertain previous response.
   // A projection failure cannot turn an already committed document into a failed ingestion.
-  try {
-    await refreshProjection(principal.orgId, {uid:`integration:${principal.keyId}`, role:'integration', source:'INTEGRATION'});
-  } catch {
-    logger.warn('First ingestion projection pending', {orgId:principal.orgId, code:'PROJECTION_PENDING', sanitized:true});
+  if (!('revalidation' in result && result.revalidation)) {
+    try {
+      await refreshProjection(principal.orgId, {uid:`integration:${principal.keyId}`, role:'integration', source:'INTEGRATION'});
+    } catch {
+      logger.warn('First ingestion projection pending', {orgId:principal.orgId, code:'PROJECTION_PENDING', sanitized:true});
+    }
   }
   res.status(result.kind === "DUPLICATE" ? 200 : 202).json({
     ok:true,
@@ -561,12 +622,14 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
     accepted:result.kind === "ACCEPTED",
     duplicate:result.kind === "DUPLICATE",
     documentId:result.documentId,
+    receiptId:idemId,
     sourceSystem:payload.sourceSystem,
     sourceIndependent:payload.sourceIndependent,
     nativeReady:payload.nativeReady,
     sourceVersion:payload.sourceVersion,
     canonicalSnapshotHash:canonical.canonicalSnapshotHash,
     ...(payload.sourceEvidence ? {sourceEvidenceHash:acquisitionEvidenceHash(payload.sourceEvidence)} : {}),
-    installation:await loadInstallationReadiness(principal.orgId, canonical.id)
+    installation:await loadInstallationReadiness(principal.orgId, canonical.id,
+      principal.member ? undefined : {receiptId:idemId,keyId:principal.keyId})
   });
 });

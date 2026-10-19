@@ -25,8 +25,9 @@ import { readRuntimeActiveRelease } from "./auroraActiveReleaseRuntime.js";
 import { readInstallationReadiness } from "./auroraInstallationReadiness.js";
 import { immutableEntityVersionId } from "./auroraCanonicalVersions.js";
 import { authenticatedOrganizationEnvironment } from "./auroraRuntimeEnvironment.js";
+import type { InstallationReceiptSelection } from './auroraIntegrationRevalidation.js';
 
-export async function loadInstallationReadiness(orgId: string, documentId?: string) {
+export async function loadInstallationReadiness(orgId: string, documentId?: string, selection?:InstallationReceiptSelection) {
   return auroraDb.runTransaction(async tx => {
     const org = await tx.get(auroraDb.doc(`organizations/${orgId}`));
     const active = org.exists && isActiveOrganization(org.data())
@@ -35,7 +36,7 @@ export async function loadInstallationReadiness(orgId: string, documentId?: stri
       if (!active) return null;
       const snap = await tx.get(auroraDb.doc(path));
       return snap.exists ? snap.data() ?? null : null;
-    }, documentId);
+    }, documentId, selection);
   });
 }
 

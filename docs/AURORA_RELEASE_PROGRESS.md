@@ -1,5 +1,32 @@
 # AURORA NEXUS — progresso até a versão vendável
 
+## Candidata de revinculação documental de credencial — 19/10/2026
+
+Produto `1.1.0-beta.2`, WindowsIntegration `1.0.7`, módulos M08/M09/M10,
+baseline reconciliada `b9fdc1ff9f6882b50c0b1f2f5f0b16a87a15e1da`. Uma chave expirada não pode
+continuar autorizando checkpoint por recibo histórico. A candidata permite
+revalidação explícita pelo POST documental existente com a nova identidade,
+seguida de replay idempotente, sem alterar documento, versão imutável ou fatos
+financeiros. O novo recibo vincula a operação atual à mesma tupla canônica e à
+proveniência anterior. GET com `documentId` e `receiptId` seleciona somente o
+recibo pertencente à chave autenticada e revalida escopos, emissor e automação.
+GET isolado e troca local de identificadores não constituem revalidação.
+
+A transição de checkpoint existente usa o pacote Windows da referência ativa e
+preserva a âncora IA histórica assinada, seus bytes/metadata/identidade e a cadeia
+de `previous/next/proof/commit`. A ativação continua exigindo prova remota fresca,
+recibo calculado pela chave atual, configuração e tupla exatas, CAS e pin atual;
+nenhuma comparação de `checkpointAuthority` foi dispensada. Este incremento
+não instala componente, não amplia escopo e não declara ingestão global.
+
+Código e testes são candidatos; revisão, CI no SHA final, publicação assinada e
+adoção real permanecem provas separadas. O gate privado e os gates de instalação,
+Mac/iOS e distribuição do Cockpit não são promovidos por essa alteração.
+Rollback: reverter o incremento pelo fluxo revisado; preservar os recibos,
+documentos, versões, transições e journals anteriores. Conhecimento e limites em
+`AURORA_MASTER_KNOWHOW_TRANSFER_20261013.md`.
+
+
 ## Candidata de recuperação da sessão após MFA — 19/10/2026
 
 Produto `1.1.0-beta.2`, módulo M09, baseline

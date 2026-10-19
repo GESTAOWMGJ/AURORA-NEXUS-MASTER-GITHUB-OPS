@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { credentialAllowsScope } from './auroraIntegrationCredential.js';
 import { canImportNativeDocuments, NATIVE_INGESTION_ORIGIN, type DocumentPrincipal } from './auroraNativeIngestion.js';
 import type { AuroraMember } from './auroraAccess.js';
+import { integrationRevalidationMatches, validInstallationReceiptSelection,
+  type InstallationReceiptSelection } from './auroraIntegrationRevalidation.js';
 
 type Data = Record<string, any>;
 export const ACQUISITION_METHODS = ['CLOUD_OAUTH', 'API_TOKEN', 'LOCAL_AGENT', 'MANUAL'] as const;
@@ -101,7 +103,8 @@ export type InstallationAcceptance = {
 
 /** Metadata allowlist only. Client method/flags, ping and cached receipts cannot satisfy it. */
 export async function readInstallationAcceptance(orgId:string, processing:Data, document:Data|null,
-  version:Data|null, completion:Data|null, read:(path:string)=>Promise<Data|null>, clock:Date|(()=>Date)=()=>new Date()): Promise<InstallationAcceptance> {
+  version:Data|null, completion:Data|null, read:(path:string)=>Promise<Data|null>, clock:Date|(()=>Date)=()=>new Date(),
+  selection?:InstallationReceiptSelection): Promise<InstallationAcceptance> {
   const currentTime=typeof clock==='function'?clock:()=>clock, now=currentTime();
   const result:InstallationAcceptance = {schemaVersion:INSTALLATION_ACCEPTANCE_SCHEMA, orgId,
     canonicalOrigin:NATIVE_INGESTION_ORIGIN, state:'PENDING_PROCESSING', eligible:false,
@@ -117,11 +120,12 @@ export async function readInstallationAcceptance(orgId:string, processing:Data, 
     limitations:['PROVIDER_ACCESS_NOT_VERIFIED','LOCAL_COLLECTION_NOT_VERIFIED','AGENT_EXECUTION_NOT_VERIFIED','GLOBAL_EXTRACTION_NOT_VERIFIED']};
   if (!result.processingVerified || document?.orgId !== orgId || version?.orgId !== orgId) return result;
   result.state = 'PENDING_RECEIPT';
-  const receiptId = version.idempotencyId;
+  if (selection!==undefined && !validInstallationReceiptSelection(selection)) return result;
+  const receiptId = selection?.receiptId ?? version.idempotencyId;
   const integration = document.integration;
   if (!hash(receiptId) || !integration || !hash(integration.payloadHash)) return result;
-  const keyId = integration.keyId;
-  const method = integration.transport === 'AURORA_NATIVE_SESSION_IMPORT' ? 'MANUAL'
+  const keyId = selection?.keyId ?? integration.keyId;
+  const method = selection ? 'API_TOKEN' : integration.transport === 'AURORA_NATIVE_SESSION_IMPORT' ? 'MANUAL'
     : integration.transport === 'AURORA_INTEGRATION_API' && key(keyId) ? 'API_TOKEN' : null;
   if (!method) return result;
   if (method === 'MANUAL' && (!uid(version.actor?.uid) || keyId !== manualIntegrationKeyId(orgId, version.actor.uid))) return result;
@@ -134,6 +138,17 @@ export async function readInstallationAcceptance(orgId:string, processing:Data, 
     || receipt.documentId !== result.documentId || receipt.versionId !== result.versionId
     || receipt.sourceVersion !== result.sourceVersion || receipt.revision !== processing.revision
     || receipt.canonicalSnapshotHash !== result.canonicalSnapshotHash || !iso(receipt.acceptedAt)) return result;
+  if (selection) {
+    if (receipt.revalidation!==undefined) {
+      // Only the immutable version supplies the original receipt path. Never
+      // trust an arbitrary path or key supplied by the selected receipt/query.
+      const originalData=hash(version.idempotencyId)
+        ? await read(`${base}/apiIdempotency/${version.idempotencyId}`) : null;
+      const originalReceipt=originalData ? {...originalData,_readReceiptId:version.idempotencyId} : null;
+      if (!integrationRevalidationMatches(orgId,keyId,receiptId,receipt,result.documentId!,document,
+        {...version,_readVersionId:result.versionId},originalReceipt,integration.payloadHash)) return result;
+    } else if (receiptId!==version.idempotencyId || keyId!==integration.keyId) return result;
+  } else if (receipt.revalidation!==undefined) return result;
   result.receiptPersisted = true; result.receiptId = receiptId; result.state = 'PENDING_REPLAY';
   const replayAt = iso(receipt.lastReplayAt), acceptedAt = iso(receipt.acceptedAt)!;
   if (!Number.isSafeInteger(receipt.replayCount) || receipt.replayCount < 1 || !replayAt
@@ -173,11 +188,16 @@ export function installationAcceptanceClientGuard(): string {
 
 /** Only called after authentication and transaction readback of the exact accepted operation. */
 export function integrationReplayPatch(orgId:string, principal:DocumentPrincipal, receipt:Data|null,
-  document:Data|null, version:Data|null, bodyHash:string, documentId:string, timestamp:unknown): Data|null {
+  document:Data|null, version:Data|null, bodyHash:string, documentId:string, timestamp:unknown,
+  revalidation?:{receiptId:string;originalReceipt:Data|null}): Data|null {
+  const bindingVerified=receipt?.revalidation!==undefined
+    ? !!revalidation && integrationRevalidationMatches(orgId,principal.keyId,revalidation.receiptId,
+      receipt,documentId,document,version,revalidation.originalReceipt,bodyHash)
+    : document?.integration?.keyId===principal.keyId;
   if (receipt?.orgId !== orgId || receipt.schemaVersion !== 'aurora.ingestion.receipt.v1'
     || principal.orgId !== orgId || receipt.keyId !== principal.keyId || receipt.bodyHash !== bodyHash
     || receipt.documentId !== documentId || document?.orgId !== orgId || version?.orgId !== orgId
-    || document.integration?.payloadHash !== bodyHash || document.integration?.keyId !== principal.keyId
+    || document.integration?.payloadHash !== bodyHash || !bindingVerified
     || receipt.sourceVersion !== document.sourceVersion || receipt.revision !== document.revision
     || receipt.versionId !== version._readVersionId || receipt.canonicalSnapshotHash !== document.canonicalSnapshotHash
     || version.sourceVersion !== document.sourceVersion || version.revision !== document.revision

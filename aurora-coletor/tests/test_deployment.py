@@ -170,7 +170,7 @@ class DeploymentTests(unittest.TestCase):
                 network = Mock(side_effect=[(200, {'ok': True, 'orgId': ORG}),
                                            (200, processed_response(self.payload, True))])
                 result = self.run_setup(token='test-token', send=True, transport=network)
-                self.assertEqual(result['componentVersion'], '1.0.6')
+                self.assertEqual(result['componentVersion'], '1.0.7')
                 self.assertEqual(result['sampleKey'], first['sampleKey'])
                 self.assertTrue(result['processingVerifiedThisRun'])
 
@@ -323,7 +323,7 @@ class DeploymentTests(unittest.TestCase):
         sentinel.write_bytes(b'# synthetic legacy bundle')
         before = sentinel.read_bytes()
         result = deployment.install_assets(ROOT, self.state)
-        self.assertEqual(result['version'], '1.0.6')
+        self.assertEqual(result['version'], '1.0.7')
         manifest = deployment.read_json(self.state / 'integration' / deployment.VERSION / 'manifest.json')
         self.assertEqual(manifest['schemaVersion'], deployment.SCHEMA)
         self.assertEqual(manifest['version'], deployment.VERSION)
@@ -360,11 +360,11 @@ class DeploymentTests(unittest.TestCase):
             first = deployment.install_assets(ROOT, self.state)
             second = deployment.install_assets(ROOT, self.state)
             self.assertEqual(old_accesses, [])
-            self.assertEqual(first, {'version': '1.0.6', 'alreadyInstalled': False})
-            self.assertEqual(second, {'version': '1.0.6', 'alreadyInstalled': True})
-            current = self.state / 'integration' / '1.0.6'
+            self.assertEqual(first, {'version': '1.0.7', 'alreadyInstalled': False})
+            self.assertEqual(second, {'version': '1.0.7', 'alreadyInstalled': True})
+            current = self.state / 'integration' / '1.0.7'
             manifest = deployment.read_json(current / 'manifest.json')
-            self.assertEqual(manifest['version'], '1.0.6')
+            self.assertEqual(manifest['version'], '1.0.7')
             for name in deployment.ASSETS:
                 self.assertEqual((current / name).read_bytes(), (ROOT / name).read_bytes())
         self.assertEqual({name: (legacy / name).read_bytes() for name in old_files}, old_files)
