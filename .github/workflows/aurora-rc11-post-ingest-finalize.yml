@@ -312,7 +312,16 @@ jobs:
           jq -nc --arg iss "$DEPLOY_SERVICE_ACCOUNT" --arg sub "$DEPLOY_SERVICE_ACCOUNT" --arg uid "$SMOKE_UID" --arg aud "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit" --arg org "wmgj" --argjson iat "$now" --argjson exp "$exp" '{iss:$iss,sub:$sub,aud:$aud,iat:$iat,exp:$exp,uid:$uid,auroraOrgId:$org}' > "$d/claims.json"
           gcloud iam service-accounts sign-jwt "$d/claims.json" "$d/custom.jwt" --iam-account "$DEPLOY_SERVICE_ACCOUNT" --project "$PROJECT_ID" >/dev/null
           jq -nc --arg token "$(cat "$d/custom.jwt")" '{token:$token,returnSecureToken:true}' > "$d/auth.json"
-          auth_status="$(curl --silent --show-error --output "$d/auth-response.json" --write-out '%{http_code}' -H 'Content-Type: application/json' --data-binary @"$d/auth.json" "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${api_key}")"
+          auth_status=""
+          set +e
+          auth_status="$(curl -4 --http1.1 --silent --show-error --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 10 --max-time 30 --output "$d/auth-response.json" --write-out '%{http_code}' -H 'Content-Type: application/json' --data-binary @"$d/auth.json" "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${api_key}")"
+          auth_transport_status=$?
+          set -e
+          if [ "$auth_transport_status" -ne 0 ]; then
+            jq -n --argjson curlExit "$auth_transport_status" '{gate:"CUSTOM_TOKEN_AUTH_TRANSPORT_FAILED",configSource:"FIREBASE_HOSTING_INIT",curlExit:$curlExit}' > "$RUNNER_TEMP/rc11-post-evidence/auth-exchange.json"
+            echo "::error title=RC1.1 custom token transport failure::CURL_EXIT_${auth_transport_status}"
+            exit 89
+          fi
           if [ "$auth_status" != "200" ]; then
             auth_error="$(jq -c '{code:(.error.code//null),status:(.error.status//null),message:(.error.message//"CUSTOM_TOKEN_AUTH_FAILED")}' "$d/auth-response.json" 2>/dev/null || printf '%s' '{"message":"UNPARSEABLE_AUTH_RESPONSE"}')"
             jq -n --arg http "$auth_status" --argjson error "$auth_error" '{gate:"CUSTOM_TOKEN_AUTH_FAILED",configSource:"FIREBASE_HOSTING_INIT",httpStatus:$http,error:$error}' > "$RUNNER_TEMP/rc11-post-evidence/auth-exchange.json"
