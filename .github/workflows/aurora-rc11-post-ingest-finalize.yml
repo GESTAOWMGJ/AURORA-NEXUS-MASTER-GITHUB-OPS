@@ -390,7 +390,17 @@ jobs:
               echo "::error title=RC1.1 native insight rejected::${intent} HTTP ${native_status} ${native_error}"
               exit 96
             fi
-            jq -e '.ok==true and .insight.engine=="AURORA_NATIVE_INTELLIGENCE" and .insight.externalProviderUsed==false and .insight.source.competence=="2026-05"' "$d/${intent}.json" >/dev/null
+            if ! jq -e '.ok==true and .insight.engine=="AURORA_NATIVE_INTELLIGENCE" and .insight.externalProviderUsed==false and .insight.source.competence=="2026-05"' "$d/${intent}.json" >/dev/null; then
+              if jq -e 'type=="object"' "$d/${intent}.json" >/dev/null 2>&1; then
+                jq --arg intent "$intent" '{gate:"NATIVE_INSIGHT_CONTRACT_FAILED",intent:$intent,responseKind:"JSON",ok:(.ok//null),code:(.code//null),engine:(.insight.engine//null),externalProviderUsed:(.insight.externalProviderUsed//null),competence:(.insight.source.competence//null)}' "$d/${intent}.json" > "$RUNNER_TEMP/rc11-post-evidence/native-insight-diagnostic.json"
+              else
+                response_sha="$(sha256sum "$d/${intent}.json" | awk '{print $1}')"
+                response_bytes="$(wc -c < "$d/${intent}.json" | tr -d ' ')"
+                jq -n --arg intent "$intent" --arg sha "$response_sha" --argjson bytes "$response_bytes" '{gate:"NATIVE_INSIGHT_CONTRACT_FAILED",intent:$intent,responseKind:"NON_JSON",responseSha256:$sha,responseBytes:$bytes}' > "$RUNNER_TEMP/rc11-post-evidence/native-insight-diagnostic.json"
+              fi
+              echo "::error title=RC1.1 native insight contract mismatch::${intent}"
+              exit 97
+            fi
           done
           jq -e '[.insight.findings[]?|select(.code=="REVENUE_GAP")]|length==0' "$d/REVENUE_RISK.json" >/dev/null
           jq -e '[.insight.findings[]?|select(.code=="SLA_OVERDUE")]|length==0' "$d/SLA_RISK.json" >/dev/null
