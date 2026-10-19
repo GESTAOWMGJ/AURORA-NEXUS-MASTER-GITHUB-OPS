@@ -186,7 +186,7 @@ function reuseFixture(options = {}) {
     ['WMGJ_FIRESTORE_HMAC_KEY_ID','synthetic-existing-key'],['WMGJ_FIRESTORE_HMAC_SECRET','e'.repeat(64)],
     ['WMGJ_FIRESTORE_DRY_RUN','true'],['AURORA_FIRESTORE_MIRROR_REQUIRED','false']
   ]);
-  let now = Date.parse('2026-10-15T01:00:00Z'), metadataHook = null, writeHook = null;
+  let now = options.now ?? Date.parse('2026-10-15T01:00:00Z'), metadataHook = null, writeHook = null;
   class Clock extends Date { constructor(...args) { super(...(args.length ? args : [now])); } static now() { return now; } }
   const forbidden = () => {calls.push('FORBIDDEN'); throw Error('private-content-or-command');};
   const context = vm.createContext({Date:Clock,Number,JSON,
@@ -332,11 +332,25 @@ test('reuse deadline blocks new configuration and allows restoration after an in
   const late=reuseFixture(),before=[...late.props];late.onWrite(values=>{for(const [key,value]of Object.entries(values))late.props.set(key,value);late.expire();});
   const r=configureReuse(late);assert.equal(r.code,'AURORA_CONNECTOR_REUSE_EXPIRED');assert.equal(r.rollbackVerified,true);assert.deepEqual([...late.props],before);assertReuseSafe(late,r);
 });
-test('reuse pilot owner, source and deadline constants match existing public authority inputs',()=>{
+test('reuse pilot owner, source and historical deadline remain separate from synthetic HML renewal',()=>{
   const code=fs.readFileSync(path.join(__dirname,'..','src','37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'),'utf8');
   const probe=fs.readFileSync(path.join(__dirname,'..','src','38_AURORA_HML_SYNTHETIC_PROBE.gs'),'utf8');
   const policy=JSON.parse(fs.readFileSync(path.join(__dirname,'..','firebase-migration/policy/hml-owner-release-approval-v1.json'),'utf8'));
   const raw=vm.createContext({});vm.runInContext(code,raw);
   assert.equal(raw.AURORA_CONNECTOR_REUSE_OWNER_HASH,probe.match(/AURORA_HML_SYNTHETIC_MASTER_HASH = '([a-f0-9]{64})'/)[1]);
-  assert.equal(raw.AURORA_CONNECTOR_REUSE_FOLDER,reuseFolder);assert.equal(raw.AURORA_CONNECTOR_REUSE_DEADLINE,policy.scope.validUntilUtc);
+  assert.equal(raw.AURORA_CONNECTOR_REUSE_FOLDER,reuseFolder);
+  const historical=policy.reaffirmations.find(item=>item.decisionId==='AURORA-HML-OWNER-RENEWAL-20261014');
+  assert.equal(raw.AURORA_CONNECTOR_REUSE_DEADLINE,historical.validUntilUtc);
+  assert.equal(raw.AURORA_CONNECTOR_REUSE_DEADLINE,'2026-10-16T03:00:00.000Z');
+  const current=policy.reaffirmations.find(item=>item.validUntilUtc===policy.scope.validUntilUtc
+    && item.riskReviewDeadlineExtended===true);
+  assert.equal(current.realSourceActivationAuthorized,false);
+  assert.ok(Date.parse(raw.AURORA_CONNECTOR_REUSE_DEADLINE)<Date.parse(policy.scope.validUntilUtc));
+});
+
+test('synthetic HML renewal cannot revive an expired customer-source reuse pilot',()=>{
+  const f=reuseFixture({now:Date.parse('2026-10-19T23:00:00Z')}),result=f.execute();
+  assert.equal(result.code,'AURORA_CONNECTOR_REUSE_EXPIRED');
+  assert.ok(!f.calls.includes('configure'));assert.ok(!f.calls.includes('metadata'));
+  assertReuseSafe(f,result);
 });
