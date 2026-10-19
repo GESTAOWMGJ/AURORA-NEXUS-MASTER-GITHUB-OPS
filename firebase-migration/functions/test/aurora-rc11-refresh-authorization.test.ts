@@ -108,6 +108,10 @@ test("post-ingest smoke uses the authenticated read path, not a privileged refre
   assert.match(smoke, /configSource:"FIREBASE_HOSTING_INIT"/);
   assert.match(smoke, /CUSTOM_TOKEN_AUTH_TRANSPORT_FAILED/);
   assert.match(smoke, /--retry 3 --retry-all-errors/);
+  assert.match(smoke, /CUSTOM_TOKEN_AUTH_VERIFIED/);
+  assert.match(smoke, /SESSION_LOGIN_TRANSPORT_FAILED/);
+  assert.match(smoke, /SESSION_LOGIN_VERIFIED/);
+  assert.match(smoke, /session_transport_status/);
   assert.match(smoke, /custom token exchange rejected/);
   assert.match(smoke, /auroraOrgId:\$org/);
   assert.match(smoke, /__sessionLogin/);
