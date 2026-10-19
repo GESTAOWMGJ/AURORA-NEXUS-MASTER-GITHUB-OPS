@@ -1,7 +1,7 @@
 {
-  "policyVersion": "aurora-nexus-2.3.0-firebase-shadow-v2",
+  "policyVersion": "aurora-nexus-2.3.3-firebase-shadow-v3",
   "sourceSkill": "aurora-nexus",
-  "sourceSkillVersion": "2.3.0",
+  "sourceSkillVersion": "2.3.3",
   "governance": "JFN-AUD-GOV-001",
   "organizationId": "wmgj",
   "environment": "HOMOLOGATION",
@@ -38,5 +38,37 @@
     "M09": "Segurança, LGPD e Segregação",
     "M10": "Trilha de Auditoria e Integridade"
   },
-  "cutoverGate": "TWO_PARALLEL_CLOSES_WITHOUT_MATERIAL_DIVERGENCE"
+  "cutoverGate": "TWO_PARALLEL_CLOSES_WITHOUT_MATERIAL_DIVERGENCE",
+  "documentSanitation": {
+    "version": 1,
+    "routineId": "AURORA-REV-SAN-001",
+    "competenceIssueAndCashDatesDistinct": true,
+    "summaryIsAdditionalRevenue": false,
+    "productionDifferenceIsAcceptedGloss": false,
+    "missingEvidenceIsZero": false,
+    "scheduleStates": [
+      "PLANNED_RECEIVED",
+      "CURRENT_VALIDATED",
+      "EXECUTED_VALIDATED",
+      "VALIDATION_NOT_LOCATED",
+      "COVERAGE_UNKNOWN"
+    ],
+    "ownerResolution": "VERIFIED_TENANT_CONFIGURATION",
+    "externalRequestAuthority": "EXISTING_EXPLICIT_TENANT_AUTHORIZATION",
+    "sharedIssueKey": [
+      "organization",
+      "competence",
+      "gapType",
+      "owner"
+    ],
+    "readLatestResponseBeforeSend": true,
+    "reuseExistingQueueAndExecutor": true,
+    "unknownSendOutcome": "RECONCILE_SENT_BEFORE_RETRY",
+    "sourceAccessError": "COVERAGE_UNKNOWN",
+    "closeOnlyWithEvidence": true,
+    "privateOwnerIdentityExported": false,
+    "runtimeVerified": false,
+    "sourcePolicySha256": "637b1d24a567f7faf3e4c9353de58bec233c6336082117663b7d7e0ee0cd1bf7",
+    "registrationOnly": true
+  }
 }
