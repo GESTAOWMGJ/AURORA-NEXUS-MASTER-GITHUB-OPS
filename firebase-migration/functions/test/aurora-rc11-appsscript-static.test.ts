@@ -236,6 +236,9 @@ test("RC1.1 primary workflow repairs stale native routes before authenticated sm
   assert.doesNotMatch(workflow, /--only functions:auroraNexusSessionLogin,functions:auroraNexusNativeInsight,hosting/);
   assert.match(workflow, /SESSION_LOGIN_HTTP_/);
   assert.match(workflow, /NATIVE_INSIGHT_.*_HTTP_/);
+  assert.match(workflow, /__\/firebase\/init\.json/);
+  assert.match(workflow, /CUSTOM_TOKEN_AUTH_FAILED/);
+  assert.match(workflow, /FIREBASE_HOSTING_INIT/);
   assert.ok(workflow.includes('targetedDeploy:(($targets | split(",")) + ["hosting"]),'));
 });
 
