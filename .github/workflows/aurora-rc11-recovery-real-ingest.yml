@@ -523,11 +523,21 @@ jobs:
           fi
           jq -n --arg http "$session_status" '{gate:"SESSION_LOGIN_VERIFIED",httpStatus:$http}' > "$RUNNER_TEMP/rc11-evidence/session-login.json"
           for intent in REVENUE_RISK SLA_RISK NEXT_ACTION EXECUTIVE; do
-            native_status="$(curl --silent --show-error --output "$d/${intent}.json" --write-out '%{http_code}' -H 'Accept: application/json' --cookie "$d/cookies.txt" "${base_url}/api/native-insight?intent=${intent}")"
+            native_status=""
+            set +e
+            native_status="$(curl -4 --http1.1 --silent --show-error --retry 3 --retry-all-errors --retry-delay 2 --connect-timeout 10 --max-time 30 --output "$d/${intent}.json" --write-out '%{http_code}' -H 'Accept: application/json' --cookie "$d/cookies.txt" "${base_url}/api/native-insight?intent=${intent}")"
+            native_transport_status=$?
+            set -e
+            if [ "$native_transport_status" -ne 0 ]; then
+              jq -n --arg intent "$intent" --argjson curlExit "$native_transport_status" '{gate:"NATIVE_INSIGHT_TRANSPORT_FAILED",intent:$intent,curlExit:$curlExit}' > "$RUNNER_TEMP/rc11-evidence/native-insight-diagnostic.json"
+              echo "::error title=RC1.1 native insight transport failure::${intent} CURL_EXIT_${native_transport_status}"
+              exit 95
+            fi
             if [ "$native_status" != "200" ]; then
-              echo "NATIVE_INSIGHT_${intent}_HTTP_${native_status}" >&2
-              cat "$d/${intent}.json" >&2 || true
-              exit 94
+              native_error="$(jq -c '{code:(.code//.error.code//null),message:(.message//.error.message//"NATIVE_INSIGHT_FAILED")}' "$d/${intent}.json" 2>/dev/null || printf '%s' '{"message":"UNPARSEABLE_NATIVE_RESPONSE"}')"
+              jq -n --arg intent "$intent" --arg http "$native_status" --argjson error "$native_error" '{gate:"NATIVE_INSIGHT_FAILED",intent:$intent,httpStatus:$http,error:$error}' > "$RUNNER_TEMP/rc11-evidence/native-insight-diagnostic.json"
+              echo "::error title=RC1.1 native insight rejected::${intent} HTTP ${native_status} ${native_error}"
+              exit 96
             fi
             jq -e '.ok==true and .insight.engine=="AURORA_NATIVE_INTELLIGENCE" and .insight.externalProviderUsed==false and .insight.source.competence=="2026-05"' "$d/${intent}.json" >/dev/null
           done
