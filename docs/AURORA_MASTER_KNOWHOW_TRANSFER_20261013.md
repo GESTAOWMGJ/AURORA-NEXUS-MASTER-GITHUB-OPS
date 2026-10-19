@@ -143,3 +143,99 @@ aceite de aparelho ou identidade do Mac por inferência. Reutiliza-se
 Contrato e regressões em `AURORA_ACTIVE_RELEASE_COMPONENTS_V2.md`.
 Estado: implementação candidata e testes sintéticos; CI, endpoint/deploy/publicação
 v2 e adoção instalada NOT_DEPLOYED/PENDING. Rollback preserva o pin e os históricos.
+
+
+## Radar hospitalar — aprendizado permanente solicitado em 19/10/2026
+
+Identificador: `AURORA-RADAR-AUD-LEARNING-001`; revisão documental: `1.0.0`.
+Origem: instruções disponíveis do titular para o Radar Auditoria Hospitalar,
+incluindo “Aprenda no aurora sempre”. A orientação reforça a política permanente
+`learningCapturePolicy` já existente; não cria outra rotina, base ou agenda.
+Baseline consultada: `eaa9e20f537e1bd0ee9c9f9a6b79c35941853008`.
+
+### Escopo e estado da captura
+
+- **Diretriz humana registrada:** capturar rotineiramente os aprendizados pertinentes
+  de cada briefing/contexto autorizado efetivamente disponível, inclusive dúvidas,
+  correções, resultados negativos e pendências; aplicação depende de validação prévia.
+- **Método documentado:** critérios editoriais e de auditoria abaixo. São requisitos
+  e procedimentos propostos, não prova de que um coletor os executa automaticamente.
+- **Fatos regulatórios:** nenhum valor, código, vigência, decisão judicial ou regra de
+  pagamento é validado por este registro. Resposta anterior de IA é pista a conferir
+  na fonte competente; não constitui fonte normativa nem evidência independente.
+- **Adoção instalada:** `PENDING_RUNTIME_READBACK`. Na consulta desta sessão,
+  os dispositivos retornados pelo conector remoto estavam offline. Não houve
+  confirmação de carga, recuperação ou uso pelo motor local/cloud.
+- **Privacidade:** somente método abstrato neste registro; contratos, preços,
+  documentos, pacientes, recebíveis e resultados particulares ficam no tenant
+  autorizado. Não extrapolar regras de um hospital ou contrato para outro cliente.
+
+### Procedimento reutilizável no mesmo motor
+
+1. Delimitar a janela desde o último briefing disponível; na ausência dele,
+   últimos sete dias. Registrar ausência do baseline sem inventar seu conteúdo.
+   Priorizar remuneração/financiamento, ciclo de receita, pagadores/prestadores,
+   governança e, por último, resultados operacionais demonstráveis.
+2. Para cada candidato, guardar órgão/emissor, identificador, versão, URL direta,
+   data de consulta, data real do fato, publicação, vigência, competência e prazo.
+   Separar norma vigente, proposta, consulta pública, decisão provisória ou restrita,
+   anúncio e implementação comprovada; indicar alcance SUS/suplementar/regional.
+3. Comparar com o estado anterior comprovado. Atualização de página, inclusão em
+   índice e republicação não demonstram mudança normativa. Fato anterior só volta
+   ao radar por atualização material, vigência nova ou prazo que exija decisão.
+4. Conservar a cadeia de evidência. Notícia e reprodução institucional ajudam a
+   localizar a fonte; falha de acesso ao original permanece explícita. Não chamar
+   reprodução de consulta direta ao Diário Oficial; confiança acompanha a prova.
+5. Explicar o mecanismo de impacto, sem prometer ganho: contrato/regra aplicável
+   → produção → faturamento apresentado/aprovado/glosado → nota fiscal
+   → recebíveis → recebimento bancário → repasses. Identificar competência,
+   identificadores de vínculo, exceções, responsável, SLA e aging em cada transição.
+6. Distinguir produção, valor faturado, reversão de glosa, crédito reconhecido e
+   caixa conciliado. Limite de financiamento, habilitação, título judicial ou
+   crédito fiscal não comprovam recebimento bancário. Estimativas têm premissas.
+7. Avaliar TISS/TUSS por componente, versão e data aplicável. Alteração terminológica
+   não demonstra troca do XML; obrigação de envio operadora→regulador não se presume
+   obrigação de faturamento prestador→operadora. Validar contrato e leiaute pertinente.
+8. Validar alterações SUS por ato/anexo, tabela da competência, estabelecimento,
+   habilitação e regras de compatibilidade. Permissão cadastral ou procedimento
+   secundário permitido não equivale a obrigatoriedade assistencial ou contratual.
+   Compatibilidade de código/CID não substitui indicação clínica e protocolo aplicável.
+9. Fundamentar cada glosa e recurso individualmente: item, motivo, fonte/regra vigente,
+   documentação, autorização, data, prazo e decisão revisada. Não produzir negativas
+   técnicas automáticas a partir de notícias, alertas de segurança ou ausência parcial
+   de documentação. Preservar auditoria concorrente e autoridade médica.
+10. Transformar cada sinal em decisão consultiva delimitada: cliente-alvo, risco ou
+    oportunidade, próximo passo, evidência necessária, indicador e prazo conhecido.
+    Classificar como ação imediata, preparação ou acompanhamento. Ausência de novidade
+    relevante deve ser declarada; não preencher o briefing com publicidade ou especulação.
+11. Automação, acreditação, NPS, produtividade e qualidade só entram como sinal material
+    quando método, período, população/denominador e efeito em receita, custo, risco ou
+    fluxo forem verificáveis. Associação observada não demonstra causalidade.
+12. Antes de reutilizar uma regra em cliente, conferir versão atual, escopo, revogação,
+    contrato e evidência no tenant. Aplicação técnica/assistencial exige revisão humana;
+    somente resultado medido e validado pode alimentar promoção orgânica.
+
+### Contrato de memória e retomada
+
+A chave lógica de deduplicação combina fonte/identificador, versão, escopo e
+vigência/competência; o hash do conteúdo identifica revisões e conflitos.
+Repetição da mesma notícia não soma casos independentes. Conteúdo novo com a
+mesma identidade exige confronto e histórico de revisão, nunca sobrescrita silenciosa.
+
+Cada registro operacional deve conservar: desafio/prompt sanitizado, fato ou hipótese,
+fonte/versão/hash, procedimento, resultado, evidência faltante, responsável,
+próxima verificação, estado e motivo de revogação/superação quando aplicável.
+Sem confirmação suficiente, manter `OBSERVED`, `PROPOSED` ou `PENDING`;
+`VALIDATED` exige evidência correspondente ao objeto da afirmação.
+
+O fluxo já previsto em `AURORA-MASTER-OPS-001`, `AURORA-REV-SAN-001` e
+`AURORA-IA-MASTER-001` continua sendo o destino. Ao retomar acesso ao motor,
+verificar identidade autorizada, schema e versão/hash do adaptador existente;
+transferir o método compatível com chave idempotente e comprovar gravação,
+hash do corpus e recuperação do registro. Não escrever em corpus desconhecido
+nem atribuir um orgId com base em nome ou contexto narrativo.
+
+Este incremento não importa históricos indisponíveis, não treina pesos, não
+implanta regras de faturamento e não executa decisões clínicas ou financeiras.
+Revogação/rollback: reverter somente este incremento documental, preservando fontes,
+versões, evidências, memória privada e a diretriz permanente já existente.
