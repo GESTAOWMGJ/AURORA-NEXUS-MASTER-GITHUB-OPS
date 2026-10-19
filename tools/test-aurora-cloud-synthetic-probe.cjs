@@ -12,7 +12,7 @@ const ROOT = path.resolve(__dirname,'..');
 const MODULES = ['04_EXTRACAO_DOCUMENTAL_WMGJ','35_AURORA_FIRESTORE_BRIDGE_WMGJ','38_AURORA_HML_SYNTHETIC_PROBE'];
 const NONCE = '0123456789abcdef0123456789abcdef';
 const NOW = Date.parse('2026-10-15T00:00:00Z');
-const DEADLINE = Date.parse('2026-10-16T03:00:00Z');
+const DEADLINE = Date.parse('2026-10-22T03:00:00Z');
 const WINDOW = {expiresAt:new Date(NOW+600000).toISOString(),deadline:DEADLINE,now:()=>NOW};
 const hash = canonical.sha;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -209,11 +209,16 @@ test('renewed Cloud hard deadline agrees with the explicit owner decision and pe
     && item.validUntilUtc===decision.scope.validUntilUtc);
   assert.equal(renewals.length,1);
   const renewal=renewals[0];
+  assert.equal(renewal.decisionId,'AURORA-HML-OWNER-RENEWAL-20261019');
+  assert.equal(renewal.realSourceActivationAuthorized,false);
+  assert.equal(decision.reaffirmations.find(item=>item.decisionId==='AURORA-HML-DOCUMENT-SCOPE-20261015')
+    .validUntilUtc,'2026-10-16T03:00:00.000Z');
   assert.equal(DEADLINE,Date.parse(decision.scope.validUntilUtc));
   assert.equal(renewal.riskReviewDeadlineExtended,true);assert.equal(renewal.laterMainCodeReviewClaimed,false);
   const previous=Date.parse(renewal.previousValidUntilUtc),f=fixture({now:previous});
   assert.equal(f.c.AURORA_HML_SYNTHETIC_DEADLINE,decision.scope.validUntilUtc);
   assert.equal(f.execute().status,'PASS');
+  assert.equal(fixture({now:Date.parse('2026-10-19T23:00:00Z')}).execute().status,'PASS');
   assert.doesNotThrow(()=>canonical.assertWindow({expiresAt:new Date(previous+600000).toISOString(),deadline:DEADLINE,now:()=>previous}));
   assert.throws(()=>canonical.assertWindow({expiresAt:new Date(DEADLINE+600000).toISOString(),deadline:DEADLINE,now:()=>DEADLINE}),/PROBE_WINDOW_EXPIRED/);
 });

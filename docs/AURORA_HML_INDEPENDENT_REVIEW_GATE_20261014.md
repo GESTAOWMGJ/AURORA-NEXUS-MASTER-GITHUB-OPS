@@ -13,6 +13,17 @@ Após o PR #254, a seleção canônica de revisão é `GITHUB_PULL_REQUEST_REVIE
 7. R029 não tem extensão automática. O prazo original (`2026-10-15T03:00:00.000Z`) foi renovado por deliberação humana direta em 14/10, registrada na política `AURORA-HML-OWNER-RENEWAL-20261014`: revisão até 15/10/2026 e expiração em 16/10/2026 00:00 America/Sao_Paulo (`2026-10-16T03:00:00.000Z`), com os mesmos 11 riscos (7 altos, 4 moderados, zero crítico) e escopo HML. Não equivale a nova revisão independente nem dispensa os gates técnicos e a aprovação real do run protegido.
 8. Escopo: exclusivamente HML `wmgj-hml-jfn-20260927`, ambiente `firebase-homologation`. Produção e `CLINICAL_SENSITIVE` permanecem excluídos.
 
+## Renovação direta de 19/10/2026
+
+O titular respondeu expressamente “Sim, renovar HML/R029 nesse escopo” à renovação
+até 22/10/2026 às 00h de Brasília (`2026-10-22T03:00:00.000Z`), com revisão até
+21/10. O registro `AURORA-HML-OWNER-RENEWAL-20261019` preserva as decisões anteriores
+e os 11 riscos aceitos (7 altos, 4 moderados, zero crítico). Autoriza publicação da
+beta e testes sintéticos Windows/nuvem; não autoriza produção, dados clínicos,
+ativação da pasta real, IAM ou rotação de segredos. A concessão documental histórica
+não recebe extensão implícita de credencial. Os gates técnicos e de revisão acima
+permanecem; esta decisão não declara revisão independente ou execução concluída.
+
 ## Evidência de aceite
 Registrar URL do PR, autor, reviewer ID/login, estado, commit exato, data, checks, decisão de merge e recibo do publisher. Sem evidência, estado `PENDING_INDEPENDENT_REVIEW` e nenhuma alegação de publicação.
 
