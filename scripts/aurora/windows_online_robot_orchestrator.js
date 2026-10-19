@@ -8,6 +8,11 @@ const ROOT = process.cwd();
 
 const robots = [
   {
+    id: "realtime-platform-guardian",
+    command: "node scripts/aurora/realtime_platform_guardian.js",
+    scope: ["cloud", "physical_server", "client", "engine", "audit"]
+  },
+  {
     id: "certification-security-gate",
     command: "node scripts/aurora/certification_security_gate.js",
     scope: ["cloud", "engine", "client"]
@@ -45,12 +50,18 @@ const robots = [
 ];
 
 const requiredPolicies = [
+  "firebase-migration/policy/realtime-platform-guardian-v1.json",
   "firebase-migration/policy/autonomous-bugfix-realtime-audit-v1.json",
   "firebase-migration/policy/cloud-failsafe-robot-operation-v1.json",
   "firebase-migration/policy/resolutive-algorithm-policy-v1.json",
   "firebase-migration/policy/digital-security-certification-layer-v1.json",
   "firebase-migration/policy/certification-readiness-v1.json",
   "firebase-migration/policy/security-baseline-v1.json"
+];
+
+const requiredRuntime = [
+  "scripts/aurora/realtime_platform_guardian.js",
+  "scripts/aurora/test_realtime_platform_guardian.js"
 ];
 
 const failoverPlan = [
@@ -78,20 +89,36 @@ function exists(filePath) {
   return fs.existsSync(path.join(ROOT, filePath));
 }
 
-const policyChecks = requiredPolicies.map((filePath) => ({
+const policyChecks = [...requiredPolicies, ...requiredRuntime].map((filePath) => ({
   path: filePath,
   ok: exists(filePath)
 }));
 
 const result = {
   orchestrator: "AURORA_CLOUD_FAILSAFE_ROBOT_ORCHESTRATOR",
-  version: "1.1.0",
+  version: "1.2.0",
   trigger: "CLOUD_HEALTH_OR_WINDOWS_XEON_ONLINE_CONFIRMED",
-  mode: "START_ALL_SAFE_ROBOTS_WITH_FAILOVER",
+  mode: "START_GUARDIAN_THEN_SAFE_ROBOTS_WITH_FAILOVER",
   passed: policyChecks.every((check) => check.ok),
+  guardian: {
+    id: "AURORA-REALTIME-PLATFORM-GUARDIAN-001",
+    startupPriority: 0,
+    singleWriterRequired: true,
+    leaseRequired: true,
+    everyMutationPassesGuardian: true,
+    splitBrainPrevention: true,
+    semanticDeduplication: true,
+    circuitBreaker: true,
+    appendOnlyAudit: true
+  },
   failoverPlan,
   startupOrder: robots,
   executionRules: [
+    "Start the realtime platform guardian before any robot capable of mutation.",
+    "Every cross-platform mutation must acquire or renew the single-writer lease.",
+    "Use semantic operation identity and existing receipts to prevent duplicate execution.",
+    "Reconcile uncertain commits before retrying; never assume timeout means failure.",
+    "Open circuit after repeated failures and use safe degraded mode instead of retry storms.",
     "Use cloud control plane as primary path when health checks pass.",
     "Run heavy builds, indexing and sync on the Windows Xeon physical server when connected or when cloud is degraded.",
     "Keep MacBook as light supervision/interface station.",
