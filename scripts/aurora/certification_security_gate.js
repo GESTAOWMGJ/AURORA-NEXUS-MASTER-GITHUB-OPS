@@ -11,6 +11,7 @@ const requiredFiles = [
   "docs/AURORA_DIGITAL_SECURITY_CERTIFICATION_LAYER.md",
   "docs/AURORA_SECURITY_PRIVACY_UPDATE_BOT.md",
   "firebase-migration/docs/50-certification-control-matrix.md",
+  "firebase-migration/policy/realtime-platform-guardian-v1.json",
   "firebase-migration/policy/autonomous-bugfix-realtime-audit-v1.json",
   "firebase-migration/policy/certification-readiness-v1.json",
   "firebase-migration/policy/cloud-failsafe-robot-operation-v1.json",
@@ -28,6 +29,8 @@ const requiredFiles = [
   "firebase-migration/docs/32-security-risk-register.md",
   "firebase-migration/docs/33-incident-response-plan.md",
   "firebase-migration/docs/37-clinical-sensitive-release-gate.md",
+  "scripts/aurora/realtime_platform_guardian.js",
+  "scripts/aurora/test_realtime_platform_guardian.js",
   "scripts/aurora/platform_unification_robot.js",
   "scripts/aurora/windows_online_robot_orchestrator.js"
 ];
@@ -53,6 +56,8 @@ const certificationProfile = readText("firebase-migration/policy/certification-r
 const digitalLayer = readText("firebase-migration/policy/digital-security-certification-layer-v1.json");
 const securityBaseline = readText("firebase-migration/policy/security-baseline-v1.json");
 const resolutivePolicy = readText("firebase-migration/policy/resolutive-algorithm-policy-v1.json");
+const guardianPolicy = readText("firebase-migration/policy/realtime-platform-guardian-v1.json");
+const guardianRuntime = readText("scripts/aurora/realtime_platform_guardian.js");
 const bugfixPolicy = readText("firebase-migration/policy/autonomous-bugfix-realtime-audit-v1.json");
 const cloudFailsafePolicy = readText("firebase-migration/policy/cloud-failsafe-robot-operation-v1.json");
 const credentialPolicy = readText("firebase-migration/policy/credential-continuity-v1.json");
@@ -63,7 +68,7 @@ const unificationPolicy = readText("firebase-migration/policy/platform-unificati
 const manifest = readText("firebase-migration/policy/manifest.json");
 const orchestrator = readText("scripts/aurora/windows_online_robot_orchestrator.js");
 const unificationRobot = readText("scripts/aurora/platform_unification_robot.js");
-const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy, bugfixPolicy, cloudFailsafePolicy, credentialPolicy, learningPolicy, deliverablePolicy, hardeningPolicy, unificationPolicy, manifest].join("\n");
+const combinedPolicy = [certificationProfile, digitalLayer, securityBaseline, resolutivePolicy, guardianPolicy, bugfixPolicy, cloudFailsafePolicy, credentialPolicy, learningPolicy, deliverablePolicy, hardeningPolicy, unificationPolicy, manifest].join("\n");
 
 const policyChecks = [
   {
@@ -174,6 +179,17 @@ const policyChecks = [
       && resolutivePolicy.includes("confirmed")
   },
   {
+    id: "realtime-platform-guardian",
+    ok: guardianPolicy.includes("AURORA-REALTIME-PLATFORM-GUARDIAN-001")
+      && guardianPolicy.includes("\"singleWriter\":true")
+      && guardianPolicy.includes("\"writerLeaseRequired\":true")
+      && guardianPolicy.includes("\"everyMutationPassesGuardian\":true")
+      && guardianRuntime.includes("SPLIT_BRAIN_PREVENTED")
+      && guardianRuntime.includes("IDEMPOTENT_DUPLICATE")
+      && guardianRuntime.includes("CIRCUIT_OPENED")
+      && orchestrator.includes("realtime-platform-guardian")
+  },
+  {
     id: "autonomous-bugfix-authorized",
     ok: bugfixPolicy.includes("AURORA-AUTO-BUGFIX-REALTIME-001")
       && bugfixPolicy.includes("AUTHORIZED_BY_OWNER")
@@ -206,7 +222,7 @@ const passed = fileChecks.every((check) => check.ok) && policyChecks.every((chec
 
 console.log(JSON.stringify({
   gate: "AURORA_CERTIFICATION_SECURITY_GATE",
-  version: "1.10.0",
+  version: "1.11.0",
   passed,
   activeDeliverable: "2026.10.07-dev.2",
   evidenceState: "POLICY_VALIDATION_ONLY",
