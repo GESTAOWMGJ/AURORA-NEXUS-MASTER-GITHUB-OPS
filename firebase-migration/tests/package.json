@@ -6,8 +6,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test firestore.rules.test.mjs",
-    "test:rules": "firebase emulators:exec --config ../firebase.json --project wmgj-firestore-rules-test --only firestore \"node --test firestore.rules.test.mjs\""
+    "test": "node --test tooling-dependencies.test.mjs firestore.rules.test.mjs",
+    "test:tooling": "node --test tooling-dependencies.test.mjs",
+    "test:rules": "firebase emulators:exec --config ../firebase.json --project wmgj-firestore-rules-test --only firestore \"npm test\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.2",
@@ -15,6 +16,11 @@
     "firebase-tools": "15.34.0"
   },
   "overrides": {
+    "firebase-tools@15.34.0": {
+      "@google-cloud/pubsub@5.3.1": {
+        "@opentelemetry/core": "2.8.0"
+      }
+    },
     "@firebase/firestore": {
       "@grpc/grpc-js": "1.13.6"
     },

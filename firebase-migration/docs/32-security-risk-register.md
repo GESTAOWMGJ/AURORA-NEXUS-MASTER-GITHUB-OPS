@@ -44,7 +44,7 @@
 | R026 | Admin Master concentra privilégios | 3 | 5 | 15 | HIGH | MFA/audit required | break-glass, dual review, scoped admin operations | Governance | MEDIUM |
 | R027 | key rotation deixa versão antiga desativada cedo | 2 | 5 | 10 | HIGH | policy | verificar activeKeyVersion antes de disable | KMS Owner | LOW |
 | R028 | dado clínico enviado a IA externa | 2 | 5 | 10 | HIGH | clinical gate | DLP/schema block + provider contract/retention review | AI/Privacy | LOW |
-| R029 | advisories residuais nas ferramentas de teste de Security Rules | 3 | 4 | 12 | HIGH | dependências de desenvolvimento separadas, fixtures sintéticas, CI de validação sem credenciais ou deploy | exceção temporária SEC-EXC-TEST-20261007 renovada expressamente pelo titular somente para ferramentas de teste HML; corrigir upstream e revisar até 15/10/2026 | AppSec / Security Governance | LOW |
+| R029 | advisories residuais nas ferramentas de teste de Security Rules | 3 | 4 | 12 | HIGH | dependências de desenvolvimento separadas, fixtures sintéticas, CI de validação sem credenciais ou deploy | aceite histórico expirou em 16/10/2026; reavaliação do PR #276 mantém braces sem correção e exige tratamento formal vigente antes da promoção | AppSec / Security Governance | HIGH |
 
 ## 3. Regras de tratamento
 
@@ -61,10 +61,11 @@ R001, R003, R004, R005, R006, R007, R009, R010, R013, R014, R017, R018, R019, R0
 
 A matriz deve ser atualizada após: incidente, pentest, nova integração, alteração IAM/KMS, mudança de arquitetura, aquisição de fornecedor, nova categoria de dado ou release que mude trust boundary.
 
-## 6. Exceção temporária para R029 — aceite específico do titular
+## 6. Exceção temporária para R029 — histórico e reavaliação
 
 - **ID:** SEC-EXC-TEST-20261007
-- **Status:** `ACCEPTED_BY_OWNER_HML_TEST_TOOLS_ONLY`
+- **Status histórico:** `ACCEPTED_BY_OWNER_HML_TEST_TOOLS_ONLY`
+- **Status na reavaliação de 19/10/2026:** `EXPIRED`; a autorização documentada terminou em `2026-10-16T03:00:00.000Z`. Este patch não renova o aceite, altera sua política ou cria outra exceção.
 - **Responsável pelo aceite:** titular responsável, por autorização humana direta no chat em 08/10/2026; acompanhamento AppSec / Security Governance.
 - **Reafirmação:** revisão e decisão específica de R029 reiteradas pelo titular em 12/10/2026, preservando o escopo original e sem extensão de prazo.
 - **Renovação expressa:** em 14/10/2026, o titular renovou HML/R029 no mesmo escopo até 00:00 de 16/10/2026 em Brasília (`2026-10-16T03:00:00.000Z`), aceitando as 11 agregações residuais (7 HIGH, 4 MODERATE, 0 CRITICAL). A reafirmação de 12/10 e o prazo anterior permanecem no histórico da política; não se trata de extensão automática nem de nova revisão independente.
@@ -97,3 +98,11 @@ Compensações verificáveis do fluxo existente:
 O aceite cobre o head revisado do PR #184 `bf5bbc1146245bdf112cedfd9a9c6cc558e46106`, CI Firestore `37712091783` com 27 Rules aprovados, e a auditoria registrada de 11 agregações acima; não é uma auditoria nova nem alegação de fechamento dos alertas. Cada main que será promovida continua exigindo CI exato atualizado. A revisão deve ocorrer até a data acima ou antes de mudança de escopo, introdução de credenciais/dados reais, falha de teste ou novo advisory relevante; qualquer dessas condições suspende este aceite até nova decisão específica.
 
 Rollback do candidato: reverter o commit que altera manifesto, lockfile e este registro, mantendo o risco aberto e a promoção bloqueada. Não aplicar downgrade do Firebase SDK, `npm audit fix --force` ou alteração de política para ocultar os advisories.
+
+## 7. Reavaliação técnica do PR #276 — 19/10/2026
+
+A [análise de alcance e correção mínima](pr276-dependency-risk-20261019.md) atualiza a medição do head original `ba6d083a11481045a62f2903f86893a198227bc5`: os três alertas altos são propagação de `GHSA-vfj7-8cjw-p6xm` em `braces@3.0.3`, ainda sem versão corrigida. Os dois moderados derivam de `GHSA-8988-4f7v-96qf` em `@opentelemetry/core@1.30.1`.
+
+O patch complementar aplica `core@2.8.0` somente sob `firebase-tools@15.34.0` e `@google-cloud/pubsub@5.3.1`, com teste do consumidor real e limites de baggage. A auditoria da árvore candidata registra 3 HIGH, 0 MODERATE e 0 CRITICAL; o lockfile separado de Functions mantém zero alertas. O risco de `braces` permanece aberto; ausência de alcance observado na rotina sintética não constitui aceite formal nem eliminação da vulnerabilidade.
+
+Os CLIs usados para implantar HML e produção têm resolução independente do lockfile de testes. Revisão humana independente, CI do SHA final, proteção nativa da `main` e tratamento vigente do risco residual continuam pendentes de comprovação antes de integração ou publicação. Este registro preserva integralmente o histórico e as alçadas existentes.
