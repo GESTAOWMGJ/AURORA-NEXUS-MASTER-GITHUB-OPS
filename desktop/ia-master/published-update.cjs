@@ -352,8 +352,7 @@ function checkpointLineage(layout, fromSha256, toSha256, reference, anchor, trus
       && [plan.expectedPreviousTargetBinding, plan.payloadSha256].every(value => hex(value, 64))
       && [plan.expectedPreviousSampleKey, plan.nextSampleKey].every(value => typeof value === 'string' && /^win-v1:[a-f0-9]{64}$/.test(value))
       && exact(plan.iaAnchor, ['attemptDirectory', 'journalSha256'])
-      && plan.iaAnchor.attemptDirectory === anchor.attempt && plan.iaAnchor.journalSha256 === anchor.journalSha256
-      && plan.expectedSourceSha === anchor.journal.sourceSha && plan.expectedCertificateSha256 === anchor.journal.certificateSha256,
+      && plan.iaAnchor.attemptDirectory === anchor.attempt && plan.iaAnchor.journalSha256 === anchor.journalSha256,
       'CHECKPOINT_TRANSITION_PLAN_CONFLICT');
     const candidate = verifyCandidate(plan.envelope, trust, plan.expectedSourceSha);
     demand(candidate.certificateSha256 === plan.expectedCertificateSha256
@@ -394,10 +393,12 @@ function checkpointLineage(layout, fromSha256, toSha256, reference, anchor, trus
 async function checkpointAuthority(bearer, evidence, expectedOrg) {
   demand(evidence.orgId === expectedOrg, 'CHECKPOINT_TRANSITION_ORGANIZATION_CONFLICT');
   const previous = evidence.proof, documentId = previous.receipt?.documentId;
-  demand(hex(documentId, 48), 'CHECKPOINT_TRANSITION_DOCUMENT_REQUIRED');
+  const receiptId = previous.installationAcceptance?.receiptId;
+  demand(hex(documentId, 48) && hex(receiptId, 64), 'CHECKPOINT_TRANSITION_DOCUMENT_REQUIRED');
   // Existing integration.read route re-evaluates the exact document's ledger,
   // projection, replay, credential and automation authority. It issues no signature.
-  const body = await readResponse(bearer, crypto.randomBytes(32).toString('hex'), '/api/integration/ping?documentId=' + documentId);
+  const body = await readResponse(bearer, crypto.randomBytes(32).toString('hex'),
+    '/api/integration/ping?documentId=' + documentId + '&receiptId=' + receiptId);
   const processing = body?.installation, acceptance = processing?.acceptance;
   const tuple = ['documentId', 'versionId', 'sourceVersion', 'canonicalSnapshotHash'];
   const flags = ['processingVerified', 'receiptPersisted', 'replayVerified', 'automationConfigured', 'automationVerified'];
@@ -405,6 +406,8 @@ async function checkpointAuthority(bearer, evidence, expectedOrg) {
     && processing?.state === 'FIRST_INGESTION_VERIFIED' && processing.firstIngestionVerified === true
     && processing.documentId === documentId && hex(processing.versionId, 48) && hex(processing.canonicalSnapshotHash, 64)
     && Number.isSafeInteger(processing.sourceVersion) && processing.sourceVersion >= 1
+    && Number.isSafeInteger(processing.revision) && processing.revision >= 1
+    && processing.revision === previous.processingProof?.revision
     && acceptance?.schemaVersion === 'aurora.installation.acceptance.v1'
     && acceptance.orgId === expectedOrg && acceptance.canonicalOrigin === ORIGIN
     && acceptance.state === 'INSTALLATION_INTEGRATION_VERIFIED' && acceptance.eligible === true

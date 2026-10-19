@@ -1,6 +1,7 @@
 import { immutableEntityVersionId, persistedDocumentHash } from './auroraCanonicalVersions.js';
 import { isOperationalRecord } from './auroraEngine.js';
 import { readInstallationAcceptance, type InstallationAcceptance } from './auroraInstallationAcceptance.js';
+import { validInstallationReceiptSelection, type InstallationReceiptSelection } from './auroraIntegrationRevalidation.js';
 import { acquisitionEvidenceHash } from './auroraIntegrationDocument.js';
 
 type RecordData = Record<string, any>;
@@ -76,9 +77,11 @@ export function installationReadiness(orgId: string, checkpoint: RecordData | nu
 }
 
 export async function readInstallationReadiness(orgId: string,
-  read: (path: string) => Promise<RecordData | null>, documentId?: string): Promise<InstallationReadiness> {
+  read: (path: string) => Promise<RecordData | null>, documentId?: string,
+  selection?:InstallationReceiptSelection): Promise<InstallationReadiness> {
   if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(orgId)) throw new Error('INVALID_ORGANIZATION');
   if (documentId !== undefined && !validId(documentId)) throw new Error('INVALID_DOCUMENT_ID');
+  if (selection!==undefined && (!documentId || !validInstallationReceiptSelection(selection))) throw new Error('INVALID_RECEIPT_SELECTION');
   const base = `organizations/${orgId}`;
   const [api, ingestion, projection, completion] = await Promise.all([
     read(`${base}/runtimeCheckpoints/integration-documents`),
@@ -106,10 +109,10 @@ export async function readInstallationReadiness(orgId: string,
     result = installationReadiness(orgId, {orgId,state:'HEALTHY',lastDocumentId:id},
       document, projection, version, completion);
     if (result.firstIngestionVerified) {
-      const acceptance = await readInstallationAcceptance(orgId,result,document,version,completion,read);
+      const acceptance = await readInstallationAcceptance(orgId,result,document,version,completion,read,undefined,selection);
       return {...result, acceptance, operationalComplete:result.operationalComplete && acceptance.eligible
         && completion?.configurationHash === acceptance.configurationHash && completion?.receiptId === acceptance.receiptId};
     }
   }
-  return {...result, acceptance:await readInstallationAcceptance(orgId,result,null,null,completion,read)};
+  return {...result, acceptance:await readInstallationAcceptance(orgId,result,null,null,completion,read,undefined,selection)};
 }

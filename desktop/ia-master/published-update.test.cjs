@@ -414,9 +414,9 @@ function explicitCheckpointTransition(f, checkpoint, windows, applied, sequence=
     expectedPreviousTargetBinding:old.targetBinding,expectedPreviousSampleKey:old.sampleKey,nextOrigin:real.ORIGIN,
     nextTargetBinding:h(real.ORIGIN+':fixture-org'),nextSampleKey:'win-v1:'+h('new explicitly selected sample '+sequence),
     payloadSha256:h('new normalized synthetic payload '+sequence),method:'API_TOKEN',orgId:'fixture-org',
-    expectedSourceSha:journal.sourceSha,expectedCertificateSha256:journal.certificateSha256,
+    expectedSourceSha:windows.envelope.certificate.sourceSha,expectedCertificateSha256:h(real.signingBytes(windows.envelope.certificate)),
     iaAnchor:{attemptDirectory:applied.attempt,journalSha256:h(journalBytes)},previousTransition,
-    publicReleaseControl:{trust:f.pair.trust,expectedSourceSha:journal.sourceSha,manifestPath:windows.manifestPath},
+    publicReleaseControl:{trust:f.pair.trust,expectedSourceSha:windows.envelope.certificate.sourceSha,manifestPath:windows.manifestPath},
     envelope:windows.envelope,packageDirectory:windows.directory};
   const processingProof={state:'FIRST_INGESTION_VERIFIED',firstIngestionVerified:true,operationalComplete:true,
     documentId:h('doc'+sequence).slice(0,48),sourceVersion:1,revision:1,versionId:h('version'+sequence).slice(0,48),
@@ -477,7 +477,7 @@ test('signed A event B event C carries explicit checkpoint lineage without rewri
   assert.deepEqual(fs.readFileSync(path.join(b.attempt,'journal.json')),second.journalBytes);
   assert.equal(f.controls.authorityReads.length>2,true);
   for(const request of f.controls.authorityReads){assert.equal(request.hostname,'auroranexus.com.br');assert.equal(request.rejectUnauthorized,true);
-    assert.match(request.path,/^\/api\/integration\/ping\?documentId=[a-f0-9]{48}$/);assert.equal(request.headers.Cookie,undefined);}
+    assert.match(request.path,/^\/api\/integration\/ping\?documentId=[a-f0-9]{48}&receiptId=[a-f0-9]{64}$/);assert.equal(request.headers.Cookie,undefined);}
   assert.equal(fs.readFileSync(path.join(f.state,'control.key'),'utf8'),'synthetic control identity');
   assert.equal(fs.readFileSync(path.join(f.state,'git-task-marker.txt'),'utf8'),'synthetic Git backlink retained C');
 });
@@ -490,6 +490,34 @@ test('two explicit events on A form one bounded chain before B and remain verifi
   assert.deepEqual(fs.readFileSync(checkpoint),second.nextBytes);
   assert.deepEqual(fs.readFileSync(path.join(applied.attempt,'journal.json')),first.journalBytes);
 });
+test('credential revalidation under signed B preserves anchor A and current receipt before applying B',async t=>{
+  const {f,checkpoint,windows,applied}=await transitionBase(t,'1.0.6');
+  const old=explicitCheckpointTransition(f,checkpoint,windows,applied);
+  const oldCheckpoint=fs.readFileSync(checkpoint),oldJournal=fs.readFileSync(path.join(applied.attempt,'journal.json'));
+  const sb=await successorWithWindows(f,'b'.repeat(40),'1.0.7');
+  const rebound=explicitCheckpointTransition(f,checkpoint,sb.windows,applied,1,old.reference);
+  const proof=JSON.parse(rebound.proofBytes),newKey='ik_fedcba9876543210';
+  proof.installationAcceptance.receiptId=h('integration-document:'+newKey+':'+rebound.plan.nextSampleKey);
+  proof.installationAcceptance.configurationHash=h('new governed automation configuration');
+  const next=JSON.parse(rebound.nextBytes);next.installationAcceptance=Object.fromEntries(Object.entries(proof.installationAcceptance).filter(([key])=>!['orgId','canonicalOrigin'].includes(key)));
+  const encoded=value=>Buffer.from(real.canonical(value)+'\n'),nextBytes=encoded(next),proofBytes=encoded(proof);
+  const commit=JSON.parse(fs.readFileSync(path.join(rebound.directory,'commit.json')));
+  commit.nextSha256=h(nextBytes);commit.proofSha256=h(proofBytes);const commitBytes=encoded(commit);
+  writeFiles(rebound.directory,{'checkpoint.next':nextBytes,'proof.json':proofBytes,'commit.json':commitBytes});
+  fs.writeFileSync(checkpoint,nextBytes);f.layout.expectedCheckpointSha256=h(nextBytes);
+  f.layout.checkpointTransition={directory:rebound.directory,commitSha256:h(commitBytes)};
+  sb.options.layout=f.layout;
+  f.controls.transitionAuthority.keyId=newKey;
+  f.controls.transitionAuthority.installation.acceptance=proof.installationAcceptance;
+  assert.equal((await f.api.activatePublished(sb.options)).status,'SIGNED_LOCAL_COMPONENT_APPLIED');
+  assert.deepEqual(fs.readFileSync(path.join(applied.attempt,'journal.json')),oldJournal);
+  assert.deepEqual(fs.readFileSync(path.join(rebound.directory,'checkpoint.previous')),oldCheckpoint);
+  assert.deepEqual(fs.readFileSync(checkpoint),nextBytes);
+  const oldProof=JSON.parse(old.proofBytes);
+  for(const field of ['documentId','versionId','sourceVersion','canonicalSnapshotHash'])assert.equal(proof.processingProof[field],oldProof.processingProof[field]);
+  assert.notEqual(proof.installationAcceptance.receiptId,oldProof.installationAcceptance.receiptId);
+  for(const request of f.controls.authorityReads)assert.ok(request.path.endsWith('&receiptId='+proof.installationAcceptance.receiptId));
+});
 test('checkpoint authority is renewed after long native checks with original certificate and 30 second leases',async t=>{
   const {f,checkpoint,windows,applied}=await transitionBase(t),transition=explicitCheckpointTransition(f,checkpoint,windows,applied);
   const {options}=await successorWithWindows(f,'b'.repeat(40)),original=options.pin;
@@ -498,7 +526,7 @@ test('checkpoint authority is renewed after long native checks with original cer
   assert.throws(()=>f.api.requireActive(original),/FRESH_CANONICAL/);
   assert.equal(f.controls.authorityReads.length>2,true);assert.deepEqual(fs.readFileSync(checkpoint),transition.nextBytes);
 });
-for(const mutation of ['missing-reference','backup','proof','plan','commit','authority','tuple','automation','foreign-org','receipt-key','control','organization'])
+for(const mutation of ['missing-reference','backup','proof','plan','commit','authority','tuple','tuple-revision','automation','foreign-org','receipt-key','control','organization'])
 test('checkpoint transition rejects '+mutation+' without stopping accepted A',async t=>{
   const {f,checkpoint,windows,applied}=await transitionBase(t),transition=explicitCheckpointTransition(f,checkpoint,windows,applied);
   const {options}=await successorWithWindows(f,'b'.repeat(40));
@@ -507,6 +535,7 @@ test('checkpoint transition rejects '+mutation+' without stopping accepted A',as
     {backup:'checkpoint.previous',proof:'proof.json',plan:'plan.json',commit:'commit.json'}[mutation]),' ');
   if(mutation==='authority')f.controls.authorityStatus=403;
   if(mutation==='tuple')f.controls.transitionAuthority.installation.acceptance.versionId='e'.repeat(48);
+  if(mutation==='tuple-revision')f.controls.transitionAuthority.installation.revision++;
   if(mutation==='automation')f.controls.transitionAuthority.installation.acceptance.automationVerified=false;
   if(mutation==='foreign-org')f.controls.transitionAuthority.orgId='other-org';
   if(mutation==='receipt-key')f.controls.transitionAuthority.keyId='ik_ffffffffffffffff';

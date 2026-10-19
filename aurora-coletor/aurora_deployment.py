@@ -21,8 +21,8 @@ import time
 
 import aurora_cloud_sync as sync
 
-VERSION = '1.0.6'
-CHECKPOINT_VERSIONS = ('1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', VERSION)
+VERSION = '1.0.7'
+CHECKPOINT_VERSIONS = ('1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', VERSION)
 SCHEMA = 'aurora.install.integration.v1'
 STATE_NAME = 'integration-setup.json'
 ASSETS = ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
@@ -464,11 +464,15 @@ def _transition_local(plan, release, candidate):
                        and journal.get('phase') == 'COMPLETED' and anchor.name == 'published-' + str(journal.get('id'))
                        and journal.get('stateDir') == str(ia_state) and journal.get('packageDir') == str(ia_package)
                        and journal.get('helperPath') == str(root / 'server-location-manager.cjs')
-                       and journal.get('sourceSha') == plan['expectedSourceSha']
-                       and journal.get('certificateSha256') == plan['expectedCertificateSha256']
+                       and _transition_hex(journal.get('sourceSha'), 40)
+                       and _transition_hex(journal.get('certificateSha256'))
                        and journal.get('trustedPublicKeySha256') == trust['publicKeySha256'], 'SIGNED_IA_CHECKPOINT_ANCHOR_REQUIRED')
     anchored = release.verify_candidate(journal.get('acceptedEnvelope'), trust, journal['sourceSha'])
-    _transition_demand(anchored.certificate_sha256 == candidate.certificate_sha256
+    # The installed IA is historical provenance, not the authority for the new
+    # Windows checkpoint. Its signed bytes remain exact while the live pin above
+    # authorizes the current WindowsIntegration package and remote replay.
+    _transition_demand(anchored.complete_signed_set
+                       and anchored.certificate_sha256 == journal['certificateSha256']
                        and journal.get('manifestSha256') == anchored.certificate['components']['iaMaster']['manifestSha256'],
                        'SIGNED_IA_CHECKPOINT_ANCHOR_CONFLICT')
     manifest_bytes = _transition_bytes(ia_package / 'manifest.json')
@@ -512,15 +516,16 @@ def _transition_local(plan, release, candidate):
         prior, commit = _transition_record(ref['directory'], ref['commitSha256'], state, plan['orgId'])
         _transition_demand(commit['nextSha256'] == needed, 'CHECKPOINT_TRANSITION_CHAIN_CONFLICT')
         _transition_demand(prior['publicReleaseControl']['trust'] == trust
-                           and prior['packageDirectory'] == plan['packageDirectory']
-                           and prior['iaAnchor'] == plan['iaAnchor']
-                           and prior['expectedSourceSha'] == plan['expectedSourceSha']
-                           and prior['expectedCertificateSha256'] == plan['expectedCertificateSha256'],
+                           and prior['iaAnchor'] == plan['iaAnchor'],
                            'CHECKPOINT_TRANSITION_CHAIN_CONFLICT')
         prior_candidate = release.verify_candidate(prior['envelope'], trust, prior['expectedSourceSha'])
         _transition_demand(prior_candidate.complete_signed_set
                            and prior_candidate.certificate_sha256 == prior['expectedCertificateSha256'],
                            'CHECKPOINT_TRANSITION_CHAIN_CONFLICT')
+        prior_package = safe_path(prior['packageDirectory'])
+        prior_files = {name: _transition_bytes(prior_package / name, 32 * 1024 * 1024) for name in ASSETS}
+        release.assess_manifest(prior_candidate, 'windowsIntegration',
+                               _transition_bytes(prior['publicReleaseControl']['manifestPath']), prior_files)
         needed, ref = prior['expectedPreviousSha256'], prior['previousTransition']
     _transition_demand(needed == identity['checkpoint'], 'CHECKPOINT_TRANSITION_IA_PREDECESSOR_CONFLICT')
 
@@ -567,7 +572,10 @@ def _transition_fresh_acceptance(proof):
 
 
 def _transition_current_server(plan, raw, token, transport, proof):
-    url = plan['nextOrigin'] + '/api/integration/ping?documentId=' + proof['receipt']['documentId']
+    receipt_id = proof.get('installationAcceptance', {}).get('receiptId')
+    _transition_demand(_transition_hex(receipt_id), 'AUTHORITATIVE_AUTOMATION_INTEGRATION_REQUIRED')
+    url = (plan['nextOrigin'] + '/api/integration/ping?documentId=' + proof['receipt']['documentId']
+           + '&receiptId=' + receipt_id)
     status, body = transport(url, token)
     _transition_demand(status == 200 and isinstance(body, dict) and body.get('ok') is True
                        and body.get('orgId') == plan['orgId'] and isinstance(body.get('keyId'), str)
