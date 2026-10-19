@@ -300,17 +300,30 @@ jobs:
           set -euo pipefail
           d="$(mktemp -d "$RUNNER_TEMP/rc11-native.XXXXXX")"; trap 'rm -rf "$d"' EXIT
           access_token="$(gcloud auth print-access-token)"
-          apps="$(curl -fsS -H "Authorization: Bearer ${access_token}" "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/webApps?pageSize=100")"
-          app_name="$(jq -r '[.apps[]?|select(.state=="ACTIVE")]|first|.name//empty' <<<"$apps")"; test -n "$app_name"
-          api_key="$(curl -fsS -H "Authorization: Bearer ${access_token}" "https://firebase.googleapis.com/v1beta1/${app_name}/config" | jq -r '.apiKey//empty')"; test -n "$api_key"
+          base_url="https://${PROJECT_ID}.web.app"
+          init_status="$(curl --silent --show-error --max-time 30 --output "$d/firebase-init.json" --write-out '%{http_code}' "${base_url}/__/firebase/init.json")"
+          if [ "$init_status" != "200" ]; then
+            echo "::error title=RC1.1 canonical Firebase config unavailable::FIREBASE_INIT_HTTP_${init_status}"
+            exit 90
+          fi
+          api_key="$(jq -r '.apiKey//empty' "$d/firebase-init.json")"
+          [[ "$api_key" =~ ^[A-Za-z0-9_-]{20,200}$ ]]
           now="$(date +%s)"; exp="$((now+3000))"
-          jq -nc --arg iss "$DEPLOY_SERVICE_ACCOUNT" --arg sub "$DEPLOY_SERVICE_ACCOUNT" --arg uid "$SMOKE_UID" --arg aud "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit" --argjson iat "$now" --argjson exp "$exp" '{iss:$iss,sub:$sub,aud:$aud,iat:$iat,exp:$exp,uid:$uid}' > "$d/claims.json"
+          jq -nc --arg iss "$DEPLOY_SERVICE_ACCOUNT" --arg sub "$DEPLOY_SERVICE_ACCOUNT" --arg uid "$SMOKE_UID" --arg aud "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit" --arg org "wmgj" --argjson iat "$now" --argjson exp "$exp" '{iss:$iss,sub:$sub,aud:$aud,iat:$iat,exp:$exp,uid:$uid,auroraOrgId:$org}' > "$d/claims.json"
           gcloud iam service-accounts sign-jwt "$d/claims.json" "$d/custom.jwt" --iam-account "$DEPLOY_SERVICE_ACCOUNT" --project "$PROJECT_ID" >/dev/null
           jq -nc --arg token "$(cat "$d/custom.jwt")" '{token:$token,returnSecureToken:true}' > "$d/auth.json"
           auth_status="$(curl --silent --show-error --output "$d/auth-response.json" --write-out '%{http_code}' -H 'Content-Type: application/json' --data-binary @"$d/auth.json" "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${api_key}")"
-          test "$auth_status" = "200"
-          id_token="$(jq -r '.idToken//empty' "$d/auth-response.json")"; test -n "$id_token"
-          base_url="https://${PROJECT_ID}.web.app"
+          if [ "$auth_status" != "200" ]; then
+            auth_error="$(jq -c '{code:(.error.code//null),status:(.error.status//null),message:(.error.message//"CUSTOM_TOKEN_AUTH_FAILED")}' "$d/auth-response.json" 2>/dev/null || printf '%s' '{"message":"UNPARSEABLE_AUTH_RESPONSE"}')"
+            jq -n --arg http "$auth_status" --argjson error "$auth_error" '{gate:"CUSTOM_TOKEN_AUTH_FAILED",configSource:"FIREBASE_HOSTING_INIT",httpStatus:$http,error:$error}' > "$RUNNER_TEMP/rc11-post-evidence/auth-exchange.json"
+            echo "::error title=RC1.1 custom token exchange rejected::HTTP ${auth_status} ${auth_error}"
+            exit 91
+          fi
+          if ! id_token="$(jq -er '.idToken|select(type=="string" and length>0)' "$d/auth-response.json")"; then
+            echo "::error title=RC1.1 custom token response invalid::AUTH_ID_TOKEN_MISSING"
+            exit 92
+          fi
+          printf '::add-mask::%s\n' "$id_token"
           jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$d/session.json"
           session_status="$(curl --silent --show-error --output "$d/session-response.json" --write-out '%{http_code}' -X POST -H 'Content-Type: application/json' -H "Origin: ${base_url}" -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$d/cookies.txt" --data-binary @"$d/session.json" "${base_url}/__sessionLogin")"
           if [ "$session_status" != "204" ]; then

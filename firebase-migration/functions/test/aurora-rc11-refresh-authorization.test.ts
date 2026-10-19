@@ -104,6 +104,10 @@ test("post-ingest smoke uses the authenticated read path, not a privileged refre
   assert.ok(start >= 0 && end > start);
   const smoke = workflow.slice(start, end);
   assert.match(smoke, /signInWithCustomToken/);
+  assert.match(smoke, /__\/firebase\/init\.json/);
+  assert.match(smoke, /configSource:"FIREBASE_HOSTING_INIT"/);
+  assert.match(smoke, /custom token exchange rejected/);
+  assert.match(smoke, /auroraOrgId:\$org/);
   assert.match(smoke, /__sessionLogin/);
   assert.match(smoke, /--cookie "\$d\/cookies\.txt"/);
   assert.match(smoke, /for intent in REVENUE_RISK SLA_RISK NEXT_ACTION EXECUTIVE/);
