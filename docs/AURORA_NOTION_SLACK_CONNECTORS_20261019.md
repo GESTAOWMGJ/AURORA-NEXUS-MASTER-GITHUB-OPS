@@ -1,6 +1,6 @@
 # Notion e Slack desde o primeiro login — M01/M08/M09/M10
 
-Baseline: main `967d32a493b9930d77cac1030642c6fca28bb1f3`. Capacidade implementada na mesma aplicação e no agente existente 1.0.5; não cria banco, scheduler, workspace, token ou executor paralelo.
+Baseline: main `cbeeb11df5ff0301a1276f5fc72e94199732f8e1`. Capacidade implementada na mesma aplicação e no agente existente 1.0.5; não cria banco, scheduler, workspace, token ou executor paralelo.
 
 ## Contrato de operação
 
