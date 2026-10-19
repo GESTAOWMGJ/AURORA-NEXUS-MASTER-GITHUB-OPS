@@ -124,6 +124,7 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}, p
     },
     engineeringReadinessPercent: Math.round((doneWeight / totalWeight) * 100),
     metricNote: "Progresso dos requisitos de desenvolvimento. A validação comercial, regulatória e financeira exige evidências próprias.",
+    workspaceConnectors: {state:"IMPLEMENTED_PENDING_PROVIDER_CREDENTIALS_AND_RUNTIME_RECEIPTS",providers:["NOTION","SLACK"],mode:"SCOPED_READ_ONLY",chatgptGrantInherited:false,physicalInstallationVerified:false},
     gates,
     nextGate: gates.find((gate) => gate.status === "BLOCKED" || gate.status === "IN_PROGRESS" || gate.status === "PLANNED") ?? null
   };
