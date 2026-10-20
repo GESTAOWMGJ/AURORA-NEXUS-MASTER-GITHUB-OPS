@@ -4,6 +4,7 @@ on:
     paths:
       - 'src/*.gs'
       - 'tools/test-gmail*.cjs'
+      - 'tools/fixtures/sanitation-runtime.cjs'
       - 'firebase-migration/functions/src/auroraNativeRoutines.ts'
       - 'docs/AURORA_GMAIL_SINGLE_MESSAGE_RECOVERY.md'
       - '.github/workflows/validate-gmail-ingestion.yml'
@@ -21,4 +22,4 @@ jobs:
         with:
           node-version: '22'
       - run: node tools/audit-appscript.js
-      - run: node --test tools/test-gmail-ingestion.cjs tools/test-gmail-replay.cjs
+      - run: node --test tools/test-gmail-ingestion.cjs tools/test-gmail-replay.cjs tools/test-gmail-sanitation.cjs

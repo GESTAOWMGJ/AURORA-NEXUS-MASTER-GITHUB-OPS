@@ -119,6 +119,10 @@ function executarCicloCompletoGmailFiscalFinanceiroWMGJ(opcoes) {
     });
   }
 
+  resultado.etapas.saneamento = executarEtapaSeguraWMGJ_(abaControle, cicloId, 'SANEAMENTO_DOCUMENTAL', function() {
+    return executarSaneamentoDocumentalAurora_('FINANCIAL_CLOSING');
+  });
+
   Object.keys(resultado.etapas).forEach(function(k) {
     var etapa = resultado.etapas[k];
     if (etapa && etapa.ok === false) {

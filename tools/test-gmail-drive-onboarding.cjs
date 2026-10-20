@@ -33,7 +33,7 @@ function fixture(required = true) {
     processarFilaComExtracaoRealWMGJ_V1: limit => {calls.push('mirror:' + limit); return {ok:true, processados:1, erros:0, revisar:0};},
     executarRoboGmailDashboardWMGJ: () => {calls.push('existing-robot'); return {ok:true};}
   });
-  for (const name of ['09D_REPLAY_MENSAGEM_GMAIL_WMGJ.gs', '06_AUTOMACAO_APPSCRIPT_WMGJ.gs', '37_AURORA_CONECTORES_PLUG_AND_PLAY.gs']) {
+  for (const name of ['09D_REPLAY_MENSAGEM_GMAIL_WMGJ.gs', '06_AUTOMACAO_APPSCRIPT_WMGJ.gs', '37_AURORA_CONECTORES_PLUG_AND_PLAY.gs', '39_AURORA_DOCUMENT_SANITATION.gs']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src', name), 'utf8'), c, {filename:name});
   }
   c.registrarStatusAutomacaoWMGJ_ = () => {};

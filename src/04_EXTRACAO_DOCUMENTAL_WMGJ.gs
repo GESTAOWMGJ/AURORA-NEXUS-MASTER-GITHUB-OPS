@@ -72,6 +72,8 @@ function processarFilaComExtracaoRealWMGJ_V1(limite) {
 
   for (var i = 1; i < dados.length && avaliados < max; i++) {
     var linha = dados[i];
+    // External communication receipts must never enter document extraction/retry.
+    if (String(linha[idx.TIPO] || '') === 'DOCUMENT_SANITATION') continue;
     var status = String(linha[idx.STATUS] || "").toUpperCase();
     var idOrigem = String(linha[idx.ID_ORIGEM] || "");
     var sourceSystem = String(linha[idx.ORIGEM] || "DRIVE").trim().toUpperCase();
