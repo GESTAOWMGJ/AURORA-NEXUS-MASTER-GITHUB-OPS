@@ -1,5 +1,7 @@
 # AURORA-MO-001 — Modus Operandi Mestre WMGJ → AURORA NEXUS
 
+Incremento de 20/10/2026: saneamento conectado à fila e ao ciclo Apps Script existentes, com autorização privada, histórico importado, recibo e bloqueio de retentativa incerta. Código candidato `IMPLEMENTED_PENDING_RUNTIME_VALIDATION`; nenhuma instalação ou publicação inferida. Contrato e provas em [AURORA_DOCUMENT_SANITATION_EXECUTOR.md](AURORA_DOCUMENT_SANITATION_EXECUTOR.md).
+
 Incremento de 19/10/2026: saneamento de projeções financeiras sem duplicar receita,
 distinção entre escala prevista/validada/executada e cobrança documental pelo
 responsável configurado no próprio tenant. Representação em

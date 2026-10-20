@@ -17,7 +17,7 @@ Reutilizar fila, lock/lease e registro de pendências existentes. Chave comparti
 
 Não repetir a cada passagem. Prazo solicitado é distinto de obrigação contratual. Resposta parcial mantém somente o residual; envio ou silêncio não encerram a pendência. Erro de acesso é cobertura desconhecida, nunca ausência de documento. Preservar bloqueios legítimos e retentativas limitadas.
 
-## Estado e limites
+## Estado e limites do incremento declarativo de 19/10
 
 `documentSanitationPolicy` representa o contrato no resumo nativo, na projeção e na inteligência existentes. É registro declarativo: `SPECIFIED_PENDING_EXECUTOR_VALIDATION`. Não cria executor, agendamento, privilégio, envio de e-mail, mutação de fonte ou treinamento de pesos. O estado da rotina governada e os gates financeiros existentes permanecem.
 
@@ -26,3 +26,7 @@ A validação deste incremento é de representação e segregação, com projeç
 Rollback: reverter o incremento de política/registro, preservando as pendências, envios e fontes privadas. Não altera release pointer nem instaladores.
 
 A política complementar versionada está em `firebase-migration/policy/document-sanitation-schedules-v1.json`. A baseline sanitizada histórica 2.3.0 e seus hashes permanecem intactos. A primeira tentativa de CI apontou a alteração indevida dessa baseline; este incremento foi separado sem enfraquecer o verificador.
+
+## Integração candidata de 20/10/2026
+
+O registro nativo v2 agora aponta para o executor na fila e no ciclo Apps Script existentes. A política v1 permanece histórica e imutável. Código implementado não equivale a instalação, publicação ou autorização de envio. Configuração privada, histórico legado, testes, homologação e rollback: [AURORA_DOCUMENT_SANITATION_EXECUTOR.md](AURORA_DOCUMENT_SANITATION_EXECUTOR.md).
