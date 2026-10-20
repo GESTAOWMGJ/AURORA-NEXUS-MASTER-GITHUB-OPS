@@ -1,3 +1,4 @@
+import { workspaceConnectorReadback } from './auroraWorkspaceConnectors.js';
 import { createHash } from "node:crypto";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
@@ -131,6 +132,7 @@ export const auroraNexusIntegrationKeys = onRequest(
         orgId:member.orgId,
         installation:await loadInstallationReadiness(member.orgId),
         agents:agents.filter(Boolean),
+        workspaceConnectors:workspaceConnectorReadback(agents.filter((agent):agent is NonNullable<typeof agent>=>agent!==null)),
         manualAutomationRevision:manualBinding === undefined ? 0 : publicAutomationConfiguration(manualBinding)?.revision ?? null,
         credentials:snapshot.docs.map((doc) => {
           const data=doc.data();
@@ -326,7 +328,7 @@ export const auroraNexusIntegrationPing = onRequest({cors:false}, async (req,res
   }
   if(req.method==='POST'){
     const body=req.body;
-    const providers=new Set(['GOOGLE_DRIVE','GMAIL','MICROSOFT_MAIL','IMAP']);
+    const providers=new Set(['GOOGLE_DRIVE','GMAIL','MICROSOFT_MAIL','IMAP','NOTION','SLACK']);
     if(!jsonRequest(req)||!body||typeof body!=='object'||Array.isArray(body)
       ||Buffer.byteLength(JSON.stringify(body))>4096
       ||Object.keys(body).some(key=>!['component','instanceId','pendingExtraction','providers'].includes(key))

@@ -84,7 +84,7 @@ test("instalação canônica é governada e está presente na projeção, sem no
   assert.equal(cloud.manualInputProofScope, "DOCUMENT_IDENTITY_VERSION_AND_CANONICAL_FACTS");
   assert.equal(cloud.manualInstallerReplaysDocument, false);
   assert.equal(cloud.manualInstallerWritesSharedCheckpoint, false);
-  assert.equal(cloud.version, "1.0.5");
+  assert.equal(cloud.version, "1.0.6");
   assert.equal(cloud.documentAcquisitionEvidence.schema,"aurora.document.acquisition.v1");
   assert.equal(cloud.documentAcquisitionEvidence.byteHashIsCanonicalFactsHash,false);
   assert.equal(cloud.documentAcquisitionEvidence.pendingExtractionBlocksCursorAdvance,true);

@@ -1,6 +1,8 @@
+import { workspaceConnectorSection, workspaceConnectorSetupClient } from './auroraWorkspaceConnectors.js';
 import { auroraDesignStyles } from "./auroraDesignSystem.js";
 import type { AuroraMember } from './auroraAccess.js';
 import { nativeIngestionSection, nativeIngestionClient } from './auroraNativeIngestionView.js';
+import { canImportNativeDocuments } from './auroraNativeIngestion.js';
 import { installationAcceptanceClientGuard } from './auroraInstallationAcceptance.js';
 
 /** Render only after the existing session and membership checks. No new identity store. */
@@ -12,7 +14,7 @@ export function setupPage(member: { orgId: string; mfaVerified: boolean } & Part
   <p class="eyebrow">Instalação guiada</p><h1>Vamos preparar seu acesso</h1><p>Conclua cada etapa. Este assistente usa a conta e a operação existentes da sua empresa.</p>
   <article><h2>1. Sua conta</h2><p>Sessão e vínculo com a empresa <strong>${org}</strong> verificados.</p><p>${member.mfaVerified ? 'Segundo fator confirmado neste acesso.' : 'Segundo fator não confirmado neste acesso. Entre novamente e selecione a configuração do autenticador.'}</p><small>A sessão pode expirar ou ser revogada. Use seu próprio acesso AURORA; contas administrativas de infraestrutura não são necessárias.</small></article>
   <article><h2>2. Confirmar comunicação</h2><p id="connection" role="status" aria-live="polite">Aguardando verificação do acesso à operação.</p><button id="check" type="button">Verificar agora</button></article>
-  <article><h2>3. Conectar as fontes da empresa</h2><p>API técnica, envio manual, nuvem/OAuth e coleta local possuem autorizações e provas próprias. Configure o processamento canônico em Integrações e confirme recibo e repetição do mesmo envio.</p><p class="pending">Login OAuth de plataformas externas ainda não está disponível neste assistente. Conexão e extração de PDF, planilha ou e-mail precisam dos adaptadores reais. Exportações JSON já estruturadas não comprovam essa extração. Não digite senhas dessas plataformas no instalador.</p><a href="/portal#integrations">Abrir integrações</a></article>
+  <article><h2>3. Conectar as fontes da empresa</h2>${workspaceConnectorSection()}<p>API técnica, envio manual, nuvem/OAuth e coleta local possuem autorizações e provas próprias. Configure o processamento canônico em Integrações e confirme recibo e repetição do mesmo envio.</p><p class="pending">Login OAuth de plataformas externas ainda não está disponível neste assistente. Conexão e extração de PDF, planilha ou e-mail precisam dos adaptadores reais. Exportações JSON já estruturadas não comprovam essa extração. Não digite senhas dessas plataformas no instalador.</p><a href="/portal#integrations">Abrir integrações</a></article>
   <article><h2>4. Conhecer a operação</h2><p>O Assistente Aurora analisa as leituras disponíveis e aponta pendências com evidências. A memória operacional é separada por empresa. A instalação não lê automaticamente seus documentos.</p><p>O processamento local da IA Master e a operação na nuvem têm verificações próprias. Confira a conexão de cada serviço antes de usar a leitura.</p><a href="/portal#native-intelligence">Abrir Assistente Aurora</a></article>
   <article><h2>5. Atualizações e segundo plano</h2><p>Patches do portal usam o atualizador existente. Novos instaladores ficam em Downloads. Esta versão do cliente de acesso ainda não instala execução automática em segundo plano; o componente IA Master do servidor possui seu próprio gerenciador.</p><small>Esta página não comprova instalação no dispositivo, sincronização do servidor físico ou funcionamento sem conexão.</small></article>
   <article><h2>6. Primeiros dados da empresa</h2><p id="ingestion" role="status" aria-live="polite">Verificando a primeira ingestão…</p><small>O cadastro preserva seu acesso. A integração do processamento só conclui com configuração autorizada, dados canônicos, recibo persistido e replay confirmado. Isso não comprova um coletor em execução nem acesso OAuth ou local.</small></article>
@@ -83,5 +85,5 @@ export function setupPage(member: { orgId: string; mfaVerified: boolean } & Part
   complete.addEventListener('click',()=>{if(!complete.disabled)window.location.assign('/portal')});
   check();
   ${nativeIngestionClient(actor,{ingest:ingestCsrf,refresh:refreshCsrf,integrationKey:integrationCsrf},false)}
-  </script></main></body></html>`;
+  ${workspaceConnectorSetupClient(actor.orgId,canImportNativeDocuments(actor))}</script></main></body></html>`;
 }

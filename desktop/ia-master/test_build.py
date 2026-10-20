@@ -20,7 +20,7 @@ class BuildContract(unittest.TestCase):
             builder.build(output)
             manifest = json.loads((output / 'manifest.json').read_text())
             self.assertEqual(manifest['version'], '1.1.0')
-            self.assertEqual(manifest['clientAgent']['version'], '1.0.4')
+            self.assertEqual(manifest['clientAgent']['version'], '1.0.5')
             self.assertFalse(manifest['clientAgent']['configured'])
             self.assertFalse(manifest['clientAgent']['providerConnectionsVerified'])
             self.assertFalse(manifest['externalAiEnabled'])

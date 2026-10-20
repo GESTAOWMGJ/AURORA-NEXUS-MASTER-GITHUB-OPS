@@ -796,3 +796,15 @@ entidade; mesmo replay conserva chave e recibo. Fechamentos não são reescritos
 Implementação e testes têm provas próprias; ingestão real, implantação e adoção
 pelo Xeon permanecem PENDING até recibos. Contrato de campos, gates e rollback:
 `docs/AURORA_STRUCTURED_FINANCIAL_FEEDING.md`.
+
+## Notion e Slack — capacidade de leitura por empresa, 19/10/2026
+
+AURORA-INSTALL-INTEGRATION-001 incorpora páginas Notion e canais Slack explicitamente
+autorizados ao mesmo agente, fila e recibos. Primeiro login apresenta as opções e
+confere o estado atual por organização. Conector disponível no ChatGPT não concede
+credencial ou acesso à aplicação. Leitura relatada, instalação, extração e primeira
+operação são provas independentes; comunicação antiga não permanece conectada.
+O fluxo não escreve nos provedores nem envia mensagens. Narrativa, anexos e threads
+não extraídos conservam pendência. Contrato e testes reutilizáveis em
+`docs/AURORA_NOTION_SLACK_CONNECTORS_20261019.md`; credenciais e documentos reais
+permanecem privados por empresa. Representação no motor não comprova adoção física.

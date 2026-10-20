@@ -19,11 +19,11 @@ import time
 
 import aurora_cloud_sync as sync
 from aurora_deployment import safe_path
-from provider_connectors import pull, exports, EXPORT_SUFFIXES, MAX_PROVIDER_BYTES, google_oauth_context, google_oauth_resolve, ProviderAuthenticationError
+from provider_connectors import pull, exports, EXPORT_SUFFIXES, MAX_PROVIDER_BYTES, google_oauth_context, google_oauth_resolve, ProviderAuthenticationError, workspace_scope
 from client_secret_store import load as load_secret
 import published_release as release
 
-VERSION='1.0.4'
+VERSION='1.0.5'
 SCHEMA='aurora.client-agent.v1'
 MAX_ENTRIES=200
 SOURCE_PROOF_TTL_SECONDS=300
@@ -64,8 +64,9 @@ def validate(config):
             raise sync.SyncError('SOURCE_STATE_OVERLAP')
         checked.append(root)
     for source in providers:
-        if not isinstance(source,dict) or set(source)-{'provider','tokenEnv','folderId','labelId','host','user','folder','oauth'}:
+        if not isinstance(source,dict) or set(source)-{'provider','tokenEnv','folderId','labelId','host','user','folder','oauth','pageId','workspaceId','channelId'}:
             raise sync.SyncError('PROVIDER_CONFIG_INVALID')
+        if source.get('provider') in ('NOTION','SLACK'):workspace_scope(source)
         if 'oauth' in source:google_oauth_context(source,org,config['instanceId'])
     return checked,state
 
@@ -143,10 +144,69 @@ def source_configuration_hash(config):
 def provider_page_hash(page):
     return sync.digest(json.dumps({'documents':sorted(sync.digest(json.dumps(row,sort_keys=True)) for row in page['documents']),
         'pendingExtraction':page['pendingExtraction'],'pendingDocuments':page.get('pendingDocuments',[]),
-        'nextCursor':page.get('nextCursor')},sort_keys=True))
+        'nextCursor':page.get('nextCursor'),**({'workspaceAcquisitions':page['workspaceAcquisitions']} if 'workspaceAcquisitions' in page else {})},sort_keys=True))
+
+
+def workspace_acquisitions(page):
+    items=page.get('workspaceAcquisitions',[])
+    if not isinstance(items,list) or len(items)>20:raise sync.SyncError('WORKSPACE_ACQUISITION_INVALID')
+    seen=set();available={sync.digest(json.dumps(row,sort_keys=True,separators=(',',':'))) for row in page.get('documents',[])}
+    for item in items:
+        if (not isinstance(item,dict) or set(item)!={'provider','sourceObjectIdHash','observedVersion','payloadHashes','pending'}
+                or item['provider'] not in {'NOTION','SLACK'} or type(item['pending']) is not bool
+                or any(not isinstance(item[k],str) or not re.fullmatch(r'[a-f0-9]{64}',item[k]) for k in ('sourceObjectIdHash','observedVersion'))
+                or not isinstance(item['payloadHashes'],list) or len(item['payloadHashes'])>20
+                or any(not isinstance(h,str) or not re.fullmatch(r'[a-f0-9]{64}',h) or h not in available for h in item['payloadHashes'])
+                or not item['pending'] and not item['payloadHashes'] or item['sourceObjectIdHash'] in seen):
+            raise sync.SyncError('WORKSPACE_ACQUISITION_INVALID')
+        seen.add(item['sourceObjectIdHash'])
+    if items and sum(int(item['pending']) for item in items)!=page['pendingExtraction']:
+        raise sync.SyncError('WORKSPACE_ACQUISITION_INVALID')
+    return items
+
+
+def retain_workspace_pending(conn,config,key,page):
+    items=workspace_acquisitions(page)
+    for item in items:
+        if not item['pending']:continue
+        identity=sync.digest(config['org']+':'+key+':workspace-pending:'+item['sourceObjectIdHash']+':'+item['observedVersion'])
+        previous=conn.execute('SELECT state,receipt FROM intake WHERE hash=?',(identity,)).fetchone()
+        record=json.loads(previous[1]) if previous else {'sourceGroup':key,'acquisition':item}
+        # A previously resolved representation can recur. Reopen the same item
+        # and retain its verified resolution as history, never current proof.
+        if previous and previous[0]=='EXTRACTION_RESOLVED' and 'resolution' in record:
+            record.setdefault('resolutionHistory',[]).append(record.pop('resolution'))
+        conn.execute('INSERT INTO intake VALUES (?, ?, 1, ?, 0) ON CONFLICT(hash) DO UPDATE SET state=excluded.state,receipt=excluded.receipt,attempts=intake.attempts+1',
+                     (identity,'PENDING_EXTRACTION',json.dumps(record,sort_keys=True)))
+    return bool(items)
+
+
+def resolve_workspace_pending(conn,org,key,page):
+    # Local source binding is distinct from cloud acquisition proof. Close only
+    # a complete observed object whose every canonical payload has a verified receipt.
+    for item in workspace_acquisitions(page):
+        if item['pending']:continue
+        receipts=[]
+        for payload_hash in item['payloadHashes']:
+            row=next(row for row in page['documents'] if sync.digest(json.dumps(row,sort_keys=True,separators=(',',':')))==payload_hash)
+            identity=sync.digest(org+':'+json.dumps(row,sort_keys=True,separators=(',',':')))
+            stored=conn.execute("SELECT receipt FROM intake WHERE hash=? AND state='PROCESSING_VERIFIED'",(identity,)).fetchone()
+            if not stored:break
+            receipt=json.loads(stored[0])
+            if receipt.get('processing',{}).get('firstIngestionVerified') is not True:break
+            receipts.append(receipt)
+        else:
+            for identity,record in pending_document_rows(conn,key):
+                prior=record['acquisition']
+                if prior.get('provider')==item['provider'] and prior.get('sourceObjectIdHash')==item['sourceObjectIdHash']:
+                    record['resolution']={'state':'CANONICAL_PROCESSING_VERIFIED','observedVersion':item['observedVersion'],
+                                          'supersedesObservedVersion':prior['observedVersion'],'records':receipts}
+                    conn.execute("UPDATE intake SET state='EXTRACTION_RESOLVED',receipt=? WHERE hash=?",(json.dumps(record,sort_keys=True),identity))
 
 
 def retain_pending_documents(conn, config, key, page, cursor):
+    if retain_workspace_pending(conn,config,key,page):
+        conn.commit();return
     pending = page.get('pendingDocuments', [])
     if (type(page.get('pendingExtraction')) is not int or not 0<=page['pendingExtraction']<=10000
             or not isinstance(pending, list) or len(pending) > 20 or len(pending) > page['pendingExtraction']):
@@ -402,6 +462,7 @@ def cycle(config,environment=os.environ,transport=sync.request_json,provider_pul
                     conn.execute('UPDATE intake SET state=?,next_attempt=? WHERE hash=?',('RETRY',time.time()+min(3600,30*2**min(attempts-1,7)),identity));conn.commit();waiting+=1;page_done=False
             if key and page_done:
                 resolve_pending_documents(conn,config['org'],key,documents)
+                resolve_workspace_pending(conn,config['org'],key,page)
                 # A processed file stays resolved even while another file holds
                 # this page's cursor. Closing SQLite must not roll it back.
                 conn.commit()
