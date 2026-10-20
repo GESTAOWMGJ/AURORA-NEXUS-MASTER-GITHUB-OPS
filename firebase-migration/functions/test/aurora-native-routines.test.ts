@@ -22,6 +22,26 @@ test("rotinas legadas ficam espelhadas até migração e nunca são fingidas com
   assert.equal(maintenance?.cadence, "DAILY");
 });
 
+test("saneamento chega à projeção sem dados privados, nova receita ou autoridade de envio", () => {
+  const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
+  for (const orgId of ["synthetic-org-a", "synthetic-org-b"]) {
+    const projection = buildProjection(empty, new Date("2026-10-19T12:00:00Z"), { orgId, competence: "2026-08" }) as any;
+    const policy = projection.nativeRoutines.documentSanitationPolicy;
+    assert.equal(policy.routineId, "AURORA-REV-SAN-001");
+    assert.equal(policy.ownerResolution, "VERIFIED_TENANT_CONFIGURATION");
+    assert.equal(policy.externalRequestAuthority, "EXISTING_EXPLICIT_TENANT_AUTHORIZATION");
+    assert.equal(policy.unknownSendOutcome, "RECONCILE_SENT_BEFORE_RETRY");
+    assert.equal(policy.sourceAccessError, "COVERAGE_UNKNOWN");
+    assert.equal(policy.state, "SPECIFIED_PENDING_EXECUTOR_VALIDATION");
+    for (const field of ["summaryIsAdditionalRevenue", "productionDifferenceIsAcceptedGloss", "missingEvidenceIsZero", "invoiceAndPaymentAreSeparateCosts", "permissionsGranted", "externalSendImplementedByThisPolicy", "schedulerCreated", "runtimeVerified", "privateOwnerIdentityExported", "modelWeightsTrained"]) assert.equal(policy[field], false, field);
+    assert.deepEqual(policy.sharedIssueKey, ["organization", "competence", "gapType", "owner"]);
+    assert.equal(policy.readLatestResponseBeforeSend, true);
+    assert.equal(policy.closeOnlyWithEvidence, true);
+    assert.equal(AURORA_NATIVE_ROUTINES.filter(r => r.id === policy.routineId).length, 1);
+    assert.doesNotMatch(JSON.stringify(policy), /@|https?:\/\/|\b\d{14}\b/);
+  }
+});
+
 test('release convergence reuses the governed registry entry without asserting installation or another executor',()=>{
   assert.equal(AURORA_NATIVE_ROUTINES.filter(item=>item.id==='AURORA-CANONICAL-RELEASE-001').length,1);
   const policy=(nativeRoutineSummary() as any).releaseConvergencePolicy;
