@@ -30,6 +30,13 @@ Não há outro motor, servidor permanente, banco, scheduler ou processo de IA.
 O módulo usa a mesma porta local, sessão, organização, empacotador e auditoria da
 IA Master. O modelo local e os provedores externos não participam do cálculo.
 
+O pacote atual da IA Master contém 39 arquivos declarados. O exportador exige os
+cinco novos arquivos TISS e metadados que mantêm portal real e transmissão
+desabilitados. Os consumidores assinados preservam o predecessor de 34 arquivos
+sem TISS e aceitam a nova composição de 39 somente com esses metadados exatos.
+A baseline histórica de 26 arquivos e o componente Windows Integration de sete
+arquivos mantêm suas identidades e verificações próprias.
+
 ## Referência oficial e escopo XML
 
 Consulta ANS em 21/10/2026: publicação **Setembro/2026**; componente Comunicação

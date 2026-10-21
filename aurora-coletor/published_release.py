@@ -26,6 +26,8 @@ READ_URL = ORIGIN + '/api/integration/active-release'
 SOURCE = 'platformRuntime/activeRelease'
 COMPONENTS = ('server', 'web', 'satellite', 'iaMaster', 'windowsIntegration')
 CHECKS = ('ciPassed', 'humanReviewApproved', 'protectedDeploySucceeded', 'smokePassed')
+TISS_MASTER_FILES = frozenset(('tiss-tool.cjs', 'tiss-browser.cjs', 'tiss-local.js',
+                               'client-agent/aurora_tiss.py', 'tiss-fixtures/sadt-valid.xml'))
 _CANDIDATES = weakref.WeakSet()
 _ACTIVE = weakref.WeakKeyDictionary()
 
@@ -213,6 +215,27 @@ def require_active(pin, now=None, expected_org=None):
     return current[0]
 
 
+def ia_master_manifest_shape(manifest):
+    """Recognize package composition only; this does not verify or authorize it."""
+    if not isinstance(manifest, dict) or not isinstance(manifest.get('files'), dict):
+        return False
+    names = manifest['files']
+    if not all(isinstance(name, str) for name in names):
+        return False
+    folded = {name.casefold() for name in names}
+    if len(folded) != len(names):
+        return False
+    if len(names) == 34:
+        return 'tissTool' not in manifest and folded.isdisjoint(TISS_MASTER_FILES)
+    tool = manifest.get('tissTool')
+    return (len(names) == 39 and TISS_MASTER_FILES.issubset(names)
+            and _exact(tool, ('id', 'version', 'configured', 'processing', 'realPortalEnabled', 'submissionEnabled'))
+            and tool['id'] == 'AURORA-TISS-SADT-001' and tool['version'] == '1.0.0'
+            and tool['processing'] == 'LOCAL_EPHEMERAL'
+            and tool['configured'] is False and tool['realPortalEnabled'] is False
+            and tool['submissionEnabled'] is False)
+
+
 def assess_manifest(candidate, component, manifest_bytes, file_bytes):
     demand(candidate in _CANDIDATES and candidate.complete_signed_set and component in ('iaMaster', 'windowsIntegration'), 'V2_COMPONENT_COVERAGE_REQUIRED')
     expected = candidate.certificate['components'][component]
@@ -229,7 +252,7 @@ def assess_manifest(candidate, component, manifest_bytes, file_bytes):
     names = manifest['files']
     demand(all(isinstance(name, str) for name in names) and all(isinstance(name, str) for name in file_bytes), 'PACKAGE_CLOSURE_CONFLICT')
     demand(set(file_bytes) == set(names) and len({name.casefold() for name in names}) == len(names)
-           and len(names) == (34 if component == 'iaMaster' else 7)
+           and (ia_master_manifest_shape(manifest) if component == 'iaMaster' else len(names) == 7)
            and (component != 'windowsIntegration' or set(names) == set(WINDOWS_FILES))
            and sum(len(value) for value in file_bytes.values()) <= 32 * 1024 * 1024, 'PACKAGE_CLOSURE_CONFLICT')
     for name, expected_hash in names.items():

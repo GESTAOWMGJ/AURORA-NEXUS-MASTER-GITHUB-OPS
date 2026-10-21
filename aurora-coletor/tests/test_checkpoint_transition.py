@@ -28,6 +28,10 @@ from test_installation_integration import CanonicalTransport, accepted_response
 from test_published_release import pair, envelope, response, NativeResponse, NOW, NEXT
 
 
+TISS_FILES = ('tiss-tool.cjs', 'tiss-browser.cjs', 'tiss-local.js',
+              'client-agent/aurora_tiss.py', 'tiss-fixtures/sadt-valid.xml')
+
+
 class InterruptedPublication(BaseException):
     pass
 
@@ -176,6 +180,42 @@ class CheckpointTransitionTests(unittest.TestCase):
     def resign(self, value):
         value['signature'] = base64.urlsafe_b64encode(self.key.sign(release.signing_bytes(value['certificate']))).decode().rstrip('=')
 
+    def repin_ia_anchor(self):
+        """Sign the synthetic package and refresh its existing provenance chain."""
+        ia_bytes = deployment._transition_encoded(self.ia_manifest)
+        (self.ia_package / 'manifest.json').write_bytes(ia_bytes)
+        manifest_sha = release.digest(ia_bytes)
+        self.env['certificate']['components']['iaMaster']['manifestSha256'] = manifest_sha
+        self.resign(self.env)
+        self.cert_sha = release.digest(release.signing_bytes(self.env['certificate']))
+        metadata_path = self.ia_state / 'installation.json'
+        metadata = json.loads(metadata_path.read_bytes())
+        metadata.update(publishedCertificateSha256=self.cert_sha,
+                        signedComponentManifestSha256=manifest_sha)
+        metadata_path.write_bytes(deployment._transition_encoded(metadata))
+        tree = {path.relative_to(self.ia_package).as_posix(): release.digest(path.read_bytes())
+                for path in self.ia_package.rglob('*') if path.is_file()}
+        self.journal.update(certificateSha256=self.cert_sha, manifestSha256=manifest_sha,
+                            nextTreeSha256=release.digest(release.canonical(tree).encode()),
+                            nextMetadataSha256=release.digest(metadata_path.read_bytes()))
+        self.journal['runtimeProof']['manifestSha256'] = manifest_sha
+        self.journal_path.write_bytes(deployment._transition_encoded(self.journal))
+        self.plan['expectedCertificateSha256'] = self.cert_sha
+        self.plan['iaAnchor']['journalSha256'] = release.digest(self.journal_path.read_bytes())
+
+    def add_tiss_anchor(self):
+        for name in TISS_FILES:
+            target = self.ia_package / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            data = ('synthetic TISS package file ' + name + '\n').encode()
+            target.write_bytes(data)
+            self.ia_manifest['files'][name] = release.digest(data)
+        self.ia_manifest['tissTool'] = {
+            'id': 'AURORA-TISS-SADT-001', 'version': '1.0.0', 'configured': False,
+            'processing': 'LOCAL_EPHEMERAL', 'realPortalEnabled': False, 'submissionEnabled': False,
+        }
+        self.repin_ia_anchor()
+
     def test_default_plan_cli_reads_no_credential_or_release_module_and_writes_no_state(self):
         plan_path = self.base / 'reviewed-plan.json'
         plan_path.write_bytes(deployment._transition_encoded(self.plan))
@@ -232,6 +272,70 @@ class CheckpointTransitionTests(unittest.TestCase):
         for path in directory.iterdir():
             for private in ('SYNTHETIC_MEMORY_ONLY', 'amountCents', 'externalDocumentId'):
                 self.assertNotIn(private.encode(), path.read_bytes())
+
+    def test_tiss_39_file_signed_ia_anchor_preserves_identity_and_commits_same_checkpoint(self):
+        self.add_tiss_anchor()
+        self.assertEqual(len(self.ia_manifest['files']), 39)
+        journal_before = self.journal_path.read_bytes()
+        identity_before = {name: (self.ia_state / name).read_bytes()
+                           for name in ('control.key', 'organization.txt', 'installation.json')}
+        result = self.execute()
+        self.assertEqual(result['status'], 'CHECKPOINT_TRANSITION_COMMITTED')
+        self.assertEqual(len(self.transport.posts), 2)
+        self.assertEqual(self.transport.posts[0], self.transport.posts[1])
+        self.assertEqual(self.journal_path.read_bytes(), journal_before)
+        self.assertEqual(identity_before, {name: (self.ia_state / name).read_bytes() for name in identity_before})
+        self.assertEqual((self.directory() / 'checkpoint.previous').read_bytes(), self.previous)
+        self.assertEqual(json.loads(self.active.read_bytes())['componentVersion'], '1.0.7')
+
+    def test_tiss_anchor_shape_is_checked_before_opening_its_payload_paths(self):
+        self.add_tiss_anchor()
+        # Keep 39 signed entries but substitute an undeclared extension path.
+        old_name = TISS_FILES[-1]
+        self.ia_manifest['files']['missing-tiss-file.xml'] = self.ia_manifest['files'].pop(old_name)
+        self.repin_ia_anchor()
+        with self.assertRaisesRegex(sync.SyncError, 'SIGNED_IA_CHECKPOINT_ANCHOR_CONFLICT'):
+            self.execute()
+        self.assertEqual(self.transport.posts, [])
+        self.assert_unpublished()
+
+    def test_tiss_anchor_requires_exact_unconfigured_tool_contract(self):
+        self.add_tiss_anchor()
+        declared = copy.deepcopy(self.ia_manifest['tissTool'])
+        for value in (None, {**declared, 'configured': True}, {**declared, 'realPortalEnabled': 0},
+                      {**declared, 'unexpected': False}):
+            with self.subTest(contract=value):
+                if value is None:
+                    self.ia_manifest.pop('tissTool', None)
+                else:
+                    self.ia_manifest['tissTool'] = value
+                self.repin_ia_anchor()
+                with self.assertRaisesRegex(sync.SyncError, 'SIGNED_IA_CHECKPOINT_ANCHOR_CONFLICT'):
+                    self.execute()
+                self.assertEqual(self.transport.posts, [])
+                self.assert_unpublished()
+
+    def test_legacy_34_anchor_cannot_claim_or_hide_partial_tiss_extension(self):
+        self.ia_manifest['tissTool'] = None
+        self.repin_ia_anchor()
+        with self.assertRaisesRegex(sync.SyncError, 'SIGNED_IA_CHECKPOINT_ANCHOR_CONFLICT'):
+            self.execute()
+        del self.ia_manifest['tissTool']
+        # A case variant must not disguise a TISS file in the legacy closure.
+        self.ia_manifest['files']['TISS-TOOL.CJS'] = self.ia_manifest['files'].pop('fixture0.cjs')
+        self.repin_ia_anchor()
+        with self.assertRaisesRegex(sync.SyncError, 'SIGNED_IA_CHECKPOINT_ANCHOR_CONFLICT'):
+            self.execute()
+        self.assertEqual(self.transport.posts, [])
+        self.assert_unpublished()
+
+    def test_tiss_anchor_changed_bytes_are_not_accepted_under_signed_metadata(self):
+        self.add_tiss_anchor()
+        (self.ia_package / 'tiss-tool.cjs').write_bytes(b'changed synthetic TISS payload\n')
+        with self.assertRaisesRegex(sync.SyncError, 'PACKAGE_FILE_BYTES_CONFLICT'):
+            self.execute()
+        self.assertEqual(self.transport.posts, [])
+        self.assert_unpublished()
 
     def test_prior_transition_cannot_cross_ia_anchor_even_with_rehashed_local_artifacts(self):
         original_plan = copy.deepcopy(self.plan)

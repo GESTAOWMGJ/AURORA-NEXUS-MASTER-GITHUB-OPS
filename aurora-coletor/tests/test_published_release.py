@@ -22,6 +22,23 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 NEXT = 'a' * 40
 ORG = 'fixture-org'
 NOW = datetime(2026, 10, 13, 12, tzinfo=timezone.utc).timestamp()
+TISS_FILES = ('tiss-tool.cjs', 'tiss-browser.cjs', 'tiss-local.js',
+              'client-agent/aurora_tiss.py', 'tiss-fixtures/sadt-valid.xml')
+
+
+def master_package(tiss=False):
+    files = {'public-fixture-%02d.cjs' % index: ('synthetic public %d' % index).encode()
+             for index in range(34)}
+    if tiss:
+        files.update({name: ('synthetic public ' + name).encode() for name in TISS_FILES})
+    manifest = {'component': 'AURORA_IA_MASTER', 'version': '1.1.0', 'sourceRevision': NEXT,
+                'dirty': False, 'externalAiEnabled': False, 'nodeMinimumMajor': 22,
+                'files': {name: release.digest(value) for name, value in files.items()}}
+    if tiss:
+        manifest['tissTool'] = {'id': 'AURORA-TISS-SADT-001', 'version': '1.0.0', 'configured': False,
+                                'processing': 'LOCAL_EPHEMERAL', 'realPortalEnabled': False,
+                                'submissionEnabled': False}
+    return manifest, files
 
 
 def pair():
@@ -95,6 +112,11 @@ class PublishedReleaseTests(unittest.TestCase):
         with patch.object(release.request, 'build_opener', return_value=opener), patch.object(release.time, 'time', return_value=NOW):
             pin = release.read_active_pin('synthetic-process-only', self.trust, NEXT, ORG)
         return pin, requests
+
+    def master_candidate(self, manifest):
+        raw = json.dumps(manifest).encode()
+        candidate = release.verify_candidate(envelope(self.key, {'iaMaster': release.digest(raw)}), self.trust, NEXT, NOW)
+        return candidate, raw
 
     def test_governance_exact_public_fixture_matches_ed25519_domain(self):
         fixture_path = Path(__file__).parent / 'fixtures/active-release-v2-public-contract.json'
@@ -180,6 +202,112 @@ class PublishedReleaseTests(unittest.TestCase):
                 release.assess_manifest(candidate, 'windowsIntegration', raw, changed)
         with self.assertRaisesRegex(release.ReleaseError, 'SIGNED_MANIFEST'):
             release.assess_manifest(candidate, 'windowsIntegration', raw + b' ', files)
+
+    def test_legacy_34_and_tiss_39_signed_master_packages_are_candidates_only(self):
+        for tiss, count in ((False, 34), (True, 39)):
+            with self.subTest(tiss=tiss):
+                manifest, files = master_package(tiss)
+                self.assertEqual(len(files), count)
+                candidate, raw = self.master_candidate(manifest)
+                result = release.assess_manifest(candidate, 'iaMaster', raw, files)
+                self.assertEqual(result['status'], 'SIGNED_COMPONENT_BYTES_VERIFIED')
+                self.assertEqual(result['sourceSha'], NEXT)
+                self.assertEqual(result['manifestSha256'], release.digest(raw))
+                self.assertEqual(result['version'], '1.1.0')
+                for field in ('currentPointerVerified', 'installed', 'allClientsSynchronized'):
+                    self.assertIs(result[field], False)
+                with self.assertRaisesRegex(release.ReleaseError, '^FRESH_CANONICAL_V2_PIN_REQUIRED$'):
+                    release.require_active(candidate, NOW, ORG)
+
+    def test_tiss_master_requires_signed_exact_manifest_and_file_bytes(self):
+        manifest, files = master_package(True)
+        candidate, raw = self.master_candidate(manifest)
+        for changed in (raw + b' ', raw.replace(b'LOCAL_EPHEMERAL', b'REMOTE_PROCESSING')):
+            with self.subTest(changed=changed[-20:]), self.assertRaisesRegex(release.ReleaseError, '^SIGNED_MANIFEST_BYTES_CONFLICT$'):
+                release.assess_manifest(candidate, 'iaMaster', changed, files)
+        changed_envelope = envelope(self.key, {'iaMaster': release.digest(raw)})
+        changed_envelope['certificate']['components']['iaMaster']['manifestSha256'] = 'd' * 64
+        with self.assertRaisesRegex(release.ReleaseError, '^RELEASE_SIGNATURE_REJECTED$'):
+            release.verify_candidate(changed_envelope, self.trust, NEXT, NOW)
+        for name in TISS_FILES:
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(release.ReleaseError, '^PACKAGE_CLOSURE_CONFLICT$'):
+                    release.assess_manifest(candidate, 'iaMaster', raw, {key: value for key, value in files.items() if key != name})
+                with self.assertRaisesRegex(release.ReleaseError, '^PACKAGE_FILE_BYTES_CONFLICT$'):
+                    release.assess_manifest(candidate, 'iaMaster', raw, {**files, name: b'changed public bytes'})
+
+    def test_signed_tiss_master_cannot_replace_required_files_at_same_count(self):
+        for name in TISS_FILES:
+            with self.subTest(name=name):
+                manifest, files = master_package(True)
+                files['replacement.cjs'] = files.pop(name)
+                manifest['files']['replacement.cjs'] = manifest['files'].pop(name)
+                self.assertEqual(len(files), 39)
+                candidate, raw = self.master_candidate(manifest)
+                with self.assertRaisesRegex(release.ReleaseError, '^PACKAGE_CLOSURE_CONFLICT$'):
+                    release.assess_manifest(candidate, 'iaMaster', raw, files)
+
+    def test_signed_tiss_metadata_requires_exact_fields_values_and_boolean_types(self):
+        original, files = master_package(True)
+        changes = [('id', 'OTHER-TOOL'), ('version', '1.0.1'), ('processing', 'REMOTE'),
+                   ('configured', True), ('realPortalEnabled', True), ('submissionEnabled', True),
+                   ('configured', 0), ('realPortalEnabled', 0), ('submissionEnabled', 0),
+                   ('configured', 1), ('realPortalEnabled', 1), ('submissionEnabled', 1),
+                   ('configured', None), ('extra', False)]
+        variants = []
+        for field, value in changes:
+            manifest = copy.deepcopy(original)
+            manifest['tissTool'][field] = value
+            variants.append((field + '=' + repr(value), manifest))
+        for field in original['tissTool']:
+            manifest = copy.deepcopy(original)
+            del manifest['tissTool'][field]
+            variants.append(('missing ' + field, manifest))
+        for value in (None, [], 'AURORA-TISS-SADT-001'):
+            variants.append(('wrong object ' + repr(value), {**original, 'tissTool': value}))
+        variants.append(('missing object', {key: value for key, value in original.items() if key != 'tissTool'}))
+        for label, manifest in variants:
+            with self.subTest(variant=label):
+                candidate, raw = self.master_candidate(manifest)
+                with self.assertRaisesRegex(release.ReleaseError, '^PACKAGE_CLOSURE_CONFLICT$'):
+                    release.assess_manifest(candidate, 'iaMaster', raw, files)
+
+    def test_legacy_master_rejects_tiss_metadata_and_partial_tiss_files(self):
+        for value in (None, {}, master_package(True)[0]['tissTool']):
+            manifest, files = master_package()
+            manifest['tissTool'] = value
+            candidate, raw = self.master_candidate(manifest)
+            with self.subTest(metadata=value), self.assertRaisesRegex(release.ReleaseError, '^PACKAGE_CLOSURE_CONFLICT$'):
+                release.assess_manifest(candidate, 'iaMaster', raw, files)
+        for name in TISS_FILES + tuple(name.upper() for name in TISS_FILES):
+            with self.subTest(file=name):
+                manifest, files = master_package()
+                files[name] = files.pop('public-fixture-00.cjs')
+                manifest['files'][name] = manifest['files'].pop('public-fixture-00.cjs')
+                self.assertEqual(len(files), 34)
+                candidate, raw = self.master_candidate(manifest)
+                with self.assertRaisesRegex(release.ReleaseError, '^PACKAGE_CLOSURE_CONFLICT$'):
+                    release.assess_manifest(candidate, 'iaMaster', raw, files)
+
+    def test_master_package_identity_and_lineage_remain_required_for_both_compositions(self):
+        for tiss in (False, True):
+            for field, value in (('component', 'OTHER_COMPONENT'), ('sourceRevision', 'b' * 40),
+                                 ('version', '9.0.0'), ('dirty', True), ('externalAiEnabled', True),
+                                 ('nodeMinimumMajor', 21)):
+                with self.subTest(tiss=tiss, field=field):
+                    manifest, files = master_package(tiss)
+                    manifest[field] = value
+                    candidate, raw = self.master_candidate(manifest)
+                    with self.assertRaisesRegex(release.ReleaseError, '^PACKAGE_IDENTITY_CONFLICT$'):
+                        release.assess_manifest(candidate, 'iaMaster', raw, files)
+
+    def test_master_composition_helper_rejects_invalid_and_case_ambiguous_names(self):
+        for manifest in (None, [], {}, {'files': []}, {'files': {1: 'c' * 64}}):
+            with self.subTest(manifest=manifest):
+                self.assertIs(release.ia_master_manifest_shape(manifest), False)
+        manifest, _ = master_package(True)
+        manifest['files']['TISS-TOOL.CJS'] = manifest['files'].pop('public-fixture-00.cjs')
+        self.assertIs(release.ia_master_manifest_shape(manifest), False)
 
     def test_preflight_defaults_readonly_and_missing_credential_does_not_authenticate(self):
         control = {'trust': self.trust, 'expectedSourceSha': NEXT, 'manifestPath': str(Path.cwd() / 'windowsIntegration-manifest.json')}

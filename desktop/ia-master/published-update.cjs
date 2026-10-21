@@ -15,6 +15,9 @@ const COMPONENTS = ['server', 'web', 'satellite', 'iaMaster', 'windowsIntegratio
 const CHECKS = ['ciPassed', 'humanReviewApproved', 'protectedDeploySucceeded', 'smokePassed'];
 const WINDOWS_FILES = ['client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
   'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py'];
+const TISS_FILES = ['tiss-tool.cjs', 'tiss-browser.cjs', 'tiss-local.js', 'client-agent/aurora_tiss.py', 'tiss-fixtures/sadt-valid.xml'];
+const TISS_TOOL = Object.freeze({ id: 'AURORA-TISS-SADT-001', version: '1.0.0', configured: false,
+  processing: 'LOCAL_EPHEMERAL', realPortalEnabled: false, submissionEnabled: false });
 const CHECKPOINT_FIELDS = ['schemaVersion', 'componentVersion', 'targetBinding', 'sampleKey', 'attempt', 'updatedAt',
   'status', 'nextAction', 'connectionVerified', 'receiptVerifiedThisRun', 'processingVerifiedThisRun', 'processingProof',
   'previousReceiptCached', 'receipt', 'fullSynchronizationVerified', 'productionReleased', 'code', 'installationAcceptance'];
@@ -186,7 +189,14 @@ function inspectPackage(candidate, component, directory, manifestBytes) {
     'PACKAGE_IDENTITY_CONFLICT');
   const files = packageFiles(directory), names = Object.keys(manifest.files);
   const physicalNames = Object.keys(files).filter(name => name !== 'manifest.json');
-  demand(names.length === (component === 'iaMaster' ? 34 : 7)
+  // Retain the previously signed 34-file lineage. TISS is an explicit 39-file
+  // package contract, never a relaxed count or a manifest-only capability claim.
+  const legacyMaster = names.length === 34 && !Object.hasOwn(manifest, 'tissTool')
+    && !names.some(name => TISS_FILES.some(required => required.toLowerCase() === name.toLowerCase()));
+  const tissMaster = names.length === 39 && TISS_FILES.every(name => Object.hasOwn(manifest.files, name))
+    && exact(manifest.tissTool, Object.keys(TISS_TOOL))
+    && Object.entries(TISS_TOOL).every(([key, value]) => manifest.tissTool[key] === value);
+  demand((component === 'iaMaster' ? legacyMaster || tissMaster : names.length === 7)
     && (component !== 'windowsIntegration' || canonical([...names].sort()) === canonical([...WINDOWS_FILES].sort()))
     && names.every(name => safeName(name) && name !== 'manifest.json' && hex(manifest.files[name], 64))
     && canonical([...physicalNames].sort()) === canonical([...names].sort()), 'PACKAGE_CLOSURE_CONFLICT');

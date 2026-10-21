@@ -478,9 +478,11 @@ def _transition_local(plan, release, candidate):
     manifest_bytes = _transition_bytes(ia_package / 'manifest.json')
     manifest = _transition_json(manifest_bytes)
     _transition_demand(isinstance(manifest.get('files'), dict), 'SIGNED_IA_CHECKPOINT_ANCHOR_CONFLICT')
-    # assess_manifest validates each name; bound names before opening any local path.
+    # Preserve the signed legacy closure while accepting the declared TISS
+    # extension. Bound its shape and every name before opening any local path;
+    # assess_manifest still verifies signature-bound identity and exact bytes.
     names = manifest['files']
-    _transition_demand(len(names) == 34 and all(isinstance(name, str)
+    _transition_demand(release.ia_master_manifest_shape(manifest) and all(isinstance(name, str)
                        and re.fullmatch(r'[A-Za-z0-9_./-]{1,200}', name)
                        and all(part not in ('', '.', '..') and not part.startswith('.') for part in name.split('/'))
                        for name in names), 'SIGNED_IA_CHECKPOINT_ANCHOR_CONFLICT')
