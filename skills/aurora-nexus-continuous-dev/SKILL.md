@@ -19,6 +19,13 @@ O ciclo obrigatório é:
 
 A regra de pendências é ativa: divergência, glosa, documento faltante, faturamento, recebimento, repasse ou SLA permanece em ciclo até fechamento comprovado.
 
+Para extração documental e fechamento institucional mensal, ler
+`docs/AURORA_DOCUMENTARY_MONTHLY_CLOSING_20261021.md` e reutilizar a
+`documentaryMonthlyClosingPolicy` do registro nativo. Separar recebimento informado,
+localização, extração, validação e conciliação; busca vazia não prova ausência.
+Preservar cortes, glosas desde D0, aging, deduplicação e snapshots fechados.
+Representação do método, execução, CI e adoção instalada exigem provas distintas.
+
 ## Finalidade
 
 Transformar cada prompt relacionado ao AURORA NEXUS em avanço mensurável do mesmo produto, evitando projetos paralelos, recomeços e melhorias apenas descritivas.
