@@ -10,7 +10,22 @@ test("modus operandi WMGJ está representado como registro nativo multi-tenant",
   for (const id of ["AURORA-RUNTIME-WATCHDOG","AURORA-PROJECTION-ENGINE","AURORA-DOCUMENT-WATCHDOG","AURORA-FIN-SOC-001","AURORA-REV-SAN-001","AURORA-MASTER-OPS-001","AURORA-TECH-AUDIT-WEEKLY"]) {
     assert.ok(ids.has(id), id);
   }
-  assert.ok(AURORA_NATIVE_ROUTINES.every((item) => item.sourceMutation === false));
+  assert.ok(AURORA_NATIVE_ROUTINES.filter(item => item.id !== 'AURORA-TISS-SADT-001').every((item) => item.sourceMutation === false));
+  const tiss = AURORA_NATIVE_ROUTINES.find(item => item.id === 'AURORA-TISS-SADT-001');
+  assert.equal(tiss?.state, 'NATIVE_GOVERNED');
+  assert.equal(tiss?.sourceMutation, true); // Browser input may invoke portal handlers.
+  assert.equal(tiss?.humanGate, true);
+});
+
+test('TISS is an executable local tool with clinical and transmission gates still explicit', () => {
+  const policy = nativeRoutineSummary().tissBillingPolicy as Record<string, unknown>;
+  assert.equal(policy.registrationOnly, false);
+  assert.equal(policy.executor, 'EXISTING_LOCAL_IA_MASTER');
+  assert.equal(policy.productionPortalEnabled, false);
+  assert.equal(policy.explicitSubmissionImplemented, false);
+  assert.equal(policy.receiptIsPayment, false);
+  assert.equal(policy.rawXmlPersisted, false);
+  assert.equal(policy.schedulerCreated, false);
 });
 
 test("rotinas legadas ficam espelhadas até migração e nunca são fingidas como nativas ativas", () => {

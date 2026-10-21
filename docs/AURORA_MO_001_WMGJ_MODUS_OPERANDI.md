@@ -1,5 +1,23 @@
 # AURORA-MO-001 — Modus Operandi Mestre WMGJ → AURORA NEXUS
 
+## Faturamento TISS/SP-SADT — incremento de 21/10/2026
+
+`AURORA-TISS-SADT-001` acrescenta ferramenta executável à IA Master existente,
+no M03.1: leitura XML TISS 4.03.00, conferência determinística de procedimentos,
+outras despesas e totais, plano por sessão e adaptador de navegador com readback.
+O registro nativo usa `NATIVE_GOVERNED`; presença em código não prova instalação.
+
+Análise é efêmera e classificada como clínica sensível. XML e valores não entram
+na IA, auditoria genérica ou persistência canônica. Nesta versão, preenchimento
+fica limitado à fixture sintética empacotada e ao portal de homologação configurado.
+Não há submissão de lote, liberação clínica ou baixa financeira. TUSS não define
+preço; contrato, XSD integral e vigência continuam verificações próprias.
+
+Intenção e resultado usam a auditoria existente, com hashes, exclusão mútua e
+bloqueio de repetição após resultado incerto. Eventos do formulário podem disparar
+autosave e exigem homologação. Nenhum novo motor, banco ou scheduler é criado.
+Contrato, provas sintéticas e rollback: `docs/AURORA_TISS_SADT_TOOL_1_0_0.md`.
+
 Incremento de 04/10/2026: `AURORA-USER-PROFILES-001` incorpora criação/retomada/revogação de perfis por administrador com MFA, por organização e sem banco paralelo. `AURORA-DAILY-UPDATES-001` representa a manutenção diária autorizada de cliente, web e mobile, ainda executada pela rotina hospedada existente e marcada LEGACY_MIRRORED. Contrato, evidências, gates e rollback em [AURORA_USER_PROFILES_1_0_0.md](AURORA_USER_PROFILES_1_0_0.md). A autorização antecipada de futuras versões evita repetir consentimento no mesmo escopo; não equivale a validação técnica ou implantação comprovada.
 
 ## Adendo permanente de autonomia resolutiva — robô e IA de desenvolvimento

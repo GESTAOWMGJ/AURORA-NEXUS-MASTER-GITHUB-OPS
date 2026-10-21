@@ -37,12 +37,17 @@ class BuildContract(unittest.TestCase):
             actual = {str(file.relative_to(output)).replace('\\', '/')
                       for file in output.rglob('*') if file.is_file()}
             self.assertEqual(actual, set(manifest['files']) | {'manifest.json'})
-            self.assertEqual(len(manifest['files']), 34)
+            self.assertEqual(len(manifest['files']), 39)
+            self.assertEqual(manifest['tissTool']['id'], 'AURORA-TISS-SADT-001')
+            self.assertFalse(manifest['tissTool']['realPortalEnabled'])
+            self.assertFalse(manifest['tissTool']['submissionEnabled'])
+            self.assertTrue({'tiss-tool.cjs', 'tiss-browser.cjs', 'tiss-local.js',
+                             'tiss-fixtures/sadt-valid.xml'}.issubset(manifest['files']))
             self.assertIn('published-update.cjs', manifest['files'])
             self.assertEqual({name for name in manifest['files'] if name.startswith('client-agent/')},
                              {'client-agent/' + name for name in ('client_agent.py', 'provider_connectors.py',
                               'client_secret_store.py', 'install_client_agent.py', 'aurora_cloud_sync.py',
-                              'aurora_deployment.py', 'published_release.py')})
+                              'aurora_deployment.py', 'published_release.py', 'aurora_tiss.py')})
             for name, expected in manifest['files'].items():
                 self.assertEqual(hashlib.sha256((output / name).read_bytes()).hexdigest(), expected)
             for name in required - {'modus-operandi.md', 'kernel/auroraMasterEngine.js', 'kernel/auroraIaMaster.js'}:

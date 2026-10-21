@@ -1,8 +1,23 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AURORA NEXUS · IA Master</title><link rel="stylesheet" href="/app.css"><link rel="stylesheet" href="/studio-local.css"><script src="/app.js" defer></script><script src="/studio-local.js" defer></script></head><body>
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AURORA NEXUS · IA Master</title><link rel="stylesheet" href="/app.css"><link rel="stylesheet" href="/studio-local.css"><script src="/app.js" defer></script><script src="/studio-local.js" defer></script><script src="/tiss-local.js" defer></script></head><body>
 <header><span>AURORA NEXUS</span><button id="logout" hidden>Sair</button></header>
 <main><p class="eyebrow">CENTRAL DE PROCESSAMENTO LOCAL</p><h1>IA Master</h1><p class="lead">A capacidade deste PC a serviço da operação e da evolução do AURORA.</p>
 <p id="session" class="notice" role="status">Validando acesso local…</p>
 <div id="workspace" hidden><section class="metrics"><article><small>Motor nativo</small><strong>Determinístico</strong><p>Mesmo núcleo da aplicação</p></article><article><small>Modelo no PC</small><strong id="model">—</strong><p id="model-state">Aguardando confirmação</p></article><article><small>Tokens externos desde a inicialização</small><strong id="tokens">—</strong><p>Fallback externo desativado</p></article><article><small>Recursos físicos</small><strong id="hardware">—</strong><p id="memory">—</p></article></section>
+<section id="tiss-panel" class="panel" aria-labelledby="tiss-heading">
+  <p class="eyebrow">CICLO DE RECEITA · M03.1</p><h2 id="tiss-heading">Faturamento TISS / SP-SADT</h2>
+  <p>Importe um XML para conferir guias, procedimentos, códigos e valores no motor local. O ensaio de preenchimento usa uma guia sintética e uma página de homologação configurada.</p>
+  <p id="tiss-notice" class="notice" role="status" aria-live="polite">Aguardando acesso local…</p>
+  <label for="tiss-file">Arquivo XML autorizado para esta organização · UTF-8 ou ISO-8859-1 · até 1 MB</label>
+  <input id="tiss-file" type="file" accept=".xml,application/xml,text/xml">
+  <div class="tiss-actions"><button id="tiss-analyze" type="button" disabled>Conferir XML</button><button id="tiss-example" type="button" class="secondary">Usar exemplo sintético</button><button id="tiss-clear" type="button" class="secondary">Limpar análise</button></div>
+  <p class="hint">O arquivo permanece na memória desta sessão por até 15 minutos. A conferência local não comprova cobertura, autorização, preço contratado, aceite da operadora ou recebimento.</p>
+  <div id="tiss-analysis-panel" hidden><div id="tiss-summary"></div><h3>Verificações e pendências</h3><ul id="tiss-issues"></ul>
+    <label for="tiss-guides">Guia para revisão</label><select id="tiss-guides"></select><div id="tiss-items" class="tiss-table"></div>
+    <h3>Preenchimento em homologação</h3><p class="hint">Confira o plano e a aba de destino. A ferramenta não envia o lote; o comportamento de salvamento do portal precisa ser homologado.</p>
+    <div class="tiss-actions"><button id="tiss-plan" type="button" disabled>Preparar campos do exemplo</button><button id="tiss-inspect" type="button" class="secondary" disabled>Conferir aba de destino</button><button id="tiss-fill" type="button" disabled>Preencher rascunho de teste</button></div>
+    <div id="tiss-plan-output" class="tiss-table"></div>
+  </div>
+</section>
 <section id="local-studio" class="panel studio" aria-labelledby="studio-heading">
   <div class="studio-heading"><div><p class="eyebrow">DESENVOLVIMENTO NO PRÓPRIO AURORA</p><h2 id="studio-heading">Studio da IA Master</h2></div><button id="studio-reconnect" type="button" class="secondary">Atualizar acesso</button></div>
   <p class="lead">Transforme uma ideia em uma proposta de código revisável, com versão e histórico, usando a inteligência deste PC.</p>

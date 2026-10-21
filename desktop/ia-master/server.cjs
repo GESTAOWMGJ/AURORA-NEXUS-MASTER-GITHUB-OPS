@@ -10,6 +10,8 @@ const { createStudio, StudioError, SECRET, LIMITS } = require('./studio.cjs');
 const { loadRegistry, selectKnowledge, DEFAULT_BUDGET } = require('./knowledge-registry.cjs');
 const { readRegularFile } = require('./safe-read.cjs');
 const { PublisherError } = require('./publisher.cjs');
+const { createTissTool, readTissConfiguration, TissError, BODY_LIMIT: TISS_BODY_LIMIT } = require('./tiss-tool.cjs');
+const { TissBrowserError } = require('./tiss-browser.cjs');
 
 const VERSION = '1.1.0';
 const MODEL = 'qwen3:8b';
@@ -39,9 +41,9 @@ function equal(a, b) {
 function closed(body, keys) {
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(k => !keys.includes(k))) throw Error('INVALID_FIELDS');
 }
-async function bodyJson(req) {
+async function bodyJson(req, limit = 65536) {
   const chunks = []; let size = 0;
-  for await (const chunk of req) { size += chunk.length; if (size > 65536) throw Error('BODY_LIMIT'); chunks.push(chunk); }
+  for await (const chunk of req) { size += chunk.length; if (size > limit) throw Error('BODY_LIMIT'); chunks.push(chunk); }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 async function localChat(prompt, knowledge, structured = false) {
@@ -116,7 +118,7 @@ function startupConfiguration(stateDir, orgId, env = process.env) {
 }
 
 function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = localChat, now = () => Date.now(), knowledge = '', registryPath = null, studioRepository = null, portalOrigins = [],
-  publisherConfig = null, publisherRunner,
+  publisherConfig = null, publisherRunner, tissConfig = null, tissParser, tissBrowserFactory,
   readManifest = () => readRegularFile(path.join(__dirname, 'manifest.json'), 65536), readModelState = localModelState }) {
   if (!/^[a-z0-9][a-z0-9-]{1,63}$/.test(orgId) || !/^[\w-]{40,100}$/.test(controlToken)) throw Error('LOCAL_IDENTITY_REQUIRED');
   fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
@@ -127,8 +129,11 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
   let busy = false, activeCorpusIdentity = null;
   const portalAllowlist = new Set(portalOrigins.filter(value => ['https://auroranexus.com.br', 'https://wmgj-hml-jfn-20260927.web.app'].includes(value)));
   function audit(action, metadata = {}) {
-    fs.appendFileSync(path.join(stateDir, 'audit.jsonl'), JSON.stringify({ at: new Date(now()).toISOString(), orgId, action, version: VERSION, ...metadata }) + '\n', { mode: 0o600 });
+    fs.appendFileSync(path.join(stateDir, 'audit.jsonl'), JSON.stringify({ at: new Date(now()).toISOString(), orgId, action, version: VERSION, ...metadata }) + '\n',
+      { mode: 0o600, flush: action.startsWith('TISS_') });
   }
+  const tiss = createTissTool({ stateDir, orgId, audit, config: tissConfig, now,
+    ...(tissParser ? { parser: tissParser } : {}), ...(tissBrowserFactory ? { browserFactory: tissBrowserFactory } : {}) });
   function expire(map) { for (const [k, v] of map) if (v.expiresAt <= now()) map.delete(k); }
   function referenceKnowledge(prompt, budget = DEFAULT_BUDGET) {
     const registry = loadRegistry(registryPath);
@@ -174,7 +179,8 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
       if (req.method === 'GET' && req.url === '/health') return send(200, { service: 'AURORA_IA_MASTER', version: VERSION, startedAt, processManifest });
       const localAssets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'],
         '/app.css': ['app.css', 'text/css'], '/studio-local.js': ['studio-local.js', 'text/javascript'],
-        '/studio-local.css': ['studio-local.css', 'text/css'] };
+        '/studio-local.css': ['studio-local.css', 'text/css'], '/tiss-local.js': ['tiss-local.js', 'text/javascript'],
+        '/tiss-fixture.xml': ['tiss-fixtures/sadt-valid.xml', 'application/xml'] };
       if (req.method === 'GET' && Object.hasOwn(localAssets, req.url)) {
         const [name, type] = localAssets[req.url];
         return send(200, readRegularFile(path.join(__dirname, name), 2 * 1024 * 1024).toString('utf8'), type);
@@ -212,12 +218,14 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
         return send(200, portalRequest ? { ok: true, sessionToken: token, orgId, expiresAt: new Date(expiresAt).toISOString() } : { ok: true });
       }
       if (!authenticated) return send(401, { code: 'LOCAL_AUTH_REQUIRED' });
+      const tissCaller = hash(orgId + '\n' + (bearer ? 'LOCAL_CONTROL_OWNER' : candidate));
       if (req.url === '/api/pair-ticket' && req.method === 'POST' && bearer) {
         if (tickets.size >= 8) return send(429, { code: 'PAIRING_LIMIT' });
         const ticket = secret(); tickets.set(ticket, { expiresAt: now() + 60000, orgId }); return send(200, { ticket });
       }
       if (req.url === '/api/pair-ticket') return send(403, { code: 'LOCAL_CONTROL_REQUIRED' });
       if (req.url === '/api/logout' && req.method === 'POST') {
+        tiss.clear(tissCaller);
         sessions.delete(candidate); if (!portalRequest) headers['Set-Cookie'] = 'aurora_local=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0';
         return send(200, { ok: true });
       }
@@ -231,9 +239,16 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
           knowledge: { status: registry.status, corpusVersion: registry.corpusVersion, corpusHash: registry.corpusHash,
             loadedCount: registry.records.length, rejectedCount: registry.rejectedCount,
             completeHistoricalAbsorption: registry.completeHistoricalAbsorption === true },
+          tiss: tiss.status(),
           studio: { schemaVersion: 'aurora.master.studio.v1', repositoryState: studio.configState,
             publish: studio.publisherCapabilities().publish, publisher: studio.publisherCapabilities() },
           bridge: { sessionBoundToOrigin: true, orgId, enabled: portalRequest, authority: 'PAIRED_LOCAL_OWNER_NO_CLOUD_MFA_CLAIM' } });
+      }
+      if (req.url.startsWith('/api/tiss/')) {
+        // This dedicated local tool never forwards XML to /native, /improve or
+        // cloud ingestion. Identity and CSRF are the same as the existing master.
+        const result = await tiss.route(req.method, req.url, req.method === 'POST' ? await bodyJson(req, TISS_BODY_LIMIT) : undefined, tissCaller);
+        return send(result.status, { ...result.value, externalAiCalls: 0 });
       }
       if (req.url.startsWith('/api/studio/')) {
         const result = await studio.route(req.method, req.url, req.method === 'POST' ? await bodyJson(req) : undefined);
@@ -272,11 +287,13 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
       audit('ENGINEERING_PROPOSAL', { inputHash: fingerprint, outputHash: hash(proposal.text), corpusHash: receipt.corpusHash, knowledgeRecordIds: receipt.recordIds });
       return send(200, { proposal, proposalId: fingerprint, knowledge: receipt, state: 'PROPOSAL_ONLY', promotionGates: IA_MASTER_POLICY.promotionGates, externalAiCalls: 0, applied: false });
     } catch (error) {
+      if (error instanceof TissError || error instanceof TissBrowserError) return send(error.status, { code: error.code, externalFallbackUsed: false });
       if (error instanceof StudioError || error instanceof PublisherError) return send(error.status, { code: error.code, ...(['STUDIO_CONTENT_LIMIT', 'STUDIO_MODEL_CONTEXT_LIMIT'].includes(error.code) ? { limits: LIMITS } : {}), externalFallbackUsed: false });
       const validation = ['INVALID_FIELDS', 'BODY_LIMIT', 'PROMPT_LIMIT'].includes(error.message) || error instanceof SyntaxError;
       send(validation ? 400 : 503, { code: validation ? 'INVALID_REQUEST' : 'LOCAL_OPERATION_UNAVAILABLE', externalFallbackUsed: false });
     }
   });
+  server.on('close', () => tiss.dispose());
   server.requestTimeout = 190000; server.headersTimeout = 10000; server.maxHeadersCount = 40;
   return { server, metrics, listen: () => new Promise(resolve => server.listen(port, '127.0.0.1', resolve)) };
 }
@@ -289,7 +306,8 @@ if (require.main === module) {
   const knowledge = readRegularFile(path.join(__dirname, 'modus-operandi.md'), 2 * 1024 * 1024).toString('utf8');
   const registryPath = path.join(stateDir, 'knowledge', 'knowledge_registry.v1.json');
   const { studioRepository, portalOrigins, publisherConfig } = startupConfiguration(stateDir, process.env.AURORA_ORG_ID);
-  const app = createMaster({ stateDir, orgId: process.env.AURORA_ORG_ID, controlToken, knowledge, registryPath, studioRepository, portalOrigins, publisherConfig });
+  const tissConfig = readTissConfiguration(stateDir, process.env.AURORA_ORG_ID);
+  const app = createMaster({ stateDir, orgId: process.env.AURORA_ORG_ID, controlToken, knowledge, registryPath, studioRepository, portalOrigins, publisherConfig, tissConfig });
   app.server.on('error', () => { console.error('AURORA_LOCAL_SERVER_START_FAILED'); process.exit(1); });
   app.listen().then(() => console.log(JSON.stringify({ service: 'AURORA_IA_MASTER', version: VERSION, address: '127.0.0.1:38765', externalAiEnabled: false })));
 }
