@@ -127,6 +127,7 @@ jobs:
             "firebase-migration/policy/aurora-nexus-source-2.3.0.json",
             "firebase-migration/policy/aurora-nexus-policy.sanitized.json",
             "firebase-migration/policy/manifest.json",
+            "firebase-migration/policy/aurora-nexus-ownership-registration-v1.json",
             "firebase-migration/policy/security-baseline-v1.json"
           ];
           for (const file of files) {

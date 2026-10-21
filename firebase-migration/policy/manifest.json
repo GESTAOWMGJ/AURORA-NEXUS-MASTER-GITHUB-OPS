@@ -1,6 +1,6 @@
 {
-  "manifestVersion": 4,
-  "generatedAt": "2026-10-07",
+  "manifestVersion": 5,
+  "generatedAt": "2026-10-21",
   "activeDeliverable": {
     "file": "development-deliverable-v1.json",
     "id": "AURORA-DEV-DELIVERABLE-001",
@@ -12,6 +12,13 @@
     "file": "aurora-nexus-source-2.3.0.json",
     "version": "2.3.0",
     "sha256": "9a8f7f291be65c0ef1feba043592452b77bef03e965198ca451f0044703a6d8f"
+  },
+  "ownershipAndRegistration": {
+    "file": "aurora-nexus-ownership-registration-v1.json",
+    "id": "AURORA-OWNERSHIP-REGISTRATION-001",
+    "version": "2026.10.21",
+    "status": "REGISTERED_SOFTWARE_EVIDENCE_VERIFIED",
+    "certificate": "docs/evidence/aurora-nexus-inpi-br512026009261-2.pdf"
   },
   "export": {
     "file": "aurora-nexus-policy.sanitized.json",
