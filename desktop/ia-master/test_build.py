@@ -37,7 +37,7 @@ class BuildContract(unittest.TestCase):
             actual = {str(file.relative_to(output)).replace('\\', '/')
                       for file in output.rglob('*') if file.is_file()}
             self.assertEqual(actual, set(manifest['files']) | {'manifest.json'})
-            self.assertEqual(len(manifest['files']), 34)
+            self.assertEqual(len(manifest['files']), 36)
             self.assertIn('published-update.cjs', manifest['files'])
             self.assertEqual({name for name in manifest['files'] if name.startswith('client-agent/')},
                              {'client-agent/' + name for name in ('client_agent.py', 'provider_connectors.py',

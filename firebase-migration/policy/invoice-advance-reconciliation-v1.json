@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1.0.0",
+  "version": "2026-10-21.invoice-advance.1",
+  "classification": "INTERNAL_SANITIZED_METHODS",
+  "coverage": "SINGLE_ABSTRACT_METHOD_NOT_FULL_TENANT_CORPUS",
+  "completeHistoricalAbsorption": false,
+  "records": [
+    {
+      "id": "AURORA-FIN-ADVANCE-001",
+      "version": "1.0.0",
+      "title": "Conciliação de nota fiscal, adiantamentos e pagamentos posteriores",
+      "knowledgeState": "REGISTERED",
+      "technicalState": "METHOD_SPECIFIED_PENDING_RUNTIME_VALIDATION",
+      "evidenceBasis": "ABSTRACT_METHOD_FROM_DOCUMENTARY_RECONCILIATION; PRIVATE_CASE_NOT_INCLUDED",
+      "sourceRefs": [
+        "docs/AURORA_INVOICE_ADVANCE_RECONCILIATION.md",
+        "docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md"
+      ],
+      "problem": "Nota emitida após pagamentos e novo repasse posterior podem duplicar custos ou misturar competência econômica e caixa.",
+      "procedure": [
+        "Ler registros e revisões atuais; recuperar os vínculos já comprovados.",
+        "Identificar emissor, tomador, chave da nota e documento bancário; conferir razão, bruto, retenções e líquido. Coincidência de valor não comprova vínculo.",
+        "Relacionar uma obrigação econômica às suas alocações de pagamento. Não somar nota e liquidações como despesas independentes.",
+        "Preservar competência do serviço, emissão, escrituração, data bancária e data do histórico em campos distintos.",
+        "Manter separado o pagamento posterior sem alocação; não presumir duplicidade, complemento ou competência.",
+        "Separar vínculo fiscal-financeiro de validação da escala executada e da classificação contábil definitiva.",
+        "Reconciliar pendência, thread, enviados, respostas, anexos e prazo antes de solicitar complemento; reutilizar identidade e executor existentes.",
+        "Reler antes de gravar, preservar antes/depois e fontes, e conferir o resultado. Repetição não deve gerar novo efeito financeiro.",
+        "Manter resultado líquido e custo total não apurados se faltar evidência essencial; DRE agregada não é resultado isolado."
+      ],
+      "prompt": {
+        "text": "Aplicar AURORA-FIN-ADVANCE-001 na organização autenticada: conciliar nota fiscal, pagamentos antecipados e repasses posteriores com documentos fiscais, razão, banco e controles. Reconhecer o serviço uma única vez; separar competência econômica e caixa; preservar histórico; consultar comunicações antes de cobrar; manter resultado líquido não apurado enquanto houver lacunas essenciais."
+      },
+      "limits": [
+        "Método não concede acesso, aprovação ou permissão de pagamento/fechamento.",
+        "Somente dados da organização autenticada; nenhum dado privado no corpus compartilhado.",
+        "Registro não comprova execução automática, implantação, uso pelo motor ou treinamento de pesos.",
+        "Integração financeira depende de schema, evidência, revisão e executor existentes.",
+        "Não substituir corpus instalado por este pacote de intercâmbio."
+      ],
+      "rollback": "Revogar ou superseder a versão pelo mecanismo vigente, preservando corpus anterior, fontes, vínculos e auditoria."
+    }
+  ]
+}

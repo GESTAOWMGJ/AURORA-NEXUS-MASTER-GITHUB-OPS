@@ -7,6 +7,23 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { loadRegistry, selectKnowledge, validateRegistry, DEFAULT_BUDGET } = require('./knowledge-registry.cjs');
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
+test('invoice advance method is recoverable by the retained loader without private case data', () => {
+  const filename = path.join(__dirname, '../../firebase-migration/policy/invoice-advance-reconciliation-v1.json');
+  const raw = fs.readFileSync(filename, 'utf8');
+  const observed = loadRegistry(filename);
+  assert.equal(observed.status, 'LOADED');
+  assert.equal(observed.totalCount, 1);
+  assert.equal(observed.completeHistoricalAbsorption, false);
+  const selected = selectKnowledge(observed, 'nota fiscal adiantamentos pagamentos posteriores');
+  assert.deepEqual(selected.recordIds, ['AURORA-FIN-ADVANCE-001']);
+  assert.equal(selected.corpusHash, digest(raw));
+  assert.deepEqual(selectKnowledge(observed, 'AURORA-FIN-ADVANCE-001'),
+    selectKnowledge(loadRegistry(filename), 'AURORA-FIN-ADVANCE-001'));
+  assert.match(selected.context, /não apurado/);
+  assert.doesNotMatch(raw, /mail\.google|docs\.google|R\$|@|\d{14,}/i);
+  assert.equal(observed.records[0].technicalState, 'METHOD_SPECIFIED_PENDING_RUNTIME_VALIDATION');
+  assert.equal(selected.applied, undefined);
+});
 const record = (id, overrides = {}) => ({ id, version: '1.0.0', title: 'Reconciliação sintética',
   knowledgeState: 'REGISTERED', technicalState: 'IMPLEMENTED', prompt: { text: 'Confrontar somente evidência sintética.' }, ...overrides });
 const registry = records => ({ schemaVersion: '1.0.0', version: 'synthetic-v1',

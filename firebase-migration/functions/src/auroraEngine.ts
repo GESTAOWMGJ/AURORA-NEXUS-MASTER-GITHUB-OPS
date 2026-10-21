@@ -1,3 +1,4 @@
+import { evaluateInvoiceAdvances } from "./auroraInvoiceAdvance.js";
 import { validEvidenceRef } from "./auroraEvidence.js";
 import { nativeRoutineSummary } from "./auroraNativeRoutines.js";
 
@@ -236,10 +237,11 @@ function sourceStates(source: ProjectionSource): Array<Record<string, unknown>> 
 
 export function buildProjection(source: ProjectionSource, now = new Date(), context: ProjectionContext = {}): Record<string, unknown> {
   const operationalSource = withoutTestRecords(source);
-  const invoiced = sumCents(operationalSource.invoices.filter(record => record.aggregationRole !== "HISTORY_ONLY"
+  const invoiceAdvanceReconciliation = evaluateInvoiceAdvances(operationalSource, context.orgId, context.competence);
+  const invoiced = sumCents(operationalSource.invoices.filter(record => record.kind !== "EXPENSE" && record.aggregationRole !== "HISTORY_ONLY"
     && !["SUPERSEDED", "SUBSTITUIDA", "CANCELLED", "CANCELADO"].includes(financialStatus(record))),
     ["totalCents", "amountCents", "grossAmountCents", "valorCentavos"], { competence: context.competence });
-  const received = sumCents(operationalSource.bankTransactions, ["liquidatedAmountCents", "amountCents", "valorCentavos"], {
+  const received = sumCents(operationalSource.bankTransactions.filter(record => record.kind !== "DEBIT"), ["liquidatedAmountCents", "amountCents", "valorCentavos"], {
     competence: context.competence,
     status: new Set(["LIQUIDATED", "RECONCILED", "MATCHED", "LIQUIDADO", "CONCILIADO"])
   });
@@ -299,6 +301,7 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
     sanitized: true,
     sensitivity: "INTERNAL",
     state: dataState,
+    invoiceAdvanceReconciliation,
     financialCents: { invoicedCents: invoiced.value, receivedCents: received.value, glossCents: gloss.value, outstandingCents: outstanding },
     operations: { openActions, overdueActions, openFindings },
     documentIntelligence,

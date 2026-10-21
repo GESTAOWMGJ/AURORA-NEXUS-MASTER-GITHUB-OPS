@@ -14,7 +14,7 @@ def build(output):
     output.mkdir(parents=True, exist_ok=False)
     functions = ROOT / 'firebase-migration/functions'
     subprocess.run(['node', str(functions / 'node_modules/typescript/bin/tsc'),
-                    'src/auroraMasterEngine.ts', '--module', 'commonjs', '--target', 'ES2022',
+                    'src/auroraMasterEngine.ts', 'src/auroraInvoiceAdvance.ts', '--module', 'commonjs', '--target', 'ES2022',
                     '--outDir', str(output / 'kernel'), '--rootDir', 'src', '--strict',
                     '--esModuleInterop', '--skipLibCheck'], cwd=functions, check=True)
     for name in ['server.cjs', 'studio.cjs', 'knowledge-registry.cjs', 'update.cjs', 'published-update.cjs', 'safe-read.cjs', 'publisher.cjs', 'index.html', 'app.js', 'app.css', 'studio-local.js', 'studio-local.css', 'manage.cjs', 'README.md']:

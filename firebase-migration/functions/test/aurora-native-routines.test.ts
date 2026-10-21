@@ -5,6 +5,26 @@ import { AURORA_NATIVE_ROUTINES, nativeRoutineSummary } from "../src/auroraNativ
 import { buildProjection, type ProjectionSource } from "../src/auroraEngine.ts";
 import { generateNativeInsight } from "../src/auroraNativeIntelligence.ts";
 
+test('invoice advance method reaches the existing projection without another executor or financial mutation', () => {
+  const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
+  const before = JSON.stringify(empty);
+  const projected = buildProjection(empty, new Date('2026-10-21T12:00:00Z'), { orgId: 'synthetic-org', competence: '2026-08' }) as any;
+  const policy = projected.nativeRoutines.invoiceAdvanceReconciliationPolicy;
+  const corpus = JSON.parse(fs.readFileSync(new URL('../../policy/invoice-advance-reconciliation-v1.json', import.meta.url), 'utf8'));
+  assert.equal(policy.knowledgeRecordId, corpus.records[0].id);
+  assert.equal(policy.version, corpus.records[0].version);
+  assert.equal(policy.routineId, 'AURORA-REV-SAN-001');
+  assert.equal(policy.closingRoutineId, 'AURORA-FIN-SOC-001');
+  assert.equal(policy.registrationOnly, false);
+  assert.equal(policy.runtimeAdoptionVerified, false);
+  assert.equal(policy.schedulerCreated, false);
+  assert.equal(policy.externalSendImplementedByThisPolicy, false);
+  assert.equal(policy.invoiceAndPaymentsAreIndependentExpenses, false);
+  assert.equal(policy.amountEqualityProvesLink, false);
+  assert.equal(policy.incompleteNetResult, 'NOT_DETERMINED');
+  assert.equal(JSON.stringify(empty), before);
+});
+
 test("modus operandi WMGJ está representado como registro nativo multi-tenant", () => {
   const ids = new Set(AURORA_NATIVE_ROUTINES.map((item) => item.id));
   for (const id of ["AURORA-RUNTIME-WATCHDOG","AURORA-PROJECTION-ENGINE","AURORA-DOCUMENT-WATCHDOG","AURORA-FIN-SOC-001","AURORA-REV-SAN-001","AURORA-MASTER-OPS-001","AURORA-TECH-AUDIT-WEEKLY"]) {
