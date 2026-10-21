@@ -1,5 +1,15 @@
 # AURORA-MO-001 — Modus Operandi Mestre WMGJ → AURORA NEXUS
 
+Incremento de 20/10/2026: saneamento conectado à fila e ao ciclo Apps Script existentes, com autorização privada, histórico importado, recibo e bloqueio de retentativa incerta. Código candidato `IMPLEMENTED_PENDING_RUNTIME_VALIDATION`; nenhuma instalação ou publicação inferida. Contrato e provas em [AURORA_DOCUMENT_SANITATION_EXECUTOR.md](AURORA_DOCUMENT_SANITATION_EXECUTOR.md).
+
+Incremento de 19/10/2026: saneamento de projeções financeiras sem duplicar receita,
+distinção entre escala prevista/validada/executada e cobrança documental pelo
+responsável configurado no próprio tenant. Representação em
+`nativeRoutineSummary().documentSanitationPolicy`, vinculada a AURORA-REV-SAN-001;
+sem novo executor ou autorização implícita. Fontes, identidades e decisões reais
+permanecem privadas. Contrato, estado de validação e rollback em
+[AURORA_DOCUMENT_SANITATION_SCHEDULES.md](AURORA_DOCUMENT_SANITATION_SCHEDULES.md).
+
 Incremento de 04/10/2026: `AURORA-USER-PROFILES-001` incorpora criação/retomada/revogação de perfis por administrador com MFA, por organização e sem banco paralelo. `AURORA-DAILY-UPDATES-001` representa a manutenção diária autorizada de cliente, web e mobile, ainda executada pela rotina hospedada existente e marcada LEGACY_MIRRORED. Contrato, evidências, gates e rollback em [AURORA_USER_PROFILES_1_0_0.md](AURORA_USER_PROFILES_1_0_0.md). A autorização antecipada de futuras versões evita repetir consentimento no mesmo escopo; não equivale a validação técnica ou implantação comprovada.
 
 ## Adendo permanente de autonomia resolutiva — robô e IA de desenvolvimento

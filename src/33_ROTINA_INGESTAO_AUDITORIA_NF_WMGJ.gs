@@ -68,6 +68,9 @@ function executarRotinaDiariaIngestaoAuditoriaNfWMGJ(opcoes) {
     resultado.erros.push({ etapa: 'notificarResumoIngestaoAuditoriaNfWMGJ_', erro: normalizarErroIngestaoWMGJ_(erroNotif) });
   }
 
+  resultado.saneamento = executarSaneamentoDocumentalAurora_('DOCUMENT_AUDIT');
+  if (resultado.saneamento.ok === false) resultado.ok = false;
+
   resultado.fim = new Date().toISOString();
   registrarStatusIngestaoAuditoriaNfWMGJ_(resultado);
   registrarLogIngestaoAuditoriaNfWMGJ_(resultado.ok ? 'OK' : 'ALERTA', 'executarRotinaDiariaIngestaoAuditoriaNfWMGJ', resultado);

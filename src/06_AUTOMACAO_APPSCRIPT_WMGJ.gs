@@ -73,6 +73,9 @@ function executarAutomacaoOperacionalWMGJ() {
       resultado.ok = false;
     }
 
+    resultado.saneamento = executarSaneamentoDocumentalAurora_('PERIODIC');
+    if (resultado.saneamento.ok === false) resultado.ok = false;
+
     resultado.fim = new Date().toISOString();
     registrarStatusAutomacaoWMGJ_(resultado);
     registrarLogAutomacaoWMGJ_(resultado.ok ? 'OK' : 'ALERTA', 'executarAutomacaoOperacionalWMGJ', resultado);

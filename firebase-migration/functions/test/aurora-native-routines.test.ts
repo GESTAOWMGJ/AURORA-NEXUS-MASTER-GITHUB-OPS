@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { buildReleaseStatus } from "../src/auroraReleaseStatus.ts";
 import test from "node:test";
 import { AURORA_NATIVE_ROUTINES, nativeRoutineSummary } from "../src/auroraNativeRoutines.ts";
 import { buildProjection, type ProjectionSource } from "../src/auroraEngine.ts";
@@ -20,6 +21,31 @@ test("rotinas legadas ficam espelhadas até migração e nunca são fingidas com
   const maintenance = legacy.find(item => item.id === "AURORA-DAILY-UPDATES-001");
   assert.equal(maintenance?.trigger, "EXISTING_HOSTED_MAINTENANCE");
   assert.equal(maintenance?.cadence, "DAILY");
+});
+
+test("saneamento chega à projeção sem dados privados, nova receita ou autoridade de envio", () => {
+  const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
+  for (const orgId of ["synthetic-org-a", "synthetic-org-b"]) {
+    const projection = buildProjection(empty, new Date("2026-10-19T12:00:00Z"), { orgId, competence: "2026-08" }) as any;
+    const policy = projection.nativeRoutines.documentSanitationPolicy;
+    assert.equal(policy.routineId, "AURORA-REV-SAN-001");
+    assert.equal(policy.ownerResolution, "VERIFIED_TENANT_CONFIGURATION");
+    assert.equal(policy.externalRequestAuthority, "EXISTING_EXPLICIT_TENANT_AUTHORIZATION");
+    assert.equal(policy.unknownSendOutcome, "RECONCILE_SENT_BEFORE_RETRY");
+    assert.equal(policy.sourceAccessError, "COVERAGE_UNKNOWN");
+    assert.equal(policy.state, "IMPLEMENTED_PENDING_RUNTIME_VALIDATION");
+    for (const field of ["summaryIsAdditionalRevenue", "productionDifferenceIsAcceptedGloss", "missingEvidenceIsZero", "invoiceAndPaymentAreSeparateCosts", "permissionsGranted", "externalSendImplementedByThisPolicy", "schedulerCreated", "runtimeVerified", "privateOwnerIdentityExported", "modelWeightsTrained"]) assert.equal(policy[field], false, field);
+    assert.deepEqual(policy.sharedIssueKey, ["organization", "competence", "gapType", "owner"]);
+    assert.equal(policy.registrationOnly, false);
+    assert.equal(policy.externalSendImplementedByExecutor, true);
+    assert.equal(policy.externalSendEnabledByDefault, false);
+    assert.equal(policy.executorMode, "LEGACY_MIRRORED");
+    assert.equal(policy.unknownOutcomeNegativeSearchAllowsRetry, false);
+    assert.equal(policy.readLatestResponseBeforeSend, true);
+    assert.equal(policy.closeOnlyWithEvidence, true);
+    assert.equal(AURORA_NATIVE_ROUTINES.filter(r => r.id === policy.routineId).length, 1);
+    assert.doesNotMatch(JSON.stringify(policy), /@|https?:\/\/|\b\d{14}\b/);
+  }
 });
 
 test('release convergence reuses the governed registry entry without asserting installation or another executor',()=>{
@@ -174,4 +200,13 @@ test("AURORA self-sufficient engine docs and policy artifacts are present", () =
   assert.match(policy, /fallback de exceção/);
   assert.equal(kpi.kpis.external_ai_dependency_rate.target, 0.2);
   assert.equal(kpi.kpis.mttr.target_minutes, 60);
+});
+
+test("saneamento implementado não promove instalação ou liberação no Release Cockpit", () => {
+  const status = buildReleaseStatus({ active: true, sanitationEnabled: true }) as any;
+  assert.equal(status.documentSanitation.status, "IMPLEMENTED_PENDING_RUNTIME_VALIDATION");
+  assert.equal(status.documentSanitation.enabledByDefault, false);
+  assert.equal(status.documentSanitation.installationVerified, false);
+  assert.equal(status.documentSanitation.productionVerified, false);
+  assert.equal(status.documentSanitation.independentReviewRequired, true);
 });

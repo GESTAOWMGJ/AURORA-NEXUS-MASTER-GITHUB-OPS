@@ -97,6 +97,12 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}, p
       versionSource: unifiedBeta.reference ? "VERIFIED_ACTIVE_REFERENCE" : "PENDING_VERIFIED_REFERENCE",
       status: "IMPLEMENTED_PENDING_DEVICE_ATTESTATION", externalAiEnabled: false, cloudSyncVerified: false, autonomousDevelopmentPromoted: false },
     userProfiles: { routineId: "AURORA-USER-PROFILES-001", version: "1.0.0", status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", verifiedEmailRequired: true, mfaRequired: true, tenantOptInRequired: true, productionVerified: false },
+    documentSanitation: {
+      routineId: "AURORA-REV-SAN-001", status: "IMPLEMENTED_PENDING_RUNTIME_VALIDATION",
+      executor: "EXISTING_APPS_SCRIPT_OPERATIONAL_CYCLE", executorMode: "LEGACY_MIRRORED",
+      enabledByDefault: false, independentReviewRequired: true, privateHistoryImportRequired: true,
+      schedulerCreated: false, installationVerified: false, productionVerified: false
+    },
     dailyUpdates: { routineId: "AURORA-DAILY-UPDATES-001", webPwaCheckIntervalHours: 24, status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", desktopBinaryUpdateVerified: false, mobileDeviceVerified: false, productionVerified: false },
     releaseConvergence: {
       routineId: "AURORA-CANONICAL-RELEASE-001",
