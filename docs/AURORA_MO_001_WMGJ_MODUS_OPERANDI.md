@@ -808,3 +808,22 @@ O fluxo não escreve nos provedores nem envia mensagens. Narrativa, anexos e thr
 não extraídos conservam pendência. Contrato e testes reutilizáveis em
 `docs/AURORA_NOTION_SLACK_CONNECTORS_20261019.md`; credenciais e documentos reais
 permanecem privados por empresa. Representação no motor não comprova adoção física.
+
+## Titularidade e registro do produto — 21/10/2026
+
+O manifesto do projeto incorpora o Certificado de Registro de Programa de Computador
+do AURORA NEXUS, processo INPI `BR512026009261-2`, expedido em 20/10/2026. O registro
+identifica `JF NETO SERVICOS MEDICOS LTDA` como titular e `JOAO DE FREITAS NETO` como
+autor. O PDF original é evidência imutável vinculada por SHA-256 ao registro estruturado
+`AURORA-OWNERSHIP-REGISTRATION-001`.
+
+Por declaração direta do titular em 21/10/2026, o manifesto também identifica o
+Dr. João de Freitas Neto, CRM-PR 55.137 e CRM-SP 214.745, como Diretor Técnico da
+JF Neto SM Ltda. Esses dados profissionais conservam estado separado
+`DECLARED_PENDING_PRIMARY_REGISTRY_EVIDENCE`: o certificado do INPI não comprova
+regularidade dos CRMs nem o ato de designação técnica.
+
+O registro é de programa de computador. Não o converter em alegação de marca registrada,
+aprovação Anvisa, certificação de dispositivo médico, certificação ISO, validação clínica,
+segurança de produção ou implantação. A incorporação é documental e não concede acesso,
+não altera autorização, não executa deploy e não produz mutação de ambiente ou dados.

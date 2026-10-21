@@ -2,6 +2,10 @@
 
 WMGJ - Automation and Operational Management System.
 
+## AURORA NEXUS - titularidade e registro
+
+O sistema-mãe AURORA NEXUS / JFN-AUD-GOV-001 possui Registro de Programa de Computador no INPI sob o processo `BR512026009261-2`, com titular registral `JF NETO SERVICOS MEDICOS LTDA` e autoria de `JOAO DE FREITAS NETO`. A documentação canônica, a evidência original e os limites das alegações estão em [Titularidade, autoria e registro](docs/AURORA_NEXUS_TITULARIDADE_E_REGISTRO.md).
+
 ## Status operacional
 
 Versão estável atual: `v1.0.1-pipeline-estavel`

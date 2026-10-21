@@ -1,0 +1,114 @@
+{
+  "id": "AURORA-OWNERSHIP-REGISTRATION-001",
+  "schemaVersion": "1.0.0",
+  "version": "2026.10.21",
+  "recordedAt": "2026-10-21",
+  "status": "REGISTERED_SOFTWARE_EVIDENCE_VERIFIED",
+  "scope": "PROJECT_IDENTITY_AND_INTELLECTUAL_PROPERTY_PROVENANCE",
+  "product": {
+    "name": "AURORA NEXUS",
+    "systemCode": "JFN-AUD-GOV-001"
+  },
+  "softwareRegistration": {
+    "authority": "INSTITUTO_NACIONAL_DA_PROPRIEDADE_INDUSTRIAL",
+    "jurisdiction": "BR",
+    "registrationType": "COMPUTER_PROGRAM",
+    "processNumber": "BR512026009261-2",
+    "title": "AURORA NEXUS",
+    "creationDate": "2026-09-18",
+    "issuedDate": "2026-10-20",
+    "protectionTerm": "50_YEARS_FROM_2027-01-01",
+    "legalBasis": "LEI_9609_1998_ART_2_PARAGRAPH_2",
+    "holder": {
+      "legalName": "JF NETO SERVICOS MEDICOS LTDA",
+      "role": "REGISTRATION_HOLDER"
+    },
+    "author": {
+      "name": "JOAO DE FREITAS NETO",
+      "role": "AUTHOR"
+    },
+    "implementationLanguages": [
+      "HTML",
+      "JAVA_SCRIPT",
+      "PYTHON",
+      "CSS",
+      "JSON",
+      "OTHER"
+    ],
+    "applicationFields": [
+      "AD-05",
+      "SD-01",
+      "SD-02",
+      "SD-05"
+    ],
+    "programTypes": [
+      "AP-01",
+      "AP-03",
+      "AP-04",
+      "AT-01",
+      "AT-06",
+      "GI-01",
+      "GI-04",
+      "GI-06",
+      "GI-07"
+    ],
+    "registeredDepositDigest": {
+      "algorithm": "SHA-256",
+      "value": "6c9a181b2820808b3881777ec7a18e13744c8db4376f89d460562eba12026d52",
+      "meaning": "DIGEST_DECLARED_BY_INPI_FOR_THE_REGISTERED_PROGRAM_DEPOSIT"
+    }
+  },
+  "professionalGovernance": {
+    "source": "DIRECT_OWNER_STATEMENT_2026-10-21",
+    "state": "DECLARED_PENDING_PRIMARY_REGISTRY_EVIDENCE",
+    "person": "JOAO DE FREITAS NETO",
+    "medicalRegistrations": [
+      {
+        "council": "CRM",
+        "state": "PR",
+        "number": "55137"
+      },
+      {
+        "council": "CRM",
+        "state": "SP",
+        "number": "214745"
+      }
+    ],
+    "technicalRole": {
+      "title": "DIRETOR_TECNICO",
+      "organizationReportedName": "JF NETO SM LTDA",
+      "certificateHolderLegalName": "JF NETO SERVICOS MEDICOS LTDA"
+    },
+    "evidenceBoundary": "THE_INPI_CERTIFICATE_PROVES_SOFTWARE_REGISTRATION_HOLDER_AND_AUTHORSHIP; IT_DOES_NOT_VALIDATE_CRM_STATUS_OR_TECHNICAL_DIRECTOR_APPOINTMENT"
+  },
+  "certificateEvidence": {
+    "file": "docs/evidence/aurora-nexus-inpi-br512026009261-2.pdf",
+    "mediaType": "application/pdf",
+    "sha256": "ebb0a1dffdf9d84b17600f84166b0d7d2c222ca1c58fd1d2f918b5b92328a596",
+    "fileSizeBytes": 372193,
+    "signature": {
+      "field": "Signature1",
+      "signerCommonName": "ERICA GUIMARAES CORREA:10517747723",
+      "signingTimeFromPdf": "2026-10-20T04:50:11",
+      "documentSignatureValidation": "VALID",
+      "localCertificateChainValidation": "ISSUER_NOT_TRUSTED_BY_LOCAL_NSS_STORE",
+      "validationTool": "pdfsig"
+    }
+  },
+  "claimBoundaries": {
+    "softwareRegistrationCertified": true,
+    "trademarkRegistrationClaimed": false,
+    "medicalDeviceRegistrationClaimed": false,
+    "anvisaApprovalClaimed": false,
+    "isoCertificationClaimed": false,
+    "crmStandingVerifiedByThisEvidence": false,
+    "technicalDirectorAppointmentVerifiedByThisEvidence": false
+  },
+  "runtimeEffect": {
+    "codeExecutionChanged": false,
+    "authorizationChanged": false,
+    "deploymentTriggered": false,
+    "productionMutation": false
+  },
+  "rollback": "Revert the manifest, registry, documentation, test and evidence-file commit; no runtime or data mutation is involved."
+}
