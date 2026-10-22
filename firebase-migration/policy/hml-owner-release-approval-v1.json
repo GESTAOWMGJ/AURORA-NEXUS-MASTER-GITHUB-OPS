@@ -25,7 +25,12 @@
       "previousReviewBy": "2026-10-14",
       "reviewBy": "2026-10-15",
       "timeZone": "America/Sao_Paulo",
-      "residual": { "critical": 0, "high": 7, "moderate": 4, "total": 11 },
+      "residual": {
+        "critical": 0,
+        "high": 7,
+        "moderate": 4,
+        "total": 11
+      },
       "protectedRunOwnerApprovalStillRequired": true,
       "laterMainCodeReviewClaimed": false,
       "independentGithubPullRequestReviewClaimed": false,
@@ -75,6 +80,37 @@
       "realSourceActivationAuthorized": false,
       "productionAuthorized": false,
       "clinicalSensitiveAuthorized": false
+    },
+    {
+      "decisionId": "AURORA-HML-OWNER-RENEWAL-20261022",
+      "recordedOn": "2026-10-22",
+      "approvalSource": "DIRECT_OWNER_CHAT",
+      "statement": "fewito",
+      "confirmationContext": "Resposta afirmativa do titular à pergunta de publicação do PR #299 em homologação e renovação HML/R029 até 23/10/2026 às 20h de Brasília, mantendo 11 riscos residuais e o escopo sem produção ou dados clínicos.",
+      "specificScope": "Publicação do PR #299 em homologação, regularização da configuração com fonte inativa e testes sintéticos Windows/nuvem; mantém os mesmos 11 riscos residuais das ferramentas de teste. Não ativa a pasta real.",
+      "authorizedPullRequest": 299,
+      "authorizedCandidateHeadSha": "69ef50bf641798cd6dbe119463aa49c87b22bfeb",
+      "originalScopeUnchanged": true,
+      "riskReviewDeadlineExtended": true,
+      "previousValidUntilUtc": "2026-10-22T03:00:00.000Z",
+      "validUntilUtc": "2026-10-23T23:00:00.000Z",
+      "previousReviewBy": "2026-10-21",
+      "reviewBy": "2026-10-23",
+      "timeZone": "America/Sao_Paulo",
+      "residual": {
+        "critical": 0,
+        "high": 7,
+        "moderate": 4,
+        "total": 11
+      },
+      "protectedRunOwnerApprovalStillRequired": true,
+      "laterMainCodeReviewClaimed": false,
+      "independentGithubPullRequestReviewClaimed": false,
+      "iamChangeAuthorized": false,
+      "secretRotationAuthorized": false,
+      "realSourceActivationAuthorized": false,
+      "productionAuthorized": false,
+      "clinicalSensitiveAuthorized": false
     }
   ],
   "scope": {
@@ -82,14 +118,29 @@
     "projectId": "wmgj-hml-jfn-20260927",
     "environment": "firebase-homologation",
     "branch": "main",
-    "validUntilUtc": "2026-10-22T03:00:00.000Z"
+    "validUntilUtc": "2026-10-23T23:00:00.000Z"
   },
-  "repositoryOwner": { "login": "GESTAOWMGJ", "id": 278915189 },
+  "repositoryOwner": {
+    "login": "GESTAOWMGJ",
+    "id": 278915189
+  },
   "reviewedPullRequests": [
-    { "number": 183, "headSha": "c76c22c47f2591c33fd9e4bb4216e6b5e593fe1f" },
-    { "number": 184, "headSha": "bf5bbc1146245bdf112cedfd9a9c6cc558e46106" },
-    { "number": 187, "headSha": "4ae55d9c23f3c5f0c660c7cc579bdf6e8acba017" },
-    { "number": 190, "headSha": "804d4a460972cdcc5924cb3cf46a65eddff08b8b" }
+    {
+      "number": 183,
+      "headSha": "c76c22c47f2591c33fd9e4bb4216e6b5e593fe1f"
+    },
+    {
+      "number": 184,
+      "headSha": "bf5bbc1146245bdf112cedfd9a9c6cc558e46106"
+    },
+    {
+      "number": 187,
+      "headSha": "4ae55d9c23f3c5f0c660c7cc579bdf6e8acba017"
+    },
+    {
+      "number": 190,
+      "headSha": "804d4a460972cdcc5924cb3cf46a65eddff08b8b"
+    }
   ],
   "gateway": {
     "sourceSha": "d94f2c93ca25b8961cec25cb032a636fa630fc64",
@@ -111,9 +162,14 @@
     "proposal": "SEC-EXC-TEST-20261007",
     "status": "ACCEPTED_BY_OWNER_HML_TEST_TOOLS_ONLY",
     "scope": "firebase-migration/tests development tools only",
-    "reviewBy": "2026-10-21",
+    "reviewBy": "2026-10-23",
     "timeZone": "America/Sao_Paulo",
-    "residual": { "critical": 0, "high": 7, "moderate": 4, "total": 11 }
+    "residual": {
+      "critical": 0,
+      "high": 7,
+      "moderate": 4,
+      "total": 11
+    }
   },
   "integrationAndHmlPublicationAuthorized": true,
   "laterMainCodeReviewClaimed": false,
