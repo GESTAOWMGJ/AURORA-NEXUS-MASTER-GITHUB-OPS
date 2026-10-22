@@ -72,3 +72,19 @@ no cadastro restaura somente valores ainda pertencentes à tentativa, com leitur
 posterior. A exclusão do gatilho não restaura automaticamente seu agendamento
 desconhecido: preservar o recibo e não recriar handler ausente. A substituição
 operacional permanece uma etapa separada, com o executor canônico existente.
+
+## Renovação e publicação autorizadas — 22/10/2026
+
+Após apresentação do PR #299 no head `69ef50bf641798cd6dbe119463aa49c87b22bfeb`,
+com 62 testes locais e seis workflows aprovados, o titular respondeu “fewito”
+à pergunta explícita de publicação em HML e renovação HML/R029 até 23/10 às 20h
+em Brasília (`2026-10-23T23:00:00.000Z`). A decisão é registrada em
+`AURORA-HML-OWNER-RENEWAL-20261022`, preservando predecessor e 11 riscos residuais.
+Não se declara review independente, MFA ou aprovação de run por esta resposta.
+
+O prazo HML anterior permanece histórico. O código de reparo e sua janela de
+24 horas não foram ampliados; a publicação precisa ocorrer dentro da validade
+HML renovada. O escopo operacional desta etapa continua sendo remover somente
+o gatilho órfão comprovado e registrar a fonte como inativa. Publicação,
+readback, reparo real e ingestão exigem seus próprios recibos. Produção, dados
+clínicos e ativação da pasta real permanecem excluídos desta renovação.
