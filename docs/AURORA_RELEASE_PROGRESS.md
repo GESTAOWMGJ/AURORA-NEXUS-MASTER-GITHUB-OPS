@@ -203,3 +203,12 @@ status/sanitização/prévia histórica). Nenhum gatilho real foi removido e nen
 fonte foi ativada por estes testes. Contrato, evidência e próximos gates em
 [AURORA_WMGJ_CONNECTOR_REGULARIZATION_20261022.md](AURORA_WMGJ_CONNECTOR_REGULARIZATION_20261022.md).
 
+
+### 22/10/2026 — renovação HML/R029 para publicar a regularização
+
+Confirmação direta do titular após apresentação do PR #299 e dos seis workflows
+aprovados: publicação em homologação e renovação até `2026-10-23T23:00:00.000Z`
+(23/10 às 20h de Brasília). Decisão `AURORA-HML-OWNER-RENEWAL-20261022`,
+com os mesmos 11 riscos residuais e registro de predecessor. O cadastro permanece
+inativo; fonte real, produção e dados clínicos não são ativados. A autorização
+não comprova review independente, aprovação de run, deploy ou ingestão.
