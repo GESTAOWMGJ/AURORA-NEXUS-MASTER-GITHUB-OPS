@@ -31,6 +31,8 @@ import { readRuntimeActiveRelease } from './auroraActiveReleaseRuntime.js';
 import { configureCanonicalAutomation, integrationReplayPatch,publicAutomationConfiguration } from './auroraInstallationAcceptance.js';
 import { buildIntegrationRevalidationReceipt, isLegacyMinimalIntegrationReceipt,
   revalidationAuthorityActive } from './auroraIntegrationRevalidation.js';
+import { DOCUMENT_OBSERVATION_OPERATION, DOCUMENT_OBSERVATION_SCHEMA,
+  documentObservationBlocksFacts, parseDocumentObservationPayload, recordDocumentObservation } from './auroraDocumentObservation.js';
 
 const ALLOWED_EMAILS = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const CSRF_HMAC_KEY = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
@@ -402,6 +404,33 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
     res.status(400).json({ok:false, code:"INVALID_IDEMPOTENCY_KEY"});
     return;
   }
+  if (req.body?.operation===DOCUMENT_OBSERVATION_OPERATION || req.body?.schemaVersion===DOCUMENT_OBSERVATION_SCHEMA) {
+    const observation=parseDocumentObservationPayload(req.body);
+    if (!observation) {res.status(400).json({ok:false,code:'INVALID_DOCUMENT_OBSERVATION'});return;}
+    try {
+      const recorded=await auroraDb.runTransaction(tx=>recordDocumentObservation(principal,observation,idempotencyKey,{
+        read:async path=>{const snap=await tx.get(auroraDb.doc(path));return snap.exists ? snap.data() ?? null : null;},
+        create:(path,data)=>{tx.create(auroraDb.doc(path),data);},
+        replace:(path,data)=>{tx.set(auroraDb.doc(path),data);},timestamp:FieldValue.serverTimestamp()
+      }));
+      // Refresh the same projection after replacing a prior snapshot with pending
+      // evidence. Observation receipts never enter installation acceptance.
+      try {await refreshProjection(principal.orgId,{uid:`integration:${principal.keyId}`,role:'integration',source:'INTEGRATION'});}
+      catch {logger.warn('Document observation projection pending',{orgId:principal.orgId,code:'PROJECTION_PENDING',sanitized:true});}
+      res.status(recorded.kind==='DUPLICATE'?200:202).json({ok:true,...recorded,
+        recorded:recorded.kind==='RECORDED',duplicate:recorded.kind==='DUPLICATE',accepted:false});
+    } catch (error) {
+      const code=error instanceof Error ? error.message : '';
+      const conflicts=['IDEMPOTENCY_CONFLICT','OBSERVATION_SUPERSEDED','OBSERVATION_CAS_CONFLICT','OBSERVATION_BINDING_CONFLICT',
+        'SOURCE_ACQUISITION_CONFLICT','SOURCE_ACQUISITION_REGRESSION','ENTITY_REVISION_CONFLICT','ENTITY_VERSION_CONFLICT'];
+      const invalid=['INVALID_DOCUMENT_OBSERVATION','INVALID_OBSERVATION_CONTEXT'];
+      const authority=['ORGANIZATION_DISABLED','MEMBERSHIP_REVOKED','INVALID_INTEGRATION_KEY','CREDENTIAL_AUTHORITY_INACTIVE'];
+      const known=[...conflicts,...invalid,...authority].includes(code);
+      res.status(conflicts.includes(code)?409:invalid.includes(code)?400:known?412:503)
+        .json({ok:false,code:known?code:'DOCUMENT_OBSERVATION_PENDING'});
+    }
+    return;
+  }
   const payload=parseIntegrationDocumentPayload(req.body);
   if (!payload) {
     res.status(400).json({ok:false, code:"INVALID_DOCUMENT_PAYLOAD"});
@@ -447,6 +476,11 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
       ? configuredBy===credential?.createdBy ? issuer
         : (await tx.get(auroraDb.doc(`${base}/members/${configuredBy}`))).data() ?? null : null;
     const authority={org:orgSnap.data() ?? null,credential,issuer,configurer};
+    // Neither a historical v1 receipt nor a higher factual sourceVersion may
+    // erase a pending content observation. Promotion requires a separate review.
+    if (documentObservationBlocksFacts(currentSnap.data() ?? null)) {
+      return {kind:'ERROR' as const,code:'DOCUMENT_OBSERVATION_PENDING_REVIEW'};
+    }
     if (idemSnap.exists) {
       if (idemSnap.data()?.bodyHash !== bodyHash) return {kind:"ERROR" as const,code:"IDEMPOTENCY_CONFLICT"};
       const current=currentSnap.data() ?? null;
@@ -605,7 +639,7 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
   });
 
   if (result.kind === "ERROR") {
-    const status=["IDEMPOTENCY_CONFLICT","SOURCE_VERSION_REGRESSION","SOURCE_VERSION_CONFLICT","SOURCE_ACQUISITION_REGRESSION","SOURCE_ACQUISITION_CONFLICT"].includes(result.code)?409:412;
+    const status=["IDEMPOTENCY_CONFLICT","SOURCE_VERSION_REGRESSION","SOURCE_VERSION_CONFLICT","SOURCE_ACQUISITION_REGRESSION","SOURCE_ACQUISITION_CONFLICT","DOCUMENT_OBSERVATION_PENDING_REVIEW"].includes(result.code)?409:412;
     res.status(status).json({ok:false,code:result.code});
     return;
   }

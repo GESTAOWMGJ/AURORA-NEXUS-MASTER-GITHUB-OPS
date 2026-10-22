@@ -4,3 +4,8 @@ desktop/ia-master/knowledge-registry.cjs text eol=lf
 firebase-migration/hosting/aurora-nexus/assets/fonts/*.txt text eol=lf
 firebase-migration/hosting/aurora-nexus/assets/fonts/provenance.json text eol=lf
 firebase-migration/hosting/aurora-nexus/assets/fonts/Atkinson-Hyperlegible-Next-OFL.txt -whitespace
+# Shared generated intake assets retain the exact compiler/manifest bytes.
+aurora-coletor/document_intake*.cjs text eol=lf
+aurora-coletor/document_fact_mapping.cjs text eol=lf
+aurora-coletor/document_intake.py text eol=lf
+aurora-coletor/document-intake-manifest.json text eol=lf

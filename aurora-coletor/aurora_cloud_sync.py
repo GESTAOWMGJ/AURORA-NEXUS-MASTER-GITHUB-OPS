@@ -361,6 +361,143 @@ def unique_object(pairs):
     return value
 
 
+OBSERVATION_SCHEMA='aurora.document.observation.v1'
+OBSERVATION_RECEIPT_SCHEMA='aurora.document.observation.receipt.v1'
+OBSERVATION_METHOD_MIMES={
+    'TEXT_UTF8':{'text/plain','text/markdown'},'CSV_UTF8':{'text/csv'},'JSON_UTF8':{'application/json'},'XML_TEXT':{'application/xml','text/xml'},
+    'DOCX_XML':{'application/vnd.openxmlformats-officedocument.wordprocessingml.document'},
+    'XLSX_XML':{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},
+    'ODT_XML':{'application/vnd.oasis.opendocument.text'},'ODS_XML':{'application/vnd.oasis.opendocument.spreadsheet'}}
+
+
+def _observation_hash(value):
+    return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode('utf-8')).hexdigest()
+
+
+def validate_observation_payload(raw):
+    """Closed structural evidence only; no document text, financial facts or fabricated sourceVersion."""
+    fields={'schemaVersion','operation','sourceSystem','externalDocumentId','observedAt','expectedRevision','expectedPreviousObservationHash','acquisition','extraction'}
+    acquisition_fields={'provider','sourceObjectIdHash','versionKind','observedVersion','representation','sourceMimeType','acquiredMimeType','byteSha256','byteLength'}
+    extraction_fields={'status','method','methodVersion','textSha256','textByteLength','coverage','code'}
+    hashed=lambda value:isinstance(value,str) and re.fullmatch(r'[a-f0-9]{64}',value) is not None
+    bounded=lambda value,maximum:type(value) is int and 0<=value<=maximum
+    if (not isinstance(raw,dict) or set(raw)!=fields or raw.get('schemaVersion')!=OBSERVATION_SCHEMA
+        or raw.get('operation')!='OBSERVE_DOCUMENT_EXTRACTION' or raw.get('sourceSystem') not in ('MV','TASY','ERP')
+        or not isinstance(raw.get('externalDocumentId'),str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{1,159}',raw['externalDocumentId'])
+        or not re.search('[A-Za-z]',raw['externalDocumentId'])
+        or re.search(r'cpf|cns|paciente|patient|beneficiario|prontuario|medical[-_.:]?record',raw['externalDocumentId'],re.I)
+        or re.search(r'\d{3}\.\d{3}\.\d{3}-\d{2}',raw['externalDocumentId'])
+        or not bounded(raw.get('expectedRevision'),9007199254740990)
+        or raw.get('expectedPreviousObservationHash') is not None and not hashed(raw['expectedPreviousObservationHash'])):
+        raise SyncError('INVALID_DOCUMENT_OBSERVATION')
+    try:
+        if not isinstance(raw['observedAt'],str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z',raw['observedAt']) or timestamp(raw['observedAt'])!=raw['observedAt']:
+            raise SyncError('INVALID_DOCUMENT_OBSERVATION')
+    except (ValueError,TypeError):raise SyncError('INVALID_DOCUMENT_OBSERVATION') from None
+    acquired=raw['acquisition'];extracted=raw['extraction']
+    if (not isinstance(acquired,dict) or set(acquired)!=acquisition_fields
+        or acquired.get('provider') not in ('GOOGLE_DRIVE','GMAIL','MICROSOFT_MAIL','IMAP','LOCAL_AGENT','API_TOKEN','MANUAL')
+        or not hashed(acquired.get('sourceObjectIdHash')) or not hashed(acquired.get('byteSha256'))
+        or not bounded(acquired.get('byteLength'),1048576) or acquired['byteLength']<1
+        or acquired.get('versionKind') not in ('PROVIDER_REVISION','LOCAL_CONTENT_HASH','CLIENT_REVISION')
+        or not isinstance(acquired.get('observedVersion'),str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}',acquired['observedVersion'])
+        or acquired.get('representation') not in ('ORIGINAL_BYTES','PROVIDER_EXPORT')
+        or any(not isinstance(acquired.get(key),str) or not re.fullmatch(r'[a-z0-9][a-z0-9.+-]{0,79}/[a-z0-9][a-z0-9.+-]{0,159}',acquired[key]) for key in ('sourceMimeType','acquiredMimeType'))
+        or acquired['versionKind']=='LOCAL_CONTENT_HASH' and acquired['observedVersion']!=acquired['byteSha256']
+        or acquired['versionKind']=='PROVIDER_REVISION' and acquired['provider']=='GOOGLE_DRIVE' and not re.fullmatch(r'[1-9][0-9]{0,31}',acquired['observedVersion'])
+        or acquired['representation']=='ORIGINAL_BYTES' and acquired['sourceMimeType']!=acquired['acquiredMimeType']):
+        raise SyncError('INVALID_DOCUMENT_OBSERVATION')
+    if (not isinstance(extracted,dict) or set(extracted)!=extraction_fields
+        or extracted.get('status') not in ('COMPLETE','PARTIAL','PENDING','FAILED') or extracted.get('methodVersion')!='1.0.0'
+        or extracted.get('method') is not None and (not isinstance(extracted.get('method'),str) or extracted.get('method') not in OBSERVATION_METHOD_MIMES)
+        or not isinstance(extracted.get('code'),str)
+        or not bounded(extracted.get('textByteLength'),262144)
+        or not isinstance(extracted.get('coverage'),dict) or set(extracted['coverage'])!={'basis','totalUnits','processedUnits'}):
+        raise SyncError('INVALID_DOCUMENT_OBSERVATION')
+    coverage=extracted['coverage']
+    if (coverage.get('basis') not in ('EXPECTED_PARTS','BOUNDED_REPRESENTATION') or not bounded(coverage.get('totalUnits'),10000)
+        or not bounded(coverage.get('processedUnits'),coverage['totalUnits'])
+        or extracted['method'] is not None and acquired['acquiredMimeType'] not in OBSERVATION_METHOD_MIMES[extracted['method']]):
+        raise SyncError('INVALID_DOCUMENT_OBSERVATION')
+    if extracted['status'] in ('COMPLETE','PARTIAL'):
+        if extracted['method'] is None or not hashed(extracted.get('textSha256')) or extracted['textByteLength']<1 or coverage['totalUnits']<1 or coverage['processedUnits']<1:
+            raise SyncError('INVALID_DOCUMENT_OBSERVATION')
+        if extracted['status']=='COMPLETE' and (extracted['code']!='CONTENT_EXTRACTED' or coverage['processedUnits']!=coverage['totalUnits']):raise SyncError('INVALID_DOCUMENT_OBSERVATION')
+        if extracted['status']=='PARTIAL' and (extracted['code']!='BOUNDED_EXTRACTION_PARTIAL' or coverage['processedUnits']==coverage['totalUnits'] and coverage['basis']!='BOUNDED_REPRESENTATION'):raise SyncError('INVALID_DOCUMENT_OBSERVATION')
+    elif (extracted['textSha256'] is not None or extracted['textByteLength']!=0 or coverage['processedUnits']!=0
+          or extracted['code'] not in ({'EXTRACTION_REQUIRED','UNSUPPORTED_FORMAT','BACKEND_REQUIRED'} if extracted['status']=='PENDING'
+                                      else {'MALFORMED_DOCUMENT','LIMIT_EXCEEDED','ENCRYPTED_DOCUMENT','EMPTY_CONTENT','SOURCE_CHANGED'})):
+        raise SyncError('INVALID_DOCUMENT_OBSERVATION')
+    return json.loads(json.dumps(raw,sort_keys=True,allow_nan=False))
+
+
+def observation_acquisition_hash(acquisition):return _observation_hash(acquisition)
+
+
+def observation_hash(payload,org):
+    return _observation_hash({'schemaVersion':payload['schemaVersion'],'sourceSystem':payload['sourceSystem'],
+        'sourceIdHash':digest(org+':'+payload['sourceSystem']+':'+payload['externalDocumentId']),
+        'acquisition':payload['acquisition'],'extraction':payload['extraction']})
+
+
+def connect_observation(origin,org,token,transport=request_json):
+    """Fresh authenticated public key identity; legacy connect() remains unchanged."""
+    origin=origin_url(origin)
+    if not isinstance(org,str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{1,62}',org):raise SyncError('INVALID_ORGANIZATION')
+    if not isinstance(token,str) or not token or any(char.isspace() for char in token):raise SyncError('INTEGRATION_CREDENTIAL_REQUIRED')
+    status,ping=transport(origin+'/api/integration/ping',token)
+    if (status!=200 or not isinstance(ping,dict) or ping.get('ok') is not True or ping.get('orgId')!=org
+        or ping.get('service')!='aurora-nexus-integration' or not isinstance(ping.get('keyId'),str)
+        or not re.fullmatch(r'ik_[a-f0-9]{16}',ping['keyId'])):raise SyncError('AUTHENTICATED_ORGANIZATION_MISMATCH')
+    return {'connectionVerified':True,'keyId':ping['keyId']}
+
+
+def synchronize_observation(raw,origin,org,token=None,send=False,transport=request_json,previous_receipt=None):
+    """An observation receipt never substitutes canonical processing or automation acceptance."""
+    origin=origin_url(origin)
+    if not isinstance(org,str) or not re.fullmatch(r'[a-z0-9][a-z0-9-]{1,62}',org):raise SyncError('INVALID_ORGANIZATION')
+    payload=validate_observation_payload(raw);encoded=json.dumps(payload,sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False)
+    body_hash=_observation_hash(payload);semantic_hash=observation_hash(payload,org)
+    acquired_hash=observation_acquisition_hash(payload['acquisition']);source_hash=digest(org+':'+payload['sourceSystem']+':'+payload['externalDocumentId'])
+    idem='observation-v1:'+digest(origin+':'+org+':'+encoded)
+    receipt={'schemaVersion':OBSERVATION_RECEIPT_SCHEMA,'status':'VALIDATED_NOT_SENT','documentId':source_hash[:48],
+        'payloadSha256':body_hash,'observationHash':semantic_hash,'acquisitionHash':acquired_hash,'idempotencyKey':idem,
+        'cloudReceiptVerified':False,'nativeReady':False,'sourceIndependent':False,'sourceVersion':None,
+        'firstIngestionVerified':False,'operationalComplete':False,'installationComplete':False}
+    if not send:return receipt
+    connected=connect_observation(origin,org,token,transport)
+    expected_receipt_id=digest('document-observation:'+connected['keyId']+':'+idem)
+    if previous_receipt is not None:
+        if (not isinstance(previous_receipt,dict) or previous_receipt.get('cloudReceiptVerified') is not True
+            or previous_receipt.get('schemaVersion')!=OBSERVATION_RECEIPT_SCHEMA or previous_receipt.get('keyId')!=connected['keyId']
+            or previous_receipt.get('idempotencyKey')!=idem or previous_receipt.get('payloadSha256')!=body_hash
+            or previous_receipt.get('receiptId')!=expected_receipt_id or previous_receipt.get('documentId')!=source_hash[:48]
+            or previous_receipt.get('observationHash')!=semantic_hash or previous_receipt.get('acquisitionHash')!=acquired_hash):
+            raise SyncError('DOCUMENT_OBSERVATION_REPLAY_MISMATCH')
+    status,result=transport(origin+'/api/integration/documents',token,payload,idem)
+    fields={'ok','kind','schemaVersion','code','orgId','documentId','receiptId','versionId','revision','observationHash','acquisitionHash',
+            'extractionStatus','nativeReady','sourceIndependent','sourceVersion','firstIngestionVerified','operationalComplete','recorded','duplicate','accepted'}
+    if (not isinstance(result,dict) or set(result)!=fields or result.get('ok') is not True
+        or result.get('schemaVersion')!=OBSERVATION_RECEIPT_SCHEMA or result.get('code')!='DOCUMENT_OBSERVATION_RECORDED'
+        or result.get('orgId')!=org or result.get('documentId')!=source_hash[:48]
+        or result.get('observationHash')!=semantic_hash or result.get('acquisitionHash')!=acquired_hash
+        or result.get('extractionStatus')!=payload['extraction']['status'] or result.get('sourceVersion') is not None
+        or any(result.get(key) is not False for key in ('accepted','nativeReady','sourceIndependent','firstIngestionVerified','operationalComplete'))
+        or result.get('receiptId')!=expected_receipt_id
+        or type(result.get('revision')) is not int or not 1<=result['revision']<=9007199254740991
+        or result.get('versionId')!=digest('v1:sourceDocument:'+payload['sourceSystem']+':'+source_hash[:32]+':revision:'+str(result['revision']))[:48]
+        or not (status==202 and result.get('kind')=='RECORDED' and result.get('recorded') is True and result.get('duplicate') is False
+                or status==200 and result.get('kind')=='DUPLICATE' and result.get('recorded') is False and result.get('duplicate') is True)):
+        raise SyncError('DOCUMENT_OBSERVATION_RECEIPT_MISMATCH')
+    if (result['recorded'] and result['revision']!=payload['expectedRevision']+1
+        or previous_receipt is not None and (result['duplicate'] is not True
+            or any(result.get(field)!=previous_receipt.get(field) for field in ('receiptId','versionId','revision','documentId','observationHash','acquisitionHash')))):
+        raise SyncError('DOCUMENT_OBSERVATION_REPLAY_MISMATCH')
+    receipt.update(status='OBSERVATION_DUPLICATE' if result['duplicate'] else 'OBSERVATION_RECORDED',cloudReceiptVerified=True,
+        receiptId=result['receiptId'],versionId=result['versionId'],revision=result['revision'],keyId=connected['keyId'])
+    return receipt
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--input', required=True, help='Explicit structured JSON export; never a document folder')

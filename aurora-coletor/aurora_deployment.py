@@ -21,12 +21,13 @@ import time
 
 import aurora_cloud_sync as sync
 
-VERSION = '1.0.7'
-CHECKPOINT_VERSIONS = ('1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', VERSION)
+VERSION = '1.0.8'
+CHECKPOINT_VERSIONS = ('1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7', VERSION)
 SCHEMA = 'aurora.install.integration.v1'
 STATE_NAME = 'integration-setup.json'
 ASSETS = ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
-          'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py')
+          'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py',
+          'document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json')
 CHECKPOINT_FIELDS = {'schemaVersion', 'componentVersion', 'targetBinding', 'sampleKey', 'attempt', 'updatedAt',
                      'status', 'nextAction', 'connectionVerified', 'receiptVerifiedThisRun',
                      'processingVerifiedThisRun', 'processingProof', 'previousReceiptCached', 'receipt',
@@ -480,7 +481,7 @@ def _transition_local(plan, release, candidate):
     _transition_demand(isinstance(manifest.get('files'), dict), 'SIGNED_IA_CHECKPOINT_ANCHOR_CONFLICT')
     # assess_manifest validates each name; bound names before opening any local path.
     names = manifest['files']
-    _transition_demand(len(names) == 34 and all(isinstance(name, str)
+    _transition_demand(len(names) in (34, 39) and all(isinstance(name, str)
                        and re.fullmatch(r'[A-Za-z0-9_./-]{1,200}', name)
                        and all(part not in ('', '.', '..') and not part.startswith('.') for part in name.split('/'))
                        for name in names), 'SIGNED_IA_CHECKPOINT_ANCHOR_CONFLICT')

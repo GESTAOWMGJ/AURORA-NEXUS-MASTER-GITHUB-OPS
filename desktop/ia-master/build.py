@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def build(output):
     output = Path(output).resolve()
+    subprocess.run(['node',str(ROOT/'firebase-migration/scripts/generate-document-intake-assets.mjs'),'--check'],cwd=ROOT,check=True,capture_output=True)
     output.mkdir(parents=True, exist_ok=False)
     functions = ROOT / 'firebase-migration/functions'
     subprocess.run(['node', str(functions / 'node_modules/typescript/bin/tsc'),
@@ -22,7 +23,8 @@ def build(output):
     # Same installer package: lightweight intake is a separate, declared child component.
     # Packaging does not authorize roots, activate providers or install another model.
     agent_output=output/'client-agent';agent_output.mkdir()
-    for name in ['client_agent.py','provider_connectors.py','client_secret_store.py','install_client_agent.py','aurora_cloud_sync.py','aurora_deployment.py','published_release.py']:
+    for name in ['client_agent.py','provider_connectors.py','client_secret_store.py','install_client_agent.py','aurora_cloud_sync.py','aurora_deployment.py','published_release.py',
+                 'document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json']:
         shutil.copyfile(ROOT/'aurora-coletor'/name,agent_output/name)
     fonts = ROOT / 'firebase-migration/hosting/aurora-nexus/assets/fonts'
     font_output = output / 'assets/fonts'

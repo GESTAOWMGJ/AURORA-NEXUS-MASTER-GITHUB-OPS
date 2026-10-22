@@ -13,8 +13,15 @@ const READ_PATH = '/api/integration/active-release';
 const SOURCE = 'platformRuntime/activeRelease';
 const COMPONENTS = ['server', 'web', 'satellite', 'iaMaster', 'windowsIntegration'];
 const CHECKS = ['ciPassed', 'humanReviewApproved', 'protectedDeploySucceeded', 'smokePassed'];
-const WINDOWS_FILES = ['client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
+const LEGACY_WINDOWS_FILES = ['client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
   'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py'];
+const INTAKE_FILES=['document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json'];
+const WINDOWS_FILES=[...LEGACY_WINDOWS_FILES,...INTAKE_FILES];
+const IA_MASTER_FILES=['README.md','app.css','app.js','index.html','knowledge-registry.cjs','manage.cjs','modus-operandi.md','published-update.cjs',
+  'publisher.cjs','safe-read.cjs','server.cjs','studio-local.css','studio-local.js','studio.cjs','update.cjs',
+  ...WINDOWS_FILES.map(name=>'client-agent/'+name),
+  ...['source-serif-4-regular.woff2','source-serif-4-semibold.woff2','atkinson-hyperlegible-next.woff2','Source-Serif-OFL.txt','Atkinson-Hyperlegible-Next-OFL.txt','provenance.json'].map(name=>'assets/fonts/'+name),
+  ...['auroraMasterEngine','auroraNativeIntelligence','auroraNativeRoutines','auroraIaMaster','auroraProductionOrchestrator','auroraDataGovernance'].map(name=>'kernel/'+name+'.js')];
 const CHECKPOINT_FIELDS = ['schemaVersion', 'componentVersion', 'targetBinding', 'sampleKey', 'attempt', 'updatedAt',
   'status', 'nextAction', 'connectionVerified', 'receiptVerifiedThisRun', 'processingVerifiedThisRun', 'processingProof',
   'previousReceiptCached', 'receipt', 'fullSynchronizationVerified', 'productionReleased', 'code', 'installationAcceptance'];
@@ -186,8 +193,14 @@ function inspectPackage(candidate, component, directory, manifestBytes) {
     'PACKAGE_IDENTITY_CONFLICT');
   const files = packageFiles(directory), names = Object.keys(manifest.files);
   const physicalNames = Object.keys(files).filter(name => name !== 'manifest.json');
-  demand(names.length === (component === 'iaMaster' ? 34 : 7)
-    && (component !== 'windowsIntegration' || canonical([...names].sort()) === canonical([...WINDOWS_FILES].sort()))
+  const sameNames=expected=>canonical([...names].sort())===canonical([...expected].sort());
+  const profile=component==='windowsIntegration'
+    ? manifest.version==='1.0.8'?sameNames(WINDOWS_FILES):/^1\.0\.[0-7]$/.test(manifest.version)&&sameNames(LEGACY_WINDOWS_FILES)
+    : names.length===39?sameNames(IA_MASTER_FILES)&&manifest.version==='1.1.0'&&manifest.clientAgent?.version==='1.0.5'
+      &&manifest.clientAgent.component==='AURORA_CLIENT_AGENT'&&manifest.clientAgent.configured===false
+      &&manifest.clientAgent.sourceAuthorizationRequired===true&&manifest.clientAgent.providerConnectionsVerified===false
+      : names.length===34&&[undefined,'1.0.4'].includes(manifest.clientAgent?.version)&&!INTAKE_FILES.some(name=>names.includes('client-agent/'+name));
+  demand(profile
     && names.every(name => safeName(name) && name !== 'manifest.json' && hex(manifest.files[name], 64))
     && canonical([...physicalNames].sort()) === canonical([...names].sort()), 'PACKAGE_CLOSURE_CONFLICT');
   if (Object.hasOwn(files, 'manifest.json')) demand(digest(files['manifest.json']) === expected.manifestSha256, 'PACKAGE_MANIFEST_CONFLICT');

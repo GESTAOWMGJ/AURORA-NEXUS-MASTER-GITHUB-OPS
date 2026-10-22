@@ -228,9 +228,16 @@ def assess_manifest(candidate, component, manifest_bytes, file_bytes):
                                           and manifest.get('nodeMinimumMajor') == 22)), 'PACKAGE_IDENTITY_CONFLICT')
     names = manifest['files']
     demand(all(isinstance(name, str) for name in names) and all(isinstance(name, str) for name in file_bytes), 'PACKAGE_CLOSURE_CONFLICT')
+    agent_profile = manifest.get('clientAgent') if isinstance(manifest.get('clientAgent'), dict) else {}
+    profile_ok = (set(names) == set(WINDOWS_FILES) if manifest.get('version') == '1.0.8'
+                  else re.fullmatch(r'1\.0\.[0-7]', str(manifest.get('version'))) is not None and set(names) == set(LEGACY_WINDOWS_FILES)) if component == 'windowsIntegration' else (
+        set(names) == set(IA_MASTER_FILES) and manifest.get('version') == '1.1.0' and agent_profile.get('version') == '1.0.5'
+        and agent_profile.get('component') == 'AURORA_CLIENT_AGENT' and agent_profile.get('configured') is False
+        and agent_profile.get('sourceAuthorizationRequired') is True and agent_profile.get('providerConnectionsVerified') is False
+        if len(names) == 39 else len(names) == 34 and agent_profile.get('version') in (None,'1.0.4')
+        and not any('client-agent/' + name in names for name in INTAKE_FILES))
     demand(set(file_bytes) == set(names) and len({name.casefold() for name in names}) == len(names)
-           and len(names) == (34 if component == 'iaMaster' else 7)
-           and (component != 'windowsIntegration' or set(names) == set(WINDOWS_FILES))
+           and profile_ok
            and sum(len(value) for value in file_bytes.values()) <= 32 * 1024 * 1024, 'PACKAGE_CLOSURE_CONFLICT')
     for name, expected_hash in names.items():
         demand(isinstance(name, str) and re.fullmatch(r'[A-Za-z0-9_./-]{1,200}', name)
@@ -241,8 +248,16 @@ def assess_manifest(candidate, component, manifest_bytes, file_bytes):
             'version': expected['version'], 'currentPointerVerified': False, 'installed': False, 'allClientsSynchronized': False}
 
 
-WINDOWS_FILES = ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
-                 'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py')
+LEGACY_WINDOWS_FILES = ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
+                       'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py')
+INTAKE_FILES = ('document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json')
+WINDOWS_FILES = (*LEGACY_WINDOWS_FILES,*INTAKE_FILES)
+IA_MASTER_FILES = ('README.md','app.css','app.js','index.html','knowledge-registry.cjs','manage.cjs','modus-operandi.md','published-update.cjs',
+                  'publisher.cjs','safe-read.cjs','server.cjs','studio-local.css','studio-local.js','studio.cjs','update.cjs',
+                  *('client-agent/'+name for name in WINDOWS_FILES),
+                  *('assets/fonts/'+name for name in ('source-serif-4-regular.woff2','source-serif-4-semibold.woff2',
+                     'atkinson-hyperlegible-next.woff2','Source-Serif-OFL.txt','Atkinson-Hyperlegible-Next-OFL.txt','provenance.json')),
+                  *('kernel/'+name+'.js' for name in ('auroraMasterEngine','auroraNativeIntelligence','auroraNativeRoutines','auroraIaMaster','auroraProductionOrchestrator','auroraDataGovernance')))
 
 
 def validate_control(control):
