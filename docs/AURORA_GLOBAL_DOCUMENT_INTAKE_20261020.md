@@ -144,3 +144,32 @@ O objetivo de cobertura integral permanece aberto enquanto houver formatos,
 fontes, paginação, credenciais ou validação operacional pendentes. Não mudar
 `globalDocumentAcquisitionVerified` ou `fullSynchronizationVerified` apenas
 pela existência deste código ou de um checkpoint.
+
+### Reconciliação dos contratos de distribuição e CI
+
+A primeira CI da candidata `dba026bec387b761941fa6dc181d5bcaf1d1b3c8`
+expôs expectativas legadas de Windows Integration 1.0.7/sete arquivos e IA Master
+34 arquivos, ausência das dependências de compilação antes da primeira verificação
+de pacote e APIs de codificação ausentes na fixture de navegador. Os contratos
+agora verificam explicitamente Integration 1.0.8/doze arquivos e IA39, mantendo
+verificação exata de nomes/hashes, rejeições e cobertura dos recibos históricos.
+A dependência TypeScript é instalada pelo lockfile antes da verificação de pacote;
+a origem deve ser um SHA exato antes de qualquer geração.
+
+O gerador deixa de verificar metadados e depois abrir o mesmo destino por nome.
+Publica bytes preparados em diretório temporário privado do checkout por renomeação,
+sem abrir o destino antigo. Regressões verificam troca normal, preservação do alvo
+externo de hardlinks/symlinks, rejeição de nomes e falha de renomeação. Isso não
+substitui o resultado do CodeQL do novo SHA nem torna diretório de build não confiável.
+
+Na árvore corrigida, 202 testes locais passaram e três foram omitidos por limites
+ou diferenças de plataforma: criação de symlink de arquivo no Windows e dois casos
+específicos de POSIX/macOS. Não foram removidas verificações nem ampliadas permissões
+para executá-los. TypeScript e comparação dos assets gerados também passaram.
+A compilação/teste da árvore de trabalho não é um artefato aprovado para instalação;
+a CI e o pacote limpo devem estar vinculados ao novo commit.
+
+O alerta Dependabot #67 foi identificado em `firebase-migration/api/uv.lock`
+(`certifi`), com correção já proposta no PR #295. Reutilizar esse PR; não duplicar
+nem misturar a mudança de dependência ao incremento documental. O alerta continua
+aberto até resolução própria comprovada e é um gate separado de promoção.

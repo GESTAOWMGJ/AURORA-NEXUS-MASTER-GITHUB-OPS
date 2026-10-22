@@ -1,6 +1,7 @@
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {mkdtemp,readFile,writeFile,rm,lstat} from 'node:fs/promises';
+import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import {atomicGeneratedFile} from './atomic-generated-file.mjs';
 import {resolve,dirname,basename} from 'node:path';
 import {tmpdir} from 'node:os';
 import {fileURLToPath} from 'node:url';
@@ -21,13 +22,13 @@ try{
     const bytes=await readFile(resolve(temporary,name+'.js'));files[target]=digest(bytes);
     sources[name+'.ts']=digest(Buffer.from((await readFile(resolve(functions,'src',name+'.ts'),'utf8')).replaceAll('\r\n','\n')));
     const destination=resolve(output,target);
-    if(write){try{const stat=await lstat(destination);if(stat.isSymbolicLink()||!stat.isFile()||stat.nlink!==1)throw Error('GENERATED_ASSET_PATH_REJECTED');}catch(error){if(error.code!=='ENOENT')throw error;}await writeFile(destination,bytes);}
+    if(write)await atomicGeneratedFile(output,target,bytes);
     else if(!bytes.equals(await readFile(destination)))throw Error('DOCUMENT_INTAKE_GENERATED_DRIFT');
   }
   for(const name of ['document_intake.cjs','document_intake.py'])files[name]=digest(await readFile(resolve(output,name)));
   const manifest=Buffer.from(JSON.stringify({schemaVersion:'aurora.document.intake.assets.v1',generatorVersion:'1.0.0',compilerVersion:compiler.version,sources,files},null,2)+'\n');
   const target=resolve(output,'document-intake-manifest.json');
-  if(write)await writeFile(target,manifest);
+  if(write)await atomicGeneratedFile(output,'document-intake-manifest.json',manifest);
   else if(!manifest.equals(await readFile(target)))throw Error('DOCUMENT_INTAKE_MANIFEST_DRIFT');
   process.stdout.write(JSON.stringify({status:write?'GENERATED':'GENERATED_BYTES_VERIFIED',sourceCount:2,fileCount:4,manifestSha256:digest(manifest),runtimeDownloads:false})+'\n');
 }finally{

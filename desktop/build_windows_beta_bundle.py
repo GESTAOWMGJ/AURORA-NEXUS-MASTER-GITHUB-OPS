@@ -43,11 +43,11 @@ pause
 
 def build(repo, output, source_sha=None):
     repo, output = Path(repo), Path(output)
-    subprocess.run(['node',str(repo/'firebase-migration/scripts/generate-document-intake-assets.mjs'),'--check'],cwd=repo,check=True,capture_output=True)
     if source_sha is None:
         source_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
     if not re.fullmatch(r'[a-f0-9]{40}', source_sha):
         raise ValueError('EXACT_SOURCE_SHA_REQUIRED')
+    subprocess.run(['node',str(repo/'firebase-migration/scripts/generate-document-intake-assets.mjs'),'--check'],cwd=repo,check=True,capture_output=True)
     files = {name: (repo / name).read_bytes() for name in SOURCES}
     match = re.search(rb'^VERSION = "([^"]+)"', files[SOURCES[0]], re.MULTILINE)
     if not match:
