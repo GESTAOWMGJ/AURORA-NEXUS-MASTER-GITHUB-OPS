@@ -441,13 +441,27 @@ def _transition_authority(plan, token):
     return release, candidate, pin
 
 
+def _transition_windows_files(package, release, signed_version):
+    # Only a verified certificate selects a fixed public-file allowlist. Historical
+    # seven-file evidence must not be reinterpreted as the new twelve-file package.
+    if signed_version == '1.0.8':
+        names = release.WINDOWS_FILES
+    elif isinstance(signed_version, str) and re.fullmatch(r'1\.0\.[0-7]', signed_version):
+        names = release.LEGACY_WINDOWS_FILES
+    else:
+        raise sync.SyncError('CHECKPOINT_TRANSITION_COMPONENT_VERSION_CONFLICT')
+    return {name: _transition_bytes(package / name, 32 * 1024 * 1024) for name in names}
+
+
 def _transition_local(plan, release, candidate):
     state, package = safe_path(plan['stateDirectory']), safe_path(plan['packageDirectory'])
     _transition_demand(state.is_dir() and package == safe_path(Path(__file__).absolute().parent),
                        'SAME_INSTALLED_CHECKPOINT_REQUIRED')
     if os.name == 'posix':
         _transition_demand(not stat.S_IMODE(state.stat().st_mode) & 0o077, 'PRIVATE_STATE_DIRECTORY_REQUIRED')
-    files = {name: _transition_bytes(package / name, 32 * 1024 * 1024) for name in ASSETS}
+    signed_version = candidate.certificate['components']['windowsIntegration']['version']
+    _transition_demand(signed_version == VERSION, 'CHECKPOINT_TRANSITION_COMPONENT_VERSION_CONFLICT')
+    files = _transition_windows_files(package, release, signed_version)
     component = release.assess_manifest(candidate, 'windowsIntegration',
                                         _transition_bytes(plan['publicReleaseControl']['manifestPath']), files)
     _transition_demand(component['version'] == VERSION, 'CHECKPOINT_TRANSITION_COMPONENT_VERSION_CONFLICT')
@@ -524,7 +538,8 @@ def _transition_local(plan, release, candidate):
                            and prior_candidate.certificate_sha256 == prior['expectedCertificateSha256'],
                            'CHECKPOINT_TRANSITION_CHAIN_CONFLICT')
         prior_package = safe_path(prior['packageDirectory'])
-        prior_files = {name: _transition_bytes(prior_package / name, 32 * 1024 * 1024) for name in ASSETS}
+        prior_version = prior_candidate.certificate['components']['windowsIntegration']['version']
+        prior_files = _transition_windows_files(prior_package, release, prior_version)
         release.assess_manifest(prior_candidate, 'windowsIntegration',
                                _transition_bytes(prior['publicReleaseControl']['manifestPath']), prior_files)
         needed, ref = prior['expectedPreviousSha256'], prior['previousTransition']
