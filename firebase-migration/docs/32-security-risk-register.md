@@ -44,7 +44,7 @@
 | R026 | Admin Master concentra privilégios | 3 | 5 | 15 | HIGH | MFA/audit required | break-glass, dual review, scoped admin operations | Governance | MEDIUM |
 | R027 | key rotation deixa versão antiga desativada cedo | 2 | 5 | 10 | HIGH | policy | verificar activeKeyVersion antes de disable | KMS Owner | LOW |
 | R028 | dado clínico enviado a IA externa | 2 | 5 | 10 | HIGH | clinical gate | DLP/schema block + provider contract/retention review | AI/Privacy | LOW |
-| R029 | advisories residuais nas ferramentas de teste de Security Rules | 3 | 4 | 12 | HIGH | dependências de desenvolvimento separadas, fixtures sintéticas, CI de validação sem credenciais ou deploy | exceção temporária SEC-EXC-TEST-20261007 renovada expressamente pelo titular somente para ferramentas de teste HML; corrigir upstream e revisar até 23/10/2026 conforme renovação registrada abaixo | AppSec / Security Governance | LOW |
+| R029 | advisories residuais nas ferramentas de teste de Security Rules | 3 | 4 | 12 | HIGH | dependências de desenvolvimento separadas, fixtures sintéticas, CI de validação sem credenciais ou deploy | exceção temporária SEC-EXC-TEST-20261007 renovada expressamente pelo titular somente para ferramentas de teste HML; corrigir upstream e revisar até 25/10/2026 conforme renovação registrada abaixo | AppSec / Security Governance | LOW |
 
 ## 3. Regras de tratamento
 
@@ -98,7 +98,7 @@ O aceite cobre o head revisado do PR #184 `bf5bbc1146245bdf112cedfd9a9c6cc558e46
 
 Rollback do candidato: reverter o commit que altera manifesto, lockfile e este registro, mantendo o risco aberto e a promoção bloqueada. Não aplicar downgrade do Firebase SDK, `npm audit fix --force` ou alteração de política para ocultar os advisories.
 
-## 7. Renovação vigente de R029 — 22/10/2026
+## 7. Renovação de R029 para o PR #299 — 22/10/2026
 
 A decisão `AURORA-HML-OWNER-RENEWAL-20261022` registra a resposta afirmativa do
  titular (“fewito”) à publicação do PR #299 em homologação e à renovação HML/R029
@@ -109,3 +109,40 @@ compensações e o escopo exclusivo das ferramentas de teste HML. Não constitui
 nova auditoria, review independente ou autorização produtiva/clínica. O código
 do conector não muda dependências; a fonte real permanece inativa. Os demais
 gates técnicos e de publicação continuam aplicáveis.
+
+## 8. Renovação vigente de R029 até 26/10 — 22/10/2026
+
+Nova decisão expressa `AURORA-HML-OWNER-RENEWAL-20261022-TO-20261026`, resposta
+“Renovar nesse escopo até 26/10” à pergunta
+`call_8636915dde044199adf7c46270661d0f`, estende a validade até
+**26/10/2026 às 00h de Brasília** (`2026-10-26T03:00:00.000Z`), com revisão até
+25/10. Os cinco registros anteriores permanecem preservados; o aceite específico
+do código do PR #299 não é transformado em revisão dos candidatos posteriores.
+Mantém as 11 agregações residuais aceitas (7 HIGH, 4 MODERATE, 0 CRITICAL), as
+compensações descritas acima e exclusivamente publicação da beta/testes sintéticos
+Windows/nuvem em HML. Não é nova auditoria nem dispensa reavaliação diante de
+mudança de escopo, credenciais/dados reais, falha de teste ou novo advisory.
+
+Credenciais, concessão HMAC documental, piloto da pasta real e a janela separada
+de regularização da fonte inativa conservam seus próprios prazos. IAM, produção,
+dados clínicos e ativação da fonte real não são autorizados por esta renovação.
+CI exato, revisão e demais gates de publicação, assinatura, smokes e CAS continuam
+necessários. Registro de decisão não comprova publicação ou instalação.
+
+Observação separada de 22/10/2026: a API GitHub informou inicialmente o
+[Dependabot #67](https://github.com/GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS/security/dependabot/67)
+aberto como CRITICAL para `certifi`, runtime em `firebase-migration/api/uv.lock`,
+advisory `GHSA-6q48-6c7w-9gw2` e primeira versão corrigida `2026.10.19`. O
+[PR #295](https://github.com/GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS/pull/295),
+head `58139bcfb804c8eb69a7800846fbf100c80b4142`, foi integrado pelo merge
+`6f46e4792ce45a1f222055f1a925dcff54416772`, com sete checks aprovados no head
+exato. Altera somente o lockfile para `certifi@2026.10.19`, com hashes das duas
+distribuições conferidos no PyPI. Esta candidata foi reconciliada com essa fonte.
+
+A correção do lockfile não comprova reconstrução de imagens, atualização de
+ambientes instalados ou do bundle de confiança efetivamente usado. Nenhum deploy
+ou reconstrução de runtime foi realizado por esta reconciliação. A leitura do
+alerta após o merge ainda retornou `open`; não se declara encerramento por
+inferência. Esse alerta não integra os 11 riscos históricos de R029 e não recebe
+aceite por esta renovação. A regra CRITICAL da seção 3 continua aplicável aos
+ambientes afetados até comprovar a remediação ou outra decisão específica.

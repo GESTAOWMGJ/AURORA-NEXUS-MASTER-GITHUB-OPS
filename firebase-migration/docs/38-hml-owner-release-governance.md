@@ -6,6 +6,19 @@ Em 12/10/2026, o titular reafirmou: “Revisão humana APROVADA E REALIZADA !!! 
 
 Em 14/10/2026, por nova autorização direta, o titular renovou expressamente HML/R029 até 00:00 de 16/10/2026 em Brasília (`2026-10-16T03:00:00.000Z`), com revisão até 15/10. Aceitou os 11 riscos residuais (7 altos, 4 moderados, zero crítico) no mesmo escopo HML, para recuperação/publicação da beta e testes sintéticos Windows/nuvem. A política registra predecessor e novo prazo na reafirmação `AURORA-HML-OWNER-RENEWAL-20261014`. Produção e dados clínicos permanecem excluídos; aprovação real do futuro run, CI, smokes, assinatura e CAS continuam obrigatórios. Não há alegação de nova revisão humana integral ou independente da main posterior.
 
+Em 22/10/2026, a resposta “Renovar nesse escopo até 26/10” à pergunta
+`call_8636915dde044199adf7c46270661d0f` originou a decisão adicional
+`AURORA-HML-OWNER-RENEWAL-20261022-TO-20261026`: prazo até
+`2026-10-26T03:00:00.000Z` (26/10 às 00h de Brasília), revisão até 25/10 e os
+mesmos 11 riscos residuais somente das ferramentas de teste HML. A política
+preserva como predecessor o aceite separado de 22/10 para PR #299, que terminava
+em `2026-10-23T23:00:00.000Z`; sua aprovação de código não é atribuída a outro
+head. A renovação cobre publicação da beta e testes sintéticos Windows/nuvem,
+sem produção, dados clínicos ou ativação da pasta real. Não prorroga credenciais,
+escopo HMAC documental, IAM, piloto real ou janela de regularização da fonte.
+Os gates técnicos e de aprovação real do run permanecem; não há nova alegação de
+revisão independente, deploy ou ingestão comprovados.
+
 | Objeto revisado | Identidade exata |
 |---|---|
 | PR #183 | `c76c22c47f2591c33fd9e4bb4216e6b5e593fe1f` |

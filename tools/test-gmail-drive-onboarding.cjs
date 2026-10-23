@@ -355,6 +355,16 @@ test('synthetic HML renewal cannot revive an expired customer-source reuse pilot
   assertReuseSafe(f,result);
 });
 
+test('the later synthetic HML renewal cannot extend the separate source regularization window',()=>{
+  const f=reuseFixture({now:Date.parse('2026-10-24T00:00:00Z')});
+  const policy=JSON.parse(fs.readFileSync(path.join(__dirname,'..','firebase-migration/policy/hml-owner-release-approval-v1.json'),'utf8'));
+  assert.ok(f.c.Date.now()<Date.parse(policy.scope.validUntilUtc));
+  assert.equal(f.execute().code,'AURORA_CONNECTOR_REUSE_EXPIRED');
+  assert.equal(repairSource(f).code,'AURORA_CONNECTOR_REUSE_EXPIRED');
+  assert.deepEqual(f.calls,[]);
+  assert.equal(f.c.AURORA_CONNECTOR_REPAIR_DEADLINE,'2026-10-23T23:27:22.000Z');
+});
+
 const repairTime = '2026-10-22T23:30:00Z';
 function repairRequest(f, mode='PREVIEW', expected=null) {
   return {...f.request(mode,expected),confirmation:'REGULARIZE_EXISTING_WMGJ_SOURCE_CONFIG_ONLY'};
