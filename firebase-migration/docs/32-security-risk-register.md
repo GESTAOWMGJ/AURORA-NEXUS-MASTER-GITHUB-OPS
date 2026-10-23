@@ -44,7 +44,7 @@
 | R026 | Admin Master concentra privilégios | 3 | 5 | 15 | HIGH | MFA/audit required | break-glass, dual review, scoped admin operations | Governance | MEDIUM |
 | R027 | key rotation deixa versão antiga desativada cedo | 2 | 5 | 10 | HIGH | policy | verificar activeKeyVersion antes de disable | KMS Owner | LOW |
 | R028 | dado clínico enviado a IA externa | 2 | 5 | 10 | HIGH | clinical gate | DLP/schema block + provider contract/retention review | AI/Privacy | LOW |
-| R029 | advisories residuais nas ferramentas de teste de Security Rules | 3 | 4 | 12 | HIGH | dependências de desenvolvimento separadas, fixtures sintéticas, CI de validação sem credenciais ou deploy | exceção temporária SEC-EXC-TEST-20261007 renovada expressamente pelo titular somente para ferramentas de teste HML; corrigir upstream e revisar até 15/10/2026 | AppSec / Security Governance | LOW |
+| R029 | advisories residuais nas ferramentas de teste de Security Rules | 3 | 4 | 12 | HIGH | dependências de desenvolvimento separadas, fixtures sintéticas, CI de validação sem credenciais ou deploy | exceção temporária SEC-EXC-TEST-20261007 renovada expressamente pelo titular somente para ferramentas de teste HML; corrigir upstream e revisar até 23/10/2026 conforme renovação registrada abaixo | AppSec / Security Governance | LOW |
 
 ## 3. Regras de tratamento
 
@@ -97,3 +97,15 @@ Compensações verificáveis do fluxo existente:
 O aceite cobre o head revisado do PR #184 `bf5bbc1146245bdf112cedfd9a9c6cc558e46106`, CI Firestore `37712091783` com 27 Rules aprovados, e a auditoria registrada de 11 agregações acima; não é uma auditoria nova nem alegação de fechamento dos alertas. Cada main que será promovida continua exigindo CI exato atualizado. A revisão deve ocorrer até a data acima ou antes de mudança de escopo, introdução de credenciais/dados reais, falha de teste ou novo advisory relevante; qualquer dessas condições suspende este aceite até nova decisão específica.
 
 Rollback do candidato: reverter o commit que altera manifesto, lockfile e este registro, mantendo o risco aberto e a promoção bloqueada. Não aplicar downgrade do Firebase SDK, `npm audit fix --force` ou alteração de política para ocultar os advisories.
+
+## 7. Renovação vigente de R029 — 22/10/2026
+
+A decisão `AURORA-HML-OWNER-RENEWAL-20261022` registra a resposta afirmativa do
+ titular (“fewito”) à publicação do PR #299 em homologação e à renovação HML/R029
+até **23/10/2026 às 20h em Brasília** (`2026-10-23T23:00:00.000Z`), com revisão
+até 23/10. Preserva os aceites anteriores e a renovação de 19/10 na política.
+Mantém as 11 agregações residuais aceitas (7 HIGH, 4 MODERATE, 0 CRITICAL), as
+compensações e o escopo exclusivo das ferramentas de teste HML. Não constitui
+nova auditoria, review independente ou autorização produtiva/clínica. O código
+do conector não muda dependências; a fonte real permanece inativa. Os demais
+gates técnicos e de publicação continuam aplicáveis.
