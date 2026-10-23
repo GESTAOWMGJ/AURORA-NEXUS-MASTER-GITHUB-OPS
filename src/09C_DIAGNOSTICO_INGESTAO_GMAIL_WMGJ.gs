@@ -20,6 +20,7 @@ function inspecionarIndiceGmailWMGJ_(dados) {
     if (header[i] !== nome) divergencias.push({ coluna: i + 1, esperado: nome });
   });
   var registros = [], naoReconhecidas = [], contagem = {}, ultimaIndexacao = null;
+  var destinosPorChave = Object.create(null);
   for (var i = 1; i < dados.length; i++) {
     var r = dados[i];
     if (r.every(function(v) { return v === '' || v === null; })) continue;
@@ -35,14 +36,29 @@ function inspecionarIndiceGmailWMGJ_(dados) {
     var chave = hash && r[9] ? [r[5], r[9], hash].join('|') : '';
     var terminal = !!chave && (/^IGNORADO_NAO_PERTINENTE/.test(status) ||
       (/^COPIADO_BRUTO_A_CLASSIFICAR/.test(status) && !!r[22]));
-    if (chave) contagem[chave] = (contagem[chave] || 0) + 1;
+    if (chave) {
+      contagem[chave] = (contagem[chave] || 0) + 1;
+      if (!destinosPorChave[chave]) destinosPorChave[chave] = { arquivos: Object.create(null), linhas: [] };
+      destinosPorChave[chave].linhas.push(i + 1);
+      if (r[22]) destinosPorChave[chave].arquivos[String(r[22])] = true;
+    }
     registros.push({ linha: i + 1, messageId: r[5], nome: r[9], hash: hash,
       chave: chave, status: status, terminal: terminal, arquivoId: r[22] || '' });
     if (r[0] instanceof Date && !isNaN(r[0].getTime()) &&
         (!ultimaIndexacao || r[0].getTime() > ultimaIndexacao.getTime())) ultimaIndexacao = r[0];
   }
+  // Destination multiplicity is a reconciliation blocker, not proof of duplicate bytes.
+  // Do not select a winner or mutate the historical index here.
+  var conflitosDestino = Object.keys(destinosPorChave).filter(function(chave) {
+    return Object.keys(destinosPorChave[chave].arquivos).length > 1;
+  }).map(function(chave) {
+    return { chave: chave, linhas: destinosPorChave[chave].linhas,
+      arquivos: Object.keys(destinosPorChave[chave].arquivos) };
+  });
   return { schemaCompativel: divergencias.length === 0 && naoReconhecidas.length === 0,
     divergencias: divergencias, linhasNaoReconhecidas: naoReconhecidas,
+    conflitosDestino: conflitosDestino, chavesDistintas: Object.keys(contagem).length,
+    repeticoesAlemPrimeira: Object.keys(contagem).reduce(function(total, chave) { return total + contagem[chave] - 1; }, 0),
     registros: registros, chavesRepetidas: Object.keys(contagem).filter(function(k) { return contagem[k] > 1; }).length,
     ultimaIndexacao: ultimaIndexacao ? ultimaIndexacao.toISOString() : null };
 }
@@ -52,6 +68,9 @@ function exigirContratoIndiceGmailWMGJ_(aba) {
   if (!diagnostico.schemaCompativel) {
     // Never overwrite a mixed header: historical rows may use a second layout.
     throw new Error('GMAIL_INDEX_SCHEMA_MISMATCH: reconciliar layout com backup e trilha antes de gravar');
+  }
+  if (diagnostico.conflitosDestino.length) {
+    throw new Error('GMAIL_INDEX_DESTINATION_CONFLICT: reconciliar destinos por mensagem, anexo e SHA-256 antes de gravar');
   }
   return diagnostico;
 }
@@ -87,10 +106,14 @@ function diagnosticarMensagemGmailWMGJ(messageId) {
     messageId: messageId, spreadsheetId: ss.getId(), anexos: itens,
     schemaCompativel: indice.schemaCompativel, divergencias: indice.divergencias,
     linhasNaoReconhecidas: indice.linhasNaoReconhecidas, chavesRepetidas: indice.chavesRepetidas,
+    conflitosDestino: indice.conflitosDestino, chavesDistintas: indice.chavesDistintas,
+    repeticoesAlemPrimeira: indice.repeticoesAlemPrimeira,
     ultimaIndexacao: indice.ultimaIndexacao, triggersDoUsuarioExecutor: triggers,
     coberturaTriggers: 'SOMENTE_USUARIO_EXECUTOR',
     estadoWatchdog: typeof obterEstadoExecucaoWMGJ_ === 'function' ? obterEstadoExecucaoWMGJ_() : null,
     bloqueios: (indice.schemaCompativel ? [] : ['SCHEMA_MISTO'])
+      .concat(indice.conflitosDestino.length ? ['CONFLITO_DESTINO'] : [])
       .concat(['RECONCILIAR_DRIVE_E_FILA', 'EXIGIR_EXECUTOR_REPLAY_COM_LOCK_E_AUDITORIA']),
     podeExecutarReplay: false };
 }
+

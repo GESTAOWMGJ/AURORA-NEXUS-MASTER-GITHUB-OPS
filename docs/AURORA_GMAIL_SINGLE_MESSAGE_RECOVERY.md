@@ -16,6 +16,27 @@ O diagnóstico somente leitura anterior, `diagnosticarMensagemGmailWMGJ`, perman
 Inventário de gatilhos mostra apenas os pertencentes ao executor; não demonstra ausência de
 execuções de outras contas. Schema misto continua bloqueado: não reparar trocando cabeçalho.
 
+## Reconciliação de destinos — incremento de 22/10/2026
+
+O diagnóstico informa `chavesDistintas`, `repeticoesAlemPrimeira` e
+`conflitosDestino`, preservando as linhas e todos os IDs envolvidos. Multiplicidade
+de destino não comprova duplicidade de conteúdo nem financeira. Comparar mensagem,
+identidade do anexo, versão, tamanho e SHA-256 completo; reenvios com mensagens
+distintas preservam proveniência mesmo quando os bytes coincidem.
+
+O contrato agora rejeita `GMAIL_INDEX_DESTINATION_CONFLICT` antes de os indexadores
+V1/V2 acessarem Gmail ou Drive, inclusive com cabeçalho canônico. Histórico com
+repetição do mesmo destino continua idempotente. O bloqueio de schema misto mantém
+precedência e não pode ser removido por simples substituição do cabeçalho.
+
+Estado: patch candidato com testes sintéticos; sem migração de índice, mudança de
+gatilhos, implantação ou liberação de ingestão. A rotina existente permanece
+`LEGACY_MIRRORED` em `ingestionRecoveryPolicy`; nenhum novo executor é criado.
+Rollback do código: reverter o commit candidato; isso não reverte evidência privada
+nem autoriza reabrir acesso público. Dados originais, backup e arquivos são imutáveis
+para esta correção. A reconciliação operacional exige manifesto privado por tenant,
+revisão das associações, exclusão mútua entre escritores e comprovação em runtime.
+
 ## Preparação e dry-run
 
 No projeto Apps Script canônico e sob identidade autorizada, exigir configurações existentes:
@@ -110,3 +131,4 @@ retomar ingestão sobre schema misto. PR permanece draft para revisão e valida�
 Referências técnicas oficiais: [IDs pré-gerados](https://developers.google.com/workspace/drive/api/guides/create-file),
 [upload multipart](https://developers.google.com/workspace/drive/api/guides/manage-uploads),
 [Lock](https://developers.google.com/apps-script/reference/lock/lock).
+
