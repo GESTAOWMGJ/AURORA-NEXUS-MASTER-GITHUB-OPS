@@ -52,9 +52,16 @@ def oid(label: str) -> str:
     return hashlib.sha256(label.encode("ascii")).hexdigest()[:24].upper()
 
 
-def project(provenance: dict, build_number: str) -> str:
+def project(provenance: dict, build_number: str, signing: dict | None = None) -> str:
     if not re.fullmatch(r"[1-9][0-9]{0,8}", build_number):
         raise ValueError("Build number must be a positive integer of at most 9 digits")
+    if signing is not None:
+        if (set(signing) != {"teamId", "profileUuid"}
+                or not isinstance(signing["teamId"], str)
+                or not re.fullmatch(r"[A-Z0-9]{10}", signing["teamId"])
+                or not isinstance(signing["profileUuid"], str)
+                or not re.fullmatch(r"[A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}", signing["profileUuid"])):
+            raise ValueError("Invalid explicit distribution signing configuration")
     objects: list[str] = []
 
     def add(label: str, body: str) -> str:
@@ -78,12 +85,17 @@ def project(provenance: dict, build_number: str) -> str:
     resource = add("ref:provenance", 'isa = PBXFileReference; lastKnownFileType = text.json; path = BuildProvenance.json; sourceTree = "<group>";')
     resource_build = add("build:provenance", f"isa = PBXBuildFile; fileRef = {resource};")
     refs.append(resource)
+    resource_builds = [resource_build]
+    if signing is not None:
+        asset = add("ref:assets", 'isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>";')
+        refs.append(asset)
+        resource_builds.append(add("build:assets", f"isa = PBXBuildFile; fileRef = {asset};"))
     app_product = add("product:app", 'isa = PBXFileReference; explicitFileType = wrapper.application; path = AuroraNexus.app; sourceTree = BUILT_PRODUCTS_DIR;')
     test_product = add("product:test", 'isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = AuroraNexusUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR;')
     products = add("group:products", f'isa = PBXGroup; children = {array([app_product, test_product])}; name = Products; sourceTree = "<group>";')
     group = add("group:main", f'isa = PBXGroup; children = {array(refs + [products])}; sourceTree = "<group>";')
     app_sources = add("phase:app:sources", f"isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = {array(app_builds)}; runOnlyForDeploymentPostprocessing = 0;")
-    app_resources = add("phase:app:resources", f"isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = {array([resource_build])}; runOnlyForDeploymentPostprocessing = 0;")
+    app_resources = add("phase:app:resources", f"isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = {array(resource_builds)}; runOnlyForDeploymentPostprocessing = 0;")
     test_sources = add("phase:test:sources", f"isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = {array([test_build])}; runOnlyForDeploymentPostprocessing = 0;")
     configurations = {}
     numeric_version = re.match(r"\d+\.\d+\.\d+", provenance["productVersion"])[0]
@@ -91,13 +103,21 @@ def project(provenance: dict, build_number: str) -> str:
         configs = []
         for mode in ("Debug", "Release"):
             settings = ['CLANG_ENABLE_MODULES = YES', 'IPHONEOS_DEPLOYMENT_TARGET = 16.0', 'SDKROOT = iphoneos', 'SWIFT_VERSION = 5.0', 'CODE_SIGNING_ALLOWED = NO', 'CODE_SIGNING_REQUIRED = NO', 'TARGETED_DEVICE_FAMILY = "1,2"']
+            if signing is not None and target == "app" and mode == "Release":
+                settings = [item for item in settings if not item.startswith(("CODE_SIGNING_ALLOWED", "CODE_SIGNING_REQUIRED"))]
+                settings += ['CODE_SIGNING_ALLOWED = YES', 'CODE_SIGNING_REQUIRED = YES',
+                             'CODE_SIGN_STYLE = Manual', 'CODE_SIGN_IDENTITY = "Apple Distribution"',
+                             f'DEVELOPMENT_TEAM = "{signing["teamId"]}"',
+                             f'PROVISIONING_PROFILE_SPECIFIER = "{signing["profileUuid"]}"',
+                             'SKIP_INSTALL = NO', 'ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon']
             if mode == "Debug":
                 settings += ['SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG', 'SWIFT_OPTIMIZATION_LEVEL = "-Onone"']
             if target != "project":
                 bundle = provenance["bundleIdentifier"] + (".uitests" if target == "test" else "")
                 settings += [f'PRODUCT_BUNDLE_IDENTIFIER = "{bundle}"', 'PRODUCT_NAME = "$(TARGET_NAME)"', f'MARKETING_VERSION = "{numeric_version}"', f'CURRENT_PROJECT_VERSION = {build_number}', 'SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"', 'SWIFT_EMIT_LOC_STRINGS = NO']
                 if target == "app":
-                    settings += ['INFOPLIST_FILE = ../App/Info.plist', 'GENERATE_INFOPLIST_FILE = NO']
+                    info_file = 'DistributionInfo.plist' if signing is not None and mode == "Release" else '../App/Info.plist'
+                    settings += [f'INFOPLIST_FILE = {info_file}', 'GENERATE_INFOPLIST_FILE = NO']
                 else:
                     settings += ['GENERATE_INFOPLIST_FILE = YES', 'TEST_TARGET_NAME = AuroraNexus']
             configs.append(add(f"config:{target}:{mode}", f'isa = XCBuildConfiguration; buildSettings = {{ ' + "; ".join(settings) + f'; }}; name = {mode};'))
@@ -110,15 +130,16 @@ def project(provenance: dict, build_number: str) -> str:
     return '// !$*UTF8*$!\n{\n\tarchiveVersion = 1;\n\tclasses = {};\n\tobjectVersion = 56;\n\tobjects = {\n' + "\n".join(objects) + f'\n\t}};\n\trootObject = {root};\n}}\n'
 
 
-def scheme() -> str:
+def scheme(distribution: bool = False) -> str:
     def ref(label: str, product: str, name: str) -> str:
         return f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{oid(label)}" BuildableName="{escape(product)}" BlueprintName="{name}" ReferencedContainer="container:AuroraNexus.xcodeproj"/>'
+    archive = "YES" if distribution else "NO"
     app = ref("target:app", "AuroraNexus.app", "AuroraNexus")
     test = ref("target:test", "AuroraNexusUITests.xctest", "AuroraNexusUITests")
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <Scheme LastUpgradeVersion="1600" version="1.3">
 <BuildAction parallelizeBuildables="YES" buildImplicitDependencies="YES"><BuildActionEntries>
-<BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="NO" buildForAnalyzing="YES">{app}</BuildActionEntry>
+<BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="{archive}" buildForAnalyzing="YES">{app}</BuildActionEntry>
 <BuildActionEntry buildForTesting="YES" buildForRunning="NO" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="YES">{test}</BuildActionEntry>
 </BuildActionEntries></BuildAction>
 <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.IDEFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES"><Testables><TestableReference skipped="NO">{test}</TestableReference></Testables></TestAction>
@@ -130,13 +151,18 @@ def scheme() -> str:
 
 
 def configure(repo: Path, ios_root: Path, bundle_identifier: str | None,
-              unsigned_test_identity: bool, build_number: str) -> dict:
+              unsigned_test_identity: bool, build_number: str, *, signing: dict | None = None) -> dict:
     provenance = identity(repo, bundle_identifier, unsigned_test_identity)
+    if signing is not None:
+        if unsigned_test_identity or provenance["bundleIdentifier"].startswith(("local.", "example.", "com.example.")):
+            raise ValueError("Distribution cannot use a synthetic bundle identity")
+        provenance["distribution"] = "APP_STORE_CANDIDATE"
+        provenance["signingStatus"] = "APPLE_SIGNING_REQUESTED"
     for name in SOURCES + (UI_TEST, "App/Info.plist"):
         path = ios_root / name
         if not path.is_file() or path.is_symlink():
             raise ValueError("Missing regular iOS source: " + name)
-    project_text = project(provenance, build_number)
+    project_text = project(provenance, build_number, signing)
     generated = ios_root / "Generated"
     if generated.is_symlink() or getattr(generated, "is_junction", lambda: False)():
         raise ValueError("Generated directory cannot be a link")
@@ -150,7 +176,7 @@ def configure(repo: Path, ios_root: Path, bundle_identifier: str | None,
         target.mkdir(exist_ok=True)
     outputs = {generated / "BuildProvenance.json": json.dumps(provenance, sort_keys=True, indent=2) + "\n",
                xcode / "project.pbxproj": project_text,
-               schemes / "AuroraNexus.xcscheme": scheme()}
+               schemes / "AuroraNexus.xcscheme": scheme(distribution=signing is not None)}
     for path in outputs:
         if path.is_symlink() or (path.exists() and (not path.is_file() or path.stat().st_nlink != 1)):
             raise ValueError("Output must be an unlinked regular file")

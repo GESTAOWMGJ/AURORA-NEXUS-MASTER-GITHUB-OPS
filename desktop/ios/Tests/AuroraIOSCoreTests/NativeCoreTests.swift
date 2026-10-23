@@ -106,6 +106,22 @@ final class NativeCoreTests: XCTestCase {
         XCTAssertThrowsError(try parse(signed))
     }
 
+    func testDistributionPreparationIsNotSignatureOrStoreAcceptance() throws {
+        var value = fixture()
+        value["bundleIdentifier"] = "br.com.synthetic.aurora"
+        value["bundleIdentityStatus"] = "CONFIGURED_UNVERIFIED_WITH_APPLE"
+        value["distribution"] = "APP_STORE_CANDIDATE"
+        value["signingStatus"] = "APPLE_SIGNING_REQUESTED"
+        let parsed = try parse(value)
+        XCTAssertFalse(parsed.nativeAcceptanceVerified)
+        XCTAssertNil(parsed.certificateSha256)
+        value["signingStatus"] = "SIGNED"
+        XCTAssertThrowsError(try parse(value))
+        value["signingStatus"] = "APPLE_SIGNING_REQUESTED"
+        value["bundleIdentifier"] = "local.auroranexus.ios.unsigned"
+        XCTAssertThrowsError(try parse(value))
+    }
+
     func testNumericBooleanCannotBypassAcceptanceGuard() {
         var value = fixture(); value["nativeAcceptanceVerified"] = 0
         XCTAssertThrowsError(try parse(value))
