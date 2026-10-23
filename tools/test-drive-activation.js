@@ -9,8 +9,11 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'src', '37_AURORA_CONE
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const plain = value => JSON.parse(JSON.stringify(value));
 function fixture() {
-  const state = {owner:'owner@fixture.test',effective:'owner@fixture.test',org:'synthetic',secret:'a'.repeat(64),calls:[],lock:false};
-  const props = {getProperty:key=>key==='WMGJ_FIRESTORE_ORG_ID'?state.org:null,
+  const state = {owner:'owner@fixture.test',effective:'owner@fixture.test',org:'synthetic',secret:'a'.repeat(64),calls:[],lock:false,properties:new Map(),propertyReads:[]};
+  const props = {getProperty:key=>{
+    if(key.startsWith('AURORA_DRIVE_')) {assert.equal(state.lock,true);state.propertyReads.push(key);}
+    return key==='WMGJ_FIRESTORE_ORG_ID'?state.org:state.properties.has(key)?state.properties.get(key):null;
+  },
     setProperty(){throw Error('GLOBAL_WRITE_FORBIDDEN');},setProperties(){throw Error('GLOBAL_WRITE_FORBIDDEN');}};
   const receipt = {entityId:'b'.repeat(48),sourceId:'synthetic-file-00001',contentHash:'c'.repeat(64),
     contentSha256:'c'.repeat(64),textSha256:'d'.repeat(64),canonicalSnapshotHash:'f'.repeat(64),sourceVersion:1,revision:1,versionId:'e'.repeat(64),replayVerified:true};
@@ -131,4 +134,96 @@ test('exceptions after entering the engine cannot masquerade as a safe lock refu
   f.context.auroraExecutarCicloDriveAutorizado_=()=>{throw Error('Service invoked too many times: PRIVATE_IDENTIFIER');};
   result=f.execute();assert.equal(result.code,'AURORA_DRIVE_SERVICE_QUOTA');assert.equal(result.failureStage,'EXECUTE');
   assert.ok(!JSON.stringify(result).includes('PRIVATE_IDENTIFIER'));
+});
+
+function diagnosticRequest(f) {
+  const preview=f.call();
+  return {...f.request,mode:'READBACK',expectedScopeSha256:preview.scopeSha256,readbackOffset:0};
+}
+function diagnosticKeys(f,request) {
+  const suffix=f.request.orgId+'_'+request.expectedScopeSha256.slice(0,24);
+  return ['AURORA_DRIVE_CURSOR_'+suffix,'AURORA_DRIVE_PROCESS_'+suffix+'_PRIORITY_V1'];
+}
+function diagnosticState(f,request,token='PRIVATE_TOKEN_ç🙂') {
+  return {schemaVersion:1,scopeSha256:request.expectedScopeSha256,explicitIndex:1,rootIndex:1,
+    scanned:255,folders:12,excluded:0,complete:false,privateExtra:'PRIVATE_DOCUMENT_CONTENT',
+    stack:[{folderId:'private-folder-00001',rootId:f.request.sources[0].folderId,
+      sourceId:f.request.sources[0].sourceId,stage:'FILES',token}]};
+}
+test('READBACK measures only scoped cursor properties under the shared lock and never returns their values',()=>{
+  const f=fixture(),request=diagnosticRequest(f),keys=diagnosticKeys(f,request),state=diagnosticState(f,request);
+  const raw=JSON.stringify(state);f.state.properties.set(keys[0],raw);f.state.properties.set(keys[1],JSON.stringify({explicit:1,'source:drive-primary':255}));
+  const before=[...f.state.properties];
+  const response=f.call(request),d=response.cursorDiagnostics;
+  assert.equal(response.ok,true);assert.equal(d.schemaVersion,'aurora.drive-resume-diagnostics.v1');assert.equal(d.readOnly,true);
+  assert.deepEqual(f.state.propertyReads,keys);assert.deepEqual([...f.state.properties],before);
+  assert.equal(d.cursor.jsonValid,true);assert.equal(d.cursor.contractValid,true);assert.equal(d.cursor.scopeMatches,true);
+  assert.equal(d.cursor.characters,raw.length);assert.equal(d.cursor.utf8Bytes,Buffer.byteLength(raw));
+  assert.equal(d.cursor.explicitIndex,1);assert.equal(d.cursor.rootIndex,1);assert.equal(d.cursor.scanned,255);
+  assert.deepEqual(d.cursor.frames,[{index:0,stage:'FILES',folderIdValid:true,sourceIndex:0,tokenTypeValid:true,
+    tokenCharacters:state.stack[0].token.length,tokenUtf8Bytes:Buffer.byteLength(state.stack[0].token)}]);
+  assert.equal(d.priority.contractValid,true);assert.equal(d.priority.groupCount,2);assert.equal(d.priority.maxOrdinal,255);
+  for(const privateValue of [state.stack[0].token,state.stack[0].folderId,state.stack[0].rootId,state.stack[0].sourceId,state.privateExtra,f.state.secret,request.expectedScopeSha256]) {
+    assert.equal(JSON.stringify(d).includes(privateValue),false);
+  }
+  assert.ok(!f.state.calls.includes('execute'));assert.equal(response.processing.accepted,0);
+  assert.equal(response.privateReadbackPlan.length,1);assert.equal(response.fullSynchronizationVerified,false);
+});
+test('READBACK reports absent or malformed state without resetting cursors or losing durable receipts',()=>{
+  const f=fixture(),request=diagnosticRequest(f),keys=diagnosticKeys(f,request);
+  let response=f.call(request);assert.equal(response.ok,true);assert.equal(response.cursorDiagnostics.cursor.readStatus,'ABSENT');
+  assert.equal(response.cursorDiagnostics.cursor.present,false);assert.equal(response.cursorDiagnostics.priority.present,false);
+  f.state.properties.set(keys[0],'{"PRIVATE_SOURCE_ID":');f.state.properties.set(keys[1],'["PRIVATE_SOURCE_ID"]');
+  response=f.call(request);assert.equal(response.ok,true);assert.equal(response.cursorDiagnostics.cursor.jsonValid,false);
+  assert.equal(response.cursorDiagnostics.cursor.contractValid,false);assert.equal(response.cursorDiagnostics.priority.jsonValid,true);
+  assert.equal(response.cursorDiagnostics.priority.contractValid,false);assert.equal(response.privateReadbackPlan.length,1);
+  assert.equal(JSON.stringify(response.cursorDiagnostics).includes('PRIVATE_SOURCE_ID'),false);
+  assert.equal(f.state.properties.get(keys[0]),'{"PRIVATE_SOURCE_ID":');
+});
+test('cursor diagnostics survive a failed queue readback but do not change its failure or completeness',()=>{
+  const f=fixture(),request=diagnosticRequest(f),keys=diagnosticKeys(f,request),state=diagnosticState(f,request,'x'.repeat(3908));
+  state.stack.push({folderId:'private-child-00001',rootId:f.request.sources[0].folderId,sourceId:'drive-primary',stage:'FILES',token:null});
+  const raw=JSON.stringify(state);assert.ok(raw.length<8000);f.state.properties.set(keys[0],raw);
+  f.context.auroraLerPlanoReadbackDriveAutorizado_=()=>{throw Error('AURORA_DRIVE_QUEUE_SCOPE_INVALID');};
+  const response=f.call(request);assert.equal(response.ok,false);assert.equal(response.code,'AURORA_DRIVE_QUEUE_SCOPE_INVALID');
+  assert.equal(response.failureStage,'READBACK');assert.equal(response.cursorDiagnostics.cursor.characters,raw.length);
+  assert.deepEqual(response.cursorDiagnostics.cursor.frames.map(x=>x.tokenCharacters),[3908,0]);
+  assert.equal(response.cursorDiagnostics.cursor.contractValid,true);assert.equal(response.cursorDiagnostics.cursor.stackDepth,2);
+  assert.equal(response.scan.complete,false);assert.equal(response.fullSynchronizationVerified,false);
+  assert.equal(response.privateReadbackPlan.length,0);assert.ok(!f.state.calls.includes('execute'));
+  assert.equal(response.cursorDiagnostics.resumable,undefined);assert.equal(response.cursorDiagnostics.healthy,undefined);
+});
+test('diagnostic arrays and values are bounded and malformed private fields cannot enter the response',()=>{
+  const f=fixture(),request=diagnosticRequest(f),keys=diagnosticKeys(f,request),state=diagnosticState(f,request);
+  state.stack=Array.from({length:25},()=>({folderId:'PRIVATE_FOLDER',rootId:'PRIVATE_ROOT',sourceId:'PRIVATE_SOURCE',
+    stage:'PRIVATE_STAGE',token:{secret:'PRIVATE_TOKEN'}}));
+  state.explicitIndex='PRIVATE_INDEX';state.complete='PRIVATE_COMPLETE';state.scopeSha256='PRIVATE_SCOPE';
+  f.state.properties.set(keys[0],JSON.stringify(state));f.state.properties.set(keys[1],JSON.stringify({'PRIVATE_GROUP':'PRIVATE_ORDINAL'}));
+  let response=f.call(request),d=response.cursorDiagnostics;
+  assert.equal(response.ok,true);assert.equal(d.cursor.frames.length,24);assert.equal(d.cursor.framesTruncated,true);
+  assert.equal(d.cursor.stackDepth,25);assert.equal(d.cursor.contractValid,false);assert.equal(d.cursor.scopeMatches,false);
+  assert.equal(d.cursor.explicitIndex,null);assert.equal(d.cursor.complete,null);assert.equal(d.cursor.frames[0].stage,'INVALID');
+  assert.equal(d.cursor.frames[0].tokenCharacters,null);assert.equal(d.priority.unknownGroupCount,1);assert.equal(d.priority.maxOrdinal,null);
+  assert.equal(JSON.stringify(d).includes('PRIVATE_'),false);
+  f.state.properties.set(keys[0],'x'.repeat(16385));response=f.call(request);
+  assert.equal(response.cursorDiagnostics.cursor.readStatus,'OVERSIZE');assert.equal(response.cursorDiagnostics.cursor.characters,16385);
+  assert.equal(response.cursorDiagnostics.cursor.jsonValid,false);assert.equal(response.cursorDiagnostics.cursor.utf8Bytes,null);
+});
+test('owner or scope rejection prevents even a diagnostic property read',()=>{
+  const f=fixture(),request=diagnosticRequest(f);f.state.effective='other@fixture.test';
+  assert.equal(f.call(request).code,'AURORA_CONNECTOR_REUSE_OWNER_REQUIRED');assert.deepEqual(f.state.propertyReads,[]);
+  f.state.effective=f.state.owner;f.state.secret='b'.repeat(64);
+  assert.equal(f.call(request).code,'AURORA_DRIVE_SCOPE_CHANGED');assert.deepEqual(f.state.propertyReads,[]);
+});
+test('closed scanner and process-cursor failures retain their cause while arbitrary error text stays redacted',()=>{
+  const f=fixture();
+  for(const suffix of ['CURSOR_CONFLICT','CURSOR_LIMIT','DEPTH_OR_CYCLE','INFLIGHT_RECONCILIATION_REQUIRED','LIMIT_INVALID',
+    'QUEUE_CONTRACT','QUEUE_SCOPE_INVALID','QUEUE_TENANT_CONFLICT','SCOPE_LIMIT','SCOPE_REQUIRED','SOURCE_INVALID','PROCESS_CURSOR_INVALID']) {
+    const code='AURORA_DRIVE_'+suffix;
+    f.context.auroraExecutarCicloDriveAutorizado_=()=>{throw Error(code);};
+    const response=f.execute();assert.equal(response.code,code);assert.equal(response.failureStage,'EXECUTE');assert.equal(response.ok,false);
+  }
+  f.context.auroraExecutarCicloDriveAutorizado_=()=>{throw new SyntaxError('PRIVATE_TOKEN PRIVATE_SOURCE_ID');};
+  const response=f.execute();assert.equal(response.code,'AURORA_DRIVE_EXECUTION_UNCONFIRMED');assert.equal(response.failureStage,'EXECUTE');
+  assert.equal(JSON.stringify(response).includes('PRIVATE_'),false);
 });

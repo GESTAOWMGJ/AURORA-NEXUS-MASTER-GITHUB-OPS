@@ -48,3 +48,18 @@ test('a partial write or non-lock failure cannot enter the shared-lock retry pat
   let calls=0;const quota={response:{ok:false,code:'AURORA_DRIVE_SERVICE_QUOTA'}};
   assert.equal(await withSharedLockRetry(()=>{calls++;return quota;},()=>{},async()=>{}),quota);assert.equal(calls,1);
 });
+
+test('scanner and process-cursor failures preserve the fixed cause and are never retried automatically',async()=>{
+  for(const suffix of ['CURSOR_CONFLICT','CURSOR_LIMIT','DEPTH_OR_CYCLE','INFLIGHT_RECONCILIATION_REQUIRED','LIMIT_INVALID',
+    'QUEUE_CONTRACT','QUEUE_SCOPE_INVALID','QUEUE_TENANT_CONFLICT','SCOPE_LIMIT','SCOPE_REQUIRED','SOURCE_INVALID','PROCESS_CURSOR_INVALID']) {
+    const code='AURORA_DRIVE_'+suffix,envelope={response:{ok:false,code,failureStage:'EXECUTE',
+      cursorDiagnostics:{privateUnexpected:'PRIVATE_TOKEN'}}};
+    let calls=0;
+    const result=await withSharedLockRetry(()=>{calls++;return envelope;},()=>{throw Error('RETRY_FORBIDDEN');},async()=>{throw Error('WAIT_FORBIDDEN');});
+    assert.equal(result,envelope);assert.equal(calls,1);
+    assert.throws(()=>sanitizeBatch(result),error=>error.message===code && error.failureStage==='EXECUTE'
+      && !JSON.stringify(error).includes('PRIVATE_TOKEN'));
+  }
+  assert.throws(()=>rejectRuntimeFailure({response:{ok:false,code:'AURORA_DRIVE_CURSOR_LIMIT:PRIVATE_TOKEN',failureStage:'EXECUTE'}}),
+    error=>error.message==='DRIVE_RUNTIME_REJECTED' && error.failureStage==='EXECUTE');
+});

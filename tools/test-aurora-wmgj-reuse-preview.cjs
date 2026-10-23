@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {sanitizePreview,readPreview,run} = require('./aurora-wmgj-reuse-preview.cjs');
+const cp = require('node:child_process');
+const {sanitizePreview,readPreview,run,failureEvidence,command,main} = require('./aurora-wmgj-reuse-preview.cjs');
 function sample() {
   return {ok:true,code:'AURORA_CONNECTOR_REUSE_CONFIG_ONLY_VERIFIED',state:'PENDING_TRIGGER_REVIEW',
     scope:'WMGJ_EXISTING_SOURCE_CONFIG_ONLY',sourceIdentified:true,sourceCount:1,metadataAccessVerified:true,
@@ -114,4 +115,168 @@ test('execute only PREVIEW in a source-verified version and re-read the same dep
     assert.equal(fs.lstatSync(root).isSymbolicLink(),false);
     fs.rmSync(root,{recursive:true,force:true});
   }
+});
+
+// Every command is injected. These fixtures never invoke git, clasp or a shell.
+function withDiagnosticFixture(operation) {
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'aurora-preview-diagnostic-test-'));
+  const env={GITHUB_REF:process.env.GITHUB_REF,GITHUB_SHA:process.env.GITHUB_SHA};
+  const sourceSha='c'.repeat(40), calls=[];
+  const deployment={description:'AURORA_EXECUTION_API_CANONICAL '+sourceSha,versionNumber:23,
+    deploymentId:'synthetic-deployment-00001'};
+  try {
+    process.env.GITHUB_REF='refs/heads/main'; process.env.GITHUB_SHA=sourceSha;
+    fs.mkdirSync(path.join(root,'src'));
+    fs.mkdirSync(path.join(root,'.github/workflows'),{recursive:true});
+    fs.mkdirSync(path.join(root,'firebase-migration/policy'),{recursive:true});
+    for(const name of ['00_CORE_WMGJ','37_AURORA_CONECTORES_PLUG_AND_PLAY'])
+      fs.writeFileSync(path.join(root,'src',name+'.gs'),'// synthetic '+name+'\n');
+    fs.writeFileSync(path.join(root,'appsscript.json'),'{}');
+    fs.writeFileSync(path.join(root,'.github/workflows/deploy-appscript.yml'),
+      'env:\n  APPS_SCRIPT_ID: existing-synthetic-script-00001\n');
+    fs.writeFileSync(path.join(root,'firebase-migration/policy/hml-owner-release-approval-v1.json'),JSON.stringify({
+      scope:{projectId:'wmgj-hml-jfn-20260927',environment:'firebase-homologation',branch:'main',
+        validUntilUtc:'2026-10-16T03:00:00Z'},integrationAndHmlPublicationAuthorized:true}));
+    const fallback=(bin,args,cwd)=>{
+      if(bin==='git') return args[0]==='rev-parse'?sourceSha:'';
+      if(bin==='clasp' && args[0]==='deployments') return JSON.stringify([deployment]);
+      if(bin==='clasp' && args[0]==='pull') {
+        for(const name of ['00_CORE_WMGJ','37_AURORA_CONECTORES_PLUG_AND_PLAY'])
+          fs.copyFileSync(path.join(root,'src',name+'.gs'),path.join(cwd,name+'.gs'));
+        fs.writeFileSync(path.join(cwd,'appsscript.json'),'{}'); return '';
+      }
+      if(bin==='bash') {
+        assert.equal(args[1],'auroraReaproveitarFonteWmgjConfigOnly');
+        assert.equal(JSON.parse(args[3])[0].mode,'PREVIEW');
+        fs.writeFileSync(args[2],JSON.stringify({response:sample()})); return '';
+      }
+      throw new Error('UNREVIEWED_TEST_COMMAND');
+    };
+    const options=(override=fallback)=>({repo:root,temporary:root,sourceSha,
+      now:()=>Date.parse('2026-10-15T04:00:00Z'),exec:(bin,args,cwd)=>{
+        calls.push({bin,command:args[0]}); return override(bin,args,cwd);
+      }});
+    return operation({root,sourceSha,deployment,calls,fallback,options});
+  } finally {
+    for(const [key,value] of Object.entries(env)) value===undefined?delete process.env[key]:process.env[key]=value;
+    assert.equal(path.dirname(path.resolve(root)),path.resolve(os.tmpdir()));
+    assert.match(path.basename(root),/^aurora-preview-diagnostic-test-/);
+    assert.equal(fs.lstatSync(root).isSymbolicLink(),false);
+    fs.rmSync(root,{recursive:true,force:true});
+  }
+}
+
+function captureRejectedFixture(fixture,exec,{phase,reason,secret,...commandDetail}) {
+  const stdout=[],stderr=[]; let caught;
+  const status=main({temporary:fixture.root,stdout:value=>stdout.push(value),stderr:value=>stderr.push(value),
+    preview:()=>{try{return run(fixture.options(exec));}catch(error){caught=error;throw error;}}});
+  assert.equal(status,1);
+  assert.equal(caught.message,'CONNECTOR_REUSE_PREVIEW_REJECTED');
+  assert.deepEqual(stdout,[]);
+  assert.deepEqual(stderr,['CONNECTOR_REUSE_PREVIEW_REJECTED']);
+  const file=path.join(fixture.root,'connector-reuse-preview.json');
+  const artifact=fs.readFileSync(file,'utf8'), evidence=JSON.parse(artifact);
+  assert.deepEqual(evidence,{
+    schemaVersion:'aurora.wmgj.existing-source-preview-failure.v1',status:'REJECTED',
+    code:'CONNECTOR_REUSE_PREVIEW_REJECTED',phase,reason,exitCode:null,spawnFailure:null,signal:null,
+    complete:false,providerIngestionOrInstallationVerified:false,...commandDetail});
+  // Windows does not expose POSIX permission bits; keep this check mandatory on Linux CI.
+  if(process.platform!=='win32') assert.equal(fs.statSync(file).mode & 0o777,0o600);
+  const visible=artifact+JSON.stringify(stdout)+JSON.stringify(stderr)+caught.message;
+  assert.equal(visible.includes(secret),false);
+  assert.equal(visible.includes(fixture.root),false);
+  return evidence;
+}
+
+test('Git dirty gates retain rejection and report only a fixed reason, never private paths',()=>{
+  const secret='synthetic-secret-git-private-path';
+  for(const [commandName,reason] of [['diff','TRACKED_DIRTY'],['status','SCOPED_UNTRACKED_OR_DIRTY']]) {
+    withDiagnosticFixture(fixture=>{
+      captureRejectedFixture(fixture,(bin,args,cwd)=>bin==='git' && args[0]===commandName
+        ? ' M src/'+secret+'.gs\n' : fixture.fallback(bin,args,cwd),
+      {phase:'PREFLIGHT_GIT',reason,secret});
+      assert.equal(fixture.calls.some(call=>call.bin!=='git'),false);
+    });
+  }
+});
+
+test('predeployment command, JSON and selection failures have bounded diagnostics without remote output',t=>{
+  const secret='synthetic-secret-deployment-output';
+  t.mock.method(cp,'spawnSync',(_bin,_args,options)=>{
+    assert.equal(options.env.DEBUG,''); assert.equal(options.env.NODE_DEBUG,'');
+    return {status:7,stdout:secret,stderr:secret,signal:secret,error:{code:secret,message:secret}};
+  });
+  for(const [kind,reason,details] of [
+    ['command','COMMAND_FAILED',{exitCode:7,spawnFailure:'OTHER',signal:'OTHER'}],
+    ['json','JSON_INVALID',{}],
+    ['selection','DEPLOYMENT_SELECTION_INVALID',{}]
+  ]) {
+    withDiagnosticFixture(fixture=>{
+      captureRejectedFixture(fixture,(bin,args,cwd)=>{
+        if(bin!=='clasp' || args[0]!=='deployments') return fixture.fallback(bin,args,cwd);
+        if(kind==='command') return command(bin,[...args,secret],path.join(cwd,secret));
+        if(kind==='json') return '{'+secret;
+        return JSON.stringify([fixture.deployment,{...fixture.deployment,deploymentId:secret}]);
+      },{phase:'DEPLOYMENT_BEFORE',reason,secret,...details});
+      assert.equal(fixture.calls.some(call=>call.command==='pull' || call.bin==='bash'),false);
+    });
+  }
+});
+
+test('preview DTO, envelope and value failures retain all gates and never serialize rejected content',()=>{
+  const secret='synthetic-secret-preview-payload';
+  for(const [envelope,reason] of [
+    [{response:{...sample(),privateToken:secret}},'DTO_SCHEMA_INVALID'],
+    [{response:sample(),error:{message:secret}},'ENVELOPE_INVALID'],
+    [{response:{...sample(),code:secret}},'DTO_VALUES_INVALID'],
+    [{response:{...sample(),contentRead:true}},'DTO_VALUES_INVALID']
+  ]) {
+    withDiagnosticFixture(fixture=>{
+      captureRejectedFixture(fixture,(bin,args,cwd)=>{
+        if(bin!=='bash') return fixture.fallback(bin,args,cwd);
+        fs.writeFileSync(args[2],JSON.stringify(envelope)); return '';
+      },{phase:'PREVIEW_READ',reason,secret});
+      assert.equal(fixture.calls.filter(call=>call.command==='deployments').length,1);
+      assert.equal(fixture.calls.filter(call=>call.command==='pull').length,1);
+      assert.equal(fixture.calls.filter(call=>call.bin==='bash').length,1);
+    });
+  }
+});
+
+test('a valid expired config-only preview remains accepted without certifying activation',()=>{
+  withDiagnosticFixture(fixture=>{
+    const value={...sample(),ok:false,code:'AURORA_CONNECTOR_REUSE_EXPIRED',state:'PENDING_CONFIGURATION',
+      sourceIdentified:false,sourceCount:0,metadataAccessVerified:false,existingHmacReused:false,
+      configurationSha256:null,triggerCount:null,handlerHashes:[],triggerReviewRequired:false};
+    const stdout=[],stderr=[];
+    const status=main({temporary:fixture.root,stdout:v=>stdout.push(v),stderr:v=>stderr.push(v),preview:()=>
+      run(fixture.options((bin,args,cwd)=>{
+        if(bin!=='bash') return fixture.fallback(bin,args,cwd);
+        fs.writeFileSync(args[2],JSON.stringify({response:value})); return '';
+      }))});
+    assert.equal(status,0); assert.deepEqual(stderr,[]); assert.equal(stdout.length,1);
+    const evidence=JSON.parse(fs.readFileSync(path.join(fixture.root,'connector-reuse-preview.json'),'utf8'));
+    assert.equal(evidence.schemaVersion,'aurora.wmgj.existing-source-preview-evidence.v1');
+    assert.deepEqual(evidence.summary,value);
+    assert.equal(evidence.complete,false); assert.equal(evidence.providerIngestionOrInstallationVerified,false);
+    assert.equal(fixture.calls.filter(call=>call.command==='deployments').length,2);
+    assert.equal(fixture.calls.filter(call=>call.command==='pull').length,2);
+  });
+});
+
+test('untrusted error metadata and messages cannot forge a phase or escape the failure artifact',()=>{
+  withDiagnosticFixture(fixture=>{
+    const secret='synthetic-secret-error-message';
+    const error=Object.assign(new Error(secret),{
+      phase:'DEPLOYMENT_BEFORE',reason:'COMMAND_FAILED',exitCode:2,spawnFailure:secret,signal:secret});
+    const stdout=[],stderr=[];
+    assert.equal(main({temporary:fixture.root,preview:()=>{throw error;},
+      stdout:v=>stdout.push(v),stderr:v=>stderr.push(v)}),1);
+    const evidence=failureEvidence(error);
+    assert.equal(evidence.phase,'UNKNOWN'); assert.equal(evidence.reason,'UNEXPECTED');
+    assert.equal(evidence.exitCode,null); assert.equal(evidence.spawnFailure,null); assert.equal(evidence.signal,null);
+    const artifact=fs.readFileSync(path.join(fixture.root,'connector-reuse-preview.json'),'utf8');
+    assert.deepEqual(JSON.parse(artifact),evidence); assert.equal(artifact.includes(secret),false);
+    assert.deepEqual(stdout,[]); assert.deepEqual(stderr,['CONNECTOR_REUSE_PREVIEW_REJECTED']);
+  });
 });
