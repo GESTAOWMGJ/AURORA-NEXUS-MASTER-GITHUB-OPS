@@ -844,9 +844,10 @@ function auroraDriveIntakeResult_(value, result) {
 function auroraExecutarIngestaoDriveAutorizada(request) {
   var result = {ok:false,code:'AURORA_DRIVE_PENDING',scopeSha256:null,
     scan:{examined:0,queued:0,aliases:0,complete:false},
-    processing:{attempted:0,accepted:0,duplicates:0,pending:0,failed:0},privateReadbackPlan:[],
+    processing:{attempted:0,accepted:0,duplicates:0,pending:0,failed:0,review:0,extractionErrors:0,aliases:0,replayVerified:0},privateReadbackPlan:[],
     triggersChanged:false,globalSettingsChanged:false,sourceMutation:false,
     firstIngestionVerified:false,fullSynchronizationVerified:false};
+  var stage = 'GUARD';
   try {
     auroraConnectorReuseOwner_();
     var scope = auroraDriveIntakeScope_(request);
@@ -859,14 +860,18 @@ function auroraExecutarIngestaoDriveAutorizada(request) {
       || (request.mode==='READBACK' ? typeof auroraLerPlanoReadbackDriveAutorizado_ !== 'function' : typeof auroraExecutarCicloDriveAutorizado_ !== 'function')) {
       throw new Error('AURORA_DRIVE_DEPENDENCY_MISSING');
     }
+    stage = 'SHARED_LOCK';
     return comTravaIngestaoGmailWMGJ_(function() {
+      stage = 'GUARD';
       var current = auroraDriveIntakeGuard_(scope, guarded.scopeSha256, false);
       if(request.mode==='READBACK') {
+        stage = 'READBACK';
         var plan=auroraLerPlanoReadbackDriveAutorizado_({orgId:scope.orgId,scopeSha256:current.scopeSha256,
           readbackOffset:request.readbackOffset,readbackLimit:scope.limit});
         return auroraDriveReadbackResult_(plan,result,request.readbackOffset,scope.limit);
       }
       var deadline = Date.now() + 150000;
+      stage = 'EXECUTE';
       var value = auroraExecutarCicloDriveAutorizado_({
         orgId:scope.orgId,sources:scope.sources,sourceIds:scope.sources.map(function(s) { return s.sourceId; }),
         fileIds:scope.fileIds,excludedFolderIds:scope.excludedFolderIds,maxScan:scope.maxScan,
@@ -877,6 +882,7 @@ function auroraExecutarIngestaoDriveAutorizada(request) {
           auroraDriveIntakeGuard_(scope, current.scopeSha256, false);
         }
       });
+      stage = 'RESULT';
       return auroraDriveIntakeResult_(value, result);
     });
   } catch (error) {
@@ -886,7 +892,11 @@ function auroraExecutarIngestaoDriveAutorizada(request) {
       'AURORA_DRIVE_RESULT_INVALID','AURORA_DRIVE_RECEIPT_COVERAGE_INVALID','AURORA_DRIVE_DEADLINE_EXCEEDED',
       'AURORA_DRIVE_READBACK_CURSOR_INVALID'];
     var message = String(error && error.message || '');
-    result.code = allowed.indexOf(message) >= 0 ? message : 'AURORA_DRIVE_EXECUTION_UNCONFIRMED';
+    result.code = allowed.indexOf(message) >= 0 ? message
+      : stage==='SHARED_LOCK' && message==='GMAIL_REPLAY_LOCK_BUSY' ? 'AURORA_DRIVE_ENGINE_BUSY'
+      : /quota|too many times|limit exceeded|limite.*exced/i.test(message) ? 'AURORA_DRIVE_SERVICE_QUOTA'
+      : 'AURORA_DRIVE_EXECUTION_UNCONFIRMED';
+    result.failureStage = stage;
     result.ok = false;
     return result;
   }

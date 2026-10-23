@@ -32,7 +32,36 @@ function parseScope(raw, expectedHash) {
 function makeRequest(scope, mode, scopeSha256, readbackOffset=0) {
   return {mode,orgId:scope.orgId,sources:scope.sources,fileIds:scope.fileIds,excludedFolderIds:scope.excludedFolderIds,maxScan:300,limit:20,expectedScopeSha256:scopeSha256||null,...(mode==='READBACK'?{readbackOffset}:{})};
 }
+function rejectRuntimeFailure(envelope) {
+  const value=envelope?.response;
+  if(value?.ok!==false || value.code==='AURORA_DRIVE_BATCH_PENDING')return;
+  const allowed=['AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_DRIVE_REQUEST_REJECTED',
+    'AURORA_DRIVE_SOURCE_SCOPE_REJECTED','AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING',
+    'AURORA_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_SOURCE_UNAVAILABLE',
+    'AURORA_DRIVE_RESULT_INVALID','AURORA_DRIVE_RECEIPT_COVERAGE_INVALID','AURORA_DRIVE_DEADLINE_EXCEEDED',
+    'AURORA_DRIVE_READBACK_CURSOR_INVALID','AURORA_DRIVE_ENGINE_BUSY','AURORA_DRIVE_SERVICE_QUOTA',
+    'AURORA_DRIVE_EXECUTION_UNCONFIRMED'];
+  const error=new Error(allowed.includes(value.code)?value.code:'DRIVE_RUNTIME_REJECTED');
+  if(['GUARD','SHARED_LOCK','EXECUTE','READBACK','RESULT'].includes(value.failureStage))error.failureStage=value.failureStage;
+  throw error;
+}
+async function withSharedLockRetry(invoke,beforeRetry=()=>{},wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),onBusy=()=>{}) {
+  for(let attempt=0;attempt<5;attempt++) {
+    const envelope=await invoke(attempt),value=envelope?.response;
+    if(value?.ok!==false || value.code!=='AURORA_DRIVE_ENGINE_BUSY')return envelope;
+    if(envelope?.error || value.failureStage!=='SHARED_LOCK' || !hex(value.scopeSha256)
+      || value.triggersChanged!==false || value.globalSettingsChanged!==false || value.sourceMutation!==false
+      || !Array.isArray(value.privateReadbackPlan) || value.privateReadbackPlan.length!==0
+      || value.scan?.complete!==false || !['examined','queued','aliases'].every(key=>value.scan?.[key]===0)
+      || !['attempted','accepted','duplicates','pending','failed','review','extractionErrors','aliases','replayVerified'].every(key=>value.processing?.[key]===0))fail('DRIVE_BUSY_RESPONSE_REJECTED');
+    onBusy(attempt+1);
+    if(attempt===4){rejectRuntimeFailure(envelope);}
+    await wait(10000*(attempt+1));
+    await beforeRetry();
+  }
+}
 function sanitizeBatch(envelope) {
+  rejectRuntimeFailure(envelope);
   const v=envelope?.response;
   if(envelope?.error || !v || typeof v!=='object' || typeof v.ok!=='boolean' || !hex(v.scopeSha256)
     || v.triggersChanged!==false || v.globalSettingsChanged!==false) fail('DRIVE_BATCH_RESPONSE_REJECTED');
@@ -174,16 +203,26 @@ async function run() {
     if(candidates.length!==1||fs.readFileSync(candidates[0],'utf8').replace(/\r\n/g,'\n')!==fs.readFileSync(path.join(repo,'src',module+'.gs'),'utf8').replace(/\r\n/g,'\n'))fail('DRIVE_PUBLISHED_SOURCE_MISMATCH');
   }
   summary.publishedVersionNumber=before.versionNumber;save();
-  const call=(request,n)=>{gate();const output=path.join(workspace,'result-'+n+'.json');command('bash',[path.join(repo,'tools/run-clasp-checked.sh'),'auroraExecutarIngestaoDriveAutorizada',output,JSON.stringify([request])],workspace);return JSON.parse(fs.readFileSync(output,'utf8'));};
+  const call=async(request,n)=>{
+    const envelope=await withSharedLockRetry(attempt=>{
+      gate();const output=path.join(workspace,'result-'+n+'-'+attempt+'.json');
+      command('bash',[path.join(repo,'tools/run-clasp-checked.sh'),'auroraExecutarIngestaoDriveAutorizada',output,JSON.stringify([request])],workspace);
+      return JSON.parse(fs.readFileSync(output,'utf8'));
+    },()=>{gate();if(stable(deployment())!==stable(before))fail('DRIVE_PUBLISHED_SOURCE_CHANGED');},undefined,attempt=>{
+      summary.sharedLockWaits=(summary.sharedLockWaits||0)+1;save();
+      console.log(JSON.stringify({code:'AURORA_DRIVE_ENGINE_BUSY',retry:attempt,canonicalWritesAttempted:false}));
+    });
+    rejectRuntimeFailure(envelope);return envelope;
+  };
   try{
     summary.recovery=await verifyRecovery(repo,command('gcloud',['auth','print-access-token'],repo).trim());save();
     let lastScopeSha256=null,stalledAttempts=0;
     for(let n=0;n<maxBatches;n++){
       gate();if(stable(deployment())!==stable(before))fail('DRIVE_PUBLISHED_SOURCE_CHANGED');
-      const preview=call(makeRequest(scope,'PREVIEW'),n+'-preview');
+      const preview=await call(makeRequest(scope,'PREVIEW'),n+'-preview');
       const previewValue=preview?.response;if(preview?.error||previewValue?.ok!==true||!hex(previewValue.scopeSha256))fail('DRIVE_PREVIEW_REJECTED');
       if(lastScopeSha256&&lastScopeSha256!==previewValue.scopeSha256)fail('DRIVE_SCOPE_CHANGED_DURING_EXECUTION');lastScopeSha256=previewValue.scopeSha256;
-      const envelope=call(makeRequest(scope,'EXECUTE',previewValue.scopeSha256),n+'-execute');
+      const envelope=await call(makeRequest(scope,'EXECUTE',previewValue.scopeSha256),n+'-execute');
       const batch=sanitizeBatch(envelope);if(batch.scopeSha256!==previewValue.scopeSha256)fail('DRIVE_SCOPE_CHANGED_DURING_EXECUTION');
       const token=command('gcloud',['auth','print-access-token'],repo).trim();
       const readback=await verifyReadback(envelope.response.privateReadbackPlan||[],scope.orgId,token);
@@ -199,16 +238,16 @@ async function run() {
     let pageNumber=0;
     const token=command('gcloud',['auth','print-access-token'],repo).trim();
     summary.coverage=await verifyCoverage(async offset=>{
-      const envelope=call(makeRequest(scope,'READBACK',lastScopeSha256,offset),'coverage-'+(++pageNumber));
+      const envelope=await call(makeRequest(scope,'READBACK',lastScopeSha256,offset),'coverage-'+(++pageNumber));
       if(envelope?.error||envelope?.response?.scopeSha256!==lastScopeSha256)fail('DRIVE_COVERAGE_SCOPE_MISMATCH');return envelope.response;
     },plan=>verifyReadback(plan,scope.orgId,token));
     summary.complete=summary.batches.at(-1)?.scan.complete===true&&summary.coverage.pending===0;
     summary.fullSynchronizationVerified=false;summary.documentReviewRequired=true;save();
     if(stable(deployment())!==stable(before))fail('DRIVE_PUBLISHED_SOURCE_CHANGED');
     summary.status=summary.complete?'VERIFIED':'RESUMABLE';
-  }catch(error){summary.status='INCOMPLETE';summary.code=/^[A-Z_0-9]{1,100}$/.test(error.message)?error.message:'DRIVE_EXECUTION_UNCONFIRMED';throw error;}
+  }catch(error){summary.status='INCOMPLETE';summary.code=/^[A-Z_0-9]{1,100}$/.test(error.message)?error.message:'DRIVE_EXECUTION_UNCONFIRMED';if(error.failureStage)summary.failureStage=error.failureStage;throw error;}
   finally{summary.finishedAtUtc=new Date().toISOString();save();}
   return summary;
 }
-module.exports={parseScope,makeRequest,sanitizeBatch,verifyReadback,verifyCoverage,sha};
+module.exports={parseScope,makeRequest,sanitizeBatch,verifyReadback,verifyCoverage,sha,rejectRuntimeFailure,withSharedLockRetry};
 if(require.main===module)run().then(result=>console.log(JSON.stringify({status:result.status,complete:result.complete,batches:result.batches.length,canonicalReadbacksVerified:result.canonicalReadbacksVerified}))).catch(error=>{console.error(/^[A-Z_0-9]{1,100}$/.test(error.message)?error.message:'DRIVE_INTAKE_UNCONFIRMED');process.exitCode=1;});

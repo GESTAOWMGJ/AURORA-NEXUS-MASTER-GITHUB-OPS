@@ -331,6 +331,67 @@ function extracaoDocumentalCompletaWMGJ_(extracao) {
     && extracao.tamanhoTexto === extracao.texto.length;
 }
 
+// Only fixed codes leave the extractor; service errors can contain source names.
+function auroraCodigoFalhaExtracaoDrive_(error, fallback) {
+  var message=String(error && error.message || error || '');
+  var allowed=['AURORA_DRIVE_EXTRACTION_AUTH_FAILED','AURORA_DRIVE_EXTRACTION_QUOTA',
+    'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE','AURORA_DRIVE_CONVERSION_UNSUPPORTED',
+    'AURORA_DRIVE_CONVERSION_FAILED','AURORA_DRIVE_CONVERSION_NOT_READY',
+    'AURORA_DRIVE_EXTRACTION_EMPTY','AURORA_DRIVE_FORMAT_UNSUPPORTED',
+    'AURORA_DRIVE_CONTENT_READ_FAILED','AURORA_DRIVE_OFX_SIGNATURE_INVALID',
+    'AURORA_DRIVE_OFX_ENCODING_UNSUPPORTED','AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED',
+    'AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT'];
+  if(allowed.indexOf(message)>=0) return message;
+  if(/permission|unauthori[sz]ed|forbidden|access denied|insufficient|permiss[aã]o|autoriz/i.test(message))
+    return 'AURORA_DRIVE_EXTRACTION_AUTH_FAILED';
+  if(/quota|rate.?limit|too many|invoked too|limite.*excedid/i.test(message))
+    return 'AURORA_DRIVE_EXTRACTION_QUOTA';
+  if(/(?:conversion|convert).*(?:unsupported|not supported)|cannot convert/i.test(message))
+    return 'AURORA_DRIVE_CONVERSION_UNSUPPORTED';
+  return allowed.indexOf(fallback)>=0?fallback:'AURORA_DRIVE_CONTENT_READ_FAILED';
+}
+
+function auroraExtrairTextoOfxDrive_(file) {
+  if(!/\.ofx$/i.test(String(file.getName()))) throw new Error('AURORA_DRIVE_FORMAT_UNSUPPORTED');
+  var blob=file.getBlob(),bytes=blob.getBytes(),prefix='';
+  if(!bytes.length) throw new Error('AURORA_DRIVE_EXTRACTION_EMPTY');
+  for(var i=0;i<bytes.length;i++) {
+    var octet=(bytes[i]+256)%256;
+    if(octet===0) throw new Error('AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED');
+    if(i<4096) prefix+=octet<128?String.fromCharCode(octet):'\uFFFD';
+  }
+  var bom=bytes.length>=3 && (bytes[0]+256)%256===239 && (bytes[1]+256)%256===187 && (bytes[2]+256)%256===191;
+  if(bom) prefix=prefix.slice(3);
+  var opening=prefix.search(/<OFX\s*>/i);
+  if(opening<0) throw new Error('AURORA_DRIVE_OFX_SIGNATURE_INVALID');
+  var header=prefix.slice(0,opening),encoding='',charset='',decodeAs='UTF-8';
+  if(/^\s*OFXHEADER:\s*100\s*(?:\r?\n)/i.test(header)) {
+    if(!/(?:^|\n)DATA:\s*OFXSGML\s*(?:\r?\n|$)/i.test(header)) throw new Error('AURORA_DRIVE_OFX_SIGNATURE_INVALID');
+    var declared=header.match(/(?:^|\n)ENCODING:\s*([^\r\n]+)/i);
+    var characters=header.match(/(?:^|\n)CHARSET:\s*([^\r\n]+)/i);
+    encoding=declared?declared[1].trim().toUpperCase():'';
+    charset=characters?characters[1].trim().toUpperCase():'';
+    if(encoding==='USASCII' && /^(1252|WINDOWS-1252)$/.test(charset)) decodeAs='windows-1252';
+    else if(encoding==='USASCII' && /^(8859-1|ISO-8859-1)$/.test(charset)) decodeAs='ISO-8859-1';
+    else if(encoding==='USASCII' && /^(NONE|US-ASCII|ASCII)?$/.test(charset)) decodeAs='US-ASCII';
+    else if(/^(UTF-8|UTF8)$/.test(encoding) && /^(NONE|UTF-8|UTF8)?$/.test(charset)) decodeAs='UTF-8';
+    else throw new Error('AURORA_DRIVE_OFX_ENCODING_UNSUPPORTED');
+  } else {
+    if(!/^\s*(?:<\?(?:xml|OFX)\s[^?]*\?>\s*)*$/i.test(header)) throw new Error('AURORA_DRIVE_OFX_SIGNATURE_INVALID');
+    var xmlEncoding=header.match(/\bencoding\s*=\s*["']([^"']+)["']/i);
+    encoding=xmlEncoding?xmlEncoding[1].toUpperCase():'UTF-8';
+    var supported={'UTF-8':'UTF-8','UTF8':'UTF-8','US-ASCII':'US-ASCII','WINDOWS-1252':'windows-1252','ISO-8859-1':'ISO-8859-1'};
+    if(!Object.prototype.hasOwnProperty.call(supported,encoding)) throw new Error('AURORA_DRIVE_OFX_ENCODING_UNSUPPORTED');
+    decodeAs=supported[encoding];
+  }
+  if(bom && decodeAs!=='UTF-8') throw new Error('AURORA_DRIVE_OFX_ENCODING_UNSUPPORTED');
+  var text=blob.getDataAsString(decodeAs);
+  if(/[\uFFFD\u0000]/.test(text) || (decodeAs==='US-ASCII' && bytes.some(function(b){return (b+256)%256>=128;})))
+    throw new Error('AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED');
+  if(!/<OFX\s*>/i.test(text) || !/<\/OFX\s*>\s*$/i.test(text)) throw new Error('AURORA_DRIVE_OFX_SIGNATURE_INVALID');
+  return text;
+}
+
 function extrairConteudoArquivoWMGJ_V1_(file) {
   var mime = file.getMimeType();
   var resultado = {
@@ -360,6 +421,20 @@ function extrairConteudoArquivoWMGJ_V1_(file) {
       return resultado;
     }
 
+    if(mime==='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || mime==='application/vnd.ms-excel') {
+      var planilha=converterArquivoParaGoogleSheetsWMGJ_V1_(file);
+      if(!planilha.ok) throw new Error(planilha.code);
+      resultado.metodo='google_sheets_values';resultado.texto=planilha.texto;
+      resultado.tamanhoTexto=resultado.texto.length;resultado.observacao=planilha.observacao;
+      return resultado;
+    }
+
+    if(mime==='application/octet-stream') {
+      resultado.metodo='blob_text';resultado.texto=auroraExtrairTextoOfxDrive_(file);
+      resultado.tamanhoTexto=resultado.texto.length;
+      return resultado;
+    }
+
     if (mime === MimeType.PLAIN_TEXT || mime.indexOf("text/") === 0 || mime.indexOf("csv") >= 0 || mime.indexOf("json") >= 0) {
       resultado.metodo = "blob_text";
       resultado.texto = file.getBlob().getDataAsString("UTF-8");
@@ -376,14 +451,19 @@ function extrairConteudoArquivoWMGJ_V1_(file) {
         resultado.observacao = convertido.observacao || "";
         return resultado;
       }
-      resultado.observacao = convertido.erro || "Conversão não retornou texto";
+      resultado.code=convertido.code || auroraCodigoFalhaExtracaoDrive_(convertido.erro,
+        convertido.ok?'AURORA_DRIVE_EXTRACTION_EMPTY':'AURORA_DRIVE_CONVERSION_FAILED');
+      resultado.observacao=resultado.code;
     }
   } catch (erro) {
     resultado.ok = false;
-    resultado.observacao = erro && erro.message ? erro.message : String(erro);
+    resultado.code=auroraCodigoFalhaExtracaoDrive_(erro,'AURORA_DRIVE_CONTENT_READ_FAILED');
+    resultado.observacao=resultado.code;
   }
 
   resultado.ok = false;
+  resultado.code=resultado.code || 'AURORA_DRIVE_FORMAT_UNSUPPORTED';
+  resultado.observacao=resultado.code;
   resultado.texto = [
     "NOME_ARQUIVO: " + file.getName(),
     "MIME_TYPE: " + mime,
@@ -395,12 +475,35 @@ function extrairConteudoArquivoWMGJ_V1_(file) {
   return resultado;
 }
 
+function converterArquivoParaGoogleSheetsWMGJ_V1_(file) {
+  if(typeof Drive==='undefined' || !Drive.Files || typeof Drive.Files.copy!=='function')
+    return {ok:false,code:'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE'};
+  var copyId='',fallback='AURORA_DRIVE_CONVERSION_FAILED';
+  try {
+    // Drive v2 files.copy explicitly supports conversion to the matching editor.
+    var copy=Drive.Files.copy({title:'WMGJ_SHEETS_TMP_'+file.getName(),mimeType:MimeType.GOOGLE_SHEETS},
+      file.getId(),{convert:true});
+    copyId=copy && copy.id || '';
+    if(!copyId || copy.mimeType!==MimeType.GOOGLE_SHEETS) throw new Error('AURORA_DRIVE_CONVERSION_UNSUPPORTED');
+    fallback='AURORA_DRIVE_CONVERSION_NOT_READY';
+    Utilities.sleep(1500);
+    var text=extrairTextoGoogleSheetsWMGJ_V1_(copyId);
+    return {ok:true,metodo:'google_sheets_values',texto:text,
+      observacao:'Planilha convertida temporariamente para Google Sheets e removida após leitura'};
+  } catch(error) {
+    return {ok:false,code:auroraCodigoFalhaExtracaoDrive_(error,fallback)};
+  } finally {
+    if(copyId) {try {DriveApp.getFileById(copyId).setTrashed(true);} catch(ignoreCleanup) {}}
+  }
+}
+
 function converterArquivoParaGoogleDocWMGJ_V1_(file) {
   if (typeof Drive === "undefined" || !Drive.Files || typeof Drive.Files.copy !== "function") {
     return {
       ok: false,
       metodo: "drive_api_indisponivel",
-      erro: "Serviço avançado Drive API não habilitado no Apps Script"
+      code: 'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE',
+      erro: 'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE'
     };
   }
 
@@ -443,7 +546,8 @@ function converterArquivoParaGoogleDocWMGJ_V1_(file) {
     return {
       ok: false,
       metodo: "drive_api_ocr_convert",
-      erro: erro && erro.message ? erro.message : String(erro)
+      code: auroraCodigoFalhaExtracaoDrive_(erro,'AURORA_DRIVE_CONVERSION_FAILED'),
+      erro: auroraCodigoFalhaExtracaoDrive_(erro,'AURORA_DRIVE_CONVERSION_FAILED')
     };
   }
 }
@@ -1125,15 +1229,38 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
       && previous.contentSha256 && previous.receipt
       && previous.receipt.replayVerified===true && previous.coverage==='EXTRACTED_REVIEW_PENDING') knownHashes[previous.contentSha256]=previous;
   }
+  var processKey='AURORA_DRIVE_PROCESS_'+options.orgId+'_'+options.scopeSha256.slice(0,24);
+  var processProps=PropertiesService.getScriptProperties(),priorityKey=processKey+'_PRIORITY_V1';
+  var groupCursors=JSON.parse(processProps.getProperty(priorityKey)||'{}');
+  if(!groupCursors || typeof groupCursors!=='object' || Array.isArray(groupCursors)
+    || !Object.keys(groupCursors).every(function(key){return Number.isSafeInteger(groupCursors[key]) && groupCursors[key]>=0;}))
+    throw new Error('AURORA_DRIVE_PROCESS_CURSOR_INVALID');
   var candidateRows=[];
   for(var n=1;n<rows.length;n++) {
     var candidateScope=auroraDriveScopeRead_(rows[n][idx.OBSERVACAO]);
     if(candidateScope && candidateScope.orgId===options.orgId && candidateScope.scopeSha256===options.scopeSha256
-      && ['PENDENTE','ERRO_REPROCESSAR'].indexOf(String(rows[n][idx.STATUS]))>=0) candidateRows.push(n);
+      && ['PENDENTE','ERRO_REPROCESSAR'].indexOf(String(rows[n][idx.STATUS]))>=0) {
+      var explicitIndex=(options.fileIds||[]).indexOf(candidateScope.fileId);
+      var sourceIndex=(options.sources||[]).findIndex(function(source) {
+        return source.sourceId===candidateScope.sourceId && source.folderId===candidateScope.rootId;
+      });
+      candidateRows.push({row:n,retry:String(rows[n][idx.STATUS])==='ERRO_REPROCESSAR',
+        priority:explicitIndex>=0?0:(sourceIndex>=0?sourceIndex+1:options.sources.length+1),
+        group:explicitIndex>=0?'explicit':(sourceIndex>=0?'source:'+options.sources[sourceIndex].sourceId:'unmapped'),
+        ordinal:explicitIndex>=0?explicitIndex+1:n});
+    }
   }
-  var processKey='AURORA_DRIVE_PROCESS_'+options.orgId+'_'+options.scopeSha256.slice(0,24);
-  var processProps=PropertiesService.getScriptProperties(),lastRow=Number(processProps.getProperty(processKey)||0);
-  candidateRows.sort(function(a,b){return ((a>lastRow)?0:1)-((b>lastRow)?0:1)||a-b;});
+  candidateRows.sort(function(a,b) {
+    // Failed canaries must not consume every bounded cycle before untouched roots.
+    if(a.retry!==b.retry) return a.retry?1:-1;
+    if(a.priority!==b.priority) return a.priority-b.priority;
+    var cursor=groupCursors[a.group]||0;
+    return (a.ordinal>cursor?0:1)-(b.ordinal>cursor?0:1)||a.ordinal-b.ordinal;
+  });
+  function rememberAttempt(candidate) {
+    groupCursors[candidate.group]=candidate.ordinal;
+    processProps.setProperty(priorityKey,JSON.stringify(groupCursors));
+  }
   function checkAuthority() {
     if(typeof options.beforeRequest==='function') options.beforeRequest();
     if(Date.now()>=deadlineMs || PropertiesService.getScriptProperties().getProperty('WMGJ_FIRESTORE_ORG_ID')!==options.orgId)
@@ -1147,7 +1274,7 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
       && typeof response.versionId==='string' && /^[A-Za-z0-9_.:-]{1,160}$/.test(response.versionId);
   }
   for (var c=0;c<candidateRows.length && result.attempted<limit && Date.now()<deadlineMs-15000;c++) {
-    var i=candidateRows[c];
+    var candidate=candidateRows[c],i=candidate.row;
     var row=rows[i], scope=auroraDriveScopeRead_(row[idx.OBSERVACAO]);
     if (!scope || scope.orgId!==options.orgId || scope.scopeSha256!==options.scopeSha256
       || ['PENDENTE','ERRO_REPROCESSAR'].indexOf(String(row[idx.STATUS]))<0) continue;
@@ -1191,15 +1318,13 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
       if(alias && alias.fileId!==scope.fileId) {
         scope.contentSha256=byteHash.value;scope.coverage='DUPLICATE_CONTENT';scope.aliasFileId=alias.fileId;scope.receipt=alias.receipt;
         atualizarLinhaFilaWMGJ_Compat_(fila,i+1,idx,{STATUS:'DUPLICADO',ULTIMO_ERRO:'',OBSERVACAO:auroraDriveScopeWrite_(scope)});
-        result.aliases++;processProps.setProperty(processKey,String(i));continue;
+        result.aliases++;rememberAttempt(candidate);continue;
       }
       var extraction=extrairConteudoArquivoWMGJ_V1_(file);
       if(!extracaoDocumentalCompletaWMGJ_(extraction)) {
-        var extractionError=String(extraction && extraction.observacao || '');
-        if(/permission|unauthori[sz]ed|forbidden|access denied|insufficient|permiss[aã]o|autoriz/i.test(extractionError))
-          throw new Error('AURORA_DRIVE_EXTRACTION_AUTH_FAILED');
-        if(/^AURORA_SHEETS_(TEXT|CELL)_LIMIT$/.test(extractionError)) throw new Error(extractionError);
-        throw new Error('PENDING_EXTRACTION');
+        var empty=extraction && extraction.ok===true && typeof extraction.texto==='string' && !extraction.texto.trim();
+        throw new Error(auroraCodigoFalhaExtracaoDrive_(extraction && (extraction.code || extraction.observacao),
+          empty?'AURORA_DRIVE_EXTRACTION_EMPTY':'AURORA_DRIVE_CONTENT_READ_FAILED'));
       }
       if(extraction.metodo==='blob_text' && /[\uFFFD\u0000]/.test(extraction.texto))
         throw new Error('AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED');
@@ -1245,6 +1370,10 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
       if(!/^[A-Z][A-Z0-9_:.-]{0,160}$/.test(code)) code='AURORA_DRIVE_EXTRACTION_FAILED';
       var recoverable=['PENDING_EXTRACTION','AURORA_DRIVE_FILE_SIZE_LIMIT','AURORA_DRIVE_TEXT_LIMIT',
         'AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED',
+        'AURORA_DRIVE_EXTRACTION_QUOTA','AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE',
+        'AURORA_DRIVE_CONVERSION_UNSUPPORTED','AURORA_DRIVE_CONVERSION_FAILED','AURORA_DRIVE_CONVERSION_NOT_READY',
+        'AURORA_DRIVE_EXTRACTION_EMPTY','AURORA_DRIVE_FORMAT_UNSUPPORTED','AURORA_DRIVE_CONTENT_READ_FAILED',
+        'AURORA_DRIVE_OFX_SIGNATURE_INVALID','AURORA_DRIVE_OFX_ENCODING_UNSUPPORTED',
         'AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT','AURORA_DRIVE_SOURCE_CHANGED_DURING_EXTRACTION'].indexOf(code)>=0;
       scope.coverage='PENDING_EXTRACTION';scope.lastCode=code;
       atualizarLinhaFilaWMGJ_Compat_(fila,i+1,idx,{STATUS:'ERRO_REPROCESSAR',TENTATIVAS:Number(row[idx.TENTATIVAS]||0)+1,
@@ -1252,7 +1381,7 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
       result.errors++;
       if(!recoverable) result.blockingErrors++;
     }
-    processProps.setProperty(processKey,String(i));
+    rememberAttempt(candidate);
     if(result.blockingErrors>0) break;
   }
   // Totals cover the entire scoped queue, including documents not attempted this cycle.
