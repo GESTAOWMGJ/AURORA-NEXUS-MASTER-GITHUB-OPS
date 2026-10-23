@@ -48,7 +48,26 @@ function failureEvidence(error) {
     exitCode:Number.isSafeInteger(detail.exitCode) && detail.exitCode >= 0 && detail.exitCode <= 255 ? detail.exitCode : null,
     spawnFailure:detail.spawnFailure == null ? null : ['ENOENT','ETIMEDOUT','ENOBUFS'].includes(detail.spawnFailure) ? detail.spawnFailure : 'OTHER',
     signal:detail.signal == null ? null : ['SIGTERM','SIGKILL'].includes(detail.signal) ? detail.signal : 'OTHER',
+    ...(detail.deploymentSelection ? {deploymentSelection:detail.deploymentSelection} : {}),
     complete:false,providerIngestionOrInstallationVerified:false};
+}
+
+// Diagnose the selector's predicates without exporting IDs, descriptions or API
+// payloads. This does not choose another deployment or relax a failed selection.
+function deploymentSelectionEvidence(rows, sourceSha) {
+  const array = Array.isArray(rows);
+  const canonical = array ? rows.filter(row => row && typeof row.description === 'string'
+    && row.description.startsWith('AURORA_EXECUTION_API_CANONICAL')) : [];
+  const selected = canonical.length === 1 ? canonical[0] : null;
+  const versionNumberValid = !!selected && Number.isSafeInteger(selected.versionNumber) && selected.versionNumber >= 1;
+  const deploymentIdValid = !!selected && typeof selected.deploymentId === 'string'
+    && /^[A-Za-z0-9_-]{10,256}$/.test(selected.deploymentId);
+  return {shape:array ? 'ARRAY' : 'NON_ARRAY',rowCount:array ? rows.length : null,
+    canonicalCount:array ? canonical.length : null,
+    expectedDescriptionCount:array ? canonical.filter(row => row.description === 'AURORA_EXECUTION_API_CANONICAL ' + sourceSha).length : null,
+    versionNumberValid,deploymentIdValid,versionNumber:versionNumberValid ? selected.versionNumber : null,
+    deploymentIdentitySha256:deploymentIdValid ? sha(selected.deploymentId) : null,
+    descriptionSha256:selected && selected.description.length <= 1024 ? sha(selected.description) : null};
 }
 const stable = value => JSON.stringify(value, (_, item) => item && !Array.isArray(item) && typeof item === 'object'
   ? Object.fromEntries(Object.entries(item).sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
@@ -139,8 +158,13 @@ function run({repo = path.resolve(__dirname,'..'), temporary = process.env.RUNNE
   const read = suffix => {
     const deploymentPhase = 'DEPLOYMENT_' + suffix, sourcePhase = 'SOURCE_' + suffix;
     gate();
-    const deployment = atPhase(deploymentPhase,'DEPLOYMENT_SELECTION_INVALID',() =>
-      selectDeployment(JSON.parse(call(deploymentPhase,'clasp',['deployments','--json'],workspace)),sourceSha));
+    const rows = atPhase(deploymentPhase,'DEPLOYMENT_SELECTION_INVALID',() =>
+      JSON.parse(call(deploymentPhase,'clasp',['deployments','--json'],workspace)));
+    const deployment = atPhase(deploymentPhase,'DEPLOYMENT_SELECTION_INVALID',() => {
+      try { return selectDeployment(rows,sourceSha); }
+      catch { throw rejection({reason:'DEPLOYMENT_SELECTION_INVALID',
+        deploymentSelection:deploymentSelectionEvidence(rows,sourceSha)}); }
+    });
     const directory = atPhase(sourcePhase,'WORKSPACE_INVALID',() => {
       const value = fs.mkdtempSync(path.join(workspace,'published-')); project(value); return value;
     });

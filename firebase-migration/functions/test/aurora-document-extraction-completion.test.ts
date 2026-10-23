@@ -35,8 +35,9 @@ function sandbox(): any {
 }
 
 function file(mime: string, id = "synthetic-document") {
+  const text = "Conteúdo sintético autorizado";
   return { getMimeType: () => mime, getId: () => id, getName: () => "documento-sintetico",
-    getBlob: () => ({ getDataAsString: () => "Conteúdo sintético autorizado" }) };
+    getBlob: () => ({ getBytes: () => Array.from(Buffer.from(text, "utf8")), getDataAsString: () => text }) };
 }
 
 test("existing Docs, Sheets, text, CSV and JSON extractors require real nonempty content", () => {
@@ -56,19 +57,31 @@ test("PDF, image and Office reuse the existing Drive conversion instead of metad
   const calls: any[] = [];
   let trashed = 0;
   ctx.Drive = { Files: { copy(resource: any, id: string, options: any) {
-    calls.push({ resource, id, options }); return { id: "synthetic-temporary-conversion" };
+    calls.push({ resource, id, options }); return { id: "synthetic-temporary-conversion", mimeType: resource.mimeType };
   } } };
   ctx.DriveApp = { getFileById: () => ({ setTrashed(value: boolean) { if (value) trashed++; } }) };
-  const formats = ["application/pdf", "image/png", "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"];
-  for (const mime of formats) {
+  const formats = [
+    ["application/pdf", "drive_api_ocr_convert", ctx.MimeType.GOOGLE_DOCS],
+    ["image/png", "drive_api_ocr_convert", ctx.MimeType.GOOGLE_DOCS],
+    ["application/msword", "drive_api_ocr_convert", ctx.MimeType.GOOGLE_DOCS],
+    ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "drive_api_ocr_convert", ctx.MimeType.GOOGLE_DOCS],
+    ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "google_sheets_values", ctx.MimeType.GOOGLE_SHEETS]
+  ];
+  for (const [mime, method, convertedMime] of formats) {
     const result = ctx.extrairConteudoArquivoWMGJ_V1_(file(mime));
-    assert.equal(result.metodo, "drive_api_ocr_convert");
+    assert.equal(result.metodo, method);
     assert.equal(ctx.extracaoDocumentalCompletaWMGJ_(result), true);
+    const call = calls[calls.length - 1];
+    assert.equal(call.resource.mimeType, convertedMime);
+    assert.equal(call.options.convert, true);
+    if (convertedMime === ctx.MimeType.GOOGLE_DOCS) {
+      assert.equal(call.options.ocr, true);
+      assert.equal(call.options.ocrLanguage, "pt");
+    } else {
+      assert.equal(call.options.ocr, undefined);
+    }
   }
   assert.equal(calls.length, formats.length);
-  assert.ok(calls.every(call => call.options.ocr === true && call.options.ocrLanguage === "pt"));
   assert.equal(trashed, formats.length);
 });
 
@@ -150,7 +163,7 @@ test("queue continues other documents but never classifies, mirrors or completes
   assert.deepEqual(classified, ["synthetic-text"]);
   assert.deepEqual(mirrored, ["synthetic-text"]);
   assert.equal(memory.has("synthetic-pdf"), false);
-  ctx.Drive = { Files: { copy: () => ({ id: "synthetic-temporary-conversion" }) } };
+  ctx.Drive = { Files: { copy: () => ({ id: "synthetic-temporary-conversion", mimeType: ctx.MimeType.GOOGLE_DOCS }) } };
   const resumed = ctx.processarFilaComExtracaoRealWMGJ_V1(20);
   assert.equal(resumed.ok, true);
   assert.equal(resumed.pendentesExtracao, 0);
