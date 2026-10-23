@@ -4,6 +4,14 @@ on:
     paths:
       - 'src/*.gs'
       - 'tools/test-gmail*.cjs'
+      - 'tools/test-drive*.js'
+      - 'tools/test-aurora-drive-ingest-run.cjs'
+      - 'tools/aurora-drive-ingest-run.cjs'
+      - 'tools/test-financial-ingestion-parity.cjs'
+      - 'firebase-migration/functions/src/policy.ts'
+      - 'firebase-migration/functions/src/types.ts'
+      - 'firebase-migration/functions/src/validation.ts'
+      - '.github/workflows/aurora-rc11-recovery-real-ingest.yml'
       - 'firebase-migration/functions/src/auroraNativeRoutines.ts'
       - 'docs/AURORA_GMAIL_SINGLE_MESSAGE_RECOVERY.md'
       - '.github/workflows/validate-gmail-ingestion.yml'
@@ -19,6 +27,6 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
       - run: node tools/audit-appscript.js
-      - run: node --test tools/test-gmail-ingestion.cjs tools/test-gmail-replay.cjs
+      - run: node --test tools/test-gmail-ingestion.cjs tools/test-gmail-replay.cjs tools/test-drive-full-ingest.js tools/test-drive-activation.js tools/test-aurora-drive-ingest-run.cjs tools/test-financial-ingestion-parity.cjs

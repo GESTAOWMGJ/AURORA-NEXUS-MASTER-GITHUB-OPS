@@ -310,6 +310,7 @@ const NON_CLINICAL_METADATA_FIELDS = new Set([
   "source_context",
   "source_registry_version",
   "source_row",
+  "source_row_hash",
   "source_sheet"
 ]);
 
@@ -323,6 +324,104 @@ const NON_CLINICAL_SOURCE_FIELDS = new Set([
   "system",
   "url"
 ]);
+
+// New financial fields are accepted only as this complete typed root record.
+// They do not broaden the generic recursive vocabulary or permit raw row text.
+const FINANCIAL_COLUMNS: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
+  MONTHLY_SUMMARY: {
+    grossRevenueCents: ["receita_bruta_nfs", "receita_bruta"],
+    receivedAmountCents: ["recebido_conciliado", "recebido", "valor_recebido"],
+    outstandingAmountCents: ["em_aberto", "valor_em_aberto"],
+    expenseAmountCents: ["despesa", "despesas"], resultAmountCents: ["resultado"]
+  },
+  INVOICE: {
+    totalCents: ["valor_servico", "valor_total", "valor_nf", "valor_nota", "valor_nfs_e", "valor_nfse", "valor"],
+    netAmountCents: ["valor_liquido"], taxAmountCents: ["iss_apurado"], receivableCents: ["saldo_receber_comprovado"]
+  },
+  EXTRACTED_MOVEMENT: {
+    creditCents: ["credito", "tipo", "valor"], debitCents: ["debito", "tipo", "valor"], extractedAmountCents: ["valor"]
+  },
+  CASH_SUMMARY: {
+    creditCents: ["total_creditos"], debitCents: ["total_debitos"],
+    resultAmountCents: ["resultado_liquido"], reviewAmountCents: ["valor_indefinido"]
+  }
+};
+const FINANCIAL_COMMON_FIELDS = [
+  "sanitized", "financialMappingVersion", "financialRecordRole", "fieldOrigins", "originDocumentRef",
+  "invoiceNumber", "sourceReconciliationStatus", "settlementEvidenceState", "dueDate", "dueDateEvidenceRef",
+  "dueDateState", "kind", "status", "aggregationRole", "sourceRowHash"
+];
+const FINANCIAL_SOURCE_STATES = new Set([
+  "CONCILIADO", "NAO_CONCILIADO", "PENDENTE", "PENDENTE_CONCILIACAO", "PENDENTE_VALIDACAO",
+  "VALIDA", "VALIDA_COMPLETA", "VALIDA_INCOMPLETA", "INVALIDA", "SUBSTITUIDA", "CANCELADA", "ANULADA",
+  "PROCESSADO", "ERRO", "REVISAR_HUMANO", "PENDING_RECONCILIATION", "NOT_RECONCILED", "UNMAPPED_SOURCE_STATUS"
+]);
+function plainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function exactFields(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  return plainRecord(value) && Object.keys(value).sort().join(",") === [...keys].sort().join(",");
+}
+function hexHash(value: unknown): boolean { return typeof value === "string" && /^[a-f0-9]{64}$/.test(value); }
+function nullableCents(value: unknown): boolean { return value === null || Number.isSafeInteger(value); }
+function driveDocumentRef(value: unknown): boolean {
+  return value === null || (typeof value === "string" && (
+    /^[A-Za-z0-9_-]{10,200}$/.test(value)
+    || /^GMAIL_ATTACHMENT:\d{50}\.pdf$/.test(value)
+    || /^https:\/\/drive\.google\.com\/file\/d\/[A-Za-z0-9_-]{10,200}\/view$/.test(value)
+    || /^https:\/\/docs\.google\.com\/(?:document|spreadsheets|presentation)\/d\/[A-Za-z0-9_-]{10,200}\/edit$/.test(value)
+    || /^https:\/\/mail\.google\.com\/mail\/u\/0\/#all\/[a-f0-9]{10,64}$/.test(value)
+  ));
+}
+function structuredFinancialRecordValid(record: Record<string, unknown>, entityType: string): boolean {
+  if (typeof record.financialRecordRole !== "string" || !Object.hasOwn(FINANCIAL_COLUMNS, record.financialRecordRole)) return false;
+  const role = String(record.financialRecordRole || "");
+  const columns = FINANCIAL_COLUMNS[role];
+  if (!columns || record.financialMappingVersion !== "v1.3.0-typed-financial") return false;
+  const extra = role === "INVOICE" ? ["receivableState", "reportedReceivableCents"]
+    : role === "MONTHLY_SUMMARY" ? [] : ["category", "nativeReady", "sourceIndependent", "documentFragility"];
+  if (!exactFields(record, [...FINANCIAL_COMMON_FIELDS, ...Object.keys(columns), ...extra])
+    || record.sanitized !== true || !hexHash(record.sourceRowHash) || !driveDocumentRef(record.originDocumentRef)
+    || !(record.invoiceNumber === null || (typeof record.invoiceNumber === "string" && /^\d{1,30}$/.test(record.invoiceNumber)))
+    || !(record.sourceReconciliationStatus === null || (typeof record.sourceReconciliationStatus === "string" && FINANCIAL_SOURCE_STATES.has(record.sourceReconciliationStatus)))
+    || record.settlementEvidenceState !== "PENDING_BANK_EVIDENCE" || record.dueDate !== null
+    || record.dueDateEvidenceRef !== null || record.dueDateState !== "MISSING_CONTRACT_EVIDENCE"
+    || !exactFields(record.fieldOrigins, [...Object.keys(columns), "dueDate"])) return false;
+  const origins = record.fieldOrigins;
+  for (const [field, allowedColumns] of Object.entries(columns)) {
+    if (!nullableCents(record[field])) return false;
+    const origin = origins[field];
+    const reported = role === "INVOICE" && field === "receivableCents" ? record.reportedReceivableCents : record[field];
+    if (!exactFields(origin, ["columns", "state"]) || !Array.isArray(origin.columns)
+      || origin.columns.length !== new Set(origin.columns).size
+      || !origin.columns.every(column => typeof column === "string" && allowedColumns.includes(column))
+      || origin.state !== (reported === null ? "MISSING_VALUE" : "SOURCE_REPORTED")) return false;
+  }
+  if (!exactFields(origins.dueDate, ["columns", "state"]) || !Array.isArray(origins.dueDate.columns)
+    || origins.dueDate.columns.length !== 0 || origins.dueDate.state !== "MISSING_CONTRACT_EVIDENCE") return false;
+  if (role === "INVOICE") return entityType === "invoice" && record.kind === "INVOICE"
+    && typeof record.status === "string" && ["SUPERSEDED", "ISSUED_UNRECONCILED"].includes(record.status)
+    && record.aggregationRole === (record.status === "SUPERSEDED" ? "HISTORY_ONLY" : "BILLING_ONLY")
+    && record.receivableState === "PENDING_RECONCILIATION" && record.receivableCents === null
+    && nullableCents(record.reportedReceivableCents);
+  if (role === "MONTHLY_SUMMARY") return entityType === "financialEntry" && record.kind === "FINANCIAL_SUMMARY"
+    && record.status === "REPORTED_SUMMARY" && record.aggregationRole === "CONTROL_ONLY";
+  return entityType === "sourceDocument" && record.kind === role && record.category === "financial"
+    && record.status === "PENDING_EVIDENCE" && record.aggregationRole === "CONTROL_ONLY"
+    && record.nativeReady === false && record.sourceIndependent === false && record.documentFragility === "MISSING_CANONICAL_FIELDS";
+}
+
+function extractionEvidenceValid(event: WmgjIngestionEvent): boolean {
+  const evidence = event.record.extractionEvidence;
+  if (!exactFields(evidence, ["schemaVersion", "contentSha256", "textSha256", "textLength", "method", "coverage", "sourceVersion", "financialFactsApproved"])) return false;
+  return event.entityType === "sourceDocument" && event.source.system === "DRIVE"
+    && evidence.schemaVersion === 1 && hexHash(evidence.contentSha256) && hexHash(evidence.textSha256)
+    && evidence.contentSha256 === event.source.contentHash && event.source.hashMethod === "content_sha256"
+    && Number.isSafeInteger(evidence.textLength) && Number(evidence.textLength) > 0 && Number(evidence.textLength) <= 1048576
+    && typeof evidence.method === "string" && ["google_docs_text", "google_sheets_values", "blob_text", "drive_api_ocr_convert"].includes(evidence.method)
+    && evidence.method === event.record.extractionMethod && evidence.coverage === "TEXT_EXTRACTED_REVIEW_PENDING"
+    && evidence.sourceVersion === event.sourceVersion && evidence.financialFactsApproved === false;
+}
 
 function normalizedTokens(value: string): string[] {
   return value
@@ -467,11 +566,21 @@ export function containsProhibitedClinicalContent(event: WmgjIngestionEvent): bo
 }
 
 export function containsFieldOutsideNonClinicalContract(event: WmgjIngestionEvent): boolean {
-  return containsFieldOutsideContract(
-    event.record,
+  const typedFinancial = Object.hasOwn(event.record, "financialMappingVersion");
+  const hasExtractionEvidence = Object.hasOwn(event.record, "extractionEvidence");
+  const ordinaryRecord = hasExtractionEvidence
+    ? Object.fromEntries(Object.entries(event.record).filter(([key]) => key !== "extractionEvidence")) : event.record;
+  const recordInvalid = typedFinancial ? !structuredFinancialRecordValid(event.record, event.entityType) : containsFieldOutsideContract(
+    ordinaryRecord,
     NON_CLINICAL_RECORD_FIELDS,
     NON_CLINICAL_RECORD_CONTAINERS
-  ) || containsFieldOutsideContract(event.metadata, NON_CLINICAL_METADATA_FIELDS)
+  );
+  // Only this exact metadata key is accepted; normalized aliases and nested
+  // containers cannot smuggle arbitrary text through the newly permitted field.
+  const rowHashEntries = Object.entries(event.metadata || {}).filter(([key]) => normalizedKey(key) === "source_row_hash");
+  const metadataHashInvalid = rowHashEntries.some(([key, value]) => key !== "sourceRowHash" || !hexHash(value));
+  return recordInvalid || (hasExtractionEvidence && !extractionEvidenceValid(event)) || metadataHashInvalid
+    || containsFieldOutsideContract(event.metadata, NON_CLINICAL_METADATA_FIELDS)
     || containsFieldOutsideContract(event.source, NON_CLINICAL_SOURCE_FIELDS);
 }
 
