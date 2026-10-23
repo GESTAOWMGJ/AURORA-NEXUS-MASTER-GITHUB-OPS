@@ -449,22 +449,7 @@ function converterArquivoParaGoogleDocWMGJ_V1_(file) {
 }
 
 function extrairTextoGoogleSheetsWMGJ_V1_(spreadsheetId) {
-  var ss = SpreadsheetApp.openById(spreadsheetId);
-  var partes = [];
-
-  ss.getSheets().forEach(function(sheet) {
-    var dados = sheet.getDataRange().getDisplayValues();
-    if (!dados.some(function(linha) {
-      return linha.some(function(valor) { return String(valor).trim().length > 0; });
-    })) return;
-    partes.push("ABA: " + sheet.getName());
-
-    dados.slice(0, 200).forEach(function(linha) {
-      partes.push(linha.join(" | "));
-    });
-  });
-
-  return partes.join("\n");
+  return auroraExtrairTextoSheetsCompleto_(spreadsheetId);
 }
 
 function classificarDocumentoGeminiOuFallbackWMGJ_V1_(extracao, file) {
@@ -1126,4 +1111,224 @@ function rodarDiagnosticoExtracaoRealWMGJ() {
 
 function rodarExtracaoRealWMGJ_5() {
   return executarExtracaoRealWMGJ_V1(5);
+}
+
+/* Scoped extraction writes review-only canonical documents through the existing bridge.
+ * Quantities, dates and monetary facts are never inferred by the generic regex classifier. */
+function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
+  var rows=fila.getDataRange().getValues(),idx=mapearCabecalhoWMGJ_Compat_(rows[0]);
+  var result={attempted:0,processed:0,accepted:0,duplicates:0,aliases:0,pending:0,review:0,
+    errors:0,blockingErrors:0,privateReadbackPlan:[]}, knownHashes={};
+  for (var k=1;k<rows.length;k++) {
+    var previous=auroraDriveScopeRead_(rows[k][idx.OBSERVACAO]);
+    if (previous && previous.orgId===options.orgId && previous.scopeSha256===options.scopeSha256
+      && previous.contentSha256 && previous.receipt
+      && previous.receipt.replayVerified===true && previous.coverage==='EXTRACTED_REVIEW_PENDING') knownHashes[previous.contentSha256]=previous;
+  }
+  var candidateRows=[];
+  for(var n=1;n<rows.length;n++) {
+    var candidateScope=auroraDriveScopeRead_(rows[n][idx.OBSERVACAO]);
+    if(candidateScope && candidateScope.orgId===options.orgId && candidateScope.scopeSha256===options.scopeSha256
+      && ['PENDENTE','ERRO_REPROCESSAR'].indexOf(String(rows[n][idx.STATUS]))>=0) candidateRows.push(n);
+  }
+  var processKey='AURORA_DRIVE_PROCESS_'+options.orgId+'_'+options.scopeSha256.slice(0,24);
+  var processProps=PropertiesService.getScriptProperties(),lastRow=Number(processProps.getProperty(processKey)||0);
+  candidateRows.sort(function(a,b){return ((a>lastRow)?0:1)-((b>lastRow)?0:1)||a-b;});
+  function checkAuthority() {
+    if(typeof options.beforeRequest==='function') options.beforeRequest();
+    if(Date.now()>=deadlineMs || PropertiesService.getScriptProperties().getProperty('WMGJ_FIRESTORE_ORG_ID')!==options.orgId)
+      throw new Error('AURORA_DRIVE_AUTHORITY_RECHECK_FAILED');
+  }
+  function receiptValid(response) {
+    return !!response && (response.accepted===true || response.duplicate===true)
+      && !(response.accepted===true && response.duplicate===true)
+      && /^[a-f0-9]{48}$/.test(response.entityId||'')
+      && Number.isSafeInteger(response.revision) && response.revision>=1
+      && typeof response.versionId==='string' && /^[A-Za-z0-9_.:-]{1,160}$/.test(response.versionId);
+  }
+  for (var c=0;c<candidateRows.length && result.attempted<limit && Date.now()<deadlineMs-15000;c++) {
+    var i=candidateRows[c];
+    var row=rows[i], scope=auroraDriveScopeRead_(row[idx.OBSERVACAO]);
+    if (!scope || scope.orgId!==options.orgId || scope.scopeSha256!==options.scopeSha256
+      || ['PENDENTE','ERRO_REPROCESSAR'].indexOf(String(row[idx.STATUS]))<0) continue;
+    result.attempted++;
+    try {
+      checkAuthority();
+      if (scope.fileId!==String(row[idx.ID_ORIGEM])) throw new Error('AURORA_DRIVE_QUEUE_ID_CONFLICT');
+      var file=DriveApp.getFileById(scope.fileId);
+      if (scope.explicit) {
+        if ((options.fileIds||[]).indexOf(scope.fileId)<0) throw new Error('AURORA_DRIVE_SOURCE_REVOKED');
+      } else {
+        var registered=options.sources.some(function(s){return s.folderId===scope.rootId && s.sourceId===scope.sourceId;});
+        if (!registered) throw new Error('AURORA_DRIVE_SOURCE_REVOKED');
+        var parents=file.getParents(),found=false;
+        while(parents.hasNext()) if(parents.next().getId()===scope.folderId) found=true;
+        if(!found || (options.excludedFolderIds||[]).indexOf(scope.folderId)>=0) throw new Error('AURORA_DRIVE_SOURCE_MOVED');
+        var parentQueue=[scope.folderId],checked={},authorizedRoot=false,steps=0;
+        while(parentQueue.length && steps++<64) {
+          var folderId=parentQueue.shift();
+          if(checked[folderId]) continue;checked[folderId]=true;
+          if((options.excludedFolderIds||[]).indexOf(folderId)>=0) continue;
+          if(folderId===scope.rootId){authorizedRoot=true;break;}
+          var folderParents=DriveApp.getFolderById(folderId).getParents();
+          while(folderParents.hasNext()) parentQueue.push(folderParents.next().getId());
+        }
+        if(!authorizedRoot) throw new Error('AURORA_DRIVE_SOURCE_MOVED');
+      }
+      var version=String(file.getLastUpdated().getTime());
+      if(version!==scope.sourceVersion) {
+        // The original source remains authorized. Refresh this queue row instead of
+        // requiring a completed enumeration cursor to run again.
+        scope.previousSourceVersion=scope.sourceVersion;scope.sourceVersion=version;
+        scope.coverage='PENDING_EXTRACTION';delete scope.receipt;delete scope.aliasFileId;
+        delete scope.contentSha256;delete scope.textSha256;
+        atualizarLinhaFilaWMGJ_Compat_(fila,i+1,idx,{STATUS:'PENDENTE',OBSERVACAO:auroraDriveScopeWrite_(scope)});
+      }
+      if(file.getSize()>16*1024*1024) throw new Error('AURORA_DRIVE_FILE_SIZE_LIMIT');
+      var byteHash=wmgjFirestoreHashArquivo_(file);
+      if(byteHash.method!=='content_sha256') throw new Error('AURORA_DRIVE_BYTES_REQUIRED');
+      var alias=knownHashes[byteHash.value];
+      if(alias && alias.fileId!==scope.fileId) {
+        scope.contentSha256=byteHash.value;scope.coverage='DUPLICATE_CONTENT';scope.aliasFileId=alias.fileId;scope.receipt=alias.receipt;
+        atualizarLinhaFilaWMGJ_Compat_(fila,i+1,idx,{STATUS:'DUPLICADO',ULTIMO_ERRO:'',OBSERVACAO:auroraDriveScopeWrite_(scope)});
+        result.aliases++;processProps.setProperty(processKey,String(i));continue;
+      }
+      var extraction=extrairConteudoArquivoWMGJ_V1_(file);
+      if(!extracaoDocumentalCompletaWMGJ_(extraction)) {
+        var extractionError=String(extraction && extraction.observacao || '');
+        if(/permission|unauthori[sz]ed|forbidden|access denied|insufficient|permiss[aã]o|autoriz/i.test(extractionError))
+          throw new Error('AURORA_DRIVE_EXTRACTION_AUTH_FAILED');
+        if(/^AURORA_SHEETS_(TEXT|CELL)_LIMIT$/.test(extractionError)) throw new Error(extractionError);
+        throw new Error('PENDING_EXTRACTION');
+      }
+      if(extraction.metodo==='blob_text' && /[\uFFFD\u0000]/.test(extraction.texto))
+        throw new Error('AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED');
+      if(extraction.texto.length>1048576) throw new Error('AURORA_DRIVE_TEXT_LIMIT');
+      if(String(file.getLastUpdated().getTime())!==version) throw new Error('AURORA_DRIVE_SOURCE_CHANGED_DURING_EXTRACTION');
+      var textHash=wmgjFirestoreHashString_(extraction.texto);
+      var classification={categoria:'outro',tipo_documento:'documento_extraido_pendente_revisao',confianca:0,
+        competencia:null,valor_total:null,atendimentos:null,metodo_extracao:extraction.metodo,
+        status:'PENDING_HUMAN_REVIEW',origem_classificacao:'aurora_drive_acquisition_v1',nivel_risco:'medio'};
+      var event=wmgjFirestoreEventoArquivo_(file,classification,{sourceContext:'authorized-drive-full-review',
+        sourceSystem:'DRIVE',originConnector:'DRIVE_FOLDER',mirrorRequired:true,sourceRegistryVersion:'1',pipelineVersion:'drive-continuation-v1'});
+      if(event.orgId!==options.orgId || event.source.contentHash!==byteHash.value || event.sourceVersion!==Number(version))
+        throw new Error('AURORA_DRIVE_EVENT_SOURCE_CONFLICT');
+      event.record.extractionEvidence={schemaVersion:1,contentSha256:byteHash.value,textSha256:textHash,
+        textLength:extraction.texto.length,method:extraction.metodo,coverage:'TEXT_EXTRACTED_REVIEW_PENDING',
+        sourceVersion:Number(version),financialFactsApproved:false};
+      // A later source version is a distinct semantic event even when its bytes
+      // are unchanged. Keep this contract local to the authorized Drive route;
+      // retries of the same version retain the same key and semantic payload.
+      event.idempotencyKey=[event.orgId,'DRIVE',scope.fileId,'drive-extraction-v1',
+        String(event.sourceVersion),byteHash.value].join(':');
+      var response=wmgjFirestoreEnviarEventoComConfig_(event,options.config,function(){},checkAuthority);
+      if(!receiptValid(response)) throw new Error('AURORA_DRIVE_RECEIPT_REQUIRED');
+      // Replay the identical event, including eventId and idempotencyKey. Its transport
+      // uses fresh HMAC nonce/timestamp while canonical revision must remain unchanged.
+      var replay=wmgjFirestoreEnviarEventoComConfig_(event,options.config,function(){},checkAuthority);
+      if(!receiptValid(replay) || replay.duplicate!==true || replay.entityId!==response.entityId
+        || replay.versionId!==response.versionId || replay.revision!==response.revision)
+        throw new Error('AURORA_DRIVE_REPLAY_NOT_IDEMPOTENT');
+      var receipt={entityId:response.entityId,eventId:response.eventId||event.eventId,sourceId:scope.fileId,
+        sourceVersion:event.sourceVersion,revision:response.revision,versionId:response.versionId,replayVerified:true,
+        canonicalSnapshotHash:event.record.canonicalSnapshotHash,contentHash:byteHash.value,contentSha256:byteHash.value,textSha256:textHash};
+      scope.contentSha256=byteHash.value;scope.textSha256=textHash;scope.coverage='EXTRACTED_REVIEW_PENDING';scope.receipt=receipt;
+      delete scope.lastCode;
+      registrarExtracaoDocumentalWMGJ_V1_(file,byteHash.value,extraction);
+      registrarFirestoreMirrorWMGJ_(file,byteHash.value,{ok:true,required:true,status:response.duplicate?'DUPLICATE_CONFIRMED':'ACCEPTED',entityId:response.entityId,eventId:receipt.eventId});
+      atualizarLinhaFilaWMGJ_Compat_(fila,i+1,idx,{STATUS:'REVISAR_HUMANO',ULTIMO_ERRO:'',OBSERVACAO:auroraDriveScopeWrite_(scope)});
+      knownHashes[byteHash.value]=scope;result.processed++;
+      if(response.duplicate===true) result.duplicates++; else result.accepted++;
+      result.privateReadbackPlan.push(receipt);
+    } catch(error) {
+      var code=String(error && error.message || 'AURORA_DRIVE_EXTRACTION_FAILED');
+      if(!/^[A-Z][A-Z0-9_:.-]{0,160}$/.test(code)) code='AURORA_DRIVE_EXTRACTION_FAILED';
+      var recoverable=['PENDING_EXTRACTION','AURORA_DRIVE_FILE_SIZE_LIMIT','AURORA_DRIVE_TEXT_LIMIT',
+        'AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED',
+        'AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT','AURORA_DRIVE_SOURCE_CHANGED_DURING_EXTRACTION'].indexOf(code)>=0;
+      scope.coverage='PENDING_EXTRACTION';scope.lastCode=code;
+      atualizarLinhaFilaWMGJ_Compat_(fila,i+1,idx,{STATUS:'ERRO_REPROCESSAR',TENTATIVAS:Number(row[idx.TENTATIVAS]||0)+1,
+        ULTIMO_ERRO:code,OBSERVACAO:auroraDriveScopeWrite_(scope)});
+      result.errors++;
+      if(!recoverable) result.blockingErrors++;
+    }
+    processProps.setProperty(processKey,String(i));
+    if(result.blockingErrors>0) break;
+  }
+  // Totals cover the entire scoped queue, including documents not attempted this cycle.
+  var after=fila.getDataRange().getValues();
+  for(var a=1;a<after.length;a++) {
+    var finalScope=auroraDriveScopeRead_(after[a][idx.OBSERVACAO]);
+    if(!finalScope || finalScope.orgId!==options.orgId || finalScope.scopeSha256!==options.scopeSha256) continue;
+    if(finalScope.coverage==='EXTRACTED_REVIEW_PENDING' && finalScope.receipt && finalScope.receipt.replayVerified===true) result.review++;
+    else if(finalScope.coverage!=='DUPLICATE_CONTENT') result.pending++;
+  }
+  return result;
+}
+
+// Full row coverage, bounded before each read/allocation. Limit failures stay explicit.
+function auroraExtrairTextoSheetsCompleto_(spreadsheetId) {
+  var ss=SpreadsheetApp.openById(spreadsheetId),parts=[],characters=0,cells=0;
+  function append(text) {
+    characters+=text.length+1;
+    if(characters>1048576) throw new Error('AURORA_SHEETS_TEXT_LIMIT');
+    parts.push(text);
+  }
+  ss.getSheets().forEach(function(sheet){
+    var lastRow=sheet.getLastRow(),lastColumn=sheet.getLastColumn();
+    if(!lastRow || !lastColumn) return;
+    if(lastColumn>256 || lastRow*lastColumn>1000000-cells) throw new Error('AURORA_SHEETS_CELL_LIMIT');
+    cells+=lastRow*lastColumn;
+    var headerWritten=false;
+    for(var start=1;start<=lastRow;start+=200){
+      var values=sheet.getRange(start,1,Math.min(200,lastRow-start+1),lastColumn).getDisplayValues();
+      values.forEach(function(row){
+        if(!row.some(function(value){return String(value).trim().length>0;})) return;
+        if(!headerWritten){append('ABA: '+sheet.getName());headerWritten=true;}
+        append(row.join(' | '));
+      });
+    }
+  });
+  return parts.join('\n');
+}
+
+/* Read-only receipt recovery for the authenticated wrapper. The coordinator must
+ * actually verify each returned canonical record; replayVerified is not readback. */
+function auroraLerPlanoReadbackDriveAutorizado_(options) {
+  var ss=getPlanilhaWMGJ_Compat_(),fila=ss.getSheetByName(getConfigWMGJ_Compat_().SHEETS.FILA);
+  var rows=fila.getDataRange().getValues(),idx=mapearCabecalhoWMGJ_Compat_(rows[0]),scoped=[];
+  var offset=Number(options.readbackOffset),limit=Math.min(40,Number(options.readbackLimit || 20));
+  if(!Number.isSafeInteger(offset) || offset<0 || !Number.isSafeInteger(limit) || limit<1)
+    throw new Error('AURORA_DRIVE_READBACK_CURSOR_INVALID');
+  var result={privateReadbackPlan:[],privateAliasRows:[],coverage:{offset:offset,nextOffset:null,
+    total:0,documents:0,aliases:0,pending:0,complete:false,returned:0,pageDocuments:0,pageAliases:0,pagePending:0},
+    fullSynchronizationVerified:false};
+  var coverage=result.coverage;
+  for(var r=1;r<rows.length;r++) {
+    var scope=auroraDriveScopeRead_(rows[r][idx.OBSERVACAO]);
+    if(!scope || scope.orgId!==options.orgId || scope.scopeSha256!==options.scopeSha256) continue;
+    var receipt=scope.receipt,kind='pending';
+    var proven=receipt && receipt.replayVerified===true && scope.contentSha256===receipt.contentHash
+      && receipt.contentHash===receipt.contentSha256;
+    if(proven && scope.coverage==='EXTRACTED_REVIEW_PENDING' && receipt.sourceId===scope.fileId
+      && receipt.sourceVersion===Number(scope.sourceVersion)) kind='documents';
+    else if(proven && scope.coverage==='DUPLICATE_CONTENT' && scope.aliasFileId && scope.aliasFileId===receipt.sourceId) kind='aliases';
+    coverage[kind]++;scoped.push({scope:scope,kind:kind});
+  }
+  coverage.total=scoped.length;
+  if(offset>coverage.total) throw new Error('AURORA_DRIVE_READBACK_CURSOR_INVALID');
+  var end=Math.min(offset+limit,coverage.total);
+  coverage.returned=end-offset;coverage.nextOffset=end<coverage.total?end:null;coverage.complete=coverage.nextOffset===null;
+  for(var i=offset;i<end;i++) {
+    var item=scoped[i],value=item.scope;
+    if(item.kind==='pending') {coverage.pagePending++;continue;}
+    result.privateReadbackPlan.push(value.receipt);
+    if(item.kind==='documents') coverage.pageDocuments++;
+    else {
+      coverage.pageAliases++;
+      result.privateAliasRows.push({fileId:value.fileId,primaryFileId:value.aliasFileId,
+        contentHash:value.contentSha256,entityId:value.receipt.entityId});
+    }
+  }
+  return result;
 }

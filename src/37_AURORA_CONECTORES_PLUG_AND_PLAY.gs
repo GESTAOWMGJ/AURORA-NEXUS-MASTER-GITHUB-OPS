@@ -705,3 +705,189 @@ function auroraConnectorLogSafe_(action, payload) {
     }
   } catch (ignore) {}
 }
+
+// Bounded Drive-only intake. The authenticated operator supplies a private scope;
+// credentials remain in existing ScriptProperties. No trigger or global mode changes.
+function auroraDriveIntakeScope_(request) {
+  var fields = ['mode','orgId','sources','fileIds','excludedFolderIds','maxScan','limit','expectedScopeSha256'];
+  if(request && request.mode==='READBACK') fields.push('readbackOffset');
+  var isId = function(value) { return typeof value === 'string' && /^[A-Za-z0-9_-]{10,200}$/.test(value); };
+  if (!request || typeof request !== 'object' || Array.isArray(request)
+    || Object.keys(request).sort().join(',') !== fields.sort().join(',')
+    || ['PREVIEW','EXECUTE','READBACK'].indexOf(request.mode) < 0
+    || (request.mode==='READBACK' && (!Number.isSafeInteger(request.readbackOffset) || request.readbackOffset<0))
+    || typeof request.orgId !== 'string' || !/^[a-z0-9][a-z0-9-]{1,62}$/.test(request.orgId)
+    || !Array.isArray(request.sources) || request.sources.length < 1 || request.sources.length > 12
+    || !Array.isArray(request.fileIds) || request.fileIds.length > 200 || !request.fileIds.every(isId)
+    || !Array.isArray(request.excludedFolderIds) || request.excludedFolderIds.length > 100 || !request.excludedFolderIds.every(isId)
+    || !Number.isSafeInteger(request.maxScan) || request.maxScan < 1 || request.maxScan > 1000
+    || !Number.isSafeInteger(request.limit) || request.limit < 1 || request.limit > 20
+    || (request.mode === 'PREVIEW' ? request.expectedScopeSha256 !== null
+      : !/^[a-f0-9]{64}$/.test(request.expectedScopeSha256 || ''))) throw new Error('AURORA_DRIVE_REQUEST_REJECTED');
+  var sourceIds = Object.create(null), folders = Object.create(null), files = Object.create(null), excluded = Object.create(null);
+  var sources = request.sources.map(function(source) {
+    if (!source || typeof source !== 'object' || Array.isArray(source)
+      || Object.keys(source).sort().join(',') !== ['sourceId','system','folderId','slaMinutes','active'].sort().join(',')
+      || typeof source.sourceId !== 'string' || !/^[a-z0-9][a-z0-9_.-]{2,63}$/.test(source.sourceId)
+      || source.system !== 'DRIVE' || source.active !== true || !isId(source.folderId)
+      || !Number.isSafeInteger(source.slaMinutes) || source.slaMinutes < 15 || source.slaMinutes > 43200
+      || sourceIds[source.sourceId] || folders[source.folderId]) throw new Error('AURORA_DRIVE_SOURCE_SCOPE_REJECTED');
+    sourceIds[source.sourceId] = true; folders[source.folderId] = true;
+    return {sourceId:source.sourceId,system:'DRIVE',folderId:source.folderId,slaMinutes:source.slaMinutes,active:true};
+  }).sort(function(a,b) { return a.sourceId < b.sourceId ? -1 : a.sourceId > b.sourceId ? 1 : 0; });
+  request.fileIds.forEach(function(id) {
+    if (files[id] || folders[id]) throw new Error('AURORA_DRIVE_SOURCE_SCOPE_REJECTED');
+    files[id] = true;
+  });
+  request.excludedFolderIds.forEach(function(id) {
+    if (excluded[id] || folders[id] || files[id]) throw new Error('AURORA_DRIVE_SOURCE_SCOPE_REJECTED');
+    excluded[id] = true;
+  });
+  return {orgId:request.orgId,sources:sources,fileIds:request.fileIds.slice(),
+    excludedFolderIds:request.excludedFolderIds.slice().sort(),maxScan:request.maxScan,limit:request.limit};
+}
+
+function auroraDriveIntakeGuard_(scope, expectedHash, verifyAccess) {
+  auroraConnectorReuseOwner_();
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('WMGJ_FIRESTORE_ORG_ID') !== scope.orgId) throw new Error('AURORA_DRIVE_TENANT_MISMATCH');
+  if (typeof wmgjFirestoreConfig_ !== 'function') throw new Error('AURORA_DRIVE_DEPENDENCY_MISSING');
+  var existing = wmgjFirestoreConfig_();
+  if (!existing || existing.orgId !== scope.orgId
+    || typeof existing.url !== 'string' || !/^https:\/\/[^\s]+\/ingestWmgjEvent$/.test(existing.url)
+    || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$/.test(existing.keyId || '')
+    || !/^[a-fA-F0-9]{64}$/.test(existing.secret || '')) throw new Error('AURORA_DRIVE_CONFIGURATION_INVALID');
+  var config = {url:existing.url,keyId:existing.keyId,secret:existing.secret,
+    orgId:existing.orgId,dryRun:false,maxRows:existing.maxRows};
+  var fingerprint = auroraConnectorReuseSha_(JSON.stringify({scope:scope,endpoint:config.url,
+    keyId:config.keyId,secretSha256:auroraConnectorReuseSha_(config.secret)}));
+  if (expectedHash !== null && expectedHash !== fingerprint) throw new Error('AURORA_DRIVE_SCOPE_CHANGED');
+  if (verifyAccess) {
+    scope.sources.forEach(function(source) {
+      if (DriveApp.getFolderById(source.folderId).getId() !== source.folderId) throw new Error('AURORA_DRIVE_SOURCE_UNAVAILABLE');
+    });
+    scope.fileIds.forEach(function(id) {
+      var file = DriveApp.getFileById(id);
+      if (file.getId() !== id || (typeof file.isTrashed === 'function' && file.isTrashed())) throw new Error('AURORA_DRIVE_SOURCE_UNAVAILABLE');
+    });
+  }
+  return {scopeSha256:fingerprint,config:config};
+}
+
+function auroraDriveIntakeReceipt_(item) {
+    if (!item || !/^[a-f0-9]{48}$/.test(item.entityId || '') || !/^[A-Za-z0-9_-]{10,200}$/.test(item.sourceId || '')
+      || !/^[a-f0-9]{64}$/.test(item.contentHash || '') || !/^[a-f0-9]{64}$/.test(item.contentSha256 || '')
+      || item.contentHash!==item.contentSha256
+      || !/^[a-f0-9]{64}$/.test(item.textSha256 || '')
+      || !/^[a-f0-9]{64}$/.test(item.canonicalSnapshotHash || '')
+      || !Number.isSafeInteger(item.sourceVersion) || item.sourceVersion < 1
+      || !Number.isSafeInteger(item.revision) || item.revision < 1
+      || typeof item.versionId !== 'string' || !/^[A-Za-z0-9_.:-]{1,160}$/.test(item.versionId)
+      || item.replayVerified !== true) throw new Error('AURORA_DRIVE_RESULT_INVALID');
+    return {entityId:item.entityId,sourceId:item.sourceId,contentHash:item.contentHash,
+      contentSha256:item.contentSha256,textSha256:item.textSha256,canonicalSnapshotHash:item.canonicalSnapshotHash,sourceVersion:item.sourceVersion,
+      revision:item.revision,versionId:item.versionId,replayVerified:true};
+}
+
+function auroraDriveReadbackResult_(value, result, expectedOffset, limit) {
+  if(!value || !value.coverage || !Array.isArray(value.privateReadbackPlan) || !Array.isArray(value.privateAliasRows))
+    throw new Error('AURORA_DRIVE_RESULT_INVALID');
+  var c=value.coverage;
+  ['offset','total','documents','aliases','pending','returned','pageDocuments','pageAliases','pagePending'].forEach(function(key) {
+    if(!Number.isSafeInteger(c[key]) || c[key]<0) throw new Error('AURORA_DRIVE_RESULT_INVALID');
+  });
+  if(c.offset!==expectedOffset || c.documents+c.aliases+c.pending!==c.total
+    || c.pageDocuments+c.pageAliases+c.pagePending!==c.returned || c.returned>limit
+    || c.returned!==Math.min(limit,c.total-c.offset)
+    || c.complete!==(c.offset+c.returned===c.total)
+    || c.nextOffset!==(c.complete?null:c.offset+c.returned)
+    || value.privateReadbackPlan.length!==c.pageDocuments+c.pageAliases
+    || value.privateAliasRows.length!==c.pageAliases) throw new Error('AURORA_DRIVE_RECEIPT_COVERAGE_INVALID');
+  result.privateReadbackPlan=value.privateReadbackPlan.map(auroraDriveIntakeReceipt_);
+  result.privateAliasRows=value.privateAliasRows.map(function(alias) {
+    if(!alias || !/^[A-Za-z0-9_-]{10,200}$/.test(alias.fileId||'')
+      || !/^[A-Za-z0-9_-]{10,200}$/.test(alias.primaryFileId||'') || alias.fileId===alias.primaryFileId
+      || !/^[a-f0-9]{64}$/.test(alias.contentHash||'') || !/^[a-f0-9]{48}$/.test(alias.entityId||'')
+      || !result.privateReadbackPlan.some(function(receipt) {
+        return receipt.sourceId===alias.primaryFileId && receipt.entityId===alias.entityId && receipt.contentHash===alias.contentHash;
+      })) throw new Error('AURORA_DRIVE_RECEIPT_COVERAGE_INVALID');
+    return {fileId:alias.fileId,primaryFileId:alias.primaryFileId,contentHash:alias.contentHash,entityId:alias.entityId};
+  });
+  result.coverage={offset:c.offset,nextOffset:c.nextOffset,total:c.total,documents:c.documents,aliases:c.aliases,
+    pending:c.pending,complete:c.complete,returned:c.returned,pageDocuments:c.pageDocuments,pageAliases:c.pageAliases,pagePending:c.pagePending};
+  result.ok=true;result.code='AURORA_DRIVE_READBACK_PLAN';
+  return result;
+}
+
+function auroraDriveIntakeResult_(value, result) {
+  if (!value || typeof value !== 'object' || !value.scan || !value.process
+    || typeof value.ok !== 'boolean' || value.triggersChanged === true || value.globalSettingsChanged === true
+    || typeof value.scan.enumerationComplete !== 'boolean'
+    || !Array.isArray(value.privateReadbackPlan) || value.privateReadbackPlan.length > 40) throw new Error('AURORA_DRIVE_RESULT_INVALID');
+  var number = function(v) { if (!Number.isSafeInteger(v) || v < 0) throw new Error('AURORA_DRIVE_RESULT_INVALID'); return v; };
+  var p = value.process;
+  result.scan = {examined:number(value.scan.visited),queued:number(value.scan.enqueued),
+    aliases:number(p.aliases),revisited:number(value.scan.duplicates),complete:value.scan.enumerationComplete};
+  result.processing = {attempted:number(p.attempted),accepted:number(p.accepted),duplicates:number(p.duplicates),
+    pending:number(p.pending),failed:number(p.blockingErrors),review:number(p.review),
+    extractionErrors:number(p.errors),aliases:number(p.aliases),replayVerified:0};
+  result.privateReadbackPlan = value.privateReadbackPlan.map(auroraDriveIntakeReceipt_);
+  if (result.privateReadbackPlan.length !== result.processing.accepted + result.processing.duplicates
+    || number(p.processed) !== result.privateReadbackPlan.length) throw new Error('AURORA_DRIVE_RECEIPT_COVERAGE_INVALID');
+  result.processing.replayVerified = result.privateReadbackPlan.length;
+  result.ok = value.ok;
+  result.code = value.ok ? 'AURORA_DRIVE_BATCH_EXECUTED' : 'AURORA_DRIVE_BATCH_PENDING';
+  return result;
+}
+
+// Public nondev Execution API entrypoint. Its private response must not be logged.
+function auroraExecutarIngestaoDriveAutorizada(request) {
+  var result = {ok:false,code:'AURORA_DRIVE_PENDING',scopeSha256:null,
+    scan:{examined:0,queued:0,aliases:0,complete:false},
+    processing:{attempted:0,accepted:0,duplicates:0,pending:0,failed:0},privateReadbackPlan:[],
+    triggersChanged:false,globalSettingsChanged:false,sourceMutation:false,
+    firstIngestionVerified:false,fullSynchronizationVerified:false};
+  try {
+    auroraConnectorReuseOwner_();
+    var scope = auroraDriveIntakeScope_(request);
+    var guarded = auroraDriveIntakeGuard_(scope, request.expectedScopeSha256, true);
+    result.scopeSha256 = guarded.scopeSha256;
+    if (request.mode === 'PREVIEW') {
+      result.ok = true; result.code = 'AURORA_DRIVE_PREVIEW_VERIFIED'; return result;
+    }
+    if (typeof comTravaIngestaoGmailWMGJ_ !== 'function'
+      || (request.mode==='READBACK' ? typeof auroraLerPlanoReadbackDriveAutorizado_ !== 'function' : typeof auroraExecutarCicloDriveAutorizado_ !== 'function')) {
+      throw new Error('AURORA_DRIVE_DEPENDENCY_MISSING');
+    }
+    return comTravaIngestaoGmailWMGJ_(function() {
+      var current = auroraDriveIntakeGuard_(scope, guarded.scopeSha256, false);
+      if(request.mode==='READBACK') {
+        var plan=auroraLerPlanoReadbackDriveAutorizado_({orgId:scope.orgId,scopeSha256:current.scopeSha256,
+          readbackOffset:request.readbackOffset,readbackLimit:scope.limit});
+        return auroraDriveReadbackResult_(plan,result,request.readbackOffset,scope.limit);
+      }
+      var deadline = Date.now() + 150000;
+      var value = auroraExecutarCicloDriveAutorizado_({
+        orgId:scope.orgId,sources:scope.sources,sourceIds:scope.sources.map(function(s) { return s.sourceId; }),
+        fileIds:scope.fileIds,excludedFolderIds:scope.excludedFolderIds,maxScan:scope.maxScan,
+        limit:scope.limit,processLimit:scope.limit,scopeSha256:current.scopeSha256,
+        configurationHash:current.scopeSha256,config:current.config,deadlineMs:deadline,
+        beforeRequest:function() {
+          if (Date.now() >= deadline) throw new Error('AURORA_DRIVE_DEADLINE_EXCEEDED');
+          auroraDriveIntakeGuard_(scope, current.scopeSha256, false);
+        }
+      });
+      return auroraDriveIntakeResult_(value, result);
+    });
+  } catch (error) {
+    var allowed = ['AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_DRIVE_REQUEST_REJECTED',
+      'AURORA_DRIVE_SOURCE_SCOPE_REJECTED','AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING',
+      'AURORA_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_SOURCE_UNAVAILABLE',
+      'AURORA_DRIVE_RESULT_INVALID','AURORA_DRIVE_RECEIPT_COVERAGE_INVALID','AURORA_DRIVE_DEADLINE_EXCEEDED',
+      'AURORA_DRIVE_READBACK_CURSOR_INVALID'];
+    var message = String(error && error.message || '');
+    result.code = allowed.indexOf(message) >= 0 ? message : 'AURORA_DRIVE_EXECUTION_UNCONFIRMED';
+    result.ok = false;
+    return result;
+  }
+}

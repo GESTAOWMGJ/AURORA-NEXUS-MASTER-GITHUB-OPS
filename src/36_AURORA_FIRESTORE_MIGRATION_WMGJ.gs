@@ -4,7 +4,7 @@
  * Checkpoint só avança quando DRY_RUN=false e o endpoint aceita/identifica duplicata.
  */
 
-var WMGJ_FIRESTORE_MIGRATION_VERSION = 'v1.2.0-structured-financial';
+var WMGJ_FIRESTORE_MIGRATION_VERSION = 'v1.3.0-typed-financial';
 var WMGJ_FIRESTORE_MONEY_NORMALIZATION_VERSION = 'brl-cents-v1';
 
 function wmgjFirestoreMigrationMap_() {
@@ -163,6 +163,10 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
       var record = config.bankStatementAdapter
         ? wmgjFirestoreBankStatementRecord_(headers, rawValues[offset], row, sourceRecord, rowHash)
         : wmgjFirestoreAddCanonicalMoney_(headers, rawValues[offset], row, sourceRecord, config.moneyFields || {});
+      // Identity and competence belong to the source. Derive them before removing
+      // free text and identifiers from the typed financial projection.
+      var entityKey = wmgjFirestoreEntityKey_(sheetName, record, rowNumber);
+      var sourceCompetence = wmgjFirestoreFindCompetence_(record);
       if (config.financialAdapter) {
         record = wmgjFirestoreFinancialRecord_(record, config, headers);
         // record is persisted in both current entities and immutable versions;
@@ -174,7 +178,6 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
       // false duplicate. Entity identity and immutable backend history stay intact.
       var contentHash = config.financialAdapter
         ? wmgjFirestoreHashString_(JSON.stringify(record)) : rowHash;
-      var entityKey = wmgjFirestoreEntityKey_(sheetName, record, rowNumber);
       var identity = config.entityType + ':' + entityKey;
       if (Object.prototype.hasOwnProperty.call(seenEntityKeys, identity)) {
         identityConflicts++;
@@ -191,7 +194,7 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
         ''
       );
       var workflow = wmgjFirestoreWorkflowFromLegacy_(legacyStatus, config.entityType);
-      if (config.financialAdapter) workflow = wmgjFirestoreFinancialWorkflow_(record, config);
+      if (config.financialAdapter) workflow = wmgjFirestoreFinancialWorkflow_(record, config, sourceRecord);
       var occurredAt = new Date();
       var event = {
         schemaVersion: 1,
@@ -223,7 +226,7 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
         reviewState: workflow.review,
         riskLevel: workflow.risk,
         sensitivity: config.sensitivity,
-        competence: wmgjFirestoreFindCompetence_(record),
+        competence: sourceCompetence,
         documentType: sheetName,
         record: record,
         metadata: {
@@ -426,7 +429,8 @@ function wmgjFirestoreNormalizeHeader_(header, index) {
 
 /** Mapping only: no reconciliation, payment, closing or contract decision. */
 function wmgjFirestoreFinancialRecord_(record, config, headers) {
-  var output = Object.assign({}, record);
+  // Explicit projection only. Never spread the source row into persisted records.
+  var output = {sanitized:true};
   var normalizedHeaders = headers.map(wmgjFirestoreNormalizeHeader_);
   output.financialMappingVersion = WMGJ_FIRESTORE_MIGRATION_VERSION;
   output.financialRecordRole = config.financialAdapter;
@@ -436,7 +440,9 @@ function wmgjFirestoreFinancialRecord_(record, config, headers) {
       return normalizedHeaders.indexOf(name) >= 0;
     });
     // Explicit null also revokes a former value under Firestore merge semantics.
-    if (output[field] === undefined) output[field] = null;
+    var value = record[field] === undefined ? null : record[field];
+    if (value !== null && !Number.isSafeInteger(value)) throw new Error('FINANCIAL_CENTS_INVALID');
+    output[field] = value;
     output.fieldOrigins[field] = { columns: columns, state: output[field] === null ? 'MISSING_VALUE' : 'SOURCE_REPORTED' };
   });
   if (config.financialAdapter === 'EXTRACTED_MOVEMENT' && output.extractedAmountCents !== null) {
@@ -451,9 +457,14 @@ function wmgjFirestoreFinancialRecord_(record, config, headers) {
       output.fieldOrigins[directedField] = { columns: ['tipo', 'valor'], state: 'SOURCE_REPORTED' };
     }
   }
-  output.originDocumentRef = record.link_drive || record.id_drive || null;
-  output.invoiceNumber = record.numero_nf || record.nf_relacionada || null;
-  output.sourceReconciliationStatus = record.status_conciliacao || record.status_extracao || record.status || null;
+  output.originDocumentRef = wmgjFirestoreFinancialDocumentRef_(record.link_drive || record.id_drive);
+  var invoiceNumber = record.numero_nf || record.nf_relacionada;
+  if (invoiceNumber !== undefined && invoiceNumber !== null && String(invoiceNumber).trim() !== '') {
+    invoiceNumber = String(invoiceNumber).trim();
+    if (!/^\d{1,30}$/.test(invoiceNumber)) throw new Error('FINANCIAL_INVOICE_NUMBER_INVALID');
+    output.invoiceNumber = invoiceNumber;
+  } else output.invoiceNumber = null;
+  output.sourceReconciliationStatus = wmgjFirestoreFinancialStatusCode_(record.status_conciliacao || record.status_extracao || record.status);
   output.settlementEvidenceState = 'PENDING_BANK_EVIDENCE';
   // Neither issue date, movement date nor SLA is a contractual due date.
   output.dueDate = null;
@@ -486,12 +497,38 @@ function wmgjFirestoreFinancialRecord_(record, config, headers) {
   return output;
 }
 
-function wmgjFirestoreFinancialWorkflow_(record, config) {
+function wmgjFirestoreFinancialDocumentRef_(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  var ref = String(value).trim(), match;
+  if (/^[A-Za-z0-9_-]{10,200}$/.test(ref)) return ref;
+  // This is an attachment locator present in the source, not an inferred message ID.
+  if (/^GMAIL_ATTACHMENT:\d{50}\.pdf$/.test(ref)) return ref;
+  match = /^https:\/\/drive\.google\.com\/file\/d\/([A-Za-z0-9_-]{10,200})(?:\/(?:view|edit))?(?:[?#].*)?$/.exec(ref);
+  if (!match) match = /^https:\/\/drive\.google\.com\/open\?id=([A-Za-z0-9_-]{10,200})(?:&[^#]*)?(?:#.*)?$/.exec(ref);
+  if (match) return 'https://drive.google.com/file/d/' + match[1] + '/view';
+  match = /^https:\/\/docs\.google\.com\/(document|spreadsheets|presentation)\/d\/([A-Za-z0-9_-]{10,200})(?:\/(?:view|edit))?(?:[?#].*)?$/.exec(ref);
+  if (match) return 'https://docs.google.com/' + match[1] + '/d/' + match[2] + '/edit';
+  match = /^https:\/\/mail\.google\.com\/mail\/u\/(?:\d+\/)?(?:\?authuser=[^#&]+)?#(?:all|inbox)\/([a-fA-F0-9]{10,64})$/.exec(ref);
+  if (match) return 'https://mail.google.com/mail/u/0/#all/' + match[1].toLowerCase();
+  throw new Error('FINANCIAL_DOCUMENT_REFERENCE_INVALID');
+}
+
+function wmgjFirestoreFinancialStatusCode_(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  var code = String(value).trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase();
+  var allowed = ['CONCILIADO','NAO_CONCILIADO','PENDENTE','PENDENTE_CONCILIACAO','PENDENTE_VALIDACAO',
+    'VALIDA','VALIDA_COMPLETA','VALIDA_INCOMPLETA','INVALIDA','SUBSTITUIDA','CANCELADA','ANULADA',
+    'PROCESSADO','ERRO','REVISAR_HUMANO','PENDING_RECONCILIATION','NOT_RECONCILED'];
+  return allowed.indexOf(code) >= 0 ? code : 'UNMAPPED_SOURCE_STATUS';
+}
+
+function wmgjFirestoreFinancialWorkflow_(record, config, sourceRecord) {
+  sourceRecord = sourceRecord || record;
   // Status text containing VALID (e.g. INVALIDA) is not validation.
   if (config.financialAdapter === 'INVOICE' && record.status !== 'SUPERSEDED'
-      && /^VALIDA(?:_|$)/.test(String(record.status_extracao || '').toUpperCase())
+      && /^VALIDA(?:_|$)/.test(String(sourceRecord.status_extracao || '').toUpperCase())
       && Number.isSafeInteger(record.totalCents) && record.totalCents >= 0
-      && record.originDocumentRef && record.chave_acesso) {
+      && record.originDocumentRef && sourceRecord.chave_acesso) {
     return { state: 'VALIDATED', review: 'NOT_REQUIRED', risk: 'LOW' };
   }
   return { state: 'PENDING_HUMAN_REVIEW', review: 'PENDING', risk: 'MEDIUM' };

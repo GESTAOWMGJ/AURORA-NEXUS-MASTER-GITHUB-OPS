@@ -2,6 +2,25 @@ name: Aurora RC1.1 Recovery and Real WMGJ Ingest
 
 on:
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Existing sample or authorized Drive-only intake
+        type: choice
+        default: RC11_SAMPLE
+        options: [RC11_SAMPLE, DRIVE_TOTAL]
+      expected_sha:
+        description: Exact published main SHA for Drive intake
+        type: string
+      scope_sha256:
+        description: SHA-256 of the private authorized Drive source scope
+        type: string
+      max_batches:
+        description: Bounded resumable Drive batches
+        type: number
+        default: 20
+      confirmation:
+        description: RUN_AUTHORIZED_REAL_DRIVE_INTAKE
+        type: string
   push:
     branches: [main]
     paths:
@@ -12,10 +31,11 @@ permissions:
 
 concurrency:
   group: aurora-rc11-hml
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   rc11:
+    if: github.event_name != 'workflow_dispatch' || inputs.operation != 'DRIVE_TOTAL'
     name: Recovery -> ingest -> reconcile -> native insight
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -577,3 +597,67 @@ jobs:
           path: ${{ runner.temp }}/rc11-evidence/
           if-no-files-found: error
           retention-days: 30
+
+  drive_total:
+    name: Authorized real Drive intake using the existing Apps Script engine
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'DRIVE_TOTAL' && github.ref == 'refs/heads/main' && inputs.expected_sha == github.sha && inputs.confirmation == 'RUN_AUTHORIZED_REAL_DRIVE_INTAKE'
+    environment: firebase-homologation
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - name: Checkout the exact published source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned 2026-10-01
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test the bounded Drive intake and private-source coordinator
+        run: |
+          set -euo pipefail
+          node tools/audit-appscript.js
+          node --test tools/test-drive-full-ingest.js tools/test-drive-activation.js tools/test-aurora-drive-ingest-run.cjs
+      - name: Authenticate the existing HML reader
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+        with:
+          version: '548.0.0'
+      - name: Use the protected existing Apps Script OAuth
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$CLASPRC_JSON"
+          npm install -g @google/clasp@3.4.1
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+      - name: Resume authorized Drive batches and verify canonical readback
+        env:
+          AURORA_DRIVE_SCOPE_JSON: ${{ secrets.AURORA_WMGJ_DRIVE_SOURCE_SCOPE }}
+          EXPECTED_SCOPE_SHA256: ${{ inputs.scope_sha256 }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_sha }}
+          AURORA_DRIVE_MAX_BATCHES: ${{ inputs.max_batches }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/aurora-drive-ingest-run.cjs
+      - name: Preserve sanitized Drive intake evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aurora-drive-intake-${{ github.run_id }}
+          path: ${{ runner.temp }}/aurora-drive-intake-summary.json
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Remove runner OAuth and private execution responses
+        if: always()
+        run: |
+          rm -f "$HOME/.clasprc.json"
+          rm -rf "$RUNNER_TEMP/aurora-drive-private"
