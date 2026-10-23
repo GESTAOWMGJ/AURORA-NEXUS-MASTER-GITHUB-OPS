@@ -24,6 +24,8 @@ export function createDocumentIntakeEngine() {
   const CONTENT_TYPES='http://schemas.openxmlformats.org/package/2006/content-types';
   const ODF_OFFICE='urn:oasis:names:tc:opendocument:xmlns:office:1.0';
   const ODF_TABLE='urn:oasis:names:tc:opendocument:xmlns:table:1.0';
+  const ODF_DRAW='urn:oasis:names:tc:opendocument:xmlns:drawing:1.0';
+  const XLINK='http://www.w3.org/1999/xlink';
   const encoder=new TextEncoder(), decoder=new TextDecoder('utf-8',{fatal:true});
   type Segment={locator:string;text:string};
   type XmlNode={name:string;namespaceURI:string;path:string[];namespacePath:string[];locator:string;
@@ -260,18 +262,34 @@ export function createDocumentIntakeEngine() {
           const doc=xml(decode(files.get('content.xml')!),'content.xml');segments=doc.segments;xmlLeaves=doc.leaves;totalUnits=processedUnits=1;
           need(doc.nodes[0]?.name==='document-content'&&doc.nodes[0].namespaceURI===ODF_OFFICE);
           partial=walk(doc.nodes,'scripts').length>0||walk(doc.nodes,'script').length>0||walk(doc.nodes,'object').length>0;
+          // ODF references are namespace-based, never tied to a conventional
+          // Pictures/ directory. An image, object or link is not extracted by
+          // reading its caption, and binary-data is not document prose.
+          const pendingNodes=[...doc.nodes],binaryPrefixes:string[]=[];
+          while(pendingNodes.length){const node=pendingNodes.pop()!;pendingNodes.push(...node.children);
+            if((node.namespaceURI===ODF_DRAW&&['image','object','object-ole','plugin','applet','floating-frame'].includes(node.name))
+              || (attribute(node,XLINK,'href')??'').trim()!=='')partial=true;
+            if(node.namespaceURI===ODF_OFFICE&&node.name==='binary-data'){
+              need(node.children.length===0);partial=true;binaryPrefixes.push(node.locator);}
+          }
+          if(binaryPrefixes.length){const readable=(locator:string)=>!binaryPrefixes.some(prefix=>locator===prefix||locator.startsWith(prefix+'/'));
+            segments=segments.filter(segment=>readable(segment.locator));xmlLeaves=xmlLeaves.filter(leaf=>readable(leaf.locator));}
+          const readableNodeText=(node:XmlNode):string=>node.namespaceURI===ODF_OFFICE&&node.name==='binary-data'?'':
+            node.text+node.children.map(readableNodeText).join('');
           if(method==='ODS_XML')for(const table of walk(doc.nodes,'table')){const rows:string[][]=[];
             need(table.namespaceURI===ODF_TABLE);
             for(const row of table.children.filter(node=>node.name==='table-row')){need(row.namespaceURI===ODF_TABLE);const repeat=Number(attribute(row,ODF_TABLE,'number-rows-repeated')??'1');need(repeat===1,'LIMIT_EXCEEDED');const values:string[]=[];
               for(const cell of row.children.filter(node=>node.name==='table-cell'||node.name==='covered-table-cell')){
-                need(cell.namespaceURI===ODF_TABLE);need(Number(attribute(cell,ODF_TABLE,'number-columns-repeated')??'1')===1,'LIMIT_EXCEEDED');if(attribute(cell,ODF_TABLE,'formula')!==undefined)partial=true;values.push(nodeText(cell));}
+                need(cell.namespaceURI===ODF_TABLE);need(Number(attribute(cell,ODF_TABLE,'number-columns-repeated')??'1')===1,'LIMIT_EXCEEDED');if(attribute(cell,ODF_TABLE,'formula')!==undefined)partial=true;values.push(readableNodeText(cell));}
               need(values.length<=128&&rows.length<10000,'LIMIT_EXCEEDED');rows.push(values);}
             tables.push({columns:rows[0]??[],rows:rows.slice(1),rowLocators:rows.slice(1).map((_row,index)=>table.locator+'/row['+(index+2)+']')});}
-          partial ||= Array.from(files.keys()).some(name=>/^(Pictures|Object[^/]*)\//.test(name));
+          // styles.xml may carry header/footer text and referenced images.
+          // This bounded reader does not interpret that part.
+          partial ||= files.has('styles.xml')||Array.from(files.keys()).some(name=>/^(Pictures|Object[^/]*)\//.test(name));
         }
       }else reject(mime==='application/pdf'||mime.startsWith('image/')?'BACKEND_REQUIRED':'UNSUPPORTED_FORMAT');
       const text=normalize(segments.map(segment=>segment.text).join('\n')),encoded=encoder.encode(text);
-      need(text.trim(),'EMPTY_CONTENT');need(encoded.length<=MAX_TEXT,'LIMIT_EXCEEDED');
+      need(text.trim(),partial?'BACKEND_REQUIRED':'EMPTY_CONTENT');need(encoded.length<=MAX_TEXT,'LIMIT_EXCEEDED');
       return {byteSha256,byteLength,text,segments,xmlLeaves,tables,extraction:{status:partial?'PARTIAL':'COMPLETE',method,methodVersion:VERSION,
         textSha256:await hash(encoded),textByteLength:encoded.length,coverage:{basis:partial?'BOUNDED_REPRESENTATION':'EXPECTED_PARTS',totalUnits,processedUnits},
         code:partial?'BOUNDED_EXTRACTION_PARTIAL':'CONTENT_EXTRACTED'}};

@@ -164,6 +164,45 @@ test('DOCX external hyperlinks and ODT scripts retain a pending coverage boundar
   const scripted=odf('<o:document-content xmlns:o="urn:oasis:names:tc:opendocument:xmlns:office:1.0"><o:scripts/><o:body><p>Texto</p></o:body></o:document-content>');
   assert.equal((await engine.extract(scripted,'application/vnd.oasis.opendocument.text',options)).extraction.status,'PARTIAL');
 });
+test('ODF image references outside Pictures and namespace aliases cannot claim complete text coverage',async()=>{
+  const start='<o:document-content xmlns:o="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:d="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:link="http://www.w3.org/1999/xlink" xmlns:t="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><o:body>';
+  for(const mime of ['application/vnd.oasis.opendocument.text','application/vnd.oasis.opendocument.spreadsheet']) {
+    for(const href of ['Media/image1.png','Assets/figure.svg','https://never-fetched.example/image.png']) {
+      const result=await engine.extract(odf(start+'<t:p>Caption</t:p><d:frame><d:image link:href="'+href+'"/></d:frame></o:body></o:document-content>',mime),mime,options);
+      assert.equal(result.text,'Caption');assert.equal(result.extraction.status,'PARTIAL');
+      assert.equal(result.extraction.coverage.basis,'BOUNDED_REPRESENTATION');
+      assert.equal(mapDocumentFactCandidates(result).candidates.length,0);
+    }
+  }
+});
+test('ODF inline binary data stays out of text and image-only documents require a backend',async()=>{
+  const start='<o:document-content xmlns:o="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:d="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:t="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><o:body>';
+  const image='<d:frame><d:image><o:binary-data>U1lOVEhFVElDX0JJTkFSWQ==</o:binary-data></d:image></d:frame>';
+  const mixed=await engine.extract(odf(start+'<t:p>Readable caption</t:p>'+image+'</o:body></o:document-content>'),'application/vnd.oasis.opendocument.text',options);
+  assert.equal(mixed.extraction.status,'PARTIAL');assert.equal(mixed.text,'Readable caption');
+  assert.equal(JSON.stringify(mixed.xmlLeaves).includes('U1lOVEhFVElD'),false);
+  const onlyImage=await engine.extract(odf(start+image+'</o:body></o:document-content>'),'application/vnd.oasis.opendocument.text',options);
+  assert.equal(onlyImage.extraction.status,'PENDING');assert.equal(onlyImage.extraction.code,'BACKEND_REQUIRED');
+  assert.equal(onlyImage.text,'');assert.equal(onlyImage.extraction.textSha256,null);
+  const sheet=start+'<s:table xmlns:s="urn:oasis:names:tc:opendocument:xmlns:table:1.0"><s:table-row><s:table-cell><t:p>Caption</t:p>'+image+'</s:table-cell></s:table-row></s:table></o:body></o:document-content>';
+  const ods=await engine.extract(odf(sheet,'application/vnd.oasis.opendocument.spreadsheet'),'application/vnd.oasis.opendocument.spreadsheet',options);
+  assert.equal(ods.extraction.status,'PARTIAL');assert.deepEqual(ods.tables[0]!.columns,['Caption']);
+  assert.equal(JSON.stringify(ods).includes('U1lOVEhFVElD'),false);
+  const nestedTable=start+'<t:p>Caption</t:p><o:binary-data><s:table xmlns:s="urn:oasis:names:tc:opendocument:xmlns:table:1.0"><s:table-row><s:table-cell><t:p>SYNTHETIC_BINARY_DESCENDANT</t:p></s:table-cell></s:table-row></s:table></o:binary-data></o:body></o:document-content>';
+  const invalid=await engine.extract(odf(nestedTable,'application/vnd.oasis.opendocument.spreadsheet'),'application/vnd.oasis.opendocument.spreadsheet',options);
+  assert.equal(invalid.extraction.status,'FAILED');assert.deepEqual(invalid.tables,[]);assert.equal(invalid.text,'');
+});
+test('ODF unprocessed styles carrying header images keep coverage partial',async()=>{
+  const mime='application/vnd.oasis.opendocument.text';
+  const entries={'mimetype':mime,
+    'META-INF/manifest.xml':'<m:manifest xmlns:m="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"/>',
+    'content.xml':'<o:document-content xmlns:o="urn:oasis:names:tc:opendocument:xmlns:office:1.0"><o:body><p>Caption</p></o:body></o:document-content>',
+    'styles.xml':'<o:document-styles xmlns:o="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:d="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:x="http://www.w3.org/1999/xlink"><o:master-styles><header><d:image x:href="Media/header.png"/></header></o:master-styles></o:document-styles>',
+    'Media/header.png':'synthetic image not decoded by the bounded text reader'};
+  const result=await engine.extract(zip(entries),mime,options);
+  assert.equal(result.text,'Caption');assert.equal(result.extraction.status,'PARTIAL');
+  assert.equal(result.extraction.coverage.basis,'BOUNDED_REPRESENTATION');assert.equal(mapDocumentFactCandidates(result).candidates.length,0);
+});
 test('synthetic NF-e bytes reach strict mapper with same instantiated namespace ancestry',async()=>{
   const ns='http://www.portalfiscal.inf.br/nfe';
   const result=await engine.extract(encode('<nfeProc xmlns="'+ns+'"><NFe><infNFe><ide><dhEmi>2026-10-01T12:00:00-03:00</dhEmi></ide><total><ICMSTot><vNF>1234.56</vNF></ICMSTot></total></infNFe></NFe></nfeProc>'),'application/xml');

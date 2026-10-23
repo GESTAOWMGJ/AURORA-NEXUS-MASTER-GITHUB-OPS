@@ -34,7 +34,7 @@ reextração pelo servidor ou prova de autenticidade/veracidade do conteúdo.
 | XML | Texto, folhas, caminho/namespace de cada ancestral | Sem DTD/entidades externas/processamento de instruções |
 | DOCX | Partes textuais vinculadas pelo pacote OPC | Namespace/manifesto/relações; imagem, hyperlink externo e objetos mantêm parcial |
 | XLSX | Abas efetivamente vinculadas por workbook/rels | Fórmulas não são executadas; resultados não viram fatos por presunção |
-| ODT/ODS | Conteúdo ODF com manifesto/tipo explícitos | Repetições além do suporte bloqueiam; fórmulas/scripts/objetos mantêm parcial |
+| ODT/ODS | Conteúdo ODF com manifesto/tipo explícitos | Repetições além do suporte bloqueiam; fórmulas/scripts/objetos/imagens/referências e styles.xml não interpretado mantêm parcial |
 | PDF e imagens/OCR | Backend ainda pendente | Nenhum placeholder ou metadado é tratado como texto |
 | DOC/XLS/RTF legados | Adapter ainda pendente | Escopo integral preservado, sem alegação de cobertura |
 
@@ -43,6 +43,16 @@ Limites iniciais: aquisição de 1 MiB, texto normalizado de 256 KiB, 128 partes
 linhas/128 colunas. Validar tamanho antes de copiar ou calcular hash. Corte,
 backend ausente, proteção, corrupção ou conteúdo vazio não podem virar COMPLETE.
 Partes não interpretadas mantêm cobertura parcial ou pendência explícita.
+Referências ODF usam namespace e ancestralidade, independentemente do prefixo
+ou pasta do recurso. `office:binary-data` não integra texto, folhas ou tabelas;
+elementos XML dentro desse campo binário invalidam a extração. Documentos só
+com imagens aguardam backend, sem fingir texto completo.
+
+A validação do ZIP Windows também seleciona o conjunto exato de arquivos pela
+versão no certificado verificado: o predecessor 1.0.7 conserva seus sete módulos,
+e a candidata 1.0.8 exige os doze módulos atuais. Misturar os perfis ou apresentar
+versão desconhecida bloqueia a transição, mesmo com manifesto/ZIP reassinados.
+Compatibilidade sintética não substitui a atualização e recuperação reais do PC.
 
 O formulário manual novo lê os bytes selecionados no navegador, mostra prévia
 limitada a 4.000 caracteres e registra/repite a observação na mesma sessão com

@@ -327,7 +327,17 @@ def _signed_client_bundle(data, plan, candidate):
         raise ValueError('SIGNED_WINDOWS_CLIENT_ZIP_CONFLICT')
     with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
         infos = archive.infolist()
-        expected_names = set(PACKAGE_SOURCES) | {'INSTALAR-AURORA-NEXUS.cmd', 'LEIA-PRIMEIRO.txt'}
+        # The verified certificate selects the historical closure. Requiring
+        # today's extra files in an old signed ZIP would break its provenance;
+        # accepting a union would silently permit missing/new unsigned members.
+        signed_version = candidate.certificate['components']['windowsIntegration']['version']
+        if signed_version == integration_deployment.VERSION:
+            sources = PACKAGE_SOURCES
+        elif isinstance(signed_version, str) and re.fullmatch(r'1\.0\.[0-7]', signed_version):
+            sources = ('desktop/install_windows_beta.py', *('aurora-coletor/' + name for name in data['release'].LEGACY_WINDOWS_FILES))
+        else:
+            raise ValueError('SIGNED_CLIENT_COMPONENT_VERSION_CONFLICT')
+        expected_names = set(sources) | {'INSTALAR-AURORA-NEXUS.cmd', 'LEIA-PRIMEIRO.txt'}
         names = [entry.filename for entry in infos]
         if (len(names) != len(set(name.casefold() for name in names)) or set(names) != expected_names | {'manifest.json'}
                 or sum(entry.file_size for entry in infos) > 16 * 1024 * 1024
