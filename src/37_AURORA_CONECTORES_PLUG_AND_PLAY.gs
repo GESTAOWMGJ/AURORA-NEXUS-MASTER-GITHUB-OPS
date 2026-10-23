@@ -789,6 +789,86 @@ function auroraDriveIntakeReceipt_(item) {
       revision:item.revision,versionId:item.versionId,replayVerified:true};
 }
 
+// Read-only, bounded diagnostics for this exact authorized continuation. Never
+// return property values, source identifiers, group names or continuation tokens.
+function auroraDriveResumeDiagnostics_(scope, scopeSha256) {
+  var props=PropertiesService.getScriptProperties(),suffix=scope.orgId+'_'+scopeSha256.slice(0,24);
+  var number=function(value) { return Number.isSafeInteger(value) && value>=0 ? value : null; };
+  function utf8Bytes(text) {
+    var length=0;
+    for(var i=0;i<text.length;i++) {
+      var c=text.charCodeAt(i);
+      if(c<128) length++;
+      else if(c<2048) length+=2;
+      else if(c>=55296 && c<=56319 && i+1<text.length
+        && text.charCodeAt(i+1)>=56320 && text.charCodeAt(i+1)<=57343) { length+=4;i++; }
+      else length+=3;
+    }
+    return length;
+  }
+  function inspect(key) {
+    var info={present:null,readStatus:'READ_FAILED',characters:null,utf8Bytes:null,jsonValid:false},value=null;
+    try {
+      var raw=props.getProperty(key);
+      info.present=raw!==null;
+      if(raw===null) { info.readStatus='ABSENT';return {info:info,value:value}; }
+      if(typeof raw!=='string') return {info:info,value:value};
+      info.characters=raw.length;
+      if(raw.length>16384) { info.readStatus='OVERSIZE';return {info:info,value:value}; }
+      info.utf8Bytes=utf8Bytes(raw);info.readStatus='PRESENT';
+      try { value=JSON.parse(raw);info.jsonValid=true; } catch(ignoreJson) {}
+    } catch(ignoreRead) {}
+    return {info:info,value:value};
+  }
+  var cursorRead=inspect('AURORA_DRIVE_CURSOR_'+suffix),cursor=cursorRead.info,state=cursorRead.value;
+  cursor.contractValid=false;cursor.scopeMatches=null;cursor.explicitIndex=null;cursor.rootIndex=null;
+  cursor.scanned=null;cursor.folders=null;cursor.excluded=null;cursor.complete=null;
+  cursor.stackDepth=null;cursor.framesTruncated=false;cursor.frames=[];
+  if(state && typeof state==='object' && !Array.isArray(state)) {
+    cursor.scopeMatches=state.scopeSha256===scopeSha256;
+    cursor.explicitIndex=number(state.explicitIndex);cursor.rootIndex=number(state.rootIndex);
+    cursor.scanned=number(state.scanned);cursor.folders=number(state.folders);cursor.excluded=number(state.excluded);
+    cursor.complete=typeof state.complete==='boolean'?state.complete:null;
+    if(Array.isArray(state.stack)) {
+      cursor.stackDepth=state.stack.length;cursor.framesTruncated=state.stack.length>24;
+      cursor.frames=state.stack.slice(0,24).map(function(frame,index) {
+        var object=frame && typeof frame==='object' && !Array.isArray(frame);
+        var token=object?frame.token:undefined;
+        var sourceIndex=object?scope.sources.findIndex(function(source) {
+          return source.sourceId===frame.sourceId && source.folderId===frame.rootId;
+        }):-1;
+        return {index:index,stage:object && (frame.stage==='FILES' || frame.stage==='FOLDERS')?frame.stage:'INVALID',
+          folderIdValid:!!object && typeof frame.folderId==='string' && /^[A-Za-z0-9_-]{10,200}$/.test(frame.folderId),
+          sourceIndex:sourceIndex>=0?sourceIndex:null,
+          tokenTypeValid:token===null || typeof token==='string',
+          tokenCharacters:token===null?0:typeof token==='string'?token.length:null,
+          tokenUtf8Bytes:token===null?0:typeof token==='string'?utf8Bytes(token):null};
+      });
+      cursor.contractValid=state.schemaVersion===1 && cursor.scopeMatches && !cursor.framesTruncated
+        && cursor.explicitIndex!==null && cursor.explicitIndex<=scope.fileIds.length
+        && cursor.rootIndex!==null && cursor.rootIndex<=scope.sources.length
+        && cursor.scanned!==null && cursor.folders!==null && cursor.excluded!==null && cursor.complete!==null
+        && cursor.frames.every(function(frame) {
+          return frame.stage!=='INVALID' && frame.folderIdValid && frame.sourceIndex!==null && frame.tokenTypeValid;
+        });
+    }
+  }
+  var priorityRead=inspect('AURORA_DRIVE_PROCESS_'+suffix+'_PRIORITY_V1'),priority=priorityRead.info,groups=priorityRead.value;
+  priority.contractValid=false;priority.groupCount=null;priority.unknownGroupCount=null;priority.maxOrdinal=null;
+  if(groups && typeof groups==='object' && !Array.isArray(groups)) {
+    var keys=Object.keys(groups),valid=true,unknown=0,max=0;
+    keys.forEach(function(key) {
+      if(key!=='explicit' && key!=='unmapped' && !scope.sources.some(function(source) { return key==='source:'+source.sourceId; })) unknown++;
+      var ordinal=number(groups[key]);if(ordinal===null) valid=false;else max=Math.max(max,ordinal);
+    });
+    priority.groupCount=keys.length;priority.unknownGroupCount=unknown;
+    priority.maxOrdinal=valid?max:null;priority.contractValid=valid && unknown===0;
+  }
+  // A stored cursor below 8,000 characters can still overflow when the next
+  // token is obtained. These measurements do not declare resumability or health.
+  return {schemaVersion:'aurora.drive-resume-diagnostics.v1',readOnly:true,cursor:cursor,priority:priority};
+}
+
 function auroraDriveReadbackResult_(value, result, expectedOffset, limit) {
   if(!value || !value.coverage || !Array.isArray(value.privateReadbackPlan) || !Array.isArray(value.privateAliasRows))
     throw new Error('AURORA_DRIVE_RESULT_INVALID');
@@ -866,6 +946,7 @@ function auroraExecutarIngestaoDriveAutorizada(request) {
       var current = auroraDriveIntakeGuard_(scope, guarded.scopeSha256, false);
       if(request.mode==='READBACK') {
         stage = 'READBACK';
+        result.cursorDiagnostics=auroraDriveResumeDiagnostics_(scope,current.scopeSha256);
         var plan=auroraLerPlanoReadbackDriveAutorizado_({orgId:scope.orgId,scopeSha256:current.scopeSha256,
           readbackOffset:request.readbackOffset,readbackLimit:scope.limit});
         return auroraDriveReadbackResult_(plan,result,request.readbackOffset,scope.limit);
@@ -890,7 +971,11 @@ function auroraExecutarIngestaoDriveAutorizada(request) {
       'AURORA_DRIVE_SOURCE_SCOPE_REJECTED','AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING',
       'AURORA_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_SOURCE_UNAVAILABLE',
       'AURORA_DRIVE_RESULT_INVALID','AURORA_DRIVE_RECEIPT_COVERAGE_INVALID','AURORA_DRIVE_DEADLINE_EXCEEDED',
-      'AURORA_DRIVE_READBACK_CURSOR_INVALID'];
+      'AURORA_DRIVE_READBACK_CURSOR_INVALID','AURORA_DRIVE_CURSOR_CONFLICT','AURORA_DRIVE_CURSOR_LIMIT',
+      'AURORA_DRIVE_DEPTH_OR_CYCLE','AURORA_DRIVE_INFLIGHT_RECONCILIATION_REQUIRED','AURORA_DRIVE_LIMIT_INVALID',
+      'AURORA_DRIVE_QUEUE_CONTRACT','AURORA_DRIVE_QUEUE_SCOPE_INVALID','AURORA_DRIVE_QUEUE_TENANT_CONFLICT',
+      'AURORA_DRIVE_SCOPE_LIMIT','AURORA_DRIVE_SCOPE_REQUIRED','AURORA_DRIVE_SOURCE_INVALID',
+      'AURORA_DRIVE_PROCESS_CURSOR_INVALID'];
     var message = String(error && error.message || '');
     result.code = allowed.indexOf(message) >= 0 ? message
       : stage==='SHARED_LOCK' && message==='GMAIL_REPLAY_LOCK_BUSY' ? 'AURORA_DRIVE_ENGINE_BUSY'

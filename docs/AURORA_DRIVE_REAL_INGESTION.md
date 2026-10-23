@@ -43,3 +43,13 @@ Os testes de contrato cobrem recursão, expiração de cursor, mudanças de orig
 Uma falha de identidade, autorização, recibo ou replay interrompe o ciclo. Falhas de formato permanecem explícitas e não impedem os demais itens. Depois de uma passagem completa sem progresso, a execução conserva as pendências para tratamento, em vez de repetir indefinidamente.
 
 Rollback de código usa o commit anterior e a publicação anterior do Apps Script. Documentos já aceitos têm revisões imutáveis; não devem ser apagados para simular rollback. Não reexecute eventos com identidade nova para ocultar uma falha ou um recibo incerto.
+
+## Diagnóstico de retomada — 23/10/2026
+
+Falhas fixas do scanner e do cursor de processamento preservam seu código no wrapper e no coordinator. Mensagens livres continuam ocultas. A mudança permite distinguir um checkpoint excedido, uma fila incompatível e uma linha legada em processamento, sem repetir automaticamente uma chamada com efeitos incertos.
+
+READBACK acrescenta um diagnóstico limitado às duas propriedades do tenant e fingerprint autorizados. Informa presença, validade, índices e tamanhos; não revela tokens, IDs, nomes ou valores das propriedades. A leitura ocorre sob a trava compartilhada e conserva recibos duráveis. Um cursor salvo abaixo do limite não prova que o próximo checkpoint caberá.
+
+O preview legado de publicação registra fase e motivo por listas fechadas, inclusive em falha. Seus gates, contrato de sucesso e erro público permanecem iguais; stdout, stderr, argumentos e exceções brutas nunca entram no artefato.
+
+Baseline deste incremento: 1ae49855b9ee1fd8f12e896c77ca98fdb4e5ca23. Testes sintéticos cobrem privacidade, ausência de escrita, rejeição por identidade/escopo, falha posterior do readback e proibição de retry dos novos códigos. O incremento não reconcilia estados legados, não comprova ociosidade de executores e não declara a carga completa. A causa e a recuperação reais dependem da leitura do runtime publicado. Rollback conserva o checkpoint e usa a fonte/publicação anteriores.
