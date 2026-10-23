@@ -194,6 +194,35 @@ verify_restore() {
   echo "sourceBackup=$BACKUP"
 }
 
+protect_restored_database() {
+  local attempt output rc restored_meta protection_requested=false
+  # Restore completion can precede serving readiness. Retry only that explicit
+  # provider precondition; IAM, network and unrelated errors remain failures.
+  for attempt in $(seq 1 12); do
+    if [ "$protection_requested" = false ]; then
+      if output="$(gcloud firestore databases update --project "$PROJECT_ID" --database "$RESTORE_DB" --delete-protection --enable-pitr --quiet 2>&1)"; then
+        protection_requested=true
+        printf '%s\n' "$output"
+      else
+        rc=$?
+        printf '%s\n' "$output" >&2
+        if ! grep -Fq 'FAILED_PRECONDITION' <<<"$output" || ! grep -Fq 'middle of restore' <<<"$output"; then
+          return "$rc"
+        fi
+      fi
+    fi
+    if [ "$protection_requested" = true ]; then
+      restored_meta="$(gcloud firestore databases describe --project "$PROJECT_ID" --database "$RESTORE_DB" --format=json)" || return 27
+      if jq -e '.deleteProtectionState=="DELETE_PROTECTION_ENABLED" and .pointInTimeRecoveryEnablement=="POINT_IN_TIME_RECOVERY_ENABLED"' <<<"$restored_meta" >/dev/null; then
+        return 0
+      fi
+    fi
+    if [ "$attempt" -lt 12 ]; then sleep 10; fi
+  done
+  echo "CMEK_RESTORE_PROTECTIONS_PENDING" >&2
+  return 27
+}
+
 restore_test() {
   test "${AURORA_CMEK_CONFIRMATION:-}" = "RESTORE_AURORA_CMEK_HML" || {
     echo "BLOCKED_CONFIRMATION" >&2; exit 20;
@@ -214,7 +243,7 @@ restore_test() {
     sleep 20
   done
   test "$restore_ready" = true || { echo "CMEK_RESTORE_PENDING_COMPLETION" >&2; return 26; }
-  gcloud firestore databases update --project "$PROJECT_ID" --database "$RESTORE_DB" --delete-protection --enable-pitr --quiet
+  protect_restored_database
   verify_restore
 }
 

@@ -264,3 +264,56 @@ test("KMS version commands use the installed supported CLI group", () => {
   assert.doesNotMatch(script, /gcloud kms versions/);
   assert.match(script, /CMEK_UNEXPECTED_READ_RESPONSE_NOT_KEY_EVIDENCE/);
 });
+
+for (const scenario of ["transient", "persistent", "iam", "other-precondition"]) {
+  test(`restore protection readiness handles ${scenario} without masking failures`, { skip: process.platform === "win32" }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "aurora-cmek-readiness-"));
+    try {
+      const functionBody = script.slice(script.indexOf("protect_restored_database() {"), script.indexOf("restore_test() {"));
+      assert.ok(functionBody.startsWith("protect_restored_database() {"));
+      writeFileSync(join(dir, "probe.sh"), `#!/bin/bash\nset -euo pipefail\n${functionBody}\nprotect_restored_database\n`);
+      writeFileSync(join(dir, "gcloud"), [
+        '#!/bin/bash',
+        'case "$*" in',
+        ' "firestore databases update"*)',
+        '  echo update >> "$AURORA_TEST_DIR/calls"',
+        '  if [ "$AURORA_TEST_CASE" = iam ]; then echo "PERMISSION_DENIED" >&2; exit 7; fi',
+        '  if [ "$AURORA_TEST_CASE" = other-precondition ]; then echo "FAILED_PRECONDITION: unrelated database policy" >&2; exit 7; fi',
+        '  if [ "$AURORA_TEST_CASE" = persistent ] || [ ! -f "$AURORA_TEST_DIR/attempted" ]; then',
+        '   touch "$AURORA_TEST_DIR/attempted"',
+        '   echo "FAILED_PRECONDITION: Cannot serve because the database is in the middle of restore." >&2; exit 9',
+        '  fi',
+        '  echo accepted ;;',
+        ' "firestore databases describe"*)',
+        '  echo describe >> "$AURORA_TEST_DIR/calls"',
+        '  if [ ! -f "$AURORA_TEST_DIR/described" ]; then',
+        '   touch "$AURORA_TEST_DIR/described"',
+        '   echo \'{"deleteProtectionState":"DELETE_PROTECTION_ENABLED","pointInTimeRecoveryEnablement":"POINT_IN_TIME_RECOVERY_DISABLED"}\'',
+        '  else',
+        '   echo \'{"deleteProtectionState":"DELETE_PROTECTION_ENABLED","pointInTimeRecoveryEnablement":"POINT_IN_TIME_RECOVERY_ENABLED"}\'',
+        '  fi ;;',
+        ' *) echo UNEXPECTED_CLOUD_CALL >&2; exit 99 ;;',
+        'esac', ''
+      ].join("\n"), { mode: 0o755 });
+      writeFileSync(join(dir, "sleep"), '#!/bin/bash\necho wait >> "$AURORA_TEST_DIR/calls"\n', { mode: 0o755 });
+      const result = spawnSync("bash", [join(dir, "probe.sh")], {
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, PROJECT_ID: "synthetic-project", RESTORE_DB: "aurora-hml-restore-synthetic",
+          AURORA_TEST_CASE: scenario, AURORA_TEST_DIR: dir }, encoding: "utf8", timeout: 10000
+      });
+      const calls = readFileSync(join(dir, "calls"), "utf8").trim().split("\n");
+      if (scenario === "transient") {
+        assert.equal(result.status, 0, result.stderr);
+        assert.deepEqual(calls, ["update", "wait", "update", "describe", "wait", "describe"]);
+      } else if (scenario === "persistent") {
+        assert.equal(result.status, 27, result.stderr);
+        assert.equal(calls.filter(x => x === "update").length, 12);
+        assert.equal(calls.filter(x => x === "wait").length, 11);
+        assert.ok(!calls.includes("describe"));
+        assert.match(result.stderr, /CMEK_RESTORE_PROTECTIONS_PENDING/);
+      } else {
+        assert.equal(result.status, 7, result.stderr);
+        assert.deepEqual(calls, ["update"]);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+}
