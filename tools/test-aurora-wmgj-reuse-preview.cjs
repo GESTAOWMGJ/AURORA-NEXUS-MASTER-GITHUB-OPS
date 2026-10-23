@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
+const {createHash} = require('node:crypto');
 const {sanitizePreview,readPreview,run,failureEvidence,command,main} = require('./aurora-wmgj-reuse-preview.cjs');
 function sample() {
   return {ok:true,code:'AURORA_CONNECTOR_REUSE_CONFIG_ONLY_VERIFIED',state:'PENDING_TRIGGER_REVIEW',
@@ -209,7 +210,9 @@ test('predeployment command, JSON and selection failures have bounded diagnostic
   for(const [kind,reason,details] of [
     ['command','COMMAND_FAILED',{exitCode:7,spawnFailure:'OTHER',signal:'OTHER'}],
     ['json','JSON_INVALID',{}],
-    ['selection','DEPLOYMENT_SELECTION_INVALID',{}]
+    ['selection','DEPLOYMENT_SELECTION_INVALID',{deploymentSelection:{shape:'ARRAY',rowCount:2,
+      canonicalCount:2,expectedDescriptionCount:2,versionNumberValid:false,deploymentIdValid:false,
+      versionNumber:null,deploymentIdentitySha256:null,descriptionSha256:null}}]
   ]) {
     withDiagnosticFixture(fixture=>{
       captureRejectedFixture(fixture,(bin,args,cwd)=>{
@@ -219,6 +222,44 @@ test('predeployment command, JSON and selection failures have bounded diagnostic
         return JSON.stringify([fixture.deployment,{...fixture.deployment,deploymentId:secret}]);
       },{phase:'DEPLOYMENT_BEFORE',reason,secret,...details});
       assert.equal(fixture.calls.some(call=>call.command==='pull' || call.bin==='bash'),false);
+    });
+  }
+});
+
+test('post-preview selection failures identify bounded predicates and retain rejection without exporting deployment metadata',()=>{
+  const secret='synthetic-private-deployment-metadata';
+  const hash=value=>createHash('sha256').update(value).digest('hex');
+  for(const kind of ['missing','duplicate','stale-description','invalid-version','invalid-id','non-array']) {
+    withDiagnosticFixture(fixture=>{
+      const known=fixture.deployment;
+      const staleDescription='AURORA_EXECUTION_API_CANONICAL '+secret;
+      const rows=kind==='missing'?[]:kind==='duplicate'?[known,known]
+        :kind==='stale-description'?[{...known,description:staleDescription}]
+        :kind==='invalid-version'?[{...known,versionNumber:secret}]
+        :kind==='invalid-id'?[{...known,deploymentId:'private:'+secret}]
+        :{private:secret};
+      const single=['stale-description','invalid-version','invalid-id'].includes(kind);
+      const versionValid=single&&kind!=='invalid-version';
+      const idValid=single&&kind!=='invalid-id';
+      let reads=0;
+      const evidence=captureRejectedFixture(fixture,(bin,args,cwd)=>{
+        if(bin==='clasp'&&args[0]==='deployments'&&++reads===2)return JSON.stringify(rows);
+        return fixture.fallback(bin,args,cwd);
+      },{phase:'DEPLOYMENT_AFTER',reason:'DEPLOYMENT_SELECTION_INVALID',secret,
+        deploymentSelection:{shape:kind==='non-array'?'NON_ARRAY':'ARRAY',
+          rowCount:kind==='non-array'?null:kind==='missing'?0:kind==='duplicate'?2:1,
+          canonicalCount:kind==='non-array'?null:kind==='missing'?0:kind==='duplicate'?2:1,
+          expectedDescriptionCount:kind==='non-array'?null:kind==='duplicate'?2:
+            kind==='invalid-version'||kind==='invalid-id'?1:0,
+          versionNumberValid:versionValid,deploymentIdValid:idValid,
+          versionNumber:versionValid?known.versionNumber:null,
+          deploymentIdentitySha256:idValid?hash(known.deploymentId):null,
+          descriptionSha256:single?hash(kind==='stale-description'?staleDescription:known.description):null}});
+      assert.equal(reads,2);
+      assert.equal(fixture.calls.filter(call=>call.bin==='bash').length,1);
+      assert.equal(fixture.calls.filter(call=>call.command==='pull').length,1);
+      assert.equal(JSON.stringify(evidence).includes(known.deploymentId),false);
+      assert.equal(JSON.stringify(evidence).includes(known.description),false);
     });
   }
 });
@@ -268,13 +309,15 @@ test('untrusted error metadata and messages cannot forge a phase or escape the f
   withDiagnosticFixture(fixture=>{
     const secret='synthetic-secret-error-message';
     const error=Object.assign(new Error(secret),{
-      phase:'DEPLOYMENT_BEFORE',reason:'COMMAND_FAILED',exitCode:2,spawnFailure:secret,signal:secret});
+      phase:'DEPLOYMENT_BEFORE',reason:'COMMAND_FAILED',exitCode:2,spawnFailure:secret,signal:secret,
+      deploymentSelection:{private:secret}});
     const stdout=[],stderr=[];
     assert.equal(main({temporary:fixture.root,preview:()=>{throw error;},
       stdout:v=>stdout.push(v),stderr:v=>stderr.push(v)}),1);
     const evidence=failureEvidence(error);
     assert.equal(evidence.phase,'UNKNOWN'); assert.equal(evidence.reason,'UNEXPECTED');
     assert.equal(evidence.exitCode,null); assert.equal(evidence.spawnFailure,null); assert.equal(evidence.signal,null);
+    assert.equal(Object.hasOwn(evidence,'deploymentSelection'),false);
     const artifact=fs.readFileSync(path.join(fixture.root,'connector-reuse-preview.json'),'utf8');
     assert.deepEqual(JSON.parse(artifact),evidence); assert.equal(artifact.includes(secret),false);
     assert.deepEqual(stdout,[]); assert.deepEqual(stderr,['CONNECTOR_REUSE_PREVIEW_REJECTED']);

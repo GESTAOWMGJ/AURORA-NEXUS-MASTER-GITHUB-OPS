@@ -68,7 +68,7 @@ test("the emitted page compares its captured web build to the official pin witho
   assert.match(f.el("app-server-status").textContent, /Arquivos verificados/);
   assert.match(f.el("app-web-build").textContent, /MATCH_REPORTED/);
   assert.match(f.el("app-version-detail").textContent, /demais clientes não foram verificados/);
-  assert.equal(f.intervals.find(item => item.ms === 60_000)?.ms, 60_000);
+  assert.equal(f.intervals.find(item => item.ms === 15_000)?.ms, 15_000);
   assert.equal(f.calls[0]?.options.cache, "no-store");
 });
 
@@ -136,7 +136,7 @@ test("polling waits during active edits and resumes without clearing them", asyn
   const f = await fixture(); f.el("review-title").value = "Editing";
   f.document.activeElement = { closest: (selector: string) => selector === "form" ? f.el("create-review") : null };
   const count = f.calls.length; await f.run("maybeReload()"); assert.equal(f.calls.length, count);
-  assert.match(f.el("sync-status").textContent, /sem edição em andamento/);
+  assert.match(f.el("sync-status").textContent, /pausada durante edição ou envio/);
   f.document.activeElement = null; await f.run("maybeReload()"); assert.equal(f.calls.length, count + 1);
   assert.equal(f.el("review-title").value, "Editing");
 });

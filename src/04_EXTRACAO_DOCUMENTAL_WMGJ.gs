@@ -574,27 +574,29 @@ function converterArquivoParaGoogleDocWMGJ_V1_(file) {
     };
   }
 
-  var copiaId = "";
+  var copiaId = "", originalId = "", fallback = 'AURORA_DRIVE_CONVERSION_FAILED';
 
   try {
+    originalId = file.getId();
     var resource = {
       title: "WMGJ_OCR_TMP_" + file.getName(),
       mimeType: MimeType.GOOGLE_DOCS
     };
 
-    var copia = Drive.Files.copy(resource, file.getId(), {
+    var copia = Drive.Files.copy(resource, originalId, {
+      convert: true,
       ocr: true,
       ocrLanguage: "pt"
     });
 
+    if (!copia || typeof copia.id !== 'string' || !/^[A-Za-z0-9_-]{10,200}$/.test(copia.id)
+      || copia.id === originalId) throw new Error('AURORA_DRIVE_CONVERSION_UNSUPPORTED');
     copiaId = copia.id;
+    if (copia.mimeType !== MimeType.GOOGLE_DOCS) throw new Error('AURORA_DRIVE_CONVERSION_UNSUPPORTED');
+    fallback = 'AURORA_DRIVE_CONVERSION_NOT_READY';
     Utilities.sleep(1500);
 
     var texto = DocumentApp.openById(copiaId).getBody().getText();
-
-    try {
-      DriveApp.getFileById(copiaId).setTrashed(true);
-    } catch (erroTrash) {}
 
     return {
       ok: true,
@@ -604,18 +606,19 @@ function converterArquivoParaGoogleDocWMGJ_V1_(file) {
     };
 
   } catch (erro) {
-    if (copiaId) {
-      try {
-        DriveApp.getFileById(copiaId).setTrashed(true);
-      } catch (erroTrash2) {}
-    }
-
+    var code = auroraCodigoFalhaExtracaoDrive_(erro, fallback);
     return {
       ok: false,
       metodo: "drive_api_ocr_convert",
-      code: auroraCodigoFalhaExtracaoDrive_(erro,'AURORA_DRIVE_CONVERSION_FAILED'),
-      erro: auroraCodigoFalhaExtracaoDrive_(erro,'AURORA_DRIVE_CONVERSION_FAILED')
+      code: code,
+      erro: code
     };
+  } finally {
+    if (copiaId && copiaId !== originalId) {
+      try {
+        DriveApp.getFileById(copiaId).setTrashed(true);
+      } catch (erroTrash) {}
+    }
   }
 }
 

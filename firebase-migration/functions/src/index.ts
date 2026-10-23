@@ -445,6 +445,23 @@ export const ingestWmgjEvent = onRequest(
         };
       });
 
+      // Canonical acceptance is already committed. Replays can recover a deferred
+      // projection through the same transaction/history used by API integrations.
+      let projectionStatus: "REFRESHED" | "PENDING" = "PENDING";
+      try {
+        // Import after setGlobalOptions so this module's HTTP/scheduled exports
+        // inherit the configured region and runtime identity.
+        const { refreshProjection } = await import("./auroraRuntime.js");
+        await refreshProjection(event.orgId, {
+          uid: `hmac:${verification.principal.keyId}`,
+          role: "integration",
+          source: "INTEGRATION"
+        });
+        projectionStatus = "REFRESHED";
+      } catch {
+        logger.warn("WMGJ ingest projection deferred", { code: "PROJECTION_PENDING" });
+      }
+
       res.status(result.duplicate ? 200 : 202).json({
         ok: true,
         accepted: !result.duplicate,
@@ -452,7 +469,8 @@ export const ingestWmgjEvent = onRequest(
         entityId: result.entityId,
         eventId: result.eventId,
         versionId: result.versionId,
-        revision: result.revision
+        revision: result.revision,
+        projectionStatus
       });
     } catch (error) {
       if (error instanceof IngestDomainError) {

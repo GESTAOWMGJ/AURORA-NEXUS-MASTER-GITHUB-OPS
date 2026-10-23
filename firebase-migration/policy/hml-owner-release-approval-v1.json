@@ -146,6 +146,25 @@
       "clinicalSensitiveAuthorized": false
     }
   ],
+  "provisionalBetaAcceptance": {
+    "decisionId": "AURORA-HML-OWNER-BETA-20261023",
+    "recordedOn": "2026-10-23",
+    "approvalSource": "DIRECT_OWNER_CHAT",
+    "statement": "O titular considera o beta provisoriamente validado para teste e autoriza sua publicação, alimentação e atualização das plataformas integradas e do painel unificado.",
+    "specificScope": "Publicar o incremento de continuidade documental no HML existente pelo modo OWNER_DEPLOYMENT_APPROVAL; processar lotes limitados da fila WMGJ coberta pela autorização documental privada vigente, sem ampliar seu escopo.",
+    "ownerProvisionalAcceptance": true,
+    "independentGithubPullRequestReviewClaimed": false,
+    "laterMainCodeReviewClaimed": false,
+    "protectedRunOwnerApprovalStillRequired": true,
+    "riskReviewDeadlineExtended": false,
+    "credentialValidityExtended": false,
+    "documentScopeValidityExtended": false,
+    "iamChangeAuthorized": false,
+    "secretRotationAuthorized": false,
+    "sourceMutationAuthorized": false,
+    "productionAuthorized": false,
+    "clinicalSensitiveAuthorized": false
+  },
   "scope": {
     "repository": "GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS",
     "projectId": "wmgj-hml-jfn-20260927",

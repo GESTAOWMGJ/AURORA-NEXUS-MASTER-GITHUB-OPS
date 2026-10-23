@@ -827,3 +827,24 @@ O registro é de programa de computador. Não o converter em alegação de marca
 aprovação Anvisa, certificação de dispositivo médico, certificação ISO, validação clínica,
 segurança de produção ou implantação. A incorporação é documental e não concede acesso,
 não altera autorização, não executa deploy e não produz mutação de ambiente ou dados.
+
+## Continuidade documental no beta — 23/10/2026
+
+O aceite provisório do titular autoriza publicar e testar a continuidade no HML
+existente pelo modo `OWNER_DEPLOYMENT_APPROVAL`. Esse aceite é registrado como
+decisão do proprietário; não constitui parecer independente. A política vigente,
+o ambiente protegido e o vínculo de cada publicação ao SHA verificado permanecem.
+
+Uma ingestão canônica autenticada, inclusive replay idempotente, passa a solicitar
+a mesma projeção financeira/operacional já utilizada pelo executor. Falha posterior
+na projeção conserva o recibo e informa pendência; replay e agenda existente podem
+recuperá-la. A interface consulta a visão publicada a cada 15 segundos quando está
+visível, online e sem edição, recuando após falha. A data dos dados e a data da
+consulta são distintas.
+
+O painel separa documentos recebidos, documentos aguardando validação, dependência
+da origem e prontidão nativa. Recebimento não valida fatos financeiros, não conclui
+a instalação de um conector e não comprova cobertura integral do Drive. Clientes
+offline conservam seu estado pendente. Capacidade e limites são representados na
+rotina `AURORA-PROJECTION-ENGINE`; contrato e provas da entrega constam em
+`docs/AURORA_BETA_DOCUMENT_PROJECTION_20261023.md`.

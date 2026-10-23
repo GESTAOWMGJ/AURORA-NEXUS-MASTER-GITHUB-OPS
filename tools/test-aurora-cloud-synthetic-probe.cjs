@@ -101,7 +101,7 @@ function fixture(options={}) {
     SpreadsheetApp:{create:name=>makeSheet(new File(name,M.GOOGLE_SHEETS)),openById:id=>makeSheet(ownFile(id)),flush(){},getActiveSpreadsheet(){throw Error('Forbidden global sheet');}},
     Drive:{Files:{copy:(resource,id)=>{
       if(options.ocrFail)throw Error('Private OCR response must not leak');
-      const source=ownFile(id);assert.equal(source.mime,M.PDF);const f=new File(resource.title,M.GOOGLE_DOCS,source.text);f.parent=source.parent;return {id:f.id};
+      const source=ownFile(id);assert.equal(source.mime,M.PDF);const f=new File(resource.title,M.GOOGLE_DOCS,source.text);f.parent=source.parent;return {id:f.id,mimeType:f.mime};
     }}},
     Utilities:{DigestAlgorithm:{SHA_256:'sha256'},Charset:{UTF_8:'utf8'},getUuid:()=> 'synthetic-uuid-'+(++sequence),sleep(){expireAfter('retrySleep');},newBlob:value=>new Blob(value),
       computeDigest:(_,value)=>[...crypto.createHash('sha256').update(Array.isArray(value)?Buffer.from(value):String(value)).digest()],

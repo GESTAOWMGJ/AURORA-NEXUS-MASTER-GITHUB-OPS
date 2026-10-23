@@ -359,6 +359,101 @@ test('Excel conversion failure reports fixed codes and cleans only the temporary
   result=f.realExtract(original);assert.equal(result.code,'AURORA_DRIVE_EXTRACTION_AUTH_FAILED');
 });
 
+function setupPdfOcr(options={}) {
+  const f=fixture(),copies=[],trashed=[],opened=[];
+  const original=f.addFile('filepdf000001',null,'synthetic original PDF bytes',f.context.MimeType.PDF);
+  original.getName=()=> 'synthetic.pdf';
+  original.setTrashed=()=>{throw Error('ORIGINAL_MUST_NOT_BE_TRASHED');};
+  const temporary=f.addFile('temporarypdf001',null,'',f.context.MimeType.GOOGLE_DOCS);
+  temporary.setTrashed=value=>trashed.push({id:temporary.getId(),value});
+  f.context.Drive={Files:{copy:(resource,id,parameters)=>{
+    copies.push({resource,id,parameters});
+    if(options.copyError) throw Error(options.copyError);
+    // Verify the request contract; this fixture does not prove conversion of a real source.
+    if(parameters.convert!==true) throw Error('PDF_CONVERSION_NOT_REQUESTED');
+    return Object.prototype.hasOwnProperty.call(options,'copyResponse')?options.copyResponse:
+      {id:temporary.getId(),mimeType:f.context.MimeType.GOOGLE_DOCS};
+  }}};
+  f.context.DocumentApp={openById:id=>{
+    opened.push(id);assert.equal(id,temporary.getId());
+    if(options.readError) throw Error(options.readError);
+    return {getBody:()=>({getText:()=>options.text===undefined?'Texto do PDF extraído para revisão.':options.text})};
+  }};
+  f.context.extrairConteudoArquivoWMGJ_V1_=f.realExtract;
+  f.options.fileIds=[original.getId()];f.options.maxScan=10;f.options.processLimit=1;
+  return {f,original,temporary,copies,trashed,opened};
+}
+
+test('PDF OCR requests Drive v2 conversion and preserves original identity and replay',()=>{
+  const {f,original,temporary,copies,trashed,opened}=setupPdfOcr();
+  const contentHash=crypto.createHash('sha256').update(original._text).digest('hex');
+  const result=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+  assert.equal(result.ok,true);assert.equal(result.process.accepted,1);assert.equal(result.process.pending,0);
+  assert.equal(copies.length,1);assert.equal(copies[0].id,original.getId());
+  assert.equal(copies[0].resource.mimeType,f.context.MimeType.GOOGLE_DOCS);
+  assert.equal(copies[0].parameters.convert,true);assert.equal(copies[0].parameters.ocr,true);
+  assert.equal(copies[0].parameters.ocrLanguage,'pt');
+  assert.deepEqual(opened,[temporary.getId()]);assert.deepEqual(trashed,[{id:temporary.getId(),value:true}]);
+  assert.equal(f.sent.length,2);assert.equal(f.sent[0],f.sent[1]);
+  const event=f.sent[0],receipt=result.privateReadbackPlan[0];
+  assert.equal(event.source.sourceId,original.getId());assert.equal(event.source.contentHash,contentHash);
+  assert.equal(event.record.extractionEvidence.method,'drive_api_ocr_convert');
+  assert.equal(event.record.extractionEvidence.financialFactsApproved,false);
+  assert.equal(event.record.extractionEvidence.coverage,'TEXT_EXTRACTED_REVIEW_PENDING');
+  assert.equal(event.idempotencyKey,'synthetic:DRIVE:'+original.getId()+':drive-extraction-v1:10000:'+contentHash);
+  assert.equal(receipt.sourceId,original.getId());assert.equal(receipt.sourceVersion,10000);
+  assert.equal(receipt.contentHash,contentHash);assert.equal(receipt.replayVerified,true);
+  assert.equal(f.rows[1][5],'REVISAR_HUMANO');
+});
+
+test('PDF OCR validates the converted identity and MIME before reading or cleaning it',()=>{
+  for(const response of [null,{}, {id:'bad'}, {id:'filepdf000001',mimeType:'application/vnd.google-apps.document'},
+    {id:'temporarypdf001',mimeType:'application/pdf'}]) {
+    const {f,original,temporary,trashed,opened}=setupPdfOcr({copyResponse:response});
+    const result=f.realExtract(original);
+    assert.equal(result.ok,false);assert.equal(result.code,'AURORA_DRIVE_CONVERSION_UNSUPPORTED');
+    assert.deepEqual(opened,[]);
+    assert.deepEqual(trashed,response?.id===temporary.getId()?[{id:temporary.getId(),value:true}]:[]);
+  }
+});
+
+test('PDF copy and document-read failures remain pending with sanitized stage codes',()=>{
+  const cases=[
+    {options:{copyError:'Service unavailable PRIVATE_FILE_NAME PRIVATE_SOURCE_ID'},code:'AURORA_DRIVE_CONVERSION_FAILED',temporary:false},
+    {options:{readError:'Service unavailable PRIVATE_FILE_NAME PRIVATE_SOURCE_ID'},code:'AURORA_DRIVE_CONVERSION_NOT_READY',temporary:true},
+    {options:{copyError:'User quota exceeded PRIVATE_FILE_NAME'},code:'AURORA_DRIVE_EXTRACTION_QUOTA',temporary:false}
+  ];
+  for(const item of cases) {
+    const {f,temporary,trashed}=setupPdfOcr(item.options);
+    const result=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+    assert.equal(result.ok,true);assert.equal(result.process.accepted,0);assert.equal(result.process.pending,1);
+    assert.equal(result.process.errors,1);assert.equal(result.process.blockingErrors,0);
+    assert.equal(f.sent.length,0);assert.equal(result.privateReadbackPlan.length,0);
+    assert.equal(f.rows[1][5],'ERRO_REPROCESSAR');assert.equal(f.rows[1][8],item.code);
+    assert.equal(f.rows[1][8].includes('PRIVATE_'),false);
+    assert.deepEqual(trashed,item.temporary?[{id:temporary.getId(),value:true}]:[]);
+  }
+  const denied=setupPdfOcr({copyError:'Permission denied PRIVATE_SOURCE_ID'});
+  const result=denied.f.realExtract(denied.original);
+  assert.equal(result.ok,false);assert.equal(result.code,'AURORA_DRIVE_EXTRACTION_AUTH_FAILED');
+  assert.equal(result.observacao.includes('PRIVATE_'),false);assert.deepEqual(denied.trashed,[]);
+  const unreadableIdentity=setupPdfOcr();
+  unreadableIdentity.original.getId=()=>{throw Error('Permission denied PRIVATE_SOURCE_ID');};
+  const identityFailure=unreadableIdentity.f.context.converterArquivoParaGoogleDocWMGJ_V1_(unreadableIdentity.original);
+  assert.equal(identityFailure.ok,false);assert.equal(identityFailure.code,'AURORA_DRIVE_EXTRACTION_AUTH_FAILED');
+  assert.equal(identityFailure.erro.includes('PRIVATE_'),false);
+  assert.deepEqual(unreadableIdentity.copies,[]);assert.deepEqual(unreadableIdentity.trashed,[]);
+});
+
+test('an empty OCR document remains pending and its temporary copy is cleaned',()=>{
+  const {f,temporary,trashed}=setupPdfOcr({text:''});
+  const result=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+  assert.equal(result.ok,true);assert.equal(result.process.accepted,0);assert.equal(result.process.pending,1);
+  assert.equal(result.process.blockingErrors,0);assert.equal(f.sent.length,0);
+  assert.equal(f.rows[1][8],'AURORA_DRIVE_EXTRACTION_EMPTY');
+  assert.deepEqual(trashed,[{id:temporary.getId(),value:true}]);
+});
+
 function ofxFile(f,name,content) {
   const bytes=Buffer.isBuffer(content)?content:Buffer.from(content,'utf8');
   const file=f.addFile('fileofx000001',null,'','application/octet-stream');file.getName=()=>name;

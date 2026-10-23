@@ -14,7 +14,7 @@ function renderedShell(ready?: string, profile: Parameters<typeof auroraProtecte
 }
 const html = renderedShell();
 const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/gi)].map(match => match[1]);
-const snapshot = { projection: { competence: '2026-08', generatedAt: '2026-09-28T11:00:00Z', financialCents: { invoicedCents: 12345, receivedCents: 0, glossCents: null }, operations: { overdueActions: 0, openActions: 0 }, coverage: { evidencePercent: null, reconciliationPercent: 0 }, modules: [] }, actions: [] };
+const snapshot = { organization: { id: 'wmgj', name: 'Synthetic organization' }, installation: { firstIngestionVerified: false }, projection: { orgId: 'wmgj', competence: '2026-08', generatedAt: '2026-09-28T11:00:00Z', financialCents: { invoicedCents: 12345, receivedCents: 0, glossCents: null }, operations: { overdueActions: 0, openActions: 0 }, coverage: { evidencePercent: null, reconciliationPercent: 0 }, modules: [] }, actions: [] };
 
 const response = (status = 200, body: unknown = snapshot) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
 async function fixture(first = response(), hash = '', markup = html) {
@@ -23,11 +23,13 @@ async function fixture(first = response(), hash = '', markup = html) {
   const winHandlers = new Map<string, Handler>();
   const calls: { url: string; options: any }[] = []; const redirects: string[] = []; const intervals: { fn: Handler; ms: number }[] = []; const timeouts = new Map<number, Handler>(); let timerId = 0;
   let fetcher = async (_url: string, _options: any): Promise<any> => first;
+  let clock = Date.now();
+  class BrowserDate extends Date { static now() { return clock; } }
   const location = { origin: 'https://auroranexus.com.br', hostname: 'auroranexus.com.br', search: '', hash, replace: (url: string) => redirects.push(url) };
-  const context = createContext({ document, window: { addEventListener: (name: string, callback: Handler) => addHandler(winHandlers, name, callback), dispatchEvent: (event: Event) => { winHandlers.get(event.type)?.(event); return true; } }, navigator: { onLine: true }, location, history: { pushState: (_state: unknown, _unused: string, value: string) => { location.hash = value; } }, matchMedia: () => ({ matches: false }), Event, Intl, Date, AbortController, crypto: { randomUUID: () => 'synthetic-idempotency-key' }, setInterval: (fn: Handler, ms: number) => intervals.push({ fn, ms }), setTimeout: (fn: Handler) => { const id = ++timerId; timeouts.set(id, fn); return id; }, clearTimeout: (id: number) => timeouts.delete(id), fetch: (url: string, options: any) => { calls.push({ url, options }); return fetcher(url, options); } });
+  const context = createContext({ document, window: { addEventListener: (name: string, callback: Handler) => addHandler(winHandlers, name, callback), dispatchEvent: (event: Event) => { winHandlers.get(event.type)?.(event); return true; } }, navigator: { onLine: true }, location, history: { pushState: (_state: unknown, _unused: string, value: string) => { location.hash = value; } }, matchMedia: () => ({ matches: false }), Event, Intl, Date: BrowserDate, AbortController, TextEncoder, TextDecoder, crypto: { randomUUID: () => 'synthetic-idempotency-key' }, setInterval: (fn: Handler, ms: number) => intervals.push({ fn, ms }), setTimeout: (fn: Handler) => { const id = ++timerId; timeouts.set(id, fn); return id; }, clearTimeout: (id: number) => timeouts.delete(id), fetch: (url: string, options: any) => { calls.push({ url, options }); return fetcher(url, options); } });
   [...markup.matchAll(/<script>([\s\S]*?)<\/script>/gi)].forEach(match => new Script(match[1]).runInContext(context));
   await setImmediate();
-  return { elements, document, calls, redirects, intervals, timeouts, docHandlers, winHandlers, context, fetchWith(fn: typeof fetcher) { fetcher = fn; }, run(code: string) { return new Script(code).runInContext(context); }, async click(id: string) { const element = elements.get(id)!; await element.handlers.get('click')!({ currentTarget: element }); }, async submit(id: string) { const element = elements.get(id)!; await element.handlers.get('submit')!({ currentTarget: element, preventDefault() {} }); } };
+  return { elements, document, calls, redirects, intervals, timeouts, docHandlers, winHandlers, context, advanceClock(ms: number) { clock += ms; }, fetchWith(fn: typeof fetcher) { fetcher = fn; }, run(code: string) { return new Script(code).runInContext(context); }, async click(id: string) { const element = elements.get(id)!; await element.handlers.get('click')!({ currentTarget: element }); }, async submit(id: string) { const element = elements.get(id)!; await element.handlers.get('submit')!({ currentTarget: element, preventDefault() {} }); } };
 }
 
 test('the actual emitted browser script parses; missing regex delimiters fail this gate', () => {
@@ -178,11 +180,93 @@ test('bootstrap renders only returned values and distinguishes absent data from 
 
 test('periodic updates are authenticated GET-only and preserve manual engine execution', async () => {
   const f = await fixture();
-  assert.equal(f.intervals.length, 1); assert.equal(f.intervals[0].ms, 60000);
+  assert.equal(f.intervals.length, 1); assert.equal(f.intervals[0].ms, 15000);
   await f.intervals[0].fn();
   assert.equal(f.calls.length, 2);
   assert.ok(f.calls.every(call => call.url === '/api/bootstrap' && !call.options.method));
   assert.equal(f.elements.get('overdue')!.textContent, '0');
+  assert.match(f.elements.get('sync-status')!.textContent, /cada 15 s/);
+  assert.match(f.elements.get('sync-status')!.textContent, /data dos dados é a da projeção/);
+});
+
+test('published document counts stay separate from financial competence and first native operation', async () => {
+  const body = { ...snapshot, projection: { ...snapshot.projection, snapshotId: 'synthetic-projection-7', documentIntelligence: { totalDocuments: 9, pendingDocumentFlow: 7, sourceDependentDocuments: 5, nativeReadyDocuments: 2 } } };
+  const f = await fixture(response(200, body));
+  for (const [id, value] of [['documents-total', '9'], ['documents-pending', '7'], ['documents-source-dependent', '5'], ['documents-native-ready', '2']]) assert.equal(f.elements.get(id)!.textContent, value);
+  assert.equal(f.elements.get('document-summary')!.closest('[data-page]')!.dataset.page, 'overview');
+  assert.equal(f.elements.get('overview')!.children[0], f.elements.get('financial-focus'));
+  assert.match(f.elements.get('document-projection-status')!.textContent, /28\/09\/2026.*11:00:00 UTC/);
+  assert.match(f.elements.get('document-snapshot-reference')!.textContent, /WMGJ.*synthetic-projection-7/);
+  assert.match(f.elements.get('document-summary')!.textContent, /todas as competências/);
+  assert.match(f.elements.get('document-summary')!.textContent, /Fila esgotada, cobertura integral/);
+  assert.match(f.elements.get('integration-status')!.textContent, /9 documento\(s\) recebido\(s\)/);
+  assert.match(f.elements.get('integration-status')!.textContent, /primeira operação nativa ainda não foi comprovada/);
+  assert.equal(f.run('activeCompetence'), '2026-08');
+  assert.equal(f.elements.get('invoiced')!.textContent, 'R$\u00a0123,45');
+  assert.equal(f.calls.length, 1);
+  f.run('renderIntegrations({installation:{firstIngestionVerified:true}})');
+  assert.match(f.elements.get('integration-status')!.textContent, /9 documento\(s\) recebido\(s\).*Primeira operação nativa confirmada/);
+  assert.match(f.elements.get('integration-status')!.textContent, /cobertura completa.*comprovação própria/);
+});
+
+test('document counts preserve zero, reject invalid counts and require a published tenant snapshot', async () => {
+  const zeros = { totalDocuments: 0, pendingDocumentFlow: 0, sourceDependentDocuments: 0, nativeReadyDocuments: 0 };
+  const f = await fixture(response(200, { ...snapshot, projection: { ...snapshot.projection, documentIntelligence: zeros } }));
+  for (const id of ['documents-total', 'documents-pending', 'documents-source-dependent', 'documents-native-ready']) assert.equal(f.elements.get(id)!.textContent, '0');
+  assert.match(f.elements.get('integration-status')!.textContent, /Nenhum documento recebido na projeção atual/);
+  const invalid = { totalDocuments: 3, pendingDocumentFlow: -1, sourceDependentDocuments: 4, nativeReadyDocuments: '2' };
+  f.fetchWith(async () => response(200, { ...snapshot, projection: { ...snapshot.projection, documentIntelligence: invalid } }));
+  await f.run('load()');
+  assert.equal(f.elements.get('documents-total')!.textContent, '3');
+  for (const id of ['documents-pending', 'documents-source-dependent', 'documents-native-ready']) assert.equal(f.elements.get(id)!.textContent, 'Sem fonte');
+  for (const candidate of [
+    { ...snapshot, projection: { ...snapshot.projection, generatedAt: null, documentIntelligence: zeros } },
+    { ...snapshot, projection: { ...snapshot.projection, generatedAt: 'invalid', documentIntelligence: zeros } },
+    { projection: { ...snapshot.projection, documentIntelligence: zeros }, actions: [] }
+  ]) {
+    f.fetchWith(async () => response(200, candidate)); await f.run('load()');
+    assert.equal(f.elements.get('documents-total')!.textContent, 'Sem fonte');
+    assert.match(f.elements.get('document-projection-status')!.textContent, /Sem projeção publicada/);
+    assert.doesNotMatch(f.elements.get('integration-status')!.textContent, /0 documento|Nenhum documento recebido/);
+  }
+});
+
+for (const mismatch of ['organization', 'projection']) test('a mismatched ' + mismatch + ' cannot populate the dashboard or continue polling', async () => {
+  const f = await fixture();
+  const body = { ...snapshot, organization: { id: mismatch === 'organization' ? 'other-company' : 'wmgj' }, projection: { ...snapshot.projection, orgId: mismatch === 'projection' ? 'other-company' : 'wmgj', documentIntelligence: { totalDocuments: 99 } } };
+  f.fetchWith(async () => response(200, body)); await f.run('load()');
+  assert.equal(f.elements.get('content')!.hidden, true);
+  assert.equal(f.elements.get('documents-total')!.textContent, '—');
+  assert.equal(f.elements.get('invoiced')!.textContent, '—');
+  assert.match(f.elements.get('notice')!.textContent, /organização da resposta não corresponde/);
+  const count = f.calls.length; await f.intervals[0].fn(); assert.equal(f.calls.length, count);
+});
+
+test('automatic polls do not overlap and use a recovery interval after failure', async () => {
+  const f = await fixture(); let complete!: (value: unknown) => void;
+  f.fetchWith(async () => new Promise(resolve => { complete = resolve; }));
+  const pending = f.intervals[0].fn();
+  f.advanceClock(15000); await f.intervals[0].fn();
+  assert.equal(f.calls.length, 2);
+  complete(response(503)); await pending;
+  for (let i = 0; i < 3; i++) { f.advanceClock(15000); await f.intervals[0].fn(); }
+  assert.equal(f.calls.length, 2);
+  assert.match(f.elements.get('sync-status')!.textContent, /intervalo de recuperação de 60 s/);
+  f.fetchWith(async () => response()); f.advanceClock(15000); await f.intervals[0].fn();
+  assert.equal(f.calls.length, 3);
+  assert.equal(f.elements.get('content')!.hidden, false);
+});
+
+test('faster bootstrap polling does not multiply integration credential reads', async () => {
+  const markup = auroraProtectedShell({ ...member, role: 'director' }, { action: 'synthetic-action', refresh: 'synthetic-refresh', integrationKey: 'synthetic-integration', documentIngest: 'synthetic-ingest', distributionApproval: 'synthetic-distribution', logout: 'synthetic-logout' });
+  const f = await fixture(response(200, { ...snapshot, orgId: 'wmgj', credentials: [], agents: [] }), '', markup);
+  const integrationReads = () => f.calls.filter(call => call.url === '/api/integration-keys').length;
+  assert.equal(integrationReads(), 1);
+  for (let i = 0; i < 3; i++) { f.advanceClock(15000); await f.intervals[0].fn(); }
+  assert.equal(integrationReads(), 1);
+  f.advanceClock(15000); await f.intervals[0].fn(); await setImmediate();
+  assert.equal(integrationReads(), 2);
+  assert.ok(f.calls.every(call => !call.options.method));
 });
 
 test('polling pauses when hidden, offline, editing, resolving or mutating', async () => {
