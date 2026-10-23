@@ -129,10 +129,20 @@ dados clínicos e ativação da fonte real não são autorizados por esta renova
 CI exato, revisão e demais gates de publicação, assinatura, smokes e CAS continuam
 necessários. Registro de decisão não comprova publicação ou instalação.
 
-Observação separada de 22/10/2026: a API GitHub informou o
+Observação separada de 22/10/2026: a API GitHub informou inicialmente o
 [Dependabot #67](https://github.com/GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS/security/dependabot/67)
 aberto como CRITICAL para `certifi`, runtime em `firebase-migration/api/uv.lock`,
-advisory `GHSA-6q48-6c7w-9gw2` e primeira versão corrigida `2026.10.19`. Esse novo
-alerta não integra os 11 riscos históricos de R029 e não recebe aceite por esta
-renovação. A regra de bloqueio CRITICAL da seção 3 continua aplicável; correção,
-revisão e validação do lockfile são gates separados antes de promover a beta.
+advisory `GHSA-6q48-6c7w-9gw2` e primeira versão corrigida `2026.10.19`. O
+[PR #295](https://github.com/GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS/pull/295),
+head `58139bcfb804c8eb69a7800846fbf100c80b4142`, foi integrado pelo merge
+`6f46e4792ce45a1f222055f1a925dcff54416772`, com sete checks aprovados no head
+exato. Altera somente o lockfile para `certifi@2026.10.19`, com hashes das duas
+distribuições conferidos no PyPI. Esta candidata foi reconciliada com essa fonte.
+
+A correção do lockfile não comprova reconstrução de imagens, atualização de
+ambientes instalados ou do bundle de confiança efetivamente usado. Nenhum deploy
+ou reconstrução de runtime foi realizado por esta reconciliação. A leitura do
+alerta após o merge ainda retornou `open`; não se declara encerramento por
+inferência. Esse alerta não integra os 11 riscos históricos de R029 e não recebe
+aceite por esta renovação. A regra CRITICAL da seção 3 continua aplicável aos
+ambientes afetados até comprovar a remediação ou outra decisão específica.
