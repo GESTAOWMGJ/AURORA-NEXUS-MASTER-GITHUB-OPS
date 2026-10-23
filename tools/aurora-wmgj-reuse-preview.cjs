@@ -6,6 +6,8 @@ const cp = require('node:child_process');
 const {selectDeployment, sha} = require('./aurora-cloud-synthetic-probe.cjs');
 const PROJECT = 'wmgj-hml-jfn-20260927';
 const MODULES = ['00_CORE_WMGJ', '37_AURORA_CONECTORES_PLUG_AND_PLAY'];
+const MAX_AFTER_DEPLOYMENT_READS = 5;
+const DEPLOYMENT_RETRY_DELAY_MS = 10000;
 const FLAGS = ['ok','sourceIdentified','metadataAccessVerified','existingHmacReused','triggerReviewRequired',
   'configurationWriteEligible','configurationChanged','configurationUncertain','rollbackVerified','configOnly',
   'sourceActive','triggersChanged','contentRead','providerConsentVerified','firstIngestionVerified',
@@ -49,6 +51,7 @@ function failureEvidence(error) {
     spawnFailure:detail.spawnFailure == null ? null : ['ENOENT','ETIMEDOUT','ENOBUFS'].includes(detail.spawnFailure) ? detail.spawnFailure : 'OTHER',
     signal:detail.signal == null ? null : ['SIGTERM','SIGKILL'].includes(detail.signal) ? detail.signal : 'OTHER',
     ...(detail.deploymentSelection ? {deploymentSelection:detail.deploymentSelection} : {}),
+    ...(detail.deploymentObservations ? {deploymentObservations:detail.deploymentObservations} : {}),
     complete:false,providerIngestionOrInstallationVerified:false};
 }
 
@@ -123,8 +126,12 @@ function command(executable,args,cwd) {
   return result.stdout;
 }
 
+function waitForDeployment(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,milliseconds);
+}
+
 function run({repo = path.resolve(__dirname,'..'), temporary = process.env.RUNNER_TEMP,
-  sourceSha = process.env.GITHUB_SHA, exec = command, now = Date.now} = {}) {
+  sourceSha = process.env.GITHUB_SHA, exec = command, now = Date.now, wait = waitForDeployment} = {}) {
   const gate = () => atPhase('PREFLIGHT_POLICY','POLICY_READ_FAILED',() => {
     const policy = JSON.parse(fs.readFileSync(path.join(repo,'firebase-migration/policy/hml-owner-release-approval-v1.json')));
     if (process.env.GITHUB_REF !== 'refs/heads/main') reject('REF_INVALID');
@@ -155,35 +162,63 @@ function run({repo = path.resolve(__dirname,'..'), temporary = process.env.RUNNE
   });
   const project = dir => fs.writeFileSync(path.join(dir,'.clasp.json'),JSON.stringify({scriptId,rootDir:'.'}),{mode:0o600,flag:'wx'});
   atPhase('PREFLIGHT_GIT','WORKSPACE_INVALID',() => project(workspace));
-  const read = suffix => {
+  const deploymentObservations = {maxAfterReads:MAX_AFTER_DEPLOYMENT_READS,
+    retryDelayMs:DEPLOYMENT_RETRY_DELAY_MS,afterReads:0,after:[]};
+  const read = (suffix,expected = null) => {
     const deploymentPhase = 'DEPLOYMENT_' + suffix, sourcePhase = 'SOURCE_' + suffix;
-    gate();
-    const rows = atPhase(deploymentPhase,'DEPLOYMENT_SELECTION_INVALID',() =>
-      JSON.parse(call(deploymentPhase,'clasp',['deployments','--json'],workspace)));
-    const deployment = atPhase(deploymentPhase,'DEPLOYMENT_SELECTION_INVALID',() => {
-      try { return selectDeployment(rows,sourceSha); }
-      catch { throw rejection({reason:'DEPLOYMENT_SELECTION_INVALID',
-        deploymentSelection:deploymentSelectionEvidence(rows,sourceSha)}); }
-    });
-    const directory = atPhase(sourcePhase,'WORKSPACE_INVALID',() => {
-      const value = fs.mkdtempSync(path.join(workspace,'published-')); project(value); return value;
-    });
-    gate(); call(sourcePhase,'clasp',['pull','--versionNumber',String(deployment.versionNumber),'--json'],directory); gate();
-    const hashes = {};
-    atPhase(sourcePhase,'SOURCE_FILE_INVALID',() => {
-      for (const module of MODULES) {
-        const candidates = ['.gs','.js'].map(ext => path.join(directory,module+ext)).filter(file=>fs.existsSync(file));
-        if (candidates.length !== 1 || fs.lstatSync(candidates[0]).isSymbolicLink()) reject('SOURCE_FILE_INVALID');
-        const local = fs.readFileSync(path.join(repo,'src',module+'.gs'),'utf8').replace(/\r\n/g,'\n');
-        const remote = fs.readFileSync(candidates[0],'utf8').replace(/\r\n/g,'\n');
-        if (local !== remote) reject('SOURCE_HASH_MISMATCH'); hashes[module] = sha(remote);
+    try {
+      const deployment = atPhase(deploymentPhase,'DEPLOYMENT_SELECTION_INVALID',() => {
+        for (let attempt = 1; ; attempt++) {
+          gate();
+          const rows = JSON.parse(call(deploymentPhase,'clasp',['deployments','--json'],workspace));
+          const observed = deploymentSelectionEvidence(rows,sourceSha);
+          if (expected) {
+            deploymentObservations.after.push(observed);
+            deploymentObservations.afterReads++;
+          }
+          let selected;
+          try { selected = selectDeployment(rows,sourceSha); } catch { /* Diagnose below; never accept a failed selector. */ }
+          if (selected && (!expected || (selected.versionNumber === expected.versionNumber
+            && sha(selected.deploymentId) === expected.deploymentIdentitySha256))) return selected;
+
+          // Only an older observation of the same unique canonical deployment may
+          // converge. Never pull that version, repeat PREVIEW, or retry a new identity.
+          const historical = expected && observed.canonicalCount === 1 && observed.versionNumberValid
+            && observed.deploymentIdValid && observed.deploymentIdentitySha256 === expected.deploymentIdentitySha256
+            && observed.versionNumber < expected.versionNumber
+            && rows.every(row => row && typeof row === 'object' && !Array.isArray(row))
+            && rows.some(row => /^AURORA_EXECUTION_API_CANONICAL [a-f0-9]{40}$/.test(row.description));
+          if (!historical || attempt >= MAX_AFTER_DEPLOYMENT_READS) {
+            throw rejection({reason:'DEPLOYMENT_SELECTION_INVALID',deploymentSelection:observed});
+          }
+          gate(); wait(DEPLOYMENT_RETRY_DELAY_MS); gate();
+        }
+      });
+      const directory = atPhase(sourcePhase,'WORKSPACE_INVALID',() => {
+        const value = fs.mkdtempSync(path.join(workspace,'published-')); project(value); return value;
+      });
+      gate(); call(sourcePhase,'clasp',['pull','--versionNumber',String(deployment.versionNumber),'--json'],directory); gate();
+      const hashes = {};
+      atPhase(sourcePhase,'SOURCE_FILE_INVALID',() => {
+        for (const module of MODULES) {
+          const candidates = ['.gs','.js'].map(ext => path.join(directory,module+ext)).filter(file=>fs.existsSync(file));
+          if (candidates.length !== 1 || fs.lstatSync(candidates[0]).isSymbolicLink()) reject('SOURCE_FILE_INVALID');
+          const local = fs.readFileSync(path.join(repo,'src',module+'.gs'),'utf8').replace(/\r\n/g,'\n');
+          const remote = fs.readFileSync(candidates[0],'utf8').replace(/\r\n/g,'\n');
+          if (local !== remote) reject('SOURCE_HASH_MISMATCH'); hashes[module] = sha(remote);
+        }
+      });
+      atPhase(sourcePhase,'MANIFEST_INVALID_OR_MISMATCH',() => {
+        if (stable(JSON.parse(fs.readFileSync(path.join(repo,'appsscript.json'))))
+          !== stable(JSON.parse(fs.readFileSync(path.join(directory,'appsscript.json'))))) reject('MANIFEST_INVALID_OR_MISMATCH');
+      });
+      return {versionNumber:deployment.versionNumber,deploymentIdentitySha256:sha(deployment.deploymentId),hashes};
+    } catch (error) {
+      if (expected && deploymentObservations.afterReads > 0) {
+        throw rejection({...errorDiagnostics.get(error),deploymentObservations});
       }
-    });
-    atPhase(sourcePhase,'MANIFEST_INVALID_OR_MISMATCH',() => {
-      if (stable(JSON.parse(fs.readFileSync(path.join(repo,'appsscript.json'))))
-        !== stable(JSON.parse(fs.readFileSync(path.join(directory,'appsscript.json'))))) reject('MANIFEST_INVALID_OR_MISMATCH');
-    });
-    return {versionNumber:deployment.versionNumber,deploymentIdentitySha256:sha(deployment.deploymentId),hashes};
+      throw error;
+    }
   };
   const before = read('BEFORE');
   const request = {confirmation:'REUSE_EXISTING_WMGJ_SOURCE_CONFIG_ONLY',configOnly:true,mode:'PREVIEW',orgId:'wmgj',
@@ -192,11 +227,11 @@ function run({repo = path.resolve(__dirname,'..'), temporary = process.env.RUNNE
   const output = path.join(workspace,'preview.raw.json');
   gate(); call('PREVIEW_CALL','bash',[path.join(repo,'tools/run-clasp-checked.sh'),'auroraReaproveitarFonteWmgjConfigOnly',output,JSON.stringify([request])],workspace); gate();
   const summary = atPhase('PREVIEW_READ','OUTPUT_FILE_INVALID',() => readPreview(output));
-  const after = read('AFTER'); gate();
+  const after = read('AFTER',before); gate();
   atPhase('FINALIZE','UNEXPECTED',() => { if (stable(before) !== stable(after)) reject('PUBLISHED_VERSION_CHANGED'); });
   return {schemaVersion:'aurora.wmgj.existing-source-preview-evidence.v1',sourceSha,publishedVersionStable:true,
     checkedSourceShaScope:'PUBLISHED_APPS_SCRIPT_VERSION_AND_PREVIEW_COORDINATOR',runtimeFunctionHashesVerified:false,
-    published:before,summary,existingHmacClaimScope:'PRESERVED_CONFIGURATION_FORMAT_ONLY',
+    published:before,deploymentObservations,summary,existingHmacClaimScope:'PRESERVED_CONFIGURATION_FORMAT_ONLY',
     providerIngestionOrInstallationVerified:false,complete:false};
 }
 

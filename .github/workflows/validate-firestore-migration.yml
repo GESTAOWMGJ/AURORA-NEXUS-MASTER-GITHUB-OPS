@@ -7,6 +7,8 @@ on:
       - "desktop/ia-master/**"
       - "aurora-coletor/**"
       - "app-foundation/contracts/**"
+      - "tools/aurora-wmgj-reuse-preview.cjs"
+      - "tools/test-aurora-wmgj-reuse-preview.cjs"
       - ".github/workflows/validate-firestore-migration.yml"
       - ".github/workflows/deploy-aurora-firebase.yml"
       - ".github/workflows/aurora-firebase-hml-request.yml"
@@ -24,6 +26,8 @@ on:
       - "desktop/ia-master/**"
       - "aurora-coletor/**"
       - "app-foundation/contracts/**"
+      - "tools/aurora-wmgj-reuse-preview.cjs"
+      - "tools/test-aurora-wmgj-reuse-preview.cjs"
       - ".github/workflows/validate-firestore-migration.yml"
       - ".github/workflows/deploy-aurora-firebase.yml"
       - ".github/workflows/aurora-firebase-hml-request.yml"
@@ -79,7 +83,9 @@ jobs:
           cache-dependency-glob: firebase-migration/api/uv.lock
 
       - name: Test isolated cloud harness before any deployment
-        run: node --test tools/test-aurora-cloud-synthetic-probe.cjs
+        run: |
+          node --test tools/test-aurora-cloud-synthetic-probe.cjs
+          node --test tools/test-aurora-wmgj-reuse-preview.cjs
 
       - name: Test controlled HML IAM repair without cloud access
         run: python3 -m unittest discover -s firebase-migration/scripts -p test_hml_eventarc_iam.py -v
