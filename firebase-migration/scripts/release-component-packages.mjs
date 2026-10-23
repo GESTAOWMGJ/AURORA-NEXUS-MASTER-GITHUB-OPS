@@ -6,9 +6,10 @@ import {resolve, dirname, relative} from 'node:path';
 
 const require=createRequire(import.meta.url);
 const {readRegularFile}=require('../../desktop/ia-master/safe-read.cjs');
-const WINDOWS_INTEGRATION_VERSION='1.0.7';
+const WINDOWS_INTEGRATION_VERSION='1.0.8';
 export const WINDOWS_INTEGRATION_FILES=Object.freeze(['aurora_cloud_sync.py','aurora_deployment.py','client_agent.py',
-  'client_secret_store.py','install_client_agent.py','provider_connectors.py','published_release.py']);
+  'client_secret_store.py','install_client_agent.py','provider_connectors.py','published_release.py',
+  'document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json']);
 export const IA_MASTER_FILES=Object.freeze([
   'README.md','app.css','app.js','index.html','knowledge-registry.cjs','manage.cjs','modus-operandi.md','published-update.cjs',
   'publisher.cjs','safe-read.cjs','server.cjs','studio-local.css','studio-local.js','studio.cjs','update.cjs',

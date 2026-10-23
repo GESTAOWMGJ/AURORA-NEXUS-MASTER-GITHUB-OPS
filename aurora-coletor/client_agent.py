@@ -516,11 +516,30 @@ def main(argv=None):
     parser=argparse.ArgumentParser();parser.add_argument('--config',required=True);parser.add_argument('--once',action='store_true');parser.add_argument('--watch',action='store_true')
     parser.add_argument('--release-status',action='store_true',help='Public release preflight without source reads or state writes')
     parser.add_argument('--read-active',action='store_true',help='Explicit authenticated canonical GET, only with --release-status')
+    parser.add_argument('--observe-document',help='One explicit file inside an authorized local root; no watcher or installation acceptance')
+    parser.add_argument('--document-mime');parser.add_argument('--document-system',choices=['MV','TASY','ERP']);parser.add_argument('--document-id')
+    parser.add_argument('--document-send',action='store_true');parser.add_argument('--document-expected-revision',type=int,default=0)
+    parser.add_argument('--document-previous-observation-hash')
     args=parser.parse_args(argv)
     config_path=safe_path(args.config)
     if not config_path.is_file() or config_path.stat().st_nlink!=1:raise sync.SyncError('CONFIG_INTEGRITY_FAILED')
     config=json.loads(config_path.read_text())
-    _,state=validate(config)
+    roots,state=validate(config)
+    if args.observe_document:
+        if args.once or args.watch or args.release_status or args.read_active or not args.document_system or not args.document_id:
+            raise sync.SyncError('SEPARATE_EXPLICIT_DOCUMENT_OBSERVATION_REQUIRED')
+        import document_intake
+        document=safe_path(args.observe_document)
+        if not any(root in document.parents for root in roots):raise sync.SyncError('DOCUMENT_OUTSIDE_AUTHORIZED_ROOT')
+        token=os.environ.get(config['tokenEnv'])
+        if args.document_send and not token:token=load_secret(state,config['org'],config['tokenEnv'])
+        result=document_intake.observe_file(document,args.document_mime or document_intake.MIMES.get(document.suffix.lower(),'application/octet-stream'),
+            config['org'],args.document_system,args.document_id,origin=config['origin'],provider='LOCAL_AGENT',
+            expected_revision=args.document_expected_revision,expected_previous_observation_hash=args.document_previous_observation_hash,
+            token=token,send=args.document_send)
+        print(json.dumps(result,sort_keys=True,allow_nan=False));return 0
+    if args.document_send or args.document_mime or args.document_system or args.document_id or args.document_previous_observation_hash or args.document_expected_revision:
+        raise sync.SyncError('EXPLICIT_DOCUMENT_OBSERVATION_REQUIRED')
     if args.read_active and not args.release_status:raise sync.SyncError('EXPLICIT_RELEASE_STATUS_REQUIRED')
     if args.release_status:
         if args.once or args.watch:raise sync.SyncError('SEPARATE_RELEASE_STATUS_REQUIRED')

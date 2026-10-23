@@ -31,6 +31,7 @@ export function installationReadiness(orgId: string, checkpoint: RecordData | nu
   const id = checkpoint?.lastDocumentId;
   if (checkpoint?.orgId !== orgId || checkpoint?.state !== 'HEALTHY' || !validId(id)) return pending('PENDING_SOURCE');
   if (document?.orgId !== orgId || !isOperationalRecord(document) || document.entityType !== 'sourceDocument'
+    || Object.hasOwn(document,'documentObservation')
     || document.nativeReady !== true || document.sourceIndependent !== true
     || document.revoked === true || document.deleted === true
     || document.externalFetchRequired !== false || document.sanitized !== true

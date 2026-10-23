@@ -31,13 +31,13 @@ def pair():
                  'publicKeySha256': release.digest(public.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo))}
 
 
-def envelope(key, hashes=None, schema=2):
+def envelope(key, hashes=None, schema=2, windows_version='1.0.1'):
     hashes = hashes or {}
     certificate = {'schemaVersion': schema, 'sourceSha': NEXT, 'productVersion': '1.1.0-beta.1',
                    'canonicalOrigin': release.ORIGIN, 'releaseRunId': '13', 'ciRunId': '12',
                    'publishedAtUtc': '2026-10-13T11:00:00.000Z', 'status': 'ACTIVE',
                    'checks': {name: True for name in release.CHECKS},
-                   'components': {name: {'version': '1.0.1' if name == 'windowsIntegration' else '1.1.0',
+                   'components': {name: {'version': windows_version if name == 'windowsIntegration' else '1.1.0',
                                          'sourceSha': NEXT, 'manifestSha256': hashes.get(name, 'c' * 64)}
                                   for name in (release.COMPONENTS if schema == 2 else release.COMPONENTS[:3])}}
     return {'certificate': certificate,
@@ -169,7 +169,7 @@ class PublishedReleaseTests(unittest.TestCase):
             self.assertGreaterEqual(handlers[2]._context.minimum_version, release.ssl.TLSVersion.TLSv1_2)
 
     def test_seven_file_package_requires_exact_signed_raw_manifest_and_byte_closure(self):
-        files = {name: ('synthetic public ' + name).encode() for name in release.WINDOWS_FILES}
+        files = {name: ('synthetic public ' + name).encode() for name in release.LEGACY_WINDOWS_FILES}
         manifest = {'component': 'AURORA_WINDOWS_INTEGRATION', 'version': '1.0.1', 'sourceSha': NEXT,
                     'files': {name: release.digest(value) for name, value in files.items()}}
         raw = json.dumps(manifest).encode()
@@ -193,10 +193,10 @@ class PublishedReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'windowsIntegration-manifest.json'
             files = {name: (Path(release.__file__).parent / name).read_bytes() for name in release.WINDOWS_FILES}
-            raw = json.dumps({'component': 'AURORA_WINDOWS_INTEGRATION', 'version': '1.0.1', 'sourceSha': NEXT,
+            raw = json.dumps({'component': 'AURORA_WINDOWS_INTEGRATION', 'version': '1.0.8', 'sourceSha': NEXT,
                               'files': {name: release.digest(value) for name, value in files.items()}}).encode()
             path.write_bytes(raw)
-            env = envelope(self.key, {'windowsIntegration': release.digest(raw)})
+            env = envelope(self.key, {'windowsIntegration': release.digest(raw)},windows_version='1.0.8')
             pin, _ = self.read(env=env)
             control = {'trust': self.trust, 'expectedSourceSha': NEXT, 'manifestPath': str(path)}
             with patch.object(release, 'read_active_pin', return_value=pin), patch.object(release.time, 'time', return_value=NOW):

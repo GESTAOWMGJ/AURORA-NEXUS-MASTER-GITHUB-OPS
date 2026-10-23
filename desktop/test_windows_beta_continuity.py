@@ -487,8 +487,11 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         self.real_installer = Path(installer.__file__).read_bytes()
         self.asset_bytes = {name: (f.package / name).read_bytes() for name in self.deployment.ASSETS}
         self.old_source, self.new_source = 'a' * 40, 'b' * 40
-        self.create_release(self.old_source, b'# exact synthetic signed predecessor installer\n')
-        old_result = f.execute()
+        self.create_release(self.old_source, b'# exact synthetic signed predecessor installer\n', version='1.0.7')
+        # Materialize the historical checkpoint under its own version guard.
+        # All later validation and execution use the current 1.0.8 guard.
+        with patch.object(self.deployment, 'VERSION', '1.0.7'):
+            old_result = f.execute()
         self.old_reference = old_result['checkpointTransition']
         self.old_plan = copy.deepcopy(f.plan)
         self.old_ia_manifest = (f.ia_package / 'manifest.json').read_bytes()
@@ -543,12 +546,14 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         receipt['artifacts']['manifest']['afterSha256'] = installer.fingerprint(self.snapshots['manifest'])
         self.receipt_path.write_bytes(self.encode(receipt))
 
-    def create_release(self, source, script, bridge=None):
+    def create_release(self, source, script, bridge=None, version='1.0.8'):
         f, release = self.f, self.release
         self.bundle = f.base / ('bundle-' + source[0])
         f.package = self.bundle / 'aurora-coletor'
         f.package.mkdir(parents=True)
-        payloads = {**{'aurora-coletor/' + name: value for name, value in self.asset_bytes.items()},
+        names = release.LEGACY_WINDOWS_FILES if version == '1.0.7' else release.WINDOWS_FILES
+        assets = {name: self.asset_bytes[name] for name in names}
+        payloads = {**{'aurora-coletor/' + name: value for name, value in assets.items()},
                     'desktop/install_windows_beta.py': script, 'INSTALAR-AURORA-NEXUS.cmd': b'@echo off\n',
                     'LEIA-PRIMEIRO.txt': b'Synthetic public release fixture only.\n'}
         for name, value in payloads.items():
@@ -563,8 +568,8 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         manifests.mkdir(parents=True)
         f.manifest_path = manifests / 'windowsIntegration-manifest.json'
         f.win_manifest = {'schemaVersion': 1, 'platform': 'windows', 'component': 'AURORA_WINDOWS_INTEGRATION',
-                          'version': '1.0.7', 'sourceSha': source,
-                          'files': {name: release.digest(value) for name, value in self.asset_bytes.items()}}
+                          'version': version, 'sourceSha': source,
+                          'files': {name: release.digest(value) for name, value in assets.items()}}
         f.manifest_path.write_bytes(self.encode(f.win_manifest))
         archive = io.BytesIO()
         with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as zip:
@@ -592,7 +597,7 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         for name, pin in f.env['certificate']['components'].items():
             pin['sourceSha'] = source
             if name == 'windowsIntegration':
-                pin['version'] = '1.0.7'
+                pin['version'] = version
         f.resign(f.env)
         f.cert_sha = release.digest(release.signing_bytes(f.env['certificate']))
         suffix = '1' if source == self.old_source else '2'
@@ -648,6 +653,66 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         proof.revalidate(acceptance)
         self.assertGreaterEqual(len(self.f.transport.readbacks), 3)
         self.assertEqual(len(self.f.transport.posts), 2)
+        self.assert_original()
+
+    def test_signed_predecessor_and_current_release_keep_separate_seven_and_twelve_file_profiles(self):
+        self.assertEqual(len(self.asset_bytes), 12)
+        self.assertEqual(set(self.asset_bytes), set(self.release.WINDOWS_FILES))
+        for plan, version, names in ((self.old_plan, '1.0.7', self.release.LEGACY_WINDOWS_FILES),
+                                     (self.f.plan, '1.0.8', self.release.WINDOWS_FILES)):
+            self.assertEqual(plan['envelope']['certificate']['components']['windowsIntegration']['version'], version)
+            manifest = json.loads(Path(plan['publicReleaseControl']['manifestPath']).read_bytes())
+            self.assertEqual(manifest['version'], version)
+            self.assertEqual(set(manifest['files']), set(names))
+            candidate = self.release.verify_candidate(plan['envelope'], self.f.trust, plan['expectedSourceSha'])
+            installer._signed_client_bundle({'files': {}, 'absent': set(), 'release': self.release}, plan, candidate)
+
+    def test_signed_zip_cannot_mix_historical_and_current_file_profiles(self):
+        for plan, add_intake in ((self.old_plan, True), (self.f.plan, False)):
+            manifest_root = Path(plan['publicReleaseControl']['manifestPath']).parent
+            archive_path = manifest_root.parent / 'payloads/satellite/AURORA-NEXUS-Windows-Beta.zip'
+            satellite_path = manifest_root / 'satellite-manifest.json'
+            archive_before, satellite_before = archive_path.read_bytes(), satellite_path.read_bytes()
+            with zipfile.ZipFile(io.BytesIO(archive_before)) as zipped:
+                files = {name: zipped.read(name) for name in zipped.namelist()}
+            manifest = json.loads(files['manifest.json'])
+            for name in self.release.INTAKE_FILES:
+                path = 'aurora-coletor/' + name
+                if add_intake:
+                    files[path] = self.asset_bytes[name]
+                    manifest['files'][path] = self.release.digest(files[path])
+                else:
+                    files.pop(path)
+                    manifest['files'].pop(path)
+            files['manifest.json'] = self.encode(manifest)
+            archive = io.BytesIO()
+            with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as zipped:
+                for name, value in files.items():
+                    zipped.writestr(name, value)
+            satellite = json.loads(satellite_before)
+            satellite['files'][0].update(sha256=self.release.digest(archive.getvalue()), size=len(archive.getvalue()))
+            try:
+                archive_path.write_bytes(archive.getvalue())
+                satellite_path.write_bytes(self.encode(satellite))
+                envelope = copy.deepcopy(plan['envelope'])
+                envelope['certificate']['components']['satellite']['manifestSha256'] = self.release.digest(satellite_path.read_bytes())
+                self.f.resign(envelope)
+                candidate = self.release.verify_candidate(envelope, self.f.trust, plan['expectedSourceSha'])
+                with self.subTest(version=manifest['sourceCommit'], addedIntake=add_intake), \
+                     self.assertRaisesRegex(ValueError, 'SIGNED_CLIENT_ZIP_CLOSURE_CONFLICT'):
+                    installer._signed_client_bundle({'files': {}, 'absent': set(), 'release': self.release}, plan, candidate)
+            finally:
+                archive_path.write_bytes(archive_before)
+                satellite_path.write_bytes(satellite_before)
+        self.assert_original()
+
+    def test_signed_zip_rejects_unknown_component_version(self):
+        envelope = copy.deepcopy(self.f.env)
+        envelope['certificate']['components']['windowsIntegration']['version'] = '1.0.9'
+        self.f.resign(envelope)
+        candidate = self.release.verify_candidate(envelope, self.f.trust, self.new_source)
+        with self.assertRaisesRegex(ValueError, 'SIGNED_CLIENT_COMPONENT_VERSION_CONFLICT'):
+            installer._signed_client_bundle({'files': {}, 'absent': set(), 'release': self.release}, self.f.plan, candidate)
         self.assert_original()
 
     def test_generic_metadata_and_unregistered_proof_cannot_authorize(self):
@@ -803,7 +868,8 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         (f.ia_state / 'installation.json').write_bytes(self.old_ia_metadata)
         self.deployment.__file__ = str(Path(f.plan['packageDirectory']) / 'aurora_deployment.py')
         f.on_read = lambda _req, body, _count: body['runtime'].update(sourceSha=self.old_source)
-        advanced = f.execute()
+        with patch.object(self.deployment, 'VERSION', '1.0.7'):
+            advanced = f.execute()
         f.plan, f.env = current_plan, current_env
         self.deployment.__file__ = str(f.package / 'aurora_deployment.py')
         (f.ia_package / 'manifest.json').write_bytes(current_ia)
@@ -871,7 +937,7 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         self.assertEqual(len(self.f.transport.posts), 2)
         metadata = json.loads(self.manifest.read_bytes())
         self.assertEqual(metadata['reviewedMainSha'], self.new_source)
-        self.assertEqual(metadata['integrationComponent']['version'], '1.0.7')
+        self.assertEqual(metadata['integrationComponent']['version'], '1.0.8')
         self.assertEqual(json.loads(self.f.active.read_bytes())['receipt']['status'], 'DUPLICATE')
         self.assertEqual((Path(result['rollbackBackup']) / 'before-manifest.json').read_bytes(), self.snapshots['manifest'])
         self.assertNotIn('SYNTHETIC_PROCESS_ONLY', output.getvalue())

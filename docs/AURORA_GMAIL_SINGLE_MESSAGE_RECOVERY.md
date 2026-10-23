@@ -29,6 +29,15 @@ V1/V2 acessarem Gmail ou Drive, inclusive com cabeçalho canônico. Histórico c
 repetição do mesmo destino continua idempotente. O bloqueio de schema misto mantém
 precedência e não pode ser removido por simples substituição do cabeçalho.
 
+`conflitosClassificacao` compara CLASSIFICADOR a JUSTIFICATIVA entre registros
+terminais da mesma identidade. Decisões divergentes bloqueiam com
+`GMAIL_INDEX_CLASSIFICATION_CONFLICT`, mesmo com um único destino. O diagnóstico
+expõe campos e linhas, sem escolher a decisão mais recente ou tomar um marcador
+de revisão como prova de aprovação humana. Decisões ignoradas são terminais;
+erros e cópias sem arquivo continuam recuperáveis. Vazios são normalizados,
+preservando tipos, falsos, zeros, datas e identidades distintas. A revisão deve
+validar pertinência e organização antes de liberar uma projeção reconciliada.
+
 Estado: patch candidato com testes sintéticos; sem migração de índice, mudança de
 gatilhos, implantação ou liberação de ingestão. A rotina existente permanece
 `LEGACY_MIRRORED` em `ingestionRecoveryPolicy`; nenhum novo executor é criado.

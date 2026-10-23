@@ -204,6 +204,7 @@ export function integrationDocumentVersionDecision(
   current: Record<string, any> | null, payload: IntegrationDocumentPayload,
   canonicalSnapshotHash: string, bodyHash: string, currentOccurredAt: string | null
 ): string {
+  if (current && Object.hasOwn(current,'documentObservation')) return 'DOCUMENT_OBSERVATION_PENDING_REVIEW';
   const currentVersion = current?.sourceVersion;
   if (typeof currentVersion === 'number' && payload.sourceVersion < currentVersion) return 'SOURCE_VERSION_REGRESSION';
   const acquisitionConflict = acquisitionVersionDecision(current, payload);
