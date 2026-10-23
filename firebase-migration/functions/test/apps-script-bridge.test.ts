@@ -340,6 +340,7 @@ function migrationPage(sheetName:string, headers:string[], rows:unknown[][]) {
       getDisplayValues:()=>row===1?[headers]:rows.slice(row-2,row-2+count).map(values=>values.map(String)),
       getValues:()=>row===1?[headers]:rows.slice(row-2,row-2+count)})};
   const ss={getId:()=> 'synthetic-sheet',getSheetByName:(name:string)=>name===sheetName?sheet:null};
+  c.getPlanilha=()=>ss;
   const run=(configuration:unknown)=>c.wmgjFirestoreMigrarAba_(ss,sheetName,c.wmgjFirestoreMigrationMap_()[sheetName],200,configuration);
   return {c,props,logs,run};
 }
@@ -374,6 +375,58 @@ test('explicit dry-run never falls back to a globally live transport configurati
   const result=fixture.run({orgId:'tenant-a',dryRun:true});
   assert.equal(result.ok,true);assert.equal(result.planned,1);assert.equal(result.sent,0);
   assert.equal(result.batchBlocked,false);assert.equal(requests,0);assert.equal(globalReads,0);assert.equal(fixture.props.size,0);
+});
+
+test('migration dry-run wrapper ignores live properties and preserves its checkpoint',()=>{
+  const fixture=migrationPage('06_NFS_E',['CHAVE_ACESSO','VALOR_SERVICO'],[
+    ['synthetic-first','10,00'],['synthetic-second','20,00']]);
+  const initialProperties=[
+    ['WMGJ_FIRESTORE_INGEST_URL','https://example.invalid'],
+    ['WMGJ_FIRESTORE_HMAC_KEY_ID','synthetic-key'],
+    ['WMGJ_FIRESTORE_HMAC_SECRET','01'.repeat(32)],
+    ['WMGJ_FIRESTORE_ORG_ID','tenant-a'],
+    ['WMGJ_FIRESTORE_DRY_RUN','false'],
+    ['WMGJ_FIRESTORE_MAX_ROWS','1'],
+    ['WMGJ_FS_MIG_06_NFS_E_ROW','2'],
+    ['UNRELATED_PROPERTY','unchanged']
+  ];
+  for(const [key,value] of initialProperties) fixture.props.set(key,value);
+  let requests=0;
+  fixture.c.UrlFetchApp={fetch:()=>{requests++;throw Error('UNEXPECTED_REQUEST');}};
+
+  const result=fixture.c.wmgjFirestoreMigracaoDryRun(200);
+
+  assert.equal(result.ok,true);assert.equal(result.dryRun,true);
+  assert.equal(result.sheets['06_NFS_E'].planned,1);
+  assert.equal(result.sheets['06_NFS_E'].sent,0);
+  assert.equal(result.sheets['06_NFS_E'].nextRow,2);
+  assert.equal(requests,0);
+  assert.deepEqual([...fixture.props],initialProperties);
+});
+
+test('migration preview preserves shared live configuration and later explicit live calls',()=>{
+  const fixture=migrationPage('06_NFS_E',['CHAVE_ACESSO','VALOR_SERVICO'],[['synthetic-first','10,00']]);
+  const configuration=Object.freeze({orgId:'tenant-a',dryRun:false,maxRows:10,
+    url:'https://example.invalid',keyId:'synthetic-key',secret:'01'.repeat(32)});
+  fixture.c.wmgjFirestoreConfig_=()=>configuration;
+  let requests=0;
+  fixture.c.UrlFetchApp={fetch:()=>{
+    requests++;
+    return {getResponseCode:()=>202,getContentText:()=>JSON.stringify({
+      ok:true,accepted:true,duplicate:false,eventId:'synthetic-event',entityId:'synthetic-entity'
+    })};
+  }};
+
+  const preview=fixture.c.wmgjFirestoreMigracaoDryRun(10);
+  assert.equal(preview.ok,true);assert.equal(preview.dryRun,true);
+  assert.equal(preview.sheets['06_NFS_E'].planned,1);
+  assert.equal(requests,0);assert.equal(fixture.props.size,0);
+  assert.equal(configuration.dryRun,false);
+
+  const live=fixture.run(configuration);
+  assert.equal(live.ok,true);assert.equal(live.sent,1);assert.equal(live.planned,1);
+  assert.equal(requests,1);assert.equal(fixture.props.get('WMGJ_FS_MIG_06_NFS_E_ROW'),'3');
+  assert.equal(configuration.dryRun,false);
 });
 
 test('a valid page passes the supplied configuration and advances only after receipts',()=>{
