@@ -141,6 +141,9 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
   var errors = 0;
   var planned = 0;
   var lastAcceptedRow = startRow - 1;
+  var pendingEvents = [];
+  var seenEntityKeys = Object.create(null);
+  var identityConflicts = 0;
 
   displayValues.forEach(function(row, offset) {
     var rowNumber = startRow + offset;
@@ -171,6 +174,12 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
       var contentHash = config.financialAdapter
         ? wmgjFirestoreHashString_(JSON.stringify(record)) : rowHash;
       var entityKey = wmgjFirestoreEntityKey_(sheetName, record, rowNumber);
+      var identity = config.entityType + ':' + entityKey;
+      if (Object.prototype.hasOwnProperty.call(seenEntityKeys, identity)) {
+        identityConflicts++;
+        throw new Error('MIGRATION_ENTITY_IDENTITY_CONFLICT');
+      }
+      seenEntityKeys[identity] = true;
       var legacyStatus = String(
         record.status ||
         record.status_conciliacao ||
@@ -225,20 +234,36 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
           nonDestructive: true
         }
       };
-      var response = wmgjFirestoreEnviarEvento_(event);
+      pendingEvents.push({ event: event, rowNumber: rowNumber });
       planned++;
-      if (bridgeConfig.dryRun) return;
-      if (!response.ok || !(response.accepted || response.duplicate)) throw new Error('MIGRATION_RECEIPT_REQUIRED');
-      if (response.accepted) sent++;
-      if (response.duplicate) duplicates++;
-      if (response.ok && (response.accepted || response.duplicate)) {
-        lastAcceptedRow = rowNumber;
-      }
     } catch (error) {
       errors++;
       wmgjFirestoreLog_('MIGRATION_ROW', 'ERRO', {
         sheet: sheetName,
         row: rowNumber,
+        error: error && error.message ? error.message : String(error)
+      });
+    }
+  });
+
+  // Validate the whole bounded page before its first request. Two source rows
+  // must not silently overwrite one canonical entity, even at equal amounts.
+  // Resolving their provenance/status is a separate reconciliation decision.
+  var batchBlocked = errors > 0;
+  if (!batchBlocked) pendingEvents.forEach(function(item) {
+    try {
+      // The supplied config governs this call, including its dry-run boundary.
+      // Never reread a different global dry-run value inside the transport.
+      var response = wmgjFirestoreEnviarEventoComConfig_(item.event, bridgeConfig, wmgjFirestoreLog_);
+      if (bridgeConfig.dryRun) return;
+      if (!response.ok || !(response.accepted || response.duplicate)) throw new Error('MIGRATION_RECEIPT_REQUIRED');
+      if (response.accepted) sent++;
+      if (response.duplicate) duplicates++;
+      lastAcceptedRow = Math.max(lastAcceptedRow, item.rowNumber);
+    } catch (error) {
+      errors++;
+      wmgjFirestoreLog_('MIGRATION_ROW', 'ERRO', {
+        sheet: sheetName, row: item.rowNumber,
         error: error && error.message ? error.message : String(error)
       });
     }
@@ -258,6 +283,8 @@ function wmgjFirestoreMigrarAba_(ss, sheetName, config, limit, bridgeConfig) {
     duplicates: duplicates,
     skipped: skipped,
     errors: errors,
+    batchBlocked: batchBlocked,
+    identityConflicts: identityConflicts,
     revisionSweep: revisionSweep,
     nextRow: bridgeConfig.dryRun ? startRow : Number(props.getProperty(checkpointKey) || startRow)
   };

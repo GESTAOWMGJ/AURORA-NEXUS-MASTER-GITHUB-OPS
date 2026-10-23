@@ -328,6 +328,63 @@ function financialRow(c:any, sheet:string, values:Record<string,string>) {
   const cfg=c.wmgjFirestoreMigrationMap_()[sheet], headers=Object.keys(values), row=Object.values(values);
   return c.wmgjFirestoreFinancialRecord_(c.wmgjFirestoreAddCanonicalMoney_(headers,row,row,c.wmgjFirestoreRowObject_(headers,row),cfg.moneyFields),cfg,headers);
 }
+
+function migrationPage(sheetName:string, headers:string[], rows:unknown[][]) {
+  const c=appsScriptContext() as any, props=new Map<string,string>(), logs:any[]=[];
+  c.PropertiesService={getScriptProperties:()=>({getProperty:(key:string)=>props.get(key)||null,
+    setProperty:(key:string,value:string)=>props.set(key,value)})};
+  c.wmgjFirestoreLog_=(event:string,status:string,payload:unknown)=>logs.push({event,status,payload});
+  c.wmgjFirestoreActorId_=()=> 'synthetic-actor';
+  const sheet={getLastRow:()=>rows.length+1,getLastColumn:()=>headers.length,
+    getRange:(row:number,_column:number,count:number)=>({
+      getDisplayValues:()=>row===1?[headers]:rows.slice(row-2,row-2+count).map(values=>values.map(String)),
+      getValues:()=>row===1?[headers]:rows.slice(row-2,row-2+count)})};
+  const ss={getId:()=> 'synthetic-sheet',getSheetByName:(name:string)=>name===sheetName?sheet:null};
+  const run=(configuration:unknown)=>c.wmgjFirestoreMigrarAba_(ss,sheetName,c.wmgjFirestoreMigrationMap_()[sheetName],200,configuration);
+  return {c,props,logs,run};
+}
+
+test('late duplicate bank identity blocks every request and preserves checkpoint even at equal amounts',()=>{
+  const fixture=migrationPage('08_EXTRATOS_BRADESCO',
+    ['DATA','DCTO','CREDITO','DEBITO','CATEGORIA','COMPETENCIA_VINCULADA','STATUS_CONCILIACAO'],[
+      ['01/10/2026','synthetic-first','10','','RECEITA','2026-10','PENDENTE'],
+      ['02/10/2026','synthetic-repeated','20','','RECEITA','2026-10','PENDENTE'],
+      ['02/10/2026','synthetic-repeated','20','','RECEITA','2026-10','CONCILIADO']]);
+  let requests=0;fixture.c.wmgjFirestoreEnviarEventoComConfig_=()=>{requests++;return{ok:true,accepted:true};};
+  const result=fixture.run({orgId:'tenant-a',dryRun:false});
+  assert.equal(result.ok,false);assert.equal(result.batchBlocked,true);assert.equal(result.identityConflicts,1);
+  assert.equal(requests,0);assert.equal(result.sent,0);assert.equal(result.nextRow,2);assert.equal(fixture.props.size,0);
+  assert.equal(fixture.logs.at(-1).payload.error,'MIGRATION_ENTITY_IDENTITY_CONFLICT');
+});
+
+test('late malformed money blocks an earlier valid invoice before its first send',()=>{
+  const fixture=migrationPage('06_NFS_E',['CHAVE_ACESSO','VALOR_SERVICO'],[
+    ['synthetic-first','10,00'],['synthetic-invalid','1,234.56']]);
+  let requests=0;fixture.c.wmgjFirestoreEnviarEventoComConfig_=()=>{requests++;return{ok:true,accepted:true};};
+  const result=fixture.run({orgId:'tenant-a',dryRun:false});
+  assert.equal(result.ok,false);assert.equal(result.batchBlocked,true);assert.equal(result.errors,1);
+  assert.equal(requests,0);assert.equal(fixture.props.size,0);
+});
+
+test('explicit dry-run never falls back to a globally live transport configuration',()=>{
+  const fixture=migrationPage('06_NFS_E',['CHAVE_ACESSO','VALOR_SERVICO'],[['synthetic-first','10,00']]);
+  let requests=0,globalReads=0;
+  fixture.c.UrlFetchApp={fetch:()=>{requests++;throw Error('UNEXPECTED_REQUEST');}};
+  fixture.c.wmgjFirestoreConfig_=()=>{globalReads++;return{orgId:'tenant-a',dryRun:false,url:'https://example.invalid',keyId:'synthetic-key',secret:'01'.repeat(32)};};
+  const result=fixture.run({orgId:'tenant-a',dryRun:true});
+  assert.equal(result.ok,true);assert.equal(result.planned,1);assert.equal(result.sent,0);
+  assert.equal(result.batchBlocked,false);assert.equal(requests,0);assert.equal(globalReads,0);assert.equal(fixture.props.size,0);
+});
+
+test('a valid page passes the supplied configuration and advances only after receipts',()=>{
+  const fixture=migrationPage('06_NFS_E',['CHAVE_ACESSO','VALOR_SERVICO'],[['synthetic-a','10,00'],['synthetic-b','20,00']]);
+  const configuration={orgId:'tenant-a',dryRun:false};let requests=0;
+  fixture.c.wmgjFirestoreEnviarEventoComConfig_=(_event:unknown,received:unknown)=>{
+    assert.equal(received,configuration);requests++;return{ok:true,accepted:requests===1,duplicate:requests===2};};
+  const result=fixture.run(configuration);
+  assert.equal(result.ok,true);assert.equal(result.batchBlocked,false);assert.equal(requests,2);
+  assert.equal(result.sent,1);assert.equal(result.duplicates,1);assert.equal(result.nextRow,4);
+});
 test('real headers preserve absent values, zero and reported settlement',()=>{
   const c=appsScriptContext() as any;
   const r=financialRow(c,'05_FINANCEIRO_MENSAL',{RECEITA_BRUTA_NFS:'123,45',RECEBIDO_CONCILIADO:'',EM_ABERTO:'0',STATUS_CONCILIACAO:'CONCILIADO'});
@@ -358,7 +415,7 @@ test('replay keys are stable, corrected amounts change version hash and missing 
   c.PropertiesService={getScriptProperties:()=>({getProperty:(k:string)=>props.get(k)||null,setProperty:(k:string,v:string)=>props.set(k,v)})};
   c.wmgjFirestoreLog_=()=>{};c.wmgjFirestoreActorId_=()=> 'synthetic-actor';
   let failure=false;
-  c.wmgjFirestoreEnviarEvento_=(event:any)=>{events.push(event);return failure&&events.length%2===1?{ok:false}:{ok:true,accepted:true}};
+  c.wmgjFirestoreEnviarEventoComConfig_=(event:any)=>{events.push(event);return failure&&events.length%2===1?{ok:false}:{ok:true,accepted:true}};
   const headers=['CHAVE_ACESSO','VALOR_SERVICO','COMPETENCIA_ASSISTENCIAL','STATUS_EXTRACAO','ID_DRIVE'];
   const rows=[['synthetic-a','100','2026-10','VALIDA','synthetic-doc'],['synthetic-b','200','2026-10','VALIDA','synthetic-doc']];
   const sheet={getLastRow:()=>3,getLastColumn:()=>headers.length,getRange:(row:number,_col:number,count:number)=>({getDisplayValues:()=>row===1?[headers]:rows.slice(row-2,row-2+count),getValues:()=>rows.slice(row-2,row-2+count)})};

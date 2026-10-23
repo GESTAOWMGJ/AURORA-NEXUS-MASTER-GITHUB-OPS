@@ -50,6 +50,21 @@ Não aumentar artificialmente sourceVersion nem apagar recibos históricos.
 Resposta sem confirmação não avança checkpoint, mesmo com linhas posteriores aceitas.
 Nenhuma escrita em monthlyClosings, distributionDecisions ou fonte da planilha.
 
+### Preflight de identidade e fronteira de dry-run
+
+Cada página limitada é inteiramente mapeada antes do primeiro envio. Identidade
+canônica repetida bloqueia a página com `MIGRATION_ENTITY_IDENTITY_CONFLICT`,
+zero envios e checkpoint preservado, inclusive quando os valores coincidem.
+Valores iguais não comprovam cópia nem autorizam escolher qual status ou
+competência prevalece. A reconciliação conserva as observações e a identidade
+histórica já existente antes de promover um registro único.
+
+Erro de mapeamento também bloqueia a página antes de transmitir seus outros
+registros. O transporte recebe a mesma configuração da chamada; `dryRun=true`
+não pode ser substituído por uma segunda leitura da configuração global.
+Essa proteção é limitada à página: não comprova unicidade entre páginas, abas
+ou identidades legadas de outros produtores, nem constitui carga real concluída.
+
 ## Investigação documental privada
 
 Foram examinados cabeçalhos e amostras da base autorizada, índice de contratos,
