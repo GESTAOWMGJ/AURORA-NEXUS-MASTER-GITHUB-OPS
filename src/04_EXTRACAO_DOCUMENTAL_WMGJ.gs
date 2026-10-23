@@ -1273,10 +1273,15 @@ function auroraExtrairTextoSheetsCompleto_(spreadsheetId) {
     var lastRow=sheet.getLastRow(),lastColumn=sheet.getLastColumn();
     if(!lastRow || !lastColumn) return;
     if(lastColumn>256 || lastRow*lastColumn>1000000-cells) throw new Error('AURORA_SHEETS_CELL_LIMIT');
-    cells+=lastRow*lastColumn;append('ABA: '+sheet.getName());
+    cells+=lastRow*lastColumn;
+    var headerWritten=false;
     for(var start=1;start<=lastRow;start+=200){
       var values=sheet.getRange(start,1,Math.min(200,lastRow-start+1),lastColumn).getDisplayValues();
-      values.forEach(function(row){append(row.join(' | '));});
+      values.forEach(function(row){
+        if(!row.some(function(value){return String(value).trim().length>0;})) return;
+        if(!headerWritten){append('ABA: '+sheet.getName());headerWritten=true;}
+        append(row.join(' | '));
+      });
     }
   });
   return parts.join('\n');

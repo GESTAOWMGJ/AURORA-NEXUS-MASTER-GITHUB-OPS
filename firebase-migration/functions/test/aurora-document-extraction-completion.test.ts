@@ -5,13 +5,27 @@ import vm from "node:vm";
 
 const source = fs.readFileSync(new URL("../../../src/04_EXTRACAO_DOCUMENTAL_WMGJ.gs", import.meta.url), "utf8");
 
+function sheetFixture(name: string, values: string[][]) {
+  return {
+    getName: () => name,
+    getLastRow: () => values.length,
+    getLastColumn: () => Math.max(0, ...values.map(row => row.length)),
+    getRange: (startRow: number, startColumn: number, rowCount: number, columnCount: number) => {
+      for (const value of [startRow, startColumn, rowCount, columnCount]) assert.ok(Number.isSafeInteger(value) && value > 0);
+      return { getDisplayValues: () => Array.from({ length: rowCount }, (_, r) =>
+        Array.from({ length: columnCount }, (_, c) => values[startRow - 1 + r]?.[startColumn - 1 + c] ?? "")) };
+    },
+    getDataRange: () => ({ getDisplayValues: () => values.map(row => row.slice()) })
+  };
+}
+
 function sandbox(): any {
   const context: any = {
     MimeType: { GOOGLE_DOCS: "application/vnd.google-apps.document", GOOGLE_SHEETS: "application/vnd.google-apps.spreadsheet",
       PLAIN_TEXT: "text/plain", PDF: "application/pdf" },
     DocumentApp: { openById: () => ({ getBody: () => ({ getText: () => "Conteúdo sintético autorizado" }) }) },
-    SpreadsheetApp: { openById: () => ({ getSheets: () => [{ getName: () => "Dados",
-      getDataRange: () => ({ getDisplayValues: () => [["referencia", "competencia"], ["SYNTHETIC", "2026-10"]] }) }] }) },
+    SpreadsheetApp: { openById: () => ({ getSheets: () => [sheetFixture("Dados",
+      [["referencia", "competencia"], ["SYNTHETIC", "2026-10"]])] }) },
     Utilities: { sleep() {} },
     DriveApp: { getFileById: () => ({ setTrashed() {} }) }
   };
@@ -69,8 +83,7 @@ test("missing conversion, service errors, unknown formats and empty content rema
   assert.equal(ctx.extracaoDocumentalCompletaWMGJ_(ctx.extrairConteudoArquivoWMGJ_V1_(file(ctx.MimeType.GOOGLE_DOCS))), false);
   ctx.DocumentApp = { openById: () => ({ getBody: () => ({ getText: () => "   " }) }) };
   assert.equal(ctx.extracaoDocumentalCompletaWMGJ_(ctx.extrairConteudoArquivoWMGJ_V1_(file(ctx.MimeType.GOOGLE_DOCS))), false);
-  ctx.SpreadsheetApp = { openById: () => ({ getSheets: () => [{ getName: () => "Empty",
-    getDataRange: () => ({ getDisplayValues: () => [["", " "]] }) }] }) };
+  ctx.SpreadsheetApp = { openById: () => ({ getSheets: () => [sheetFixture("Empty", [["", " "]])] }) };
   assert.equal(ctx.extrairTextoGoogleSheetsWMGJ_V1_("synthetic-sheet"), "");
   assert.equal(ctx.extracaoDocumentalCompletaWMGJ_(ctx.extrairConteudoArquivoWMGJ_V1_(file(ctx.MimeType.GOOGLE_SHEETS))), false);
   for (const result of [null, { ok: true, metodo: "metadata_fallback", texto: "metadata", tamanhoTexto: 8 },
@@ -79,6 +92,19 @@ test("missing conversion, service errors, unknown formats and empty content rema
     { ok: true, metodo: "unregistered_adapter", texto: "text", tamanhoTexto: 4 }]) {
     assert.equal(ctx.extracaoDocumentalCompletaWMGJ_(result), false);
   }
+});
+
+test("Sheets emits headers only for real content and includes every nonempty tab beyond row 200", () => {
+  const ctx = sandbox();
+  const lateTable = Array.from({ length: 201 }, (_, index) => index === 200 ? ["linha201", "42"] : ["", " "]);
+  ctx.SpreadsheetApp = { openById: () => ({ getSheets: () => [
+    sheetFixture("Empty", []), sheetFixture("Whitespace", [["", " "]]),
+    sheetFixture("Late", lateTable), sheetFixture("Dados", [["referencia", "competencia"], ["SYNTHETIC", "2026-10"]])
+  ] }) };
+  const result = ctx.extrairConteudoArquivoWMGJ_V1_(file(ctx.MimeType.GOOGLE_SHEETS));
+  assert.equal(ctx.extracaoDocumentalCompletaWMGJ_(result), true);
+  assert.equal(result.texto, "ABA: Late\nlinha201 | 42\nABA: Dados\nreferencia | competencia\nSYNTHETIC | 2026-10");
+  assert.equal(result.tamanhoTexto, result.texto.length);
 });
 
 test("queue continues other documents but never classifies, mirrors or completes a metadata fallback; retry resumes", () => {

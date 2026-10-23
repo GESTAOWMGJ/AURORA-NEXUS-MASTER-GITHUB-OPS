@@ -449,11 +449,23 @@ test('billing never infers due date or receipt from issue date, narrative or inv
   const values={CHAVE_ACESSO:'synthetic-invoice',VALOR_SERVICO:'150,00',VALOR_LIQUIDO:'145,00',DATA_EMISSAO:'13/10/2026',OBS_AUDITORIA:'Recebida em 14/10/2026',ID_DRIVE:'synthetic-doc',STATUS_EXTRACAO:'VALIDA_REPROCESSADA'};
   const r=financialRow(c,'06_NFS_E',values);
   assert.equal(r.totalCents,15000);assert.equal(r.netAmountCents,14500);assert.equal(r.receivableCents,null);assert.equal(r.dueDate,null);
-  assert.equal(c.wmgjFirestoreFinancialWorkflow_(r,{financialAdapter:'INVOICE'}).state,'VALIDATED');
+  const sourceRecord=c.wmgjFirestoreRowObject_(Object.keys(values),Object.values(values));
+  assert.equal(c.wmgjFirestoreFinancialWorkflow_(r,{financialAdapter:'INVOICE'},sourceRecord).state,'VALIDATED');
   for(const status of ['INVALIDA','SUBSTITUIDA_PELA_NF7','CANCELADA','VALIDA_SUBSTITUIDA']) {
-    const pending=financialRow(c,'06_NFS_E',{...values,STATUS_EXTRACAO:status});
-    assert.equal(c.wmgjFirestoreFinancialWorkflow_(pending,{financialAdapter:'INVOICE'}).state,'PENDING_HUMAN_REVIEW');
+    const sourceValues={...values,STATUS_EXTRACAO:status};
+    const pending=financialRow(c,'06_NFS_E',sourceValues);
+    const pendingSource=c.wmgjFirestoreRowObject_(Object.keys(sourceValues),Object.values(sourceValues));
+    assert.equal(c.wmgjFirestoreFinancialWorkflow_(pending,{financialAdapter:'INVOICE'},pendingSource).state,'PENDING_HUMAN_REVIEW');
   }
+});
+test('a sanitized invoice cannot claim validation without its original source record',()=>{
+  const c=appsScriptContext() as any;
+  const r=financialRow(c,'06_NFS_E',{CHAVE_ACESSO:'synthetic-invoice',VALOR_SERVICO:'150,00',
+    ID_DRIVE:'synthetic-doc',STATUS_EXTRACAO:'VALIDA_REPROCESSADA'});
+  assert.equal(r.totalCents,15000);assert.ok(r.originDocumentRef);
+  assert.equal(r.status_extracao,undefined);assert.equal(r.chave_acesso,undefined);
+  assert.deepEqual({...c.wmgjFirestoreFinancialWorkflow_(r,{financialAdapter:'INVOICE'})},
+    {state:'PENDING_HUMAN_REVIEW',review:'PENDING',risk:'MEDIUM'});
 });
 test('extractions and aggregates are control documents, never duplicate bank transactions',()=>{
   const c=appsScriptContext() as any;
