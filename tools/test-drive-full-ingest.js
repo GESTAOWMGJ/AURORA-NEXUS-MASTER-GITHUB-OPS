@@ -4,13 +4,17 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const crypto = require('node:crypto');
+const {stripTypeScriptTypes} = require('node:module');
 const root = path.resolve(__dirname, '..');
 const code = ['01_PIPELINE_CONFIABILIDADE_WMGJ.gs','04_EXTRACAO_DOCUMENTAL_WMGJ.gs'].map(n=>fs.readFileSync(path.join(root,'src',n),'utf8')).join('\n');
+const backendIdempotency={};
+vm.runInNewContext(stripTypeScriptTypes(fs.readFileSync(path.join(root,'firebase-migration/functions/src/idempotency.ts'),'utf8'))
+  .replace(/^export /gm,''),backendIdempotency);
 const H='a'.repeat(64), ORG='synthetic';
 function fixture() {
-  const props=new Map(), tokens=new Map(), files=new Map(), folders=new Map(),receipts=new Map(),sent=[];
+  const props=new Map(), tokens=new Map(), files=new Map(), folders=new Map(),receipts=new Map(),entities=new Map(),sent=[];
   const head=['DATA_ENTRADA','ORIGEM','ID_ORIGEM','NOME_ARQUIVO','MIME_TYPE','STATUS','TENTATIVAS','ACAO_SUGERIDA','ULTIMO_ERRO','OBSERVACAO'];
-  const rows=[head];let serial=0;
+  const rows=[head];let serial=0,eventSerial=0;
   const sheet={getDataRange:()=>({getValues:()=>rows.map(r=>r.slice())}),getLastRow:()=>rows.length,
     appendRow:r=>rows.push(r.slice()),getRange:(r,c)=>({setValue:v=>{rows[r-1][c-1]=v;}})};
   const property={getProperty:k=>props.get(k)||null,setProperty:(k,v)=>props.set(k,v)};
@@ -39,19 +43,29 @@ function fixture() {
   context.extrairConteudoArquivoWMGJ_V1_=file=>({ok:true,metodo:'blob_text',texto:file._text,tamanhoTexto:file._text.length});
   context.wmgjFirestoreEventoArquivo_=(file,classification)=>{
     assert.equal(classification.valor_total,null);assert.equal(classification.competencia,null);assert.equal(classification.confianca,0);
-    return {orgId:ORG,sourceVersion:file.getLastUpdated().getTime(),eventId:'event-'+file.getId(),source:{sourceId:file.getId(),contentHash:context.wmgjFirestoreHashArquivo_(file).value},record:{canonicalSnapshotHash:H},metadata:{}};
+    eventSerial++;
+    return {orgId:ORG,sourceVersion:file.getLastUpdated().getTime(),eventId:'event-'+file.getId()+'-'+eventSerial,
+      occurredAt:new Date(100000+eventSerial).toISOString(),entityType:'sourceDocument',entityKey:'DRIVE:'+file.getId(),
+      source:{system:'DRIVE',sourceId:file.getId(),contentHash:context.wmgjFirestoreHashArquivo_(file).value},record:{canonicalSnapshotHash:H},metadata:{}};
   };
   context.wmgjFirestoreEnviarEventoComConfig_=(event,cfg,logger,check)=>{
-    check();sent.push(event);const key=event.source.sourceId+':'+event.source.contentHash;
-    const prior=receipts.get(key);if(prior)return {...prior,accepted:false,duplicate:true};
-    const receipt={accepted:true,duplicate:false,entityId:crypto.createHash('sha256').update(key).digest('hex').slice(0,48),
-      eventId:event.eventId,revision:1,versionId:crypto.createHash('sha256').update(key).digest('hex')};
-    receipts.set(key,receipt);return receipt;
+    check();sent.push(event);const key=event.idempotencyKey;
+    assert.equal(typeof key,'string');
+    const payloadHash=crypto.createHash('sha256').update(JSON.stringify(backendIdempotency.semanticEventForIdempotency(event))).digest('hex');
+    const decision=backendIdempotency.decideIdempotency(receipts.get(key),payloadHash);
+    if(decision.kind==='CONFLICT')throw Error('IDEMPOTENCY_CONFLICT');
+    if(decision.kind==='DUPLICATE')return {...decision,accepted:false,duplicate:true};
+    const previous=entities.get(event.entityKey);
+    if(backendIdempotency.decideSourceVersion(previous?.sourceVersion,event.sourceVersion)!=='ACCEPT')throw Error('SOURCE_VERSION_CONFLICT');
+    const revision=(previous?.revision||0)+1;
+    const receipt={accepted:true,duplicate:false,entityId:crypto.createHash('sha256').update(event.entityKey).digest('hex').slice(0,48),
+      eventId:event.eventId,revision,versionId:crypto.createHash('sha256').update(event.entityKey+':'+revision).digest('hex')};
+    receipts.set(key,{...receipt,payloadHash});entities.set(event.entityKey,{sourceVersion:event.sourceVersion,revision});return receipt;
   };
   context.registrarExtracaoDocumentalWMGJ_V1_=()=>{};context.registrarFirestoreMirrorWMGJ_=()=>{};
   const options={orgId:ORG,scopeSha256:H,sources:[],fileIds:[],excludedFolderIds:[],maxScan:1,processLimit:0,
     config:{orgId:ORG,dryRun:false},deadlineMs:Date.now()+140000};
-  return {context,props,tokens,files,folders,rows,sent,addFile,addFolder,options};
+  return {context,props,tokens,files,folders,rows,sent,receipts,entities,addFile,addFolder,options};
 }
 test('recursive cursor resumes beyond duplicates and preserves one row per source',()=>{
   const f=fixture();f.addFile('file000000001','folder000001');f.addFile('file000000002','folder000002');
@@ -139,6 +153,41 @@ test('source changed after completed scan refreshes authorized queue version and
   file.getLastUpdated=()=>new Date(20000);f.options.processLimit=1;
   const result=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
   assert.equal(result.ok,true);assert.equal(result.process.processed,1);assert.equal(result.privateReadbackPlan[0].sourceVersion,20000);
+});
+test('retry after accepted write preserves semantic idempotency despite a new event ID and time',()=>{
+  const f=fixture();f.addFile('fileexplicit1',null,'same bytes');
+  f.options.fileIds=['fileexplicit1'];f.options.maxScan=10;f.options.processLimit=1;
+  let failPersistence=true;
+  f.context.registrarExtracaoDocumentalWMGJ_V1_=()=>{if(failPersistence){failPersistence=false;throw Error('PERSISTENCE_INTERRUPTED');}};
+  const interrupted=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+  assert.equal(interrupted.ok,false);assert.equal(f.entities.get('DRIVE:fileexplicit1').revision,1);
+  const retried=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+  assert.equal(retried.ok,true);assert.equal(retried.process.accepted,0);assert.equal(retried.process.duplicates,1);
+  assert.equal(retried.privateReadbackPlan[0].sourceVersion,10000);assert.equal(retried.privateReadbackPlan[0].revision,1);
+  assert.equal(f.sent[0].idempotencyKey,f.sent[2].idempotencyKey);
+  assert.match(f.sent[0].idempotencyKey,/:drive-extraction-v1:10000:/);
+  assert.notEqual(f.sent[0].eventId,f.sent[2].eventId);assert.notEqual(f.sent[0].occurredAt,f.sent[2].occurredAt);
+  assert.equal(JSON.stringify(backendIdempotency.semanticEventForIdempotency(f.sent[0])),
+    JSON.stringify(backendIdempotency.semanticEventForIdempotency(f.sent[2])));
+  assert.equal(f.receipts.size,1);assert.equal(f.entities.get('DRIVE:fileexplicit1').revision,1);
+});
+test('new source version with unchanged bytes gets a new key and canonical revision on retry',()=>{
+  const f=fixture();const file=f.addFile('fileexplicit1',null,'same bytes');
+  f.options.fileIds=['fileexplicit1'];f.options.maxScan=10;f.options.processLimit=1;
+  let failPersistence=true;
+  f.context.registrarExtracaoDocumentalWMGJ_V1_=()=>{if(failPersistence){failPersistence=false;throw Error('PERSISTENCE_INTERRUPTED');}};
+  const interrupted=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+  assert.equal(interrupted.ok,false);file.getLastUpdated=()=>new Date(20000);
+  const retried=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+  assert.equal(retried.ok,true);assert.equal(retried.process.accepted,1);assert.equal(retried.process.duplicates,0);
+  assert.equal(retried.privateReadbackPlan[0].sourceVersion,20000);assert.equal(retried.privateReadbackPlan[0].revision,2);
+  assert.equal(f.sent[0].source.contentHash,f.sent[2].source.contentHash);
+  assert.notEqual(f.sent[0].idempotencyKey,f.sent[2].idempotencyKey);
+  assert.equal(f.sent[0].entityKey,f.sent[2].entityKey);assert.equal(f.receipts.size,2);
+  assert.deepEqual(f.entities.get('DRIVE:fileexplicit1'),{sourceVersion:20000,revision:2});
+  const oldKeyEvent={...f.sent[2],idempotencyKey:f.sent[0].idempotencyKey};
+  const oldKeyPayloadHash=crypto.createHash('sha256').update(JSON.stringify(backendIdempotency.semanticEventForIdempotency(oldKeyEvent))).digest('hex');
+  assert.equal(backendIdempotency.decideIdempotency(f.receipts.get(f.sent[0].idempotencyKey),oldKeyPayloadHash).kind,'CONFLICT');
 });
 test('durable readback plan recovers receipts and content aliases after lost coordinator response',()=>{
   const f=fixture();f.addFile('fileexplicit1',null,'same');f.addFile('fileexplicit2',null,'same');

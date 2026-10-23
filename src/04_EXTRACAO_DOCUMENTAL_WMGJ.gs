@@ -1216,6 +1216,11 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
       event.record.extractionEvidence={schemaVersion:1,contentSha256:byteHash.value,textSha256:textHash,
         textLength:extraction.texto.length,method:extraction.metodo,coverage:'TEXT_EXTRACTED_REVIEW_PENDING',
         sourceVersion:Number(version),financialFactsApproved:false};
+      // A later source version is a distinct semantic event even when its bytes
+      // are unchanged. Keep this contract local to the authorized Drive route;
+      // retries of the same version retain the same key and semantic payload.
+      event.idempotencyKey=[event.orgId,'DRIVE',scope.fileId,'drive-extraction-v1',
+        String(event.sourceVersion),byteHash.value].join(':');
       var response=wmgjFirestoreEnviarEventoComConfig_(event,options.config,function(){},checkAuthority);
       if(!receiptValid(response)) throw new Error('AURORA_DRIVE_RECEIPT_REQUIRED');
       // Replay the identical event, including eventId and idempotencyKey. Its transport
