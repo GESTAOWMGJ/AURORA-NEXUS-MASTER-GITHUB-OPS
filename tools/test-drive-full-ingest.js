@@ -348,3 +348,76 @@ test('a recoverable explicit failure does not starve a healthy root and retries 
   assert.equal(f.sent.length,2);assert.equal(f.sent[0].source.sourceId,'rootfile00001');
   assert.equal(f.rows[1][8],'AURORA_DRIVE_CONVERSION_NOT_READY');
 });
+
+// Provider-backed recovery keeps the original bytes authoritative and requires human review.
+function setupProviderTextRecovery(sourceBytes,providerText,copyMime='application/vnd.google-apps.document',copyIsOriginal=false) {
+  const f=fixture(),copies=[],trashed=[],extractions=[];
+  const file=f.addFile('explicittext001',null,'original source','text/plain');
+  file.getName=()=> 'synthetic-legacy.txt';file.getSize=()=>sourceBytes.length;
+  file.getBlob=()=>({getBytes:()=>Array.from(sourceBytes,b=>b>127?b-256:b),getDataAsString:()=>sourceBytes.toString('utf8')});
+  file.setTrashed=()=>{throw Error('ORIGINAL_MUST_NOT_BE_TRASHED');};
+  const temporary=f.addFile('temporarydoc001',null,'',copyMime);
+  temporary.setTrashed=value=>trashed.push({id:temporary.getId(),value});
+  f.context.Utilities.getUuid=()=> 'synthetic-temporary-name';
+  f.context.Drive={Files:{copy:(resource,id,options)=>{
+    copies.push({resource,id,options});return {id:copyIsOriginal?file.getId():temporary.getId(),mimeType:copyMime};
+  }}};
+  f.context.DocumentApp={openById:id=>{
+    assert.equal(id,temporary.getId());return {getBody:()=>({getText:()=>providerText})};
+  }};
+  const contentHash=crypto.createHash('sha256').update(sourceBytes).digest('hex');
+  f.context.wmgjFirestoreHashArquivo_=()=>({method:'content_sha256',value:contentHash});
+  f.context.extrairConteudoArquivoWMGJ_V1_=f.realExtract;
+  f.context.registrarExtracaoDocumentalWMGJ_V1_=(source,hash,extraction)=>extractions.push({source,hash,extraction});
+  f.options.fileIds=[file.getId()];f.options.maxScan=10;f.options.processLimit=1;
+  return {f,file,temporary,copies,trashed,extractions,contentHash};
+}
+
+test('provider recovery keeps original byte identity and sends valid Unicode only for human review',()=>{
+  for(const sourceBytes of [Buffer.from([0x41,0xc7,0x42]),Buffer.from([0x41,0,0x42])]) {
+    const text='Texto recuperado pelo provedor: operação, ação e revisão.';
+    const {f,file,temporary,copies,trashed,extractions,contentHash}=setupProviderTextRecovery(sourceBytes,text);
+    assert.equal(f.context.auroraBytesTextoUtf8Validos_(Array.from(sourceBytes)),false);
+    const result=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+    assert.equal(result.ok,true);assert.equal(result.process.accepted,1);assert.equal(result.process.pending,0);
+    assert.equal(copies.length,1);assert.equal(copies[0].id,file.getId());
+    assert.equal(copies[0].resource.mimeType,'application/vnd.google-apps.document');assert.equal(copies[0].options.convert,true);
+    assert.equal(copies[0].options.ocr,undefined);assert.deepEqual(trashed,[{id:temporary.getId(),value:true}]);
+    assert.equal(f.sent.length,2);assert.equal(f.sent[0],f.sent[1]);
+    const event=f.sent[0],receipt=result.privateReadbackPlan[0];
+    assert.equal(event.source.sourceId,file.getId());assert.equal(event.source.contentHash,contentHash);
+    assert.equal(event.sourceVersion,10000);assert.equal(event.idempotencyKey,
+      'synthetic:DRIVE:'+file.getId()+':drive-extraction-v1:10000:'+contentHash);
+    assert.equal(event.record.extractionEvidence.method,'google_docs_text');
+    assert.equal(event.record.extractionEvidence.financialFactsApproved,false);
+    assert.equal(event.record.extractionEvidence.coverage,'TEXT_EXTRACTED_REVIEW_PENDING');
+    assert.equal(event.record.extractionEvidence.textSha256,crypto.createHash('sha256').update(text).digest('hex'));
+    assert.equal(f.rows[1][5],'REVISAR_HUMANO');assert.equal(receipt.contentHash,contentHash);
+    assert.equal(receipt.sourceVersion,10000);assert.equal(receipt.replayVerified,true);
+    assert.equal(extractions[0].extraction.texto,text);
+    assert.match(extractions[0].extraction.observacao,/codificação da fonte não verificada/);
+  }
+});
+
+test('damaged or unconfirmed provider output remains pending and cleanup never targets the original',()=>{
+  const cases=[
+    {text:'damaged \uFFFD text',code:'AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED'},
+    {text:'damaged \u0000 text',code:'AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED'},
+    {text:' \n\t',code:'AURORA_DRIVE_EXTRACTION_EMPTY'},
+    {text:'x'.repeat(1048577),code:'AURORA_DRIVE_TEXT_LIMIT'},
+    {text:'readable',mime:'text/plain',code:'AURORA_DRIVE_CONVERSION_UNSUPPORTED'},
+    {text:'readable',original:true,code:'AURORA_DRIVE_CONVERSION_UNSUPPORTED'}
+  ];
+  for(const item of cases) {
+    const {f,temporary,trashed}=setupProviderTextRecovery(Buffer.from([0x41,0xc7,0x42]),item.text,item.mime,item.original);
+    const result=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+    assert.equal(result.ok,true);assert.equal(result.process.accepted,0);assert.equal(result.process.pending,1);
+    assert.equal(result.process.blockingErrors,0);assert.equal(f.sent.length,0);assert.equal(result.privateReadbackPlan.length,0);
+    assert.equal(f.rows[1][5],'ERRO_REPROCESSAR');assert.equal(f.rows[1][8],item.code);
+    assert.deepEqual(trashed,item.original?[]:[{id:temporary.getId(),value:true}]);
+  }
+  const bounded=setupProviderTextRecovery(Buffer.from([0xc7]),'valid provider text');
+  const deferred=bounded.f.context.auroraConverterTextoProviderDrive_(bounded.file,Date.now()+1000);
+  assert.equal(deferred.ok,false);assert.equal(deferred.code,'AURORA_DRIVE_CONVERSION_DEFERRED');
+  assert.equal(bounded.copies.length,0);assert.equal(bounded.trashed.length,0);
+});
