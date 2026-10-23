@@ -155,7 +155,7 @@ function withDiagnosticFixture(operation) {
     };
     const options=(override=fallback)=>({repo:root,temporary:root,sourceSha,
       now:()=>Date.parse('2026-10-15T04:00:00Z'),exec:(bin,args,cwd)=>{
-        calls.push({bin,command:args[0]}); return override(bin,args,cwd);
+        calls.push({bin,command:args[0],args:[...args]}); return override(bin,args,cwd);
       }});
     return operation({root,sourceSha,deployment,calls,fallback,options});
   } finally {
@@ -167,17 +167,42 @@ function withDiagnosticFixture(operation) {
   }
 }
 
-function captureRejectedFixture(fixture,exec,{phase,reason,secret,...commandDetail}) {
+function assertDeploymentObservations(evidence,count,versions) {
+  const observations=evidence.deploymentObservations;
+  assert.deepEqual(Object.keys(observations).sort(),['after','afterReads','maxAfterReads','retryDelayMs']);
+  assert.equal(observations.maxAfterReads,5); assert.equal(observations.retryDelayMs,10000);
+  assert.equal(observations.afterReads,count); assert.equal(observations.after.length,count);
+  assert.ok(count>=1&&count<=5);
+  for(const observation of observations.after) {
+    assert.deepEqual(Object.keys(observation).sort(),['canonicalCount','deploymentIdValid',
+      'deploymentIdentitySha256','descriptionSha256','expectedDescriptionCount','rowCount',
+      'shape','versionNumber','versionNumberValid']);
+    assert.ok(['ARRAY','NON_ARRAY'].includes(observation.shape));
+    for(const key of ['canonicalCount','expectedDescriptionCount','rowCount'])
+      assert.ok(observation[key]===null||(Number.isSafeInteger(observation[key])&&observation[key]>=0));
+    for(const key of ['deploymentIdValid','versionNumberValid'])assert.equal(typeof observation[key],'boolean');
+    assert.ok(observation.versionNumber===null||Number.isSafeInteger(observation.versionNumber)&&observation.versionNumber>=1);
+    for(const key of ['deploymentIdentitySha256','descriptionSha256'])
+      assert.ok(observation[key]===null||/^[a-f0-9]{64}$/.test(observation[key]));
+  }
+  if(versions)assert.deepEqual(observations.after.map(observation=>observation.versionNumber),versions);
+}
+
+function captureRejectedFixture(fixture,exec,{phase,reason,secret,...commandDetail},runtime={}) {
   const stdout=[],stderr=[]; let caught;
   const status=main({temporary:fixture.root,stdout:value=>stdout.push(value),stderr:value=>stderr.push(value),
-    preview:()=>{try{return run(fixture.options(exec));}catch(error){caught=error;throw error;}}});
+    preview:()=>{try{return run({...fixture.options(exec),...runtime});}catch(error){caught=error;throw error;}}});
   assert.equal(status,1);
   assert.equal(caught.message,'CONNECTOR_REUSE_PREVIEW_REJECTED');
   assert.deepEqual(stdout,[]);
   assert.deepEqual(stderr,['CONNECTOR_REUSE_PREVIEW_REJECTED']);
   const file=path.join(fixture.root,'connector-reuse-preview.json');
   const artifact=fs.readFileSync(file,'utf8'), evidence=JSON.parse(artifact);
-  assert.deepEqual(evidence,{
+  const {deploymentObservations,...legacyEvidence}=evidence;
+  const afterReads=fixture.calls.filter(call=>call.command==='deployments').length-1;
+  if(afterReads>0)assertDeploymentObservations(evidence,afterReads);
+  else assert.equal(deploymentObservations,undefined);
+  assert.deepEqual(legacyEvidence,{
     schemaVersion:'aurora.wmgj.existing-source-preview-failure.v1',status:'REJECTED',
     code:'CONNECTOR_REUSE_PREVIEW_REJECTED',phase,reason,exitCode:null,spawnFailure:null,signal:null,
     complete:false,providerIngestionOrInstallationVerified:false,...commandDetail});
@@ -260,6 +285,159 @@ test('post-preview selection failures identify bounded predicates and retain rej
       assert.equal(fixture.calls.filter(call=>call.command==='pull').length,1);
       assert.equal(JSON.stringify(evidence).includes(known.deploymentId),false);
       assert.equal(JSON.stringify(evidence).includes(known.description),false);
+    });
+  }
+});
+
+for(const descriptionKind of ['previous-sha','same-sha']) {
+  test('an older '+descriptionKind+' observation converges to the exact initial deployment without another preview or older source pull',()=>{
+    withDiagnosticFixture(fixture=>{
+      const known=fixture.deployment;
+      const older={...known,versionNumber:known.versionNumber-1,
+        description:'AURORA_EXECUTION_API_CANONICAL '+(descriptionKind==='same-sha'?fixture.sourceSha:'d'.repeat(40))};
+      let reads=0; const waits=[];
+      const exec=(bin,args,cwd)=>{
+        if(bin==='clasp'&&args[0]==='deployments') {
+          reads++;
+          return JSON.stringify([reads===2?older:known]);
+        }
+        return fixture.fallback(bin,args,cwd);
+      };
+      const proof=run({...fixture.options(exec),wait:milliseconds=>{
+        waits.push(milliseconds);
+        assert.equal(reads,2);
+        assert.equal(fixture.calls.filter(call=>call.bin==='bash').length,1);
+        assert.deepEqual(fixture.calls.filter(call=>call.command==='pull').map(call=>call.args[2]),['23']);
+      }});
+      assert.equal(reads,3); assert.equal(waits.length,1);
+      assert.ok(Number.isSafeInteger(waits[0])&&waits[0]>0&&waits[0]<=10000);
+      assert.equal(fixture.calls.filter(call=>call.bin==='bash').length,1);
+      assert.deepEqual(fixture.calls.filter(call=>call.command==='pull').map(call=>call.args[2]),['23','23']);
+      assert.equal(proof.published.versionNumber,23);
+      assert.equal(proof.published.deploymentIdentitySha256,
+        createHash('sha256').update(known.deploymentId).digest('hex'));
+      assert.deepEqual(Object.keys(proof.published.hashes).sort(),['00_CORE_WMGJ','37_AURORA_CONECTORES_PLUG_AND_PLAY']);
+      assert.equal(proof.publishedVersionStable,true);
+      assertDeploymentObservations(proof,2,[22,23]);
+      assert.equal(proof.complete,false); assert.equal(proof.providerIngestionOrInstallationVerified,false);
+    });
+  });
+
+  test('five older '+descriptionKind+' observations exhaust the limit and remain rejected without pulling an old version',()=>{
+    withDiagnosticFixture(fixture=>{
+      const known=fixture.deployment;
+      const older={...known,versionNumber:22,
+        description:'AURORA_EXECUTION_API_CANONICAL '+(descriptionKind==='same-sha'?fixture.sourceSha:'d'.repeat(40))};
+      let reads=0; const waits=[];
+      captureRejectedFixture(fixture,(bin,args,cwd)=>{
+        if(bin==='clasp'&&args[0]==='deployments')return JSON.stringify([++reads===1?known:older]);
+        return fixture.fallback(bin,args,cwd);
+      },{phase:'DEPLOYMENT_AFTER',reason:'DEPLOYMENT_SELECTION_INVALID',secret:known.deploymentId,
+        deploymentSelection:{shape:'ARRAY',rowCount:1,canonicalCount:1,
+          expectedDescriptionCount:descriptionKind==='same-sha'?1:0,
+          versionNumberValid:true,deploymentIdValid:true,versionNumber:22,
+          deploymentIdentitySha256:createHash('sha256').update(known.deploymentId).digest('hex'),
+          descriptionSha256:createHash('sha256').update(older.description).digest('hex')}},
+      {wait:milliseconds=>waits.push(milliseconds)});
+      assert.equal(reads,6); assert.equal(waits.length,4);
+      assert.ok(waits.every(milliseconds=>Number.isSafeInteger(milliseconds)&&milliseconds>0&&milliseconds<=10000));
+      assert.equal(fixture.calls.filter(call=>call.bin==='bash').length,1);
+      assert.deepEqual(fixture.calls.filter(call=>call.command==='pull').map(call=>call.args[2]),['23']);
+    });
+  });
+}
+
+test('post-preview changed identity, newer version, ambiguity or same-version wrong description cannot trigger a wait or source pull',()=>{
+  for(const kind of ['newer-version','newer-previous-sha','different-id','older-different-id',
+    'older-different-id-same-sha','ambiguous-older','same-version-wrong-sha','older-malformed-description']) {
+    withDiagnosticFixture(fixture=>{
+      const known=fixture.deployment;
+      const previous='AURORA_EXECUTION_API_CANONICAL '+'d'.repeat(40);
+      const older={...known,versionNumber:22,description:previous};
+      const rows=kind==='newer-version'?[{...known,versionNumber:24}]
+        :kind==='newer-previous-sha'?[{...older,versionNumber:24}]
+        :kind==='different-id'?[{...known,deploymentId:'synthetic-different-deployment-00002'}]
+        :kind==='older-different-id'?[{...older,deploymentId:'synthetic-different-deployment-00002'}]
+        :kind==='older-different-id-same-sha'?[{...known,versionNumber:22,deploymentId:'synthetic-different-deployment-00002'}]
+        :kind==='ambiguous-older'?[older,older]
+        :kind==='same-version-wrong-sha'?[{...known,description:previous}]
+        :[{...older,description:'AURORA_EXECUTION_API_CANONICAL malformed'}];
+      let reads=0,waits=0,caught;
+      assert.throws(()=>run({...fixture.options((bin,args,cwd)=>{
+        if(bin==='clasp'&&args[0]==='deployments')return JSON.stringify(++reads===1?[known]:rows);
+        return fixture.fallback(bin,args,cwd);
+      }),wait:()=>waits++}),error=>{
+        caught=error; return error.message==='CONNECTOR_REUSE_PREVIEW_REJECTED';
+      },kind);
+      assert.equal(reads,2,kind); assert.equal(waits,0,kind);
+      assert.equal(fixture.calls.filter(call=>call.bin==='bash').length,1,kind);
+      assert.deepEqual(fixture.calls.filter(call=>call.command==='pull').map(call=>call.args[2]),['23'],kind);
+      assert.equal(failureEvidence(caught).phase,'DEPLOYMENT_AFTER',kind);
+      assertDeploymentObservations(failureEvidence(caught),1);
+    });
+  }
+});
+
+test('an older observation before the preview is rejected immediately and never retried',()=>{
+  withDiagnosticFixture(fixture=>{
+    let reads=0,waits=0,caught;
+    assert.throws(()=>run({...fixture.options((bin,args,cwd)=>{
+      if(bin==='clasp'&&args[0]==='deployments') {
+        reads++;
+        return JSON.stringify([{...fixture.deployment,versionNumber:22,
+          description:'AURORA_EXECUTION_API_CANONICAL '+'d'.repeat(40)}]);
+      }
+      return fixture.fallback(bin,args,cwd);
+    }),wait:()=>waits++}),error=>{
+      caught=error; return error.message==='CONNECTOR_REUSE_PREVIEW_REJECTED';
+    });
+    assert.equal(reads,1); assert.equal(waits,0);
+    assert.equal(failureEvidence(caught).phase,'DEPLOYMENT_BEFORE');
+    assert.equal(fixture.calls.some(call=>call.bin==='bash'||call.command==='pull'),false);
+  });
+});
+
+test('policy expiry during any permitted wait blocks the next deployment read and all further source pulls',()=>{
+  for(const expiresDuringWait of [1,2,3,4]) {
+    withDiagnosticFixture(fixture=>{
+      const deadline=Date.parse('2026-10-16T03:00:00Z');
+      let clock=deadline-1000,reads=0,waits=0;
+      captureRejectedFixture(fixture,(bin,args,cwd)=>{
+        if(bin==='clasp'&&args[0]==='deployments')return JSON.stringify([++reads===1?fixture.deployment:
+          {...fixture.deployment,versionNumber:22,description:'AURORA_EXECUTION_API_CANONICAL '+'d'.repeat(40)}]);
+        return fixture.fallback(bin,args,cwd);
+      },{phase:'PREFLIGHT_POLICY',reason:'POLICY_WINDOW_INVALID',secret:fixture.deployment.deploymentId},
+      {now:()=>clock,wait:()=>{if(++waits===expiresDuringWait)clock=deadline;}});
+      assert.equal(waits,expiresDuringWait);
+      assert.equal(reads,expiresDuringWait+1);
+      assert.equal(fixture.calls.filter(call=>call.bin==='bash').length,1);
+      assert.deepEqual(fixture.calls.filter(call=>call.command==='pull').map(call=>call.args[2]),['23']);
+    });
+  }
+});
+
+test('deployment convergence still requires exact sources and manifest after the preview',()=>{
+  for(const mismatch of ['source','manifest']) {
+    withDiagnosticFixture(fixture=>{
+      let reads=0,pulls=0,waits=0,caught;
+      assert.throws(()=>run({...fixture.options((bin,args,cwd)=>{
+        if(bin==='clasp'&&args[0]==='deployments')return JSON.stringify([++reads===2?
+          {...fixture.deployment,versionNumber:22,description:'AURORA_EXECUTION_API_CANONICAL '+'d'.repeat(40)}:fixture.deployment]);
+        const result=fixture.fallback(bin,args,cwd);
+        if(bin==='clasp'&&args[0]==='pull'&&++pulls===2) {
+          if(mismatch==='source')fs.appendFileSync(path.join(cwd,'00_CORE_WMGJ.gs'),'// incompatible published source\n');
+          else fs.writeFileSync(path.join(cwd,'appsscript.json'),'{"timeZone":"Etc/UTC"}');
+        }
+        return result;
+      }),wait:()=>waits++}),error=>{
+        caught=error; return error.message==='CONNECTOR_REUSE_PREVIEW_REJECTED';
+      });
+      assert.equal(reads,3); assert.equal(waits,1); assert.equal(pulls,2);
+      assert.equal(fixture.calls.filter(call=>call.bin==='bash').length,1);
+      assert.deepEqual(fixture.calls.filter(call=>call.command==='pull').map(call=>call.args[2]),['23','23']);
+      assert.equal(failureEvidence(caught).phase,'SOURCE_AFTER');
+      assert.equal(failureEvidence(caught).reason,mismatch==='source'?'SOURCE_HASH_MISMATCH':'MANIFEST_INVALID_OR_MISMATCH');
+      assertDeploymentObservations(failureEvidence(caught),2,[22,23]);
     });
   }
 });

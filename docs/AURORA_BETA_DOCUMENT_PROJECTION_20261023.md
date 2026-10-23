@@ -105,3 +105,23 @@ limite de texto e o formato ZIP sem extrator suportado.
 O preview de configuração de conectores ganhou diagnóstico sanitizado dos
 predicados de seleção da implantação. As rejeições, o SHA esperado e a comparação
 antes/depois permanecem obrigatórios; não foi adicionado retry permissivo.
+
+### Releitura anterior à versão publicada
+
+O deploy posterior ao PR #311 publicou a versão 36, mas o preview encontrou na
+releitura a versão 35 da mesma identidade canônica. A API consultada em seguida
+confirmou a versão 36 com o SHA integrado e os módulos esperados. O artefato de
+falha identifica essa observação; não estabelece se houve cache ou propagação do
+provedor.
+
+A recuperação limita-se a novas leituras após o preview: uma versão estritamente
+anterior, com identidade canônica única e igual à conferida antes, pode aguardar
+convergência por até cinco tentativas. Nenhuma versão anterior é aceita. A leitura
+final precisa coincidir exatamente em identidade, versão e SHA com a inicial e
+passar nas verificações de fontes e manifesto. Estado ambíguo, identidade distinta,
+versão superior ou descrição divergente na mesma versão continuam bloqueando de
+imediato. Persistência da leitura antiga também bloqueia ao esgotar o limite.
+
+O CI passa a executar os testes desse preview antes de qualquer deploy Firebase.
+Alterações de coordenadores `.cjs` também acionam a publicação Apps Script existente,
+para que sua referência de código acompanhe o SHA integrado.
