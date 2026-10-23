@@ -98,9 +98,9 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}, p
       status: "IMPLEMENTED_PENDING_DEVICE_ATTESTATION", externalAiEnabled: false, cloudSyncVerified: false, autonomousDevelopmentPromoted: false },
     userProfiles: { routineId: "AURORA-USER-PROFILES-001", version: "1.0.0", status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", verifiedEmailRequired: true, mfaRequired: true, tenantOptInRequired: true, productionVerified: false },
     dailyUpdates: { routineId: "AURORA-DAILY-UPDATES-001", webPwaCheckIntervalHours: 24, status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", desktopBinaryUpdateVerified: false, mobileDeviceVerified: false, productionVerified: false },
-    tissBilling: { routineId: "AURORA-TISS-SADT-001", version: "1.0.0", status: "IMPLEMENTED_PENDING_PORTAL_AND_DEVICE_VALIDATION",
+    tissBilling: { routineId: "AURORA-TISS-SADT-001", version: "1.0.1", status: "IMPLEMENTED_PENDING_PORTAL_AND_DEVICE_VALIDATION",
       localXmlAnalysis: true, browserExecutionScope: "PACKAGED_SYNTHETIC_FIXTURE_ONLY", productionPortalEnabled: false,
-      xsdValidationImplemented: false, tussCatalogValidationImplemented: false, clinicalPersistenceEnabled: false,
+      xsdValidationImplemented: true, tussCatalogValidationImplemented: false, clinicalPersistenceEnabled: false,
       productionVerified: false, submissionImplemented: false, installationVerified: false },
     releaseConvergence: {
       routineId: "AURORA-CANONICAL-RELEASE-001",

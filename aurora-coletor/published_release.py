@@ -215,6 +215,16 @@ def require_active(pin, now=None, expected_org=None):
     return current[0]
 
 
+TISS_XSD_FILES = frozenset((
+    'client-agent/tiss-schemas/4.03.00/tissAssinaturaDigital_v1.01.xsd',
+    'client-agent/tiss-schemas/4.03.00/tissComplexTypesV4_03_00.xsd',
+    'client-agent/tiss-schemas/4.03.00/tissGuiasV4_03_00.xsd',
+    'client-agent/tiss-schemas/4.03.00/tissSimpleTypesV4_03_00.xsd',
+    'client-agent/tiss-schemas/4.03.00/tissV4_03_00.xsd',
+    'client-agent/tiss-schemas/4.03.00/xmldsig-core-schema.xsd',
+))
+
+
 def ia_master_manifest_shape(manifest):
     """Recognize package composition only; this does not verify or authorize it."""
     if not isinstance(manifest, dict) or not isinstance(manifest.get('files'), dict):
@@ -228,9 +238,11 @@ def ia_master_manifest_shape(manifest):
     if len(names) == 34:
         return 'tissTool' not in manifest and folded.isdisjoint(TISS_MASTER_FILES)
     tool = manifest.get('tissTool')
-    return (len(names) == 39 and TISS_MASTER_FILES.issubset(names)
+    return (((len(names) == 39 and isinstance(tool, dict) and tool.get('version') == '1.0.0')
+             or (len(names) == 45 and isinstance(tool, dict) and tool.get('version') == '1.0.1'
+                 and TISS_XSD_FILES.issubset(names))) and TISS_MASTER_FILES.issubset(names)
             and _exact(tool, ('id', 'version', 'configured', 'processing', 'realPortalEnabled', 'submissionEnabled'))
-            and tool['id'] == 'AURORA-TISS-SADT-001' and tool['version'] == '1.0.0'
+            and tool['id'] == 'AURORA-TISS-SADT-001'
             and tool['processing'] == 'LOCAL_EPHEMERAL'
             and tool['configured'] is False and tool['realPortalEnabled'] is False
             and tool['submissionEnabled'] is False)

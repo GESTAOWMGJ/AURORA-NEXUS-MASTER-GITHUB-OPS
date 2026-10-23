@@ -1,9 +1,9 @@
 """Bounded, in-memory SP-SADT extraction for the existing AURORA motor.
 
-This is a local structural/arithmetic check, not an XSD validator, a TUSS
-catalog, a contract adjudicator or proof that an operator accepted a claim.
-Only ENVIO_LOTE_GUIAS / 4.03.00 is supported. No network or filesystem I/O is
-performed by analyze_xml. The CLI accepts one closed JSON request on stdin.
+This performs local XSD/structural/arithmetic checks, not TUSS catalog or
+contract adjudication, billing approval or proof of acceptance. Only
+ENVIO_LOTE_GUIAS / 4.03.00 is supported. Only pinned packaged schemas are read;
+no document filesystem I/O or network. The CLI accepts closed JSON on stdin.
 """
 from __future__ import annotations
 
@@ -11,11 +11,13 @@ import datetime as dt
 from decimal import Decimal, ROUND_HALF_UP, localcontext
 import hashlib
 import json
+from pathlib import Path
+import stat
 import re
 import sys
 import xml.etree.ElementTree as ET
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 NAMESPACE = "http://www.ans.gov.br/padroes/tiss/schemas"
 STANDARD_VERSION = "4.03.00"
 MAX_XML_BYTES = 1024 * 1024
@@ -70,6 +72,78 @@ class _BoundedTree(ET.TreeBuilder):
 
     def pi(self, *_):
         raise TissError("XML_PROCESSING_INSTRUCTION_FORBIDDEN")
+
+
+# Official ANS Communication 202511 ZIP, retrieved 2026-10-22. The complete
+# transitive closure of tissV4_03_00.xsd is pinned here, not chosen by XML.
+SCHEMA_HASHES = {
+    "tissAssinaturaDigital_v1.01.xsd": "8567690a0eb05b9681fdc575ca7c867f75bf5cb33573175b8d333617ef035221",
+    "tissComplexTypesV4_03_00.xsd": "83a24d606620cd3907c5cd574a71bf9c4411a2ec9e0510979f44293fe7c5956a",
+    "tissGuiasV4_03_00.xsd": "587f0b6bac24175c50635ede52356cab00ff1ae28b550adc42e3a7f03cf605c7",
+    "tissSimpleTypesV4_03_00.xsd": "d854debf58ac2d96194f72db95315ef2d102de57aeaf0388512f242824fdc794",
+    "tissV4_03_00.xsd": "d4c421c7e3cf936551b70d6bd794a419867b6daea554d557b4d928363c54044c",
+    "xmldsig-core-schema.xsd": "b6388292d746c6cc8f932ce3b6bf7c7fc0bf6cba58ec385b38988887bcf5fdbb"
+}
+SCHEMA_SET_SHA256 = hashlib.sha256(json.dumps(SCHEMA_HASHES, sort_keys=True,
+    separators=(",", ":")).encode("ascii")).hexdigest()
+_SCHEMA_DIR = Path(__file__).resolve().parent / "tiss-schemas" / STANDARD_VERSION
+
+
+def _validate_xsd(root):
+    """Validate the exact bounded extraction tree against the pinned ANS closure.
+
+    Re-serialize as UTF-8 so a previously decoded ISO-8859-1 declaration cannot
+    reinterpret Unicode field values. No defaults, recovery or document hints.
+    Only fixed error codes escape libxml2 (its messages can contain PHI).
+    """
+    try:
+        from lxml import etree as LX
+    except ImportError:
+        raise TissError("XSD_RUNTIME_UNAVAILABLE") from None
+    schemas = {}
+    try:
+        # No symlink traversal or unbounded reads, including parent directories.
+        for directory in (_SCHEMA_DIR, _SCHEMA_DIR.parent):
+            if directory.is_symlink() or not directory.is_dir():
+                raise ValueError()
+        for name, expected in SCHEMA_HASHES.items():
+            source = _SCHEMA_DIR / name
+            if not stat.S_ISREG(source.lstat().st_mode) or source.stat().st_size > 256 * 1024:
+                raise ValueError()
+            with source.open("rb") as stream:
+                data = stream.read(256 * 1024 + 1)
+            if hashlib.sha256(data).hexdigest() != expected:
+                raise ValueError()
+            schemas[name] = data
+    except (OSError, ValueError):
+        raise TissError("XSD_SCHEMA_INTEGRITY_FAILED") from None
+
+    class PinnedResolver(LX.Resolver):
+        def resolve(self, url, public_id, context):
+            # Never return None: that would permit libxml2's default loader.
+            if url not in schemas:
+                raise OSError("XSD_RESOURCE_REJECTED")
+            return self.resolve_string(schemas[url], context, base_url=url)
+
+    parser = LX.XMLParser(resolve_entities=False, load_dtd=False, no_network=True,
+                          huge_tree=False, recover=False, attribute_defaults=False)
+    parser.resolvers.add(PinnedResolver())
+    try:
+        schema = LX.XMLSchema(LX.fromstring(schemas["tissV4_03_00.xsd"], parser,
+                                           base_url="tissV4_03_00.xsd"))
+    except (LX.LxmlError, OSError, ValueError):
+        raise TissError("XSD_SCHEMA_COMPILE_FAILED") from None
+    try:
+        document = LX.fromstring(ET.tostring(root, encoding="utf-8"), parser)
+        valid = schema.validate(document)
+    except (LX.LxmlError, OSError, ValueError):
+        raise TissError("XSD_DOCUMENT_INVALID") from None
+    if not valid:
+        raise TissError("XSD_DOCUMENT_INVALID")
+    return {"state": "VALIDATED", "standardVersion": STANDARD_VERSION,
+            "entrypoint": "tissV4_03_00.xsd", "schemaSetSha256": SCHEMA_SET_SHA256,
+            "source": "ANS_COMMUNICATION_202511", "engine": "lxml.etree.XMLSchema",
+            "engineVersion": ".".join(map(str, LX.LXML_VERSION[:3]))}
 
 
 def _one(parent, name, path, *, required=True):
@@ -380,14 +454,17 @@ def analyze_xml(xml: str, *, org_id: str) -> dict:
     keys = [guide["duplicateKey"] for guide in guides]
     if len(keys) != len(set(keys)):
         _issue(issues, "DUPLICATE_GUIDE_IN_BATCH", "guides")
-    for code in ("XSD_VALIDATION_PENDING", "TUSS_CATALOG_VALIDATION_PENDING", "CONTRACT_VALIDATION_PENDING", "TISS_HASH_UNVERIFIED"):
+    xsd = _validate_xsd(root)
+    for code in ("TUSS_CATALOG_VALIDATION_PENDING", "CONTRACT_VALIDATION_PENDING", "TISS_HASH_UNVERIFIED"):
         _issue(issues, code, "batch", "INFO")
     return {"schemaVersion": "aurora.tiss.analysis.v1", "version": VERSION, "orgId": org_id,
             "sourceSha256": hashlib.sha256(encoded).hexdigest(), "sourceHashBasis": "UTF8_XML_TEXT",
             "standardVersion": version, "messageType": message_type, "transactionId": transaction_id,
             "batchNumber": batch_number, "operatorRegistration": operator, "guides": guides,
             "validation": {"status": "REVIEW_REQUIRED" if any(issue["severity"] in ("ERROR", "WARNING") for issue in issues) else "VALIDATED_LOCAL",
-                           "xsdValidated": False, "catalogValidated": False, "contractValidated": False,
+                           "xsdValidated": True, "xsd": xsd,
+                           "catalogValidated": False, "contractValidated": False,
+                           "billingApproved": False,
                            "tissHashState": "PRESENT_UNVERIFIED", "issues": issues},
             "summary": {"guideCount": len(guides), "procedureCount": sum(len(guide["procedures"]) for guide in guides),
                         "otherExpenseCount": sum(len(guide["otherExpenses"]) for guide in guides),

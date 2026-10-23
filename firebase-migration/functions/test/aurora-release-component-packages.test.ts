@@ -14,15 +14,15 @@ function fixture(t:any){
   const fileBytes=Object.fromEntries(IA_MASTER_FILES.map((name:string)=>[name,Buffer.from('synthetic public '+name+'\n')]));
   const manifest:any={component:'AURORA_IA_MASTER',version:'1.1.0',sourceRevision:sourceSha,dirty:false,nodeMinimumMajor:22,externalAiEnabled:false,
     clientAgent:{component:'AURORA_CLIENT_AGENT',version:'1.0.5',configured:false,sourceAuthorizationRequired:true,providerConnectionsVerified:false},
-    tissTool:{id:'AURORA-TISS-SADT-001',version:'1.0.0',configured:false,processing:'LOCAL_EPHEMERAL',realPortalEnabled:false,submissionEnabled:false},
+    tissTool:{id:'AURORA-TISS-SADT-001',version:'1.0.1',configured:false,processing:'LOCAL_EPHEMERAL',realPortalEnabled:false,submissionEnabled:false},
     files:Object.fromEntries(Object.entries(fileBytes).map(([name,bytes])=>[name,hash(bytes as Uint8Array)]))};
   const rewrite=()=>writeFileSync(join(directory,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
   for(const [name,bytes] of Object.entries(fileBytes)){const file=join(directory,...name.split('/'));mkdirSync(dirname(file),{recursive:true});writeFileSync(file,bytes as Uint8Array);}
   rewrite();return {temporary,directory,manifest,fileBytes,rewrite};
 }
-test('current package closure yields IA39 with TISS and unchanged Windows7 without activation claims',async t=>{
+test('current package closure yields IA45 with TISS and unchanged Windows7 without activation claims',async t=>{
   const f=fixture(t),ia=await readComponentPackage(f.directory,'iaMaster',sourceSha),windows=windowsIntegrationPackage(ia,sourceSha);
-  assert.equal(Object.keys(ia.fileBytes).length,39);assert.equal(Object.keys(windows.fileBytes).length,7);
+  assert.equal(Object.keys(ia.fileBytes).length,45);assert.equal(Object.keys(windows.fileBytes).length,7);
   assert.equal(ia.manifest.tissTool.id,'AURORA-TISS-SADT-001');
   assert.equal(ia.manifest.tissTool.realPortalEnabled,false);assert.equal(ia.manifest.tissTool.submissionEnabled,false);
   assert.ok(ia.fileBytes['client-agent/aurora_tiss.py']);assert.equal(Object.hasOwn(windows.fileBytes,'aurora_tiss.py'),false);
@@ -41,7 +41,7 @@ test('current TISS release refuses incomplete metadata or operational activation
     await assert.rejects(readComponentPackage(f.directory,'iaMaster',sourceSha),/COMPONENT_IDENTITY_CONFLICT/);
   }
 });
-for(const name of ['tiss-tool.cjs','tiss-browser.cjs','tiss-local.js','client-agent/aurora_tiss.py','tiss-fixtures/sadt-valid.xml'])
+for(const name of IA_MASTER_FILES.filter((name:string)=>name.startsWith('tiss-')||name.startsWith('client-agent/tiss-schemas/')||name==='client-agent/aurora_tiss.py'))
 test(`current release cannot silently omit TISS payload ${name}`,async t=>{
   const f=fixture(t);delete f.manifest.files[name];unlinkSync(join(f.directory,...name.split('/')));f.rewrite();
   await assert.rejects(readComponentPackage(f.directory,'iaMaster',sourceSha),/COMPONENT_MANIFEST_INVALID/);

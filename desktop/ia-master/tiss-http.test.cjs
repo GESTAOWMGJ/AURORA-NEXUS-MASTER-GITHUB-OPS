@@ -62,6 +62,7 @@ test('TISS HTTP routes reuse authenticated owner, origin, CSRF and DNS-rebinding
   });
   assert.equal(rebinding, 403);
   const status = await (await f.request('/api/tiss/status')).json();
+  assert.equal(status.xsdValidationImplemented, true); assert.equal(status.xsdValidated, false);
   assert.equal(status.id, 'AURORA-TISS-SADT-001'); assert.equal(status.state, 'LOCAL_ANALYSIS_CONFIGURED');
   assert.equal(status.realPortalEnabled, false); assert.equal(status.submissionEnabled, false);
   assert.equal(status.rawDataPersistence, false); assert.equal(status.externalAiCalls, 0);
@@ -73,7 +74,7 @@ test('built HTTP tool invokes real packaged parser and keeps XML out of audit an
   const response = await f.request('/api/tiss/analyze', { xml });
   assert.equal(response.status, 200); const result = await response.json();
   assert.equal(result.analysis.standardVersion, '4.03.00'); assert.equal(result.analysis.orgId, orgId);
-  assert.equal(result.analysis.summary.totalCents, 10700); assert.equal(result.analysis.validation.xsdValidated, false);
+  assert.equal(result.analysis.summary.totalCents, 10700); assert.equal(result.analysis.validation.xsdValidated, true);
   assert.equal(result.dataMode, 'PACKAGED_SYNTHETIC_FIXTURE'); assert.equal(result.externalAiCalls, 0);
   const replay = await (await f.request('/api/tiss/analyze', { xml })).json();
   assert.equal(replay.analysisId, result.analysisId); assert.equal(replay.reused, true);
@@ -83,7 +84,7 @@ test('built HTTP tool invokes real packaged parser and keeps XML out of audit an
   assert.equal(f.inferCalls.length, 0);
   const master = await (await f.request('/api/status')).json();
   assert.equal(master.metrics.localModelCalls, 0); assert.equal(master.metrics.externalAiCalls, 0);
-  assert.equal(master.tiss.version, '1.0.0');
+  assert.equal(master.tiss.version, '1.0.1');
 });
 
 test('TISS HTTP schema refuses caller tenant/path/commands and never reports unsafe source text', async t => {
@@ -138,4 +139,19 @@ test('TISS plans expire even while owner authentication remains valid', async t 
   assert.equal((await f.request('/api/tiss/status', undefined, headers)).status, 200);
   const next = await (await f.request('/api/tiss/analyze', { xml }, headers)).json();
   assert.equal(next.reused, false);
+});
+
+test('packaged runtime rejects XSD-incompatible fields with sanitized HTTP errors', async t => {
+  const f = await fixture(t);
+  const marker = 'SYNTHETIC_PRIVATE_XSD_VALUE';
+  const invalid = xml.replace('<ans:nomeProfissional>PROFISSIONAL SINTETICO</ans:nomeProfissional>',
+    '<ans:nomeProfissional>' + marker.repeat(4) + '</ans:nomeProfissional>');
+  const response = await f.request('/api/tiss/analyze', { xml: invalid });
+  assert.equal(response.status, 400);
+  const text = await response.text();
+  assert.equal(JSON.parse(text).code, 'TISS_XSD_DOCUMENT_INVALID');
+  assert.doesNotMatch(text, new RegExp(marker));
+  const audit = fs.existsSync(path.join(f.stateDir, 'audit.jsonl')) ? fs.readFileSync(path.join(f.stateDir, 'audit.jsonl'), 'utf8') : '';
+  assert.doesNotMatch(audit, /SYNTHETIC_PRIVATE_XSD_VALUE|TISS_XML_ANALYZED/);
+  assert.equal(f.inferCalls.length, 0);
 });

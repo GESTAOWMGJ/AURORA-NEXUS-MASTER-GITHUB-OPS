@@ -219,6 +219,29 @@ class PublishedReleaseTests(unittest.TestCase):
                 with self.assertRaisesRegex(release.ReleaseError, '^FRESH_CANONICAL_V2_PIN_REQUIRED$'):
                     release.require_active(candidate, NOW, ORG)
 
+    def test_xsd_45_signed_closure_requires_all_schemas_and_fixed_capabilities(self):
+        manifest, files = master_package(True)
+        for name in release.TISS_XSD_FILES:
+            files[name] = ('synthetic schema ' + name).encode()
+            manifest['files'][name] = release.digest(files[name])
+        manifest['tissTool']['version'] = '1.0.1'
+        candidate, raw = self.master_candidate(manifest)
+        result = release.assess_manifest(candidate, 'iaMaster', raw, files)
+        self.assertEqual(result['status'], 'SIGNED_COMPONENT_BYTES_VERIFIED')
+        self.assertFalse(result['installed'])
+        for missing in release.TISS_XSD_FILES:
+            changed = copy.deepcopy(manifest)
+            changed['files']['unrelated.txt'] = changed['files'].pop(missing)
+            self.assertFalse(release.ia_master_manifest_shape(changed))
+        for key, value in [('version', '1.0.0'), ('realPortalEnabled', True), ('submissionEnabled', True)]:
+            changed = copy.deepcopy(manifest)
+            changed['tissTool'][key] = value
+            self.assertFalse(release.ia_master_manifest_shape(changed))
+        changed_files = dict(files)
+        changed_files[next(iter(release.TISS_XSD_FILES))] = b'tampered schema'
+        with self.assertRaises(release.ReleaseError):
+            release.assess_manifest(candidate, 'iaMaster', raw, changed_files)
+
     def test_tiss_master_requires_signed_exact_manifest_and_file_bytes(self):
         manifest, files = master_package(True)
         candidate, raw = self.master_candidate(manifest)

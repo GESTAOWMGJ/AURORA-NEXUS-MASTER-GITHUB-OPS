@@ -68,7 +68,7 @@ export function nativeRoutineSummary(): Record<string, unknown> {
     routines: AURORA_NATIVE_ROUTINES,
     counts,
     tissBillingPolicy: {
-      routineId: "AURORA-TISS-SADT-001", version: "1.0.0", module: "M03.1",
+      routineId: "AURORA-TISS-SADT-001", version: "1.0.1", module: "M03.1",
       executor: "EXISTING_LOCAL_IA_MASTER", executorState: "IMPLEMENTED_PENDING_RUNTIME_VALIDATION",
       registrationOnly: false, localApi: "/api/tiss", supportedXmlVersion: "4.03.00",
       supportedMessage: "ENVIO_LOTE_GUIAS", supportedGuide: "SP-SADT",
@@ -76,7 +76,7 @@ export function nativeRoutineSummary(): Record<string, unknown> {
       rawXmlPersisted: false, externalAiRequired: false, canonicalIngestionEnabled: false,
       browserTransport: "LOOPBACK_CDP", browserScope: "PACKAGED_SYNTHETIC_FIXTURE_AND_CONFIGURED_HOMOLOGATION",
       browserInputMayTriggerPortalEffects: true, productionPortalEnabled: false,
-      explicitSubmissionImplemented: false, xsdValidatedByRuntime: false,
+      explicitSubmissionImplemented: false, xsdValidatedByRuntime: true,
       tussCatalogValidated: false, contractValidated: false,
       receiptIsPayment: false, retryAfterUncertainEffect: false,
       audit: "EXISTING_PRIVATE_MASTER_AUDIT_LEDGER_HASHES_ONLY",

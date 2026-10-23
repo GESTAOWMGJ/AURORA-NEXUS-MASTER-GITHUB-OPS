@@ -9,7 +9,8 @@ const { readRegularFile } = require('./safe-read.cjs');
 const { createBrowserAdapter } = require('./tiss-browser.cjs');
 
 const TOOL_ID = 'AURORA-TISS-SADT-001';
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
+const XSD_SET_SHA256 = 'e76b264ee9a2b0069d8cf6cd4906f5267a365abb61e44b37e1edd3aa6515aa51';
 const XML_LIMIT = 1024 * 1024;
 const BODY_LIMIT = XML_LIMIT * 2;
 const TTL = 15 * 60 * 1000;
@@ -74,7 +75,8 @@ function runParser({ executable, parserPath, xml, orgId }) {
       if (error || result.ok === false) {
         const code = result.code || result.error?.code;
         return reject(new TissError(/^[A-Z][A-Z0-9_]{1,90}$/.test(code || '')
-          ? (code.startsWith('TISS_') ? code : 'TISS_' + code) : 'TISS_XML_REJECTED'));
+          ? (code.startsWith('TISS_') ? code : 'TISS_' + code) : 'TISS_XML_REJECTED',
+          ['XSD_RUNTIME_UNAVAILABLE', 'XSD_SCHEMA_INTEGRITY_FAILED', 'XSD_SCHEMA_COMPILE_FAILED'].includes(code) ? 503 : 400));
       }
       resolve(result.result || result);
     });
@@ -131,7 +133,7 @@ function createTissTool({ stateDir, orgId, audit, config = null, now = () => Dat
       standardVersion: '4.03.00', classification: 'CLINICAL_SENSITIVE', rawDataPersistence: false,
       externalAiCalls: 0, canonicalIngestionEnabled: false, realPortalEnabled: false,
       browserMode: 'PACKAGED_SYNTHETIC_FIXTURE_ONLY', browserConfigured: Boolean(browser),
-      syntheticFixtureAvailable: Boolean(fixtureHash), submissionEnabled: false, xsdValidated: false,
+      syntheticFixtureAvailable: Boolean(fixtureHash), submissionEnabled: false, xsdValidated: false, xsdValidationImplemented: true,
       tussCatalogValidated: false, contractValidated: false, maxXmlBytes: XML_LIMIT, ttlSeconds: TTL / 1000 };
   }
   function forget(map, id) { const entry = map.get(id); if (entry?.timer) clearTimeout(entry.timer); map.delete(id); }
@@ -194,13 +196,18 @@ function createTissTool({ stateDir, orgId, audit, config = null, now = () => Dat
         const result = await parser({ executable: configuration.pythonExecutable, parserPath, xml: body.xml, orgId });
         demand(inflight.get(caller) === pending, 'TISS_ANALYSIS_CANCELLED', 409);
         demand(result?.orgId === orgId && result.sourceSha256 === sourceHash && Array.isArray(result.guides) &&
-          result.guides.length > 0 && result.guides.length <= 100 && result.validation?.xsdValidated === false,
+          result.guides.length > 0 && result.guides.length <= 100 && result.version === VERSION && result.validation?.xsdValidated === true &&
+          result.validation.xsd?.schemaSetSha256 === XSD_SET_SHA256 &&
+          result.validation.xsd.state === 'VALIDATED' && result.validation.xsd.standardVersion === '4.03.00' &&
+          result.validation.catalogValidated === false && result.validation.contractValidated === false &&
+          result.validation.billingApproved === false,
         'TISS_PARSER_CONTRACT_INVALID', 503);
         const expiresAt = now() + TTL;
         const publicValue = { analysisId, analysis: result, expiresAt: new Date(expiresAt).toISOString(),
           dataMode: sourceHash === fixtureHash ? 'PACKAGED_SYNTHETIC_FIXTURE' : 'CLINICAL_SENSITIVE_EPHEMERAL',
           canonicalIngestionEnabled: false, realPortalEnabled: false, rawDataPersistence: false, reused: false };
-        audited('TISS_XML_ANALYZED', { sourceHash, guideCount: result.guides.length, analysisId });
+        audited('TISS_XML_ANALYZED', { sourceHash, guideCount: result.guides.length, analysisId,
+          xsdState: result.validation.xsd.state, schemaSetSha256: XSD_SET_SHA256 });
         remember(analyses, analysisId, { orgId, caller, expiresAt, result, publicValue });
         return { status: 200, value: publicValue };
       } finally { if (inflight.get(caller) === pending) inflight.delete(caller); busy = false; }

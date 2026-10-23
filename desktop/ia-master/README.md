@@ -220,7 +220,7 @@ contínua de todas as versões seguintes nem comprova instalação do Mac.
 
 ## Ferramenta de faturamento TISS / SP-SADT
 
-O mesmo componente inclui `AURORA-TISS-SADT-001` versão `1.0.0`: painel de XML,
+O mesmo componente inclui `AURORA-TISS-SADT-001` versão `1.0.1`: painel de XML,
 parser determinístico Python e preenchimento assistido em Chromium/Edge por CDP
 loopback. Autenticação, organização e auditoria pertencem à IA Master existente.
 Configuração e execução não usam o modelo de linguagem.
@@ -228,7 +228,10 @@ Configuração e execução não usam o modelo de linguagem.
 O parser recebe o arquivo por stdin e mantém resultados em memória. O adaptador
 de navegador desta versão executa somente a fixture sintética empacotada, com
 configuração de homologação revisada. Transmissão de lote, persistência clínica,
-validação XSD/TUSS integral e operação real permanecem gates independentes.
+validação de catálogo TUSS, contrato e operação real permanecem gates independentes.
+O parser valida XSD 4.03.00 em runtime com seis esquemas oficiais fixados por hash.
+Requer `lxml==6.1.1` no Python configurado (modo isolado); dependência ou esquemas
+ausentes bloqueiam a análise. Não há instalação automática de dependências.
 
 Configurar `tiss-configuration.json` no diretório privado existente, vinculando
 `schemaVersion: aurora.tiss.config.v1`, `orgId` autenticado e `pythonExecutable`

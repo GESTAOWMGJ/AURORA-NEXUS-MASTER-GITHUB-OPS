@@ -10,6 +10,7 @@ const { EventEmitter } = require('node:events');
 const real = require('./published-update.cjs');
 const WINDOWS = ['client_agent.py','provider_connectors.py','client_secret_store.py','install_client_agent.py','aurora_cloud_sync.py','aurora_deployment.py','published_release.py'];
 const TISS_FILES = ['tiss-tool.cjs','tiss-browser.cjs','tiss-local.js','client-agent/aurora_tiss.py','tiss-fixtures/sadt-valid.xml'];
+const TISS_XSD_FILES = ['client-agent/tiss-schemas/4.03.00/tissAssinaturaDigital_v1.01.xsd', 'client-agent/tiss-schemas/4.03.00/tissComplexTypesV4_03_00.xsd', 'client-agent/tiss-schemas/4.03.00/tissGuiasV4_03_00.xsd', 'client-agent/tiss-schemas/4.03.00/tissSimpleTypesV4_03_00.xsd', 'client-agent/tiss-schemas/4.03.00/tissV4_03_00.xsd', 'client-agent/tiss-schemas/4.03.00/xmldsig-core-schema.xsd'];
 const TISS_TOOL = {id:'AURORA-TISS-SADT-001',version:'1.0.0',configured:false,processing:'LOCAL_EPHEMERAL',realPortalEnabled:false,submissionEnabled:false};
 const OLD = '56a813aac38390d928122cb774a16b3503977d72', NEXT = 'a'.repeat(40);
 const h = real.digest, encode = value => Buffer.from(JSON.stringify(value));
@@ -206,19 +207,22 @@ test('34-file signed IA and 7-file Windows closures reject extras and changed by
   fs.writeFileSync(path.join(base,'ia','extra.txt'),'public extra');assert.throws(()=>real.inspectPackage(candidate,'iaMaster',path.join(base,'ia'),ia.bytes),/CLOSURE/);
   fs.writeFileSync(path.join(base,'win','client_agent.py'),'changed');assert.throws(()=>real.inspectPackage(candidate,'windowsIntegration',path.join(base,'win'),win.bytes),/FILE_BYTES/);
 });
-test('39-file TISS package requires signed bytes, the five payloads and exact closed capabilities',t=>{
+for (const xsdRuntime of [false, true]) test(`TISS ${xsdRuntime ? 45 : 39} package requires signed closure and exact capabilities`,t=>{
+  const payloads = xsdRuntime ? [...TISS_FILES, ...TISS_XSD_FILES] : TISS_FILES;
+  const metadata = {...TISS_TOOL, version: xsdRuntime ? '1.0.1' : '1.0.0'};
+  const count = xsdRuntime ? 45 : 39;
   const base=fs.mkdtempSync(path.join(os.tmpdir(),'aurora-tiss-package-proof-'));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
-  const pair=keyPair(),names=[...Array.from({length:34},(_,i)=>'public-'+i+'.txt'),...TISS_FILES];
+  const pair=keyPair(),names=[...Array.from({length:34},(_,i)=>'public-'+i+'.txt'),...payloads];
   function make(label,mutate=()=>{}){
     const directory=path.join(base,label),pack=packageFixture(directory,names);
-    pack.manifest.tissTool={...TISS_TOOL};mutate(pack,directory);
+    pack.manifest.tissTool={...metadata};mutate(pack,directory);
     pack.bytes=encode(pack.manifest);fs.writeFileSync(path.join(directory,'manifest.json'),pack.bytes);
     const candidate=real.verifyCandidate(envelope(pair,{iaMaster:h(pack.bytes)}),pair.trust,NEXT);
     return {pack,directory,candidate};
   }
   const valid=make('valid'),checked=real.inspectPackage(valid.candidate,'iaMaster',valid.directory,valid.pack.bytes);
-  assert.equal(Object.keys(checked.files).length,40);
-  for(const name of TISS_FILES)assert.equal(h(checked.files[name]),valid.pack.manifest.files[name]);
+  assert.equal(Object.keys(checked.files).length,count+1);
+  for(const name of payloads)assert.equal(h(checked.files[name]),valid.pack.manifest.files[name]);
   const stage=real.stageCandidate({candidate:valid.candidate,packageDirectory:valid.directory,manifestBytes:valid.pack.bytes,destination:path.join(base,'stage')});
   assert.equal(stage.activated,false);assert.equal(stage.installed,false);
   assert.throws(()=>real.inspectPackage({...valid.candidate},'iaMaster',valid.directory,valid.pack.bytes),/V2_COMPONENT_COVERAGE/);
@@ -232,13 +236,13 @@ test('39-file TISS package requires signed bytes, the five payloads and exact cl
     pack=>{pack.manifest.tissTool.submissionEnabled=true;},pack=>{pack.manifest.tissTool.submissionEnabled='false';}
   ];
   mutations.forEach((mutate,index)=>{const f=make('gate-'+index,mutate);assert.throws(()=>real.inspectPackage(f.candidate,'iaMaster',f.directory,f.pack.bytes),/PACKAGE_CLOSURE/);});
-  TISS_FILES.forEach((missing,index)=>{
+  payloads.forEach((missing,index)=>{
     const f=make('missing-'+index,(pack,directory)=>{
       delete pack.manifest.files[missing];fs.unlinkSync(path.join(directory,missing));
       const replacement='unrelated-'+index+'.txt',bytes=Buffer.from('synthetic unrelated replacement');
       pack.manifest.files[replacement]=h(bytes);fs.writeFileSync(path.join(directory,replacement),bytes);
     });
-    assert.equal(Object.keys(f.pack.manifest.files).length,39);
+    assert.equal(Object.keys(f.pack.manifest.files).length,count);
     assert.throws(()=>real.inspectPackage(f.candidate,'iaMaster',f.directory,f.pack.bytes),/PACKAGE_CLOSURE/);
   });
   const missingPhysical=make('missing-physical');fs.unlinkSync(path.join(missingPhysical.directory,TISS_FILES[0]));
@@ -446,11 +450,13 @@ async function successorOptions(f, source) {
     stageDirectory:path.join(f.root,'reviewed-stage-'+source.slice(0,8))};
 }
 
-test('signed legacy 34 and TISS 39 successors preserve completed lineage and local identity',async t=>{
+for (const xsdRuntime of [false, true]) test(`signed legacy and TISS ${xsdRuntime ? 45 : 39} preserve lineage and identity`,async t=>{
+  const payloads = xsdRuntime ? [...TISS_FILES, ...TISS_XSD_FILES] : TISS_FILES;
+  const metadata = {...TISS_TOOL, version: xsdRuntime ? '1.0.1' : '1.0.0'};
   const f=transactionFixture(t),legacy=await f.api.activatePublished(await f.options());
   const source='b'.repeat(40),options=await successorOptions(f,source);
-  const manifest=JSON.parse(options.manifestBytes);manifest.tissTool={...TISS_TOOL};
-  for(const name of TISS_FILES){
+  const manifest=JSON.parse(options.manifestBytes);manifest.tissTool={...metadata};
+  for(const name of payloads){
     const bytes=Buffer.from('synthetic TISS payload '+name);
     writeFiles(options.packageDirectory,{[name]:bytes});manifest.files[name]=h(bytes);
   }
@@ -460,7 +466,7 @@ test('signed legacy 34 and TISS 39 successors preserve completed lineage and loc
   const applied=await f.api.activatePublished(options);
   assert.equal(applied.status,'SIGNED_LOCAL_COMPONENT_APPLIED');
   const installed=JSON.parse(fs.readFileSync(path.join(f.pkg,'manifest.json')));
-  assert.equal(Object.keys(installed.files).length,39);assert.deepEqual(installed.tissTool,TISS_TOOL);
+  assert.equal(Object.keys(installed.files).length,xsdRuntime ? 45 : 39);assert.deepEqual(installed.tissTool,metadata);
   const journal=JSON.parse(fs.readFileSync(path.join(applied.attempt,'journal.json')));
   assert.equal(journal.previousRelease.kind,'SIGNED_COMPLETED');assert.equal(journal.previousRelease.sourceSha,NEXT);
   assert.equal(journal.previousRelease.journalSha256,h(fs.readFileSync(path.join(legacy.attempt,'journal.json'))));

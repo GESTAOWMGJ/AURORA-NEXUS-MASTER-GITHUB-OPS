@@ -20,6 +20,10 @@ test("modus operandi WMGJ está representado como registro nativo multi-tenant",
 test('TISS is an executable local tool with clinical and transmission gates still explicit', () => {
   const policy = nativeRoutineSummary().tissBillingPolicy as Record<string, unknown>;
   assert.equal(policy.registrationOnly, false);
+  assert.equal(policy.version, '1.0.1');
+  assert.equal(policy.xsdValidatedByRuntime, true);
+  assert.equal(policy.tussCatalogValidated, false);
+  assert.equal(policy.contractValidated, false);
   assert.equal(policy.executor, 'EXISTING_LOCAL_IA_MASTER');
   assert.equal(policy.productionPortalEnabled, false);
   assert.equal(policy.explicitSubmissionImplemented, false);

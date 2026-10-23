@@ -1,6 +1,7 @@
 # AURORA-TISS-SADT-001 — ferramenta de faturamento no motor
 
-Versão do componente: **1.0.0**. Data do incremento: **21/10/2026**.
+Versão do componente: **1.0.1** (candidato XSD runtime). Data: **22/10/2026**.
+Base do incremento: PR #296, SHA `083c5c1569f7f9ac3c01c5fb3e0475ee14cf3dc2`.
 Módulo preservado: **M03.1 / JFN-AUD-FAT-001**, com M01, M08, M09 e M10.
 Baseline de engenharia: `226a7f101f4bf1e0680afca2459132f01ebaf71d`.
 
@@ -30,10 +31,13 @@ Não há outro motor, servidor permanente, banco, scheduler ou processo de IA.
 O módulo usa a mesma porta local, sessão, organização, empacotador e auditoria da
 IA Master. O modelo local e os provedores externos não participam do cálculo.
 
-O pacote atual da IA Master contém 39 arquivos declarados. O exportador exige os
+O pacote candidato da IA Master contém 45 arquivos declarados, incluindo os seis
+XSD oficiais com bytes originais preservados. O exportador exige os
 cinco novos arquivos TISS e metadados que mantêm portal real e transmissão
 desabilitados. Os consumidores assinados preservam o predecessor de 34 arquivos
-sem TISS e aceitam a nova composição de 39 somente com esses metadados exatos.
+sem TISS e aceitam a composições de 39 (1.0.0) e 45 (1.0.1) somente com metadados
+exatos de cada versão. O exportador corrente exige 45 arquivos; não publica a
+composição histórica como capacidade XSD.
 A baseline histórica de 26 arquivos e o componente Windows Integration de sete
 arquivos mantêm suas identidades e verificações próprias.
 
@@ -92,7 +96,8 @@ O retorno mantém explicitamente:
 
 ```json
 {
-  "xsdValidated": false,
+  "xsdValidated": true,
+  "billingApproved": false,
   "catalogValidated": false,
   "contractValidated": false,
   "tissHashState": "PRESENT_UNVERIFIED"
@@ -100,15 +105,16 @@ O retorno mantém explicitamente:
 ```
 
 `VALIDATED_LOCAL` significa apenas que as conferências locais implementadas não
-encontraram divergência. Não significa XML integralmente conforme, conta liberada
-ou autorização da operadora. O hash TISS do epílogo e assinatura digital não são
+encontraram divergência. Inclui XSD válido contra a versão fixada, mas não significa conta liberada
+ou autorização da operadora. O subconjunto aceito pelo parser é mais restrito
+que o XSD completo; XSD válido pode continuar sendo rejeitado pelo subconjunto. O hash TISS do epílogo e assinatura digital não são
 verificados nesta versão. SHA-256 de proveniência não substitui esses mecanismos.
 
 ## Integração executável
 
 | Arquivo | Responsabilidade |
 | --- | --- |
-| `aurora-coletor/aurora_tiss.py` | Parser e conferência determinística, função pura e CLI JSON |
+| `aurora-coletor/aurora_tiss.py` | Parser e conferência determinística, CLI JSON e leitura somente dos XSD fixados no pacote |
 | `desktop/ia-master/tiss-tool.cjs` | Plano por sessão, limites, expiração, auditoria e idempotência |
 | `desktop/ia-master/tiss-browser.cjs` | Adaptador Chromium/Edge via CDP em loopback |
 | `desktop/ia-master/tiss-local.js` | Importação, revisão e controles da tela existente |
@@ -254,8 +260,9 @@ Fixture `aurora-coletor/fixtures/tiss/sp-sadt-4.03.00.synthetic.xml`:
 ZIP oficial ANS consultado:
 `db8640e1c3b87085892f54f838bfcea9934439ff365798c8428559f88c13d62d`.
 
-A fixture passou em validação independente pelo conjunto XSD oficial 4.03.00.
-Isso valida a fixture, não acrescenta um validador XSD ao runtime.
+O histórico 1.0.0 validou a fixture separadamente. O candidato 1.0.1 valida
+cada análise em runtime pelo mesmo conjunto oficial; isso não constitui revisão
+humana independente, instalação no executor ou homologação de portal.
 
 Suítes novas verificam parser, origem/CSRF/sessão, isolamento, limites, memória,
 duplicidade, totais, mapeamento, replay, concorrência, intenção anterior ao efeito,
@@ -268,6 +275,7 @@ Aurora Installers**, com verificação da composição e hashes do mesmo pacote.
 Os testes Chromium são opt-in e não acrescentam dependência ao runtime:
 
 ```bash
+python3 -m pip install -r aurora-coletor/requirements-tiss.txt
 python3 -m unittest discover -s aurora-coletor -p test_aurora_tiss.py -v
 node --test desktop/ia-master/tiss-tool.test.cjs desktop/ia-master/tiss-browser.test.cjs
 AURORA_TEST_BUILD=/caminho/pacote node --test desktop/ia-master/tiss-http.test.cjs
@@ -281,8 +289,8 @@ ambiente de testes. Os testes não usam o perfil do usuário.
 ## Próximo gate e rollback
 
 Antes de operação real: CI do candidato, instalação comprovada no executor,
-versão/catalogação TUSS e contrato aplicáveis, validação XSD/hash/assinatura quando
-exigida, portal e mapeamento homologados, identidade da conta/prestador verificada,
+versão/catalogação TUSS e contrato aplicáveis, dependência e XSD
+verificados no Python configurado, hash TISS/assinatura quando exigidos, portal e mapeamento homologados, identidade da conta/prestador verificada,
 finalidade e requisitos de privacidade aprovados, governança clínica vigente,
 fluxo de retorno/protocolo e reconciliação antes de retry. O módulo não libera
 esses gates por configuração livre nem herda uma autorização de outro tenant.
@@ -300,3 +308,89 @@ Aprendizado reutilizável: XML é dado, TUSS é identificação, preço exige co
 total inclui outras despesas, preenchimento não prova envio, protocolo não prova
 pagamento e resultado incerto exige reconciliação. Só esse padrão abstrato pode
 ser promovido entre organizações; documentos e regras privadas não o acompanham.
+
+
+## XSD em runtime — incremento 1.0.1
+
+A análise mantém o parser limitado existente e valida a mesma árvore extraída,
+serializada em UTF-8, com `lxml.etree.XMLSchema`. Isso evita reinterpretar o texto
+já decodificado de um arquivo ISO-8859-1. Não altera o XML-fonte, seus valores,
+a base de hash `UTF8_XML_TEXT` ou os cálculos financeiros. Não há auto-correção,
+preenchimento de defaults ou consulta à rede. Após qualquer falha não há análise
+em cache, plano de navegador ou evento de análise aprovada.
+
+Dependência explícita: `lxml==6.1.1`, em `requirements-tiss.txt`. Deve estar no
+**mesmo Python configurado**, acessível em modo `-I`; instalação somente no user
+site não basta. O runtime e o instalador não baixam nem instalam dependências.
+A falta da dependência bloqueia a ferramenta com `XSD_RUNTIME_UNAVAILABLE`.
+O coletor genérico mantém sua baseline de biblioteca padrão; apenas a ferramenta
+TISS requer lxml. Compatibilidade nativa Windows/macOS ainda exige prova própria.
+
+Os seis arquivos em `aurora-coletor/tiss-schemas/4.03.00/` são a closure transitiva
+de `tissV4_03_00.xsd`, extraídos do ZIP oficial acima, sem modificação. O ZIP
+reobtido em 22/10/2026 corresponde ao SHA-256 já documentado. `SCHEMA_HASHES` no
+parser fixa cada arquivo; o manifesto do pacote também cobre seus bytes.
+O hash do mapa canônico (nomes/hashes ordenados, JSON compacto ASCII) é:
+`e76b264ee9a2b0069d8cf6cd4906f5267a365abb61e44b37e1edd3aa6515aa51`.
+
+O resolver atende apenas nomes exatos dessa closure a partir de bytes verificados
+em memória. Qualquer outra URI é rejeitada, sem fallback para o loader do sistema.
+`resolve_entities=False`, `load_dtd=False`, `no_network=True`, `recover=False` e
+`huge_tree=False`. O DTD histórico no XSD de assinatura oficial é mantido como
+byte original, sem carregar seu recurso externo. DTD no **XML importado** é
+sempre proibido antes da validação. Nenhum XInclude é executado.
+
+| Situação | Resultado |
+| --- | --- |
+| XML bem formado e compatível com o subconjunto e XSD | `xsdValidated=true`, prova XSD e hash; faturamento continua não aprovado |
+| XML incompatível com o XSD oficial | `XSD_DOCUMENT_INVALID`, sem análise/plano; HTTP 400 |
+| Outra versão ou mensagem | Rejeição existente `TISS_VERSION_UNSUPPORTED` / `TISS_MESSAGE_UNSUPPORTED` |
+| Dependência indisponível | `XSD_RUNTIME_UNAVAILABLE`; HTTP 503 |
+| Arquivo ausente, alterado, excessivo ou symlink | `XSD_SCHEMA_INTEGRITY_FAILED`; HTTP 503 |
+| Falha na compilação dos esquemas | `XSD_SCHEMA_COMPILE_FAILED`; HTTP 503 |
+
+Os códigos Python recebem prefixo `TISS_` na API local. Mensagens, valores,
+caminhos e error logs de libxml2 não são devolvidos ou registrados, pois podem
+incluir conteúdo de guias. O ledger existente registra somente fonte/hash,
+contagens, identificação da análise, estado XSD e hash do conjunto oficial.
+O status sem documento informa capacidade implementada, mantendo
+`xsdValidated=false`: ele não valida por inferência um arquivo ainda não analisado.
+
+O servidor exige a versão atual e o hash XSD esperado no retorno do parser antes
+de armazenar o resultado. Mantém `catalogValidated=false`, `contractValidated=false`,
+`billingApproved=false`, `receiptState=NOT_SUBMITTED` e `paymentState=NOT_VERIFIED`.
+XSD restringe domínios de tipos mas não confere vigência TUSS, preço contratual,
+necessidade/autorização assistencial, hash TISS ou assinatura criptográfica.
+
+Revisão: incremento incorporável à mesma candidata do PR #296. Não há
+necessidade de outro motor ou outro PR. Merge, release e instalação dependem
+de provas e revisão humana independente próprias.
+Regressões cobrem parser, API, autenticação/origem/CSRF, isolamento de sessões,
+cache, auditoria, composição, consumidores assinados e reversão sintética.
+CI do SHA candidato, revisão humana independente, instalação no dispositivo,
+homologação física e produção são estados próprios; nenhum é inferido dos testes
+locais. Não foram usados dados clínicos reais nem transmitidos lotes.
+
+Rollback: restaurar o predecessor pelo mecanismo existente, preservando ledger,
+locks e configuração. Consumidores reconhecem explicitamente as composições
+históricas 34/39 e a candidata 45; não se ampliou a confiança em assinaturas,
+autorizações ou arquivos adicionais. Um predecessor não passa a oferecer XSD.
+
+### Verificação local desta candidata
+
+Ambiente de engenharia: Linux, Python 3.12.14, lxml 6.1.1, Node 24.19.0.
+O CI existente usa Node 22; seu resultado no SHA candidato é uma prova separada.
+
+- 35 testes Python TISS, 18 de orquestração e 16 do adaptador: aprovados.
+- 7 testes HTTP com parser/XSD do pacote real: aprovados.
+- 27 testes existentes do servidor: aprovados, com `AURORA_STUDIO_TEST_GIT` configurado.
+- 43 testes de registro nativo, Release Cockpit e exportador: aprovados.
+- 24 testes do consumidor Python e 46 de checkpoint: aprovados.
+- Teste de composição de 45 arquivos e build TypeScript: aprovados.
+- Regressão do consumidor JavaScript e SHA final: consultar o relatório entregue
+  junto ao patch.
+
+Os 76 testes específicos TISS acima não incluem Chromium real. Os dois ensaios
+Chromium registrados na baseline 1.0.0 não foram repetidos nem atribuídos a este
+incremento. Os testes novos da API invocam o parser Python e os XSD empacotados;
+os testes do adaptador usam as fixtures e o transporte sintético existentes.

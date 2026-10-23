@@ -8,6 +8,10 @@
     TISS_PORTAL_CONFIGURATION_REQUIRED: 'O portal de homologação ainda não foi vinculado a esta organização.',
     TISS_REAL_PORTAL_GATE_BLOCKED: 'O XML pode ser conferido localmente. Nesta versão, o teste de preenchimento usa somente o exemplo sintético incluído.',
     TISS_GUIDE_REVIEW_REQUIRED: 'A guia apresenta divergências. Confira os apontamentos antes de preparar o preenchimento.',
+    TISS_XSD_DOCUMENT_INVALID: 'XML incompatível com o esquema oficial TISS 4.03.00. Confira os campos e sua ordem.',
+    TISS_XSD_RUNTIME_UNAVAILABLE: 'A validação XSD não está disponível nesta instalação. Solicite a conferência do componente.',
+    TISS_XSD_SCHEMA_INTEGRITY_FAILED: 'Os esquemas oficiais estão ausentes ou divergentes. A análise foi bloqueada.',
+    TISS_XSD_SCHEMA_COMPILE_FAILED: 'Não foi possível carregar os esquemas oficiais. A análise foi bloqueada.',
     TISS_MAPPING_INCOMPLETE: 'O mapeamento do portal não cobre todos os itens desta guia.',
     TISS_GUIDE_ALREADY_ATTEMPTED_REVIEW_REQUIRED: 'Esta guia já teve uma tentativa de preenchimento. Confira o resultado no portal antes de uma nova operação.',
     TISS_FILL_UNCERTAIN_REVIEW_REQUIRED: 'O resultado do preenchimento ficou incerto. Confira o portal; a tentativa não será repetida automaticamente.',
@@ -18,7 +22,7 @@
     TISS_EXECUTOR_RECONCILIATION_REQUIRED: 'Existe uma tentativa em andamento ou interrompida. A reconciliação precisa ser concluída antes de prosseguir.'
   };
   const issueLabels = {
-    XSD_VALIDATION_PENDING: 'Validação completa pelo XSD oficial pendente.',
+
     TUSS_CATALOG_VALIDATION_PENDING: 'Catálogo TUSS e vigência dos códigos ainda não conferidos.',
     CONTRACT_VALIDATION_PENDING: 'Preços, cobertura e autorização dependem do contrato aplicável.',
     TISS_HASH_UNVERIFIED: 'Hash do padrão TISS presente, ainda não verificado.',
@@ -106,6 +110,7 @@
       el('tiss-summary').append(node('p', result.dataMode === 'PACKAGED_SYNTHETIC_FIXTURE'
         ? 'Exemplo sintético incluído: disponível para ensaio de preenchimento.'
         : 'Análise local em memória. Envio ao portal e persistência clínica permanecem desabilitados nesta versão.'));
+      el('tiss-summary').append(node('p', 'Estrutura XSD oficial validada. TUSS, contrato e aprovação para faturamento permanecem pendentes.'));
       el('tiss-guides').replaceChildren();
       data.guides.forEach((guide, index) => { const option = node('option', 'Guia ' + guide.providerGuideNumber); option.value = String(index); el('tiss-guides').append(option); });
       el('tiss-issues').replaceChildren();

@@ -1,0 +1,2 @@
+# Install in the configured Python environment; the runtime never installs packages.
+lxml==6.1.1

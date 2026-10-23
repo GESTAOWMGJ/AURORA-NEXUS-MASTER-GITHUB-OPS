@@ -75,7 +75,7 @@ test('real stdin parser extracts SP-SADT and sanitizes rejected XML errors', asy
   assert.equal(result.standardVersion, '4.03.00');
   assert.equal(result.sourceSha256, digest(xml));
   assert.equal(result.summary.totalCents, 10700);
-  assert.equal(result.validation.xsdValidated, false);
+  assert.equal(result.validation.xsdValidated, true);
   await assert.rejects(runParser({ executable: python, parserPath, xml: '<private-data>SYNTHETIC_SECRET_MARKER</private-data>', orgId }), error => {
     assert.doesNotMatch(error.message, /SYNTHETIC_SECRET_MARKER/); return error.code === 'TISS_XML_NAMESPACE_REJECTED';
   });
@@ -284,4 +284,30 @@ test('dispose cancels unfinished analysis and discards cached sensitive data', a
   await started; f.tool.dispose(); release();
   await assert.rejects(pending, code('TISS_ANALYSIS_CANCELLED'));
   assert.equal(f.events.filter(event => event.action === 'TISS_XML_ANALYZED').length, 0);
+});
+
+test('XSD rejection cannot cache an analysis or authorize a synthetic plan', async t => {
+  const f = fixture(t);
+  const invalid = xml.replace('<ans:UF>41</ans:UF>', '<ans:UF>ZZ</ans:UF>');
+  await assert.rejects(f.route('analyze', { xml: invalid }), code('TISS_XSD_DOCUMENT_INVALID'));
+  assert.equal(f.events.length, 0); assert.equal(f.calls.length, 0);
+  assert.equal((await f.route('analyze', { xml })).value.analysis.validation.xsdValidated, true);
+});
+
+test('server requires current schema provenance and preserves independent billing gates', async t => {
+  const baseline = await runParser({ executable: python, parserPath, xml, orgId });
+  for (const mutate of [
+    result => { result.validation.xsdValidated = false; },
+    result => { delete result.validation.xsd; },
+    result => { result.validation.xsd.schemaSetSha256 = '0'.repeat(64); },
+    result => { result.validation.xsd.standardVersion = '4.02.00'; },
+    result => { result.validation.catalogValidated = true; },
+    result => { result.validation.contractValidated = true; },
+    result => { result.validation.billingApproved = true; }
+  ]) {
+    const result = structuredClone(baseline); mutate(result);
+    const f = fixture(t, { parser: async () => result });
+    await assert.rejects(f.route('analyze', { xml }), code('TISS_PARSER_CONTRACT_INVALID'));
+    assert.equal(f.events.length, 0); assert.equal(f.calls.length, 0);
+  }
 });

@@ -63,7 +63,7 @@ class TissParserTests(unittest.TestCase):
         self.assertEqual(guide["totals"]["proceduresCents"], 10050)
         self.assertEqual(guide["totals"]["otherExpensesCents"], 650)
         self.assertEqual(result["validation"]["status"], "VALIDATED_LOCAL")
-        self.assertFalse(result["validation"]["xsdValidated"])
+        self.assertTrue(result["validation"]["xsdValidated"])
         self.assertFalse(result["validation"]["catalogValidated"])
         self.assertFalse(result["validation"]["contractValidated"])
         self.assertEqual(result["validation"]["tissHashState"], "PRESENT_UNVERIFIED")
@@ -228,6 +228,125 @@ class TissParserTests(unittest.TestCase):
         result = subprocess.run(command, input='{"xml":"invalid","orgId":"synthetic-a","orgId":"synthetic-b"}', capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, 2)
         self.assertEqual(json.loads(result.stdout)["error"]["code"], "AMBIGUOUS_JSON_FIELD")
+
+
+
+class TissRuntimeXsdTests(unittest.TestCase):
+    analyze = TissParserTests.analyze
+    rejected = TissParserTests.rejected
+    # This class tests the new gate using previously unvalidated official fields.
+    def test_xsd_rejects_invalid_unextracted_fields_and_order(self):
+        for xml in (
+            mutated(GUIDE + '/dadosSolicitante/profissionalSolicitante/UF', 'ZZ'),
+            mutated(GUIDE + '/dadosSolicitante/profissionalSolicitante/conselhoProfissional', '99'),
+            XML.replace('</ans:procedimentoExecutado>', '<ans:equipeSadt/></ans:procedimentoExecutado>'),
+            XML.replace('<ans:regimeAtendimento>01</ans:regimeAtendimento>',
+                        '<ans:regimeAtendimento>01</ans:regimeAtendimento><ans:tipoConsulta>1</ans:tipoConsulta>'),
+            XML.replace('<ans:horaRegistroTransacao>12:00:00</ans:horaRegistroTransacao>', ''),
+        ):
+            with self.subTest(xml_hash=hashlib.sha256(xml.encode()).hexdigest()):
+                # Existing subset validation may reject before XSD. No result escapes.
+                with self.assertRaises(TissError) as raised:
+                    self.analyze(xml)
+                self.assertIn(raised.exception.code, {'XSD_DOCUMENT_INVALID', 'REQUIRED_FIELD_MISSING'})
+
+    def test_xsd_specific_required_field_and_domain(self):
+        self.rejected(XML.replace('</ans:procedimentoExecutado>', '<ans:equipeSadt/></ans:procedimentoExecutado>'), 'XSD_DOCUMENT_INVALID')
+        self.rejected(mutated(GUIDE + '/dadosSolicitante/profissionalSolicitante/UF', 'ZZ'), 'XSD_DOCUMENT_INVALID')
+
+    def test_valid_xsd_does_not_validate_tuss_contract_hash_or_billing(self):
+        xml = mutated(PROC + '/procedimento/codigoProcedimento', '99999999')
+        validation = self.analyze(xml)['validation']
+        self.assertTrue(validation['xsdValidated'])
+        self.assertEqual(validation['xsd']['state'], 'VALIDATED')
+        self.assertEqual(len(validation['xsd']['schemaSetSha256']), 64)
+        self.assertFalse(validation['catalogValidated'])
+        self.assertFalse(validation['contractValidated'])
+        self.assertFalse(validation['billingApproved'])
+        self.assertEqual(validation['tissHashState'], 'PRESENT_UNVERIFIED')
+        self.assertNotIn('XSD_VALIDATION_PENDING', {i['code'] for i in validation['issues']})
+
+    def test_decoded_latin1_text_uses_same_tree_without_mojibake(self):
+        xml = XML.replace('UTF-8', 'ISO-8859-1').replace('PROFISSIONAL SINTETICO', 'PROFISSIONAL SINTÉTICO')
+        result = self.analyze(xml.encode('iso-8859-1').decode('iso-8859-1'))
+        self.assertTrue(result['validation']['xsdValidated'])
+        self.assertEqual(result['sourceSha256'], hashlib.sha256(xml.encode('utf-8')).hexdigest())
+
+    def test_missing_dependency_fails_closed_without_fallback(self):
+        from unittest.mock import patch
+        import builtins
+        original = builtins.__import__
+        def without_lxml(name, *args, **kwargs):
+            if name == 'lxml':
+                raise ImportError('SYNTHETIC_PRIVATE_ERROR')
+            return original(name, *args, **kwargs)
+        with patch('builtins.__import__', side_effect=without_lxml):
+            self.rejected(XML, 'XSD_RUNTIME_UNAVAILABLE')
+
+    def test_missing_corrupt_and_linked_schema_fail_closed(self):
+        import aurora_tiss
+        import tempfile
+        import shutil
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / 'schemas'
+            with patch.object(aurora_tiss, '_SCHEMA_DIR', destination):
+                self.rejected(XML, 'XSD_SCHEMA_INTEGRITY_FAILED')
+            shutil.copytree(aurora_tiss._SCHEMA_DIR, destination)
+            source = destination / 'tissSimpleTypesV4_03_00.xsd'
+            original = source.read_bytes()
+            source.write_bytes(original + b'<!-- tampered -->')
+            with patch.object(aurora_tiss, '_SCHEMA_DIR', destination):
+                self.rejected(XML, 'XSD_SCHEMA_INTEGRITY_FAILED')
+            source.unlink()
+            original_path = Path(temporary) / 'original.xsd'
+            original_path.write_bytes(original)
+            source.symlink_to(original_path)
+            with patch.object(aurora_tiss, '_SCHEMA_DIR', destination):
+                self.rejected(XML, 'XSD_SCHEMA_INTEGRITY_FAILED')
+
+    def test_remote_and_local_schema_hints_are_inert(self):
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import threading
+        requests = []
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                requests.append(self.path)
+                self.send_response(500)
+                self.end_headers()
+            def log_message(self, *args):
+                pass
+        server = HTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for location in (f'http://127.0.0.1:{server.server_port}/evil.xsd', 'file:///etc/passwd', '../../evil.xsd'):
+                xml = XML.replace('<ans:mensagemTISS ', '<ans:mensagemTISS xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="' + NAMESPACE + ' ' + location + '" ', 1)
+                self.assertTrue(self.analyze(xml)['validation']['xsdValidated'])
+            self.assertEqual(requests, [])
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    def test_entities_billion_laughs_and_external_dtd_rejected(self):
+        for declaration in (
+            '<!DOCTYPE mensagemTISS SYSTEM "http://127.0.0.1:1/evil.dtd">',
+            '<!DOCTYPE mensagemTISS [<!ENTITY x SYSTEM "file:///etc/passwd">]>',
+            '<!DOCTYPE mensagemTISS [<!ENTITY a "ha"><!ENTITY b "&a;&a;"><!ENTITY c "&b;&b;">]>',
+        ):
+            self.rejected(XML.replace('<ans:mensagemTISS', declaration + '<ans:mensagemTISS', 1), 'XML_DTD_FORBIDDEN')
+
+    def test_cli_xsd_error_never_echoes_libxml_values_or_paths(self):
+        marker = 'SYNTHETIC_PRIVATE_FIELD_VALUE'
+        # Use a scalar that previously bypassed subset validation.
+        xml = mutated(GUIDE + '/dadosSolicitante/profissionalSolicitante/nomeProfissional', marker * 4)
+        result = subprocess.run([sys.executable, '-I', '-B', str(FIXTURE.parents[2] / 'aurora_tiss.py')],
+            input=json.dumps({'xml': xml, 'orgId': 'synthetic-org'}), text=True, capture_output=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(json.loads(result.stdout), {'error': {'code': 'XSD_DOCUMENT_INVALID', 'path': 'xml'}})
+        self.assertNotIn(marker, result.stdout + result.stderr)
+        self.assertEqual(result.stderr, '')
 
 
 if __name__ == "__main__":
