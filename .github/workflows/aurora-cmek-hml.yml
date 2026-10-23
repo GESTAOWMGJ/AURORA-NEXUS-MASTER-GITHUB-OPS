@@ -155,7 +155,7 @@ jobs:
           mkdir -p "$evidence"
           export AURORA_CMEK_EVIDENCE_DIR="$evidence/key-test"
           set +e
-          "$SCRIPT" "$MODE" 2>&1 | tee "$evidence/result.txt"
+          bash "$SCRIPT" "$MODE" 2>&1 | tee "$evidence/result.txt"
           rc=${PIPESTATUS[0]}
           set -e
           jq -n             --arg mode "$MODE"             --arg sha "$GITHUB_SHA"             --arg runId "$GITHUB_RUN_ID"             --arg project "wmgj-hml-jfn-20260927"             --argjson exitCode "$rc"             '{control:"AURORA-SEC-002-CMEK-HML", mode:$mode, sha:$sha, runId:$runId, project:$project, exitCode:$exitCode, productionMutation:false, clinicalSensitiveEnabled:false, realDataAllowed:false}'             > "$evidence/metadata.json"
