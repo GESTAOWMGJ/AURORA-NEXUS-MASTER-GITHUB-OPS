@@ -88,3 +88,10 @@ HML renovada. O escopo operacional desta etapa continua sendo remover somente
 o gatilho órfão comprovado e registrar a fonte como inativa. Publicação,
 readback, reparo real e ingestão exigem seus próprios recibos. Produção, dados
 clínicos e ativação da pasta real permanecem excluídos desta renovação.
+
+A renovação também alinha os limites fixos do probe sintético e de sua leitura
+canônica ao prazo HML aprovado. Não altera endpoints, identidades ou escopos.
+Os testes preservam o histórico e verificam bloqueio no novo vencimento.
+Após esse alinhamento: **108 testes locais aprovados** (62 do conector e 46 do
+probe/recibos sintéticos). O publisher conserva a exigência de aprovação real
+do run; seu teste de renovação usa o novo registro sem fabricar essa aprovação.
