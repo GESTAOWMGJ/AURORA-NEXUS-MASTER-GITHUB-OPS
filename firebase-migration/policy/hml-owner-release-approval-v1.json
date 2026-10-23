@@ -111,6 +111,39 @@
       "realSourceActivationAuthorized": false,
       "productionAuthorized": false,
       "clinicalSensitiveAuthorized": false
+    },
+    {
+      "decisionId": "AURORA-HML-OWNER-RENEWAL-20261022-TO-20261026",
+      "recordedOn": "2026-10-22",
+      "approvalSource": "DIRECT_OWNER_CHAT",
+      "statement": "Renovar nesse escopo até 26/10",
+      "responseReference": "call_8636915dde044199adf7c46270661d0f",
+      "confirmationContext": "Resposta do titular à renovação HML/R029 até 26/10/2026 às 00h de Brasília, para publicar a beta e executar apenas testes sintéticos Windows/nuvem, mantendo os 11 riscos registrados das ferramentas de teste, sem produção, dados clínicos ou ativação da pasta real.",
+      "specificScope": "Publicação da beta e testes sintéticos Windows/nuvem, com os mesmos 11 riscos residuais das ferramentas de teste; sem produção, dados clínicos ou ativação da pasta real. Não prorroga credenciais, concessões documentais, IAM ou a janela separada de regularização da fonte inativa.",
+      "originalScopeUnchanged": true,
+      "riskReviewDeadlineExtended": true,
+      "previousValidUntilUtc": "2026-10-23T23:00:00.000Z",
+      "validUntilUtc": "2026-10-26T03:00:00.000Z",
+      "previousReviewBy": "2026-10-23",
+      "reviewBy": "2026-10-25",
+      "timeZone": "America/Sao_Paulo",
+      "residual": {
+        "critical": 0,
+        "high": 7,
+        "moderate": 4,
+        "total": 11
+      },
+      "protectedRunOwnerApprovalStillRequired": true,
+      "laterMainCodeReviewClaimed": false,
+      "independentGithubPullRequestReviewClaimed": false,
+      "iamChangeAuthorized": false,
+      "secretRotationAuthorized": false,
+      "credentialValidityExtended": false,
+      "documentScopeValidityExtended": false,
+      "sourceRegularizationWindowExtended": false,
+      "realSourceActivationAuthorized": false,
+      "productionAuthorized": false,
+      "clinicalSensitiveAuthorized": false
     }
   ],
   "scope": {
@@ -118,7 +151,7 @@
     "projectId": "wmgj-hml-jfn-20260927",
     "environment": "firebase-homologation",
     "branch": "main",
-    "validUntilUtc": "2026-10-23T23:00:00.000Z"
+    "validUntilUtc": "2026-10-26T03:00:00.000Z"
   },
   "repositoryOwner": {
     "login": "GESTAOWMGJ",
@@ -162,7 +195,7 @@
     "proposal": "SEC-EXC-TEST-20261007",
     "status": "ACCEPTED_BY_OWNER_HML_TEST_TOOLS_ONLY",
     "scope": "firebase-migration/tests development tools only",
-    "reviewBy": "2026-10-23",
+    "reviewBy": "2026-10-25",
     "timeZone": "America/Sao_Paulo",
     "residual": {
       "critical": 0,

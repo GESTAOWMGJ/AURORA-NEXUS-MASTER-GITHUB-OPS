@@ -12,7 +12,7 @@ const ROOT = path.resolve(__dirname,'..');
 const MODULES = ['04_EXTRACAO_DOCUMENTAL_WMGJ','35_AURORA_FIRESTORE_BRIDGE_WMGJ','38_AURORA_HML_SYNTHETIC_PROBE'];
 const NONCE = '0123456789abcdef0123456789abcdef';
 const NOW = Date.parse('2026-10-15T00:00:00Z');
-const DEADLINE = Date.parse('2026-10-23T23:00:00Z');
+const DEADLINE = Date.parse('2026-10-26T03:00:00Z');
 const WINDOW = {expiresAt:new Date(NOW+600000).toISOString(),deadline:DEADLINE,now:()=>NOW};
 const hash = canonical.sha;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -209,8 +209,11 @@ test('renewed Cloud hard deadline agrees with the explicit owner decision and pe
     && item.validUntilUtc===decision.scope.validUntilUtc);
   assert.equal(renewals.length,1);
   const renewal=renewals[0];
-  assert.equal(renewal.decisionId,'AURORA-HML-OWNER-RENEWAL-20261022');
+  assert.equal(renewal.decisionId,'AURORA-HML-OWNER-RENEWAL-20261022-TO-20261026');
+  assert.equal(renewal.statement,'Renovar nesse escopo até 26/10');
   assert.equal(renewal.realSourceActivationAuthorized,false);
+  for(const field of ['credentialValidityExtended','documentScopeValidityExtended','sourceRegularizationWindowExtended'])
+    assert.equal(renewal[field],false,field);
   assert.equal(decision.reaffirmations.find(item=>item.decisionId==='AURORA-HML-DOCUMENT-SCOPE-20261015')
     .validUntilUtc,'2026-10-16T03:00:00.000Z');
   assert.equal(DEADLINE,Date.parse(decision.scope.validUntilUtc));
@@ -220,6 +223,11 @@ test('renewed Cloud hard deadline agrees with the explicit owner decision and pe
   assert.equal(f.execute().status,'PASS');
   assert.equal(fixture({now:Date.parse('2026-10-19T23:00:00Z')}).execute().status,'PASS');
   assert.doesNotThrow(()=>canonical.assertWindow({expiresAt:new Date(previous+600000).toISOString(),deadline:DEADLINE,now:()=>previous}));
+  assert.equal(fixture({now:DEADLINE-1}).execute().status,'PASS');
+  const atDeadline=fixture({now:DEADLINE});
+  assert.equal(atDeadline.execute().code,'PROBE_REQUEST_REJECTED');
+  assert.equal(atDeadline.calls.configReads,0);assert.equal(atDeadline.calls.filesCreated,0);
+  assert.doesNotThrow(()=>canonical.assertWindow({expiresAt:new Date(DEADLINE).toISOString(),deadline:DEADLINE,now:()=>DEADLINE-1}));
   assert.throws(()=>canonical.assertWindow({expiresAt:new Date(DEADLINE+600000).toISOString(),deadline:DEADLINE,now:()=>DEADLINE}),/PROBE_WINDOW_EXPIRED/);
 });
 for(const [name,options]of [

@@ -38,6 +38,17 @@ escopo, até `2026-10-16T03:00:00.000Z` (16/10 00:00 em Brasília), conforme
 esse hard cutoff; a autorização não se estende automaticamente nem libera
 produção, dados clínicos ou nova alegação de revisão independente.
 
+Atualização de 22/10: a resposta expressa “Renovar nesse escopo até 26/10”,
+registrada como `AURORA-HML-OWNER-RENEWAL-20261022-TO-20261026`, fixa o novo hard
+cutoff do probe/readback em `2026-10-26T03:00:00.000Z` (26/10 às 00h de Brasília),
+com revisão até 25/10. As renovações anteriores, inclusive a específica do PR #299,
+permanecem no histórico. Esse novo prazo HML/R029 não estende a validade do HMAC,
+do scope `sourceDocument` ou de qualquer credencial; rejeição por expiração ou
+escopo continua bloqueando o teste. Não renova o piloto real nem a janela
+separada de regularização da fonte inativa. Limites de identidade, lease curto,
+fonte exata, ambiente protegido, aquisição sintética, cleanup e ausência de dados
+reais permanecem exigidos. Esta alteração de código não publica nem executa o probe.
+
 Cria uma nova pasta marcada e quatro arquivos novos: Google Doc, Google Sheets,
 texto e PDF exportado daquele Doc. Extratores existentes devem retornar conteúdo,
 método correto e o nonce; OCR/metadados falhos continuam FAIL/PENDING. Não chama
