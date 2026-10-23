@@ -1049,10 +1049,25 @@ jobs:
             --expected-candidate-sha256 "$EXPECTED_CANDIDATE_SHA256" \
             --trusted-public-key-sha256 "$TRUSTED_PUBLIC_KEY_SHA256" \
             --output "$RUNNER_TEMP/aurora-unified-beta-$GITHUB_SHA.zip"
+          node firebase-migration/scripts/finalize-unified-beta.mjs --client-only \
+            --candidate firebase-migration/functions/runtime-release/unified-beta-candidate.zip \
+            --public-envelope "$RUNNER_TEMP/unified-release-public/release-envelope-signed.json" \
+            --public-trust "$RUNNER_TEMP/unified-release-public/public-trust.json" \
+            --source-sha "$GITHUB_SHA" \
+            --expected-candidate-sha256 "$EXPECTED_CANDIDATE_SHA256" \
+            --trusted-public-key-sha256 "$TRUSTED_PUBLIC_KEY_SHA256" \
+            --output "$RUNNER_TEMP/Aurora-Nexus-Client-Atual.zip"
       - name: Retain beta with signed certificate and verified payloads; device acceptance pending
         uses: actions/upload-artifact@v4
         with:
           name: aurora-unified-beta-${{ github.sha }}
           path: ${{ runner.temp }}/aurora-unified-beta-${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain client-only delivery with the same signed reference; installation pending
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-client-current-${{ github.sha }}
+          path: ${{ runner.temp }}/Aurora-Nexus-Client-Atual.zip
           if-no-files-found: error
           retention-days: 14

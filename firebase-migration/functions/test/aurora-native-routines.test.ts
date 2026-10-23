@@ -29,7 +29,7 @@ test('release convergence reuses the governed registry entry without asserting i
   assert.equal(policy.requiredSchema2Components.length,5);assert.equal(policy.fullSynchronizationInferredFromSignedCoverage,false);
   assert.equal(policy.nativeMacAcceptanceInferredFromSatellite,false);assert.equal(policy.allClientsSynchronized,false);
   assert.equal(policy.schedulerCreated,false);assert.equal(policy.automaticInstallationEnabled,false);assert.equal(policy.permissionsGranted,false);
-  assert.equal(policy.unifiedDownloadEndpoint,'/downloads/Aurora-Nexus-Beta-One.zip');
+  assert.equal(policy.unifiedDownloadEndpoint,'/downloads/Aurora-Nexus-Client-Atual.zip');
   assert.equal(policy.unifiedDownloadState,'IMPLEMENTED_PENDING_RUNTIME_VALIDATION');
   assert.equal(policy.artifactDownloadProvesDeviceAcceptance,false);
 });

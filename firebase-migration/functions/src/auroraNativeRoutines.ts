@@ -111,7 +111,7 @@ export function nativeRoutineSummary(): Record<string, unknown> {
       requiredSchema2Components: ["server", "web", "satellite", "iaMaster", "windowsIntegration"],
       commonIdentity: ["releaseId", "productVersion", "sourceSha", "certificateSha256"],
       unifiedDelivery: "SOURCE_BOUND_PAYLOADS_WITH_PUBLIC_SIGNED_CERTIFICATE",
-      unifiedDownloadEndpoint: "/downloads/Aurora-Nexus-Beta-One.zip",
+      unifiedDownloadEndpoint: "/downloads/Aurora-Nexus-Client-Atual.zip",
       unifiedDownloadState: "IMPLEMENTED_PENDING_RUNTIME_VALIDATION",
       unifiedDownloadAuthority: "EXISTING_LIVE_SESSION_MEMBERSHIP_AND_DOWNLOAD_PERMISSION",
       unifiedDownloadFinalizer: "SHARED_PURE_NODE_ZIP_STORED",
