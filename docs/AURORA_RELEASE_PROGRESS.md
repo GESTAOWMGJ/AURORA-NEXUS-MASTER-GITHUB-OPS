@@ -190,3 +190,25 @@ sintéticos Windows/nuvem até `2026-10-22T03:00:00.000Z`, com revisão até 21/
 Histórico e 11 riscos residuais preservados; produção, dados clínicos e pasta real
 continuam excluídos. Registro de autorização não comprova CI, deploy, ingestão ou
 convergência dos dispositivos. Gates e revisão independente permanecem inalterados.
+### 22/10/2026 — regularização restrita da configuração documental
+
+Candidata baseada em `226a7f101f4bf1e0680afca2459132f01ebaf71d`: uma janela
+separada de 24 horas permite ao proprietário conferir/remover exclusivamente o
+gatilho de captura cujo handler desapareceu e registrar a fonte existente como
+inativa. O piloto histórico continua expirado; HML/R029, publicação, ativação,
+dados reais e critérios do Release Cockpit não são renovados nem promovidos.
+Estado: `IMPLEMENTED_LOCAL_TESTED_PENDING_CI_REVIEW_DEPLOYMENT`.
+Validação local: 62 testes sintéticos (38 de onboarding/configuração e 24 de
+status/sanitização/prévia histórica). Nenhum gatilho real foi removido e nenhuma
+fonte foi ativada por estes testes. Contrato, evidência e próximos gates em
+[AURORA_WMGJ_CONNECTOR_REGULARIZATION_20261022.md](AURORA_WMGJ_CONNECTOR_REGULARIZATION_20261022.md).
+
+
+### 22/10/2026 — renovação HML/R029 para publicar a regularização
+
+Confirmação direta do titular após apresentação do PR #299 e dos seis workflows
+aprovados: publicação em homologação e renovação até `2026-10-23T23:00:00.000Z`
+(23/10 às 20h de Brasília). Decisão `AURORA-HML-OWNER-RENEWAL-20261022`,
+com os mesmos 11 riscos residuais e registro de predecessor. O cadastro permanece
+inativo; fonte real, produção e dados clínicos não são ativados. A autorização
+não comprova review independente, aprovação de run, deploy ou ingestão.
