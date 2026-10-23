@@ -12,7 +12,9 @@ NAME = 'AURORA-NEXUS-Windows-Beta.zip'
 SOURCES = ('desktop/install_windows_beta.py', 'aurora-coletor/aurora_deployment.py',
            'aurora-coletor/aurora_cloud_sync.py', 'aurora-coletor/client_agent.py',
            'aurora-coletor/provider_connectors.py', 'aurora-coletor/client_secret_store.py',
-           'aurora-coletor/install_client_agent.py', 'aurora-coletor/published_release.py')
+           'aurora-coletor/install_client_agent.py', 'aurora-coletor/published_release.py',
+           'aurora-coletor/document_intake.py','aurora-coletor/document_intake.cjs','aurora-coletor/document_intake_core.cjs',
+           'aurora-coletor/document_fact_mapping.cjs','aurora-coletor/document-intake-manifest.json')
 LAUNCHER = r'''@echo off
 setlocal
 cd /d "%~dp0"
@@ -45,6 +47,7 @@ def build(repo, output, source_sha=None):
         source_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
     if not re.fullmatch(r'[a-f0-9]{40}', source_sha):
         raise ValueError('EXACT_SOURCE_SHA_REQUIRED')
+    subprocess.run(['node',str(repo/'firebase-migration/scripts/generate-document-intake-assets.mjs'),'--check'],cwd=repo,check=True,capture_output=True)
     files = {name: (repo / name).read_bytes() for name in SOURCES}
     match = re.search(rb'^VERSION = "([^"]+)"', files[SOURCES[0]], re.MULTILINE)
     if not match:
@@ -70,6 +73,8 @@ def build(repo, output, source_sha=None):
         'Atualiza o cliente de acesso existente por usuario, preservando o portal e a instalacao anterior.\n'
         'O portal exige login individual. Nenhuma senha, dado operacional ou modelo de IA acompanha o pacote.\n'
         'O pacote nao instala servico, banco offline ou dependencia. Nao desative protecoes do Windows.\n'
+        'A extracao documental local compartilha o motor do portal e requer Node.js 22+ ja instalado.\n'
+        'Sem esse runtime ou OCR/PDF homologado, a fonte permanece pendente; nao ha download automatico.\n'
         'Sem assinatura de editor. SHA-256 verifica integridade, nao identidade do editor.\n'
         'Compilacao e testes de pacote nao comprovam instalacao no seu dispositivo.\n'
     ).encode('utf-8')

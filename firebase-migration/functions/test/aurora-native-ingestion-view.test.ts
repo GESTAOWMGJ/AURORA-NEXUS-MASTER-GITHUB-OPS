@@ -8,7 +8,7 @@ const proof={state:'FIRST_INGESTION_VERIFIED',firstIngestionVerified:true,docume
  acceptance:{schemaVersion:'aurora.installation.acceptance.v1',orgId:member.orgId,canonicalOrigin:'https://auroranexus.com.br',state:'INSTALLATION_INTEGRATION_VERIFIED',eligible:true,processingVerified:true,receiptPersisted:true,replayVerified:true,automationConfigured:true,automationVerified:true,automationScope:'AURORA_CANONICAL_PIPELINE',method:'MANUAL',configurationHash:'d'.repeat(64),receiptId:'e'.repeat(64),documentId:'a'.repeat(48),versionId:'b'.repeat(48),sourceVersion:1,canonicalSnapshotHash:'c'.repeat(64),verifiedAt:'2026-10-14T00:00:00Z'}};
 async function run(responses:any[]){
  const status={textContent:''},form={addEventListener(){},reset(){},elements:[]},calls:any[]=[];
- const context=createContext({document:{getElementById:(id:string)=>id==='native-ingestion-status'?status:form},window:{addEventListener(){}},AbortController,setTimeout:()=>1,clearTimeout(){},Date,fetch:async(url:string,options:any)=>{calls.push({url,options});return {status:200,ok:true,headers:{get:()=> 'application/json'},json:async()=>responses.shift()}}});
+ const context=createContext({document:{getElementById:(id:string)=>id==='native-ingestion-status'?status:form},window:{addEventListener(){}},TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,crypto:webcrypto,AbortController,setTimeout:()=>1,clearTimeout(){},Date,fetch:async(url:string,options:any)=>{calls.push({url,options});return {status:200,ok:true,headers:{get:()=> 'application/json'},json:async()=>responses.shift()}}});
  new Script(nativeIngestionClient(member,{ingest:'synthetic-ingest',refresh:'synthetic-refresh'})).runInContext(context);await setImmediate();return {status,calls};
 }
 test('first login completes only the same tenant and immutable processed version',async()=>{
@@ -29,7 +29,7 @@ function importHarness(fetcher:(url:string,options:any)=>Promise<any>,autoPrepar
  const handlers:Record<string,Function>={},events:Record<string,Function>={};
  const form={addEventListener:(name:string,handler:Function)=>{handlers[name]=handler},reset(){},elements:[],querySelector:()=>button};
  const nodes:Record<string,any>={'native-ingestion-status':status,'native-ingestion-form':form,'native-ingestion-file':{files:[file]},'native-ingestion-consent':{checked:true}};
- const context=createContext({document:{getElementById:(id:string)=>nodes[id]},window:{addEventListener:(name:string,handler:Function)=>{events[name]=handler},dispatchEvent(){}},AbortController,setTimeout:()=>1,clearTimeout(){},Date,Event,TextEncoder,crypto:webcrypto,fetch:fetcher});
+ const context=createContext({document:{getElementById:(id:string)=>nodes[id]},window:{addEventListener:(name:string,handler:Function)=>{events[name]=handler},dispatchEvent(){}},AbortController,setTimeout:()=>1,clearTimeout(){},Date,Event,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,crypto:webcrypto,fetch:fetcher});
  new Script(nativeIngestionClient(member,{ingest:'synthetic-ingest',refresh:'synthetic-refresh',...(configure?{integrationKey:'synthetic-integration-csrf'}:{})},autoPrepare)).runInContext(context);
  return {status,button,file,nodes,events,submit:()=>handlers.submit({preventDefault(){}})};
 }

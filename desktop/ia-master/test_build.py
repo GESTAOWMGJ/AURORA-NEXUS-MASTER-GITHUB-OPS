@@ -37,12 +37,13 @@ class BuildContract(unittest.TestCase):
             actual = {str(file.relative_to(output)).replace('\\', '/')
                       for file in output.rglob('*') if file.is_file()}
             self.assertEqual(actual, set(manifest['files']) | {'manifest.json'})
-            self.assertEqual(len(manifest['files']), 34)
+            self.assertEqual(len(manifest['files']), 39)
             self.assertIn('published-update.cjs', manifest['files'])
             self.assertEqual({name for name in manifest['files'] if name.startswith('client-agent/')},
                              {'client-agent/' + name for name in ('client_agent.py', 'provider_connectors.py',
                               'client_secret_store.py', 'install_client_agent.py', 'aurora_cloud_sync.py',
-                              'aurora_deployment.py', 'published_release.py')})
+                              'aurora_deployment.py', 'published_release.py','document_intake.py','document_intake.cjs',
+                              'document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json')})
             for name, expected in manifest['files'].items():
                 self.assertEqual(hashlib.sha256((output / name).read_bytes()).hexdigest(), expected)
             for name in required - {'modus-operandi.md', 'kernel/auroraMasterEngine.js', 'kernel/auroraIaMaster.js'}:
