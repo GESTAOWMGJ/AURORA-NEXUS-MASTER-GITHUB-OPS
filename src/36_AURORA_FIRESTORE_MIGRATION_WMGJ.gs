@@ -61,7 +61,8 @@ function wmgjFirestoreMigrationMap_() {
 }
 
 function wmgjFirestoreMigracaoDryRun(limitPerSheet) {
-  var cfg = wmgjFirestoreConfig_();
+  // A preview cannot inherit live mode or mutate a shared/global configuration.
+  var cfg = Object.assign({}, wmgjFirestoreConfig_(), { dryRun: true });
   var ss = getPlanilha();
   var mapping = wmgjFirestoreMigrationMap_();
   var limit = Math.max(1, Math.min(Number(limitPerSheet || cfg.maxRows), cfg.maxRows));

@@ -62,6 +62,10 @@ histórica já existente antes de promover um registro único.
 Erro de mapeamento também bloqueia a página antes de transmitir seus outros
 registros. O transporte recebe a mesma configuração da chamada; `dryRun=true`
 não pode ser substituído por uma segunda leitura da configuração global.
+O wrapper `wmgjFirestoreMigracaoDryRun` sempre força `dryRun=true` em uma cópia
+da configuração, inclusive quando `WMGJ_FIRESTORE_DRY_RUN=false`. Não altera
+propriedades nem checkpoints. Chamadas live delimitadas continuam pelo migrador
+existente com configuração explícita, sob seus gates próprios.
 Essa proteção é limitada à página: não comprova unicidade entre páginas, abas
 ou identidades legadas de outros produtores, nem constitui carga real concluída.
 
