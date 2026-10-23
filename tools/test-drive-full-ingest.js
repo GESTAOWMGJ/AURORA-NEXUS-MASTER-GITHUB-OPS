@@ -69,6 +69,77 @@ function fixture() {
     config:{orgId:ORG,dryRun:false},deadlineMs:Date.now()+140000};
   return {context,props,tokens,files,folders,rows,sent,receipts,entities,addFile,addFolder,options,realExtract};
 }
+
+function addAuthenticatedWrapper(f) {
+  const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
+  f.context.Utilities.DigestAlgorithm={SHA_256:'sha256'};f.context.Utilities.Charset={UTF_8:'utf8'};
+  f.context.Utilities.computeDigest=(_algorithm,value)=>[...crypto.createHash('sha256').update(value).digest()];
+  f.context.Session={getActiveUser:()=>({getEmail:()=> 'owner@fixture.test'}),getEffectiveUser:()=>({getEmail:()=> 'owner@fixture.test'})};
+  f.context.ScriptApp={getProjectTriggers(){throw Error('TRIGGER_READ_FORBIDDEN');},newTrigger(){throw Error('TRIGGER_WRITE_FORBIDDEN');}};
+  f.context.Logger={log(){throw Error('LOG_FORBIDDEN');}};
+  f.context.wmgjFirestoreConfig_=()=>({orgId:ORG,url:'https://synthetic.example/ingestWmgjEvent',keyId:'synthetic-key',secret:'d'.repeat(64),dryRun:true,maxRows:50});
+  let locked=false;
+  f.context.comTravaIngestaoGmailWMGJ_=callback=>{assert.equal(locked,false);locked=true;try{return callback();}finally{locked=false;}};
+  const process=f.context.auroraProcessarFilaDriveAutorizada_;
+  f.context.auroraProcessarFilaDriveAutorizada_=(...args)=>{assert.equal(locked,true);return process(...args);};
+  vm.runInContext(fs.readFileSync(path.join(root,'src/37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'),'utf8'),f.context);
+  f.context.AURORA_CONNECTOR_REUSE_OWNER_HASH=hash('owner@fixture.test');
+  return request=>JSON.parse(JSON.stringify(f.context.auroraExecutarIngestaoDriveAutorizada(request)));
+}
+
+test('PROCESS_EXISTING resumes 245 scoped documents, preserves 43 legacy rows and never enumerates or advances the scanner',()=>{
+  const f=fixture(),call=addAuthenticatedWrapper(f),rootId='synthetic-root-00001';
+  const folder=f.addFolder(rootId,null,[]);
+  folder.getFiles=()=>{throw Error('ENUMERATION_FORBIDDEN');};folder.getFolders=()=>{throw Error('ENUMERATION_FORBIDDEN');};
+  f.context.auroraExecutarCicloDriveAutorizado_=()=>{throw Error('SCANNER_FORBIDDEN');};
+  f.context.garantirAbasControleExtracaoWMGJ_V1_=()=>{throw Error('SHEET_CREATION_FORBIDDEN');};
+  const request={mode:'PREVIEW',orgId:ORG,sources:[{sourceId:'drive-primary',system:'DRIVE',folderId:rootId,active:true,slaMinutes:1440}],
+    fileIds:[],excludedFolderIds:[],maxScan:300,limit:20,expectedScopeSha256:null};
+  const preview=call(request);assert.equal(preview.ok,true);const scopeHash=preview.scopeSha256;
+  for(let n=0;n<43;n++)f.rows.push(['2026-09-01','DRIVE','legacy-file-'+String(n).padStart(4,'0'),'private legacy name',
+    'text/plain',n<38?'EXTRAINDO':'CLASSIFICANDO',2,'','',n<38?'Extração real iniciada':'Conteúdo extraído por blob_text']);
+  const legacy=JSON.stringify(f.rows.slice(1));
+  for(let n=0;n<245;n++) {
+    const fileId='scoped-file-'+String(n).padStart(4,'0');f.addFile(fileId,rootId,'synthetic extracted content '+n);
+    const metadata={schemaVersion:1,orgId:ORG,scopeSha256:scopeHash,sourceId:'drive-primary',rootId,folderId:rootId,
+      fileId,explicit:false,sourceVersion:'10000',coverage:'PENDING_EXTRACTION'};
+    f.rows.push(['2026-10-23','DRIVE',fileId,'private scoped name','text/plain','PENDENTE',0,'','',f.context.auroraDriveScopeWrite_(metadata)]);
+  }
+  const foreign=['2026-10-23','DRIVE','other-org-file-00001','private other org','text/plain','PENDENTE',0,'','',
+    f.context.auroraDriveScopeWrite_({orgId:'other',scopeSha256:scopeHash,fileId:'other-org-file-00001'})];
+  f.rows.push(foreign.slice());
+  const cursorKey='AURORA_DRIVE_CURSOR_'+ORG+'_'+scopeHash.slice(0,24);
+  const savedCursor=JSON.stringify({schemaVersion:1,scopeSha256:scopeHash,explicitIndex:0,rootIndex:1,
+    stack:[{folderId:rootId,rootId,sourceId:'drive-primary',stage:'FILES',token:'PRIVATE_BLOCKED_TOKEN'}],
+    scanned:255,folders:1,excluded:0,complete:false});
+  f.props.set(cursorKey,savedCursor);f.props.set('WMGJ_FIRESTORE_DRY_RUN','true');
+  const processRequest={...request,mode:'PROCESS_EXISTING',expectedScopeSha256:scopeHash};
+  // The first successful response is deliberately not consumed by the coordinator.
+  const lostResponse=call(processRequest);assert.equal(lostResponse.processing.accepted,20);
+  let result,batches=1;
+  do {
+    result=call(processRequest);batches++;
+    assert.equal(result.ok,true);assert.equal(result.scopeSha256,scopeHash);
+    assert.equal(result.scan.examined,0);assert.equal(result.scan.queued,0);assert.equal(result.scan.complete,false);
+    assert.equal(result.processing.replayVerified,result.privateReadbackPlan.length);
+  } while(result.processing.pending>0 && batches<20);
+  assert.equal(batches,13);assert.equal(result.processing.pending,0);assert.equal(f.entities.size,245);
+  assert.equal(f.sent.length,490);assert.equal(f.tokens.size,0);
+  assert.equal(JSON.stringify(f.rows.slice(1,44)),legacy);assert.deepEqual(f.rows.at(-1),foreign);
+  assert.equal(f.props.get(cursorKey),savedCursor);assert.equal(f.props.get('WMGJ_FIRESTORE_DRY_RUN'),'true');
+  const empty=call(processRequest);assert.equal(empty.processing.attempted,0);assert.equal(empty.processing.pending,0);
+  assert.equal(empty.scan.complete,false);assert.equal(empty.fullSynchronizationVerified,false);
+  let offset=0,recovered=0,page;
+  do {
+    page=call({...request,mode:'READBACK',expectedScopeSha256:scopeHash,readbackOffset:offset});
+    assert.equal(page.ok,true);assert.equal(page.coverage.total,245);assert.equal(page.coverage.pending,0);
+    assert.equal(page.coverage.documents,245);assert.equal(page.cursorDiagnostics.cursor.complete,false);
+    recovered+=page.privateReadbackPlan.length;offset=page.coverage.nextOffset;
+  } while(offset!==null);
+  assert.equal(recovered,245);assert.equal(page.coverage.complete,true);
+  assert.equal(page.scan.complete,false);assert.equal(page.fullSynchronizationVerified,false);
+  assert.equal(f.props.get(cursorKey),savedCursor);assert.equal(JSON.stringify(f.rows.slice(1,44)),legacy);
+});
 test('recursive cursor resumes beyond duplicates and preserves one row per source',()=>{
   const f=fixture();f.addFile('file000000001','folder000001');f.addFile('file000000002','folder000002');
   f.addFolder('folder000002','folder000001',['file000000002']);f.addFolder('folder000001',null,['file000000001','folder000002']);
