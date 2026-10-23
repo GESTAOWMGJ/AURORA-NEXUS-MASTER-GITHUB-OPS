@@ -337,6 +337,7 @@ function auroraCodigoFalhaExtracaoDrive_(error, fallback) {
   var allowed=['AURORA_DRIVE_EXTRACTION_AUTH_FAILED','AURORA_DRIVE_EXTRACTION_QUOTA',
     'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE','AURORA_DRIVE_CONVERSION_UNSUPPORTED',
     'AURORA_DRIVE_CONVERSION_FAILED','AURORA_DRIVE_CONVERSION_NOT_READY',
+    'AURORA_DRIVE_CONVERSION_DEFERRED','AURORA_DRIVE_FILE_SIZE_LIMIT','AURORA_DRIVE_TEXT_LIMIT',
     'AURORA_DRIVE_EXTRACTION_EMPTY','AURORA_DRIVE_FORMAT_UNSUPPORTED',
     'AURORA_DRIVE_CONTENT_READ_FAILED','AURORA_DRIVE_OFX_SIGNATURE_INVALID',
     'AURORA_DRIVE_OFX_ENCODING_UNSUPPORTED','AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED',
@@ -392,7 +393,61 @@ function auroraExtrairTextoOfxDrive_(file) {
   return text;
 }
 
-function extrairConteudoArquivoWMGJ_V1_(file) {
+function auroraBytesTextoUtf8Validos_(bytes) {
+  for(var i=0;i<bytes.length;) {
+    var first=(bytes[i]+256)%256,extra=0,minimum=128,maximum=191;
+    if(first===0) return false;
+    if(first<128) {i++;continue;}
+    if(first>=194 && first<=223) extra=1;
+    else if(first>=224 && first<=239) {
+      extra=2;if(first===224) minimum=160;if(first===237) maximum=159;
+    } else if(first>=240 && first<=244) {
+      extra=3;if(first===240) minimum=144;if(first===244) maximum=143;
+    } else return false;
+    if(i+extra>=bytes.length) return false;
+    for(var j=1;j<=extra;j++) {
+      var next=(bytes[i+j]+256)%256;
+      if(next<(j===1?minimum:128) || next>(j===1?maximum:191)) return false;
+    }
+    i+=extra+1;
+  }
+  return true;
+}
+
+// The provider imports the original bytes. This does not establish their charset.
+function auroraConverterTextoProviderDrive_(file,deadlineMs) {
+  if(typeof Drive==='undefined' || !Drive.Files || typeof Drive.Files.copy!=='function')
+    return {ok:false,code:'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE'};
+  var deadline=Number(deadlineMs),copyId='',originalId=file.getId(),fallback='AURORA_DRIVE_CONVERSION_FAILED';
+  if(!Number.isFinite(deadline)) deadline=Date.now()+145000;
+  try {
+    if(Date.now()>=deadline-15000) throw new Error('AURORA_DRIVE_CONVERSION_DEFERRED');
+    var copy=Drive.Files.copy({title:'WMGJ_TEXT_TMP_'+Utilities.getUuid(),mimeType:MimeType.GOOGLE_DOCS},
+      originalId,{convert:true});
+    if(!copy || typeof copy.id!=='string' || !/^[A-Za-z0-9_-]{10,200}$/.test(copy.id) || copy.id===originalId)
+      throw new Error('AURORA_DRIVE_CONVERSION_UNSUPPORTED');
+    copyId=copy.id;
+    if(copy.mimeType!==MimeType.GOOGLE_DOCS) throw new Error('AURORA_DRIVE_CONVERSION_UNSUPPORTED');
+    if(Date.now()>=deadline-5000) throw new Error('AURORA_DRIVE_CONVERSION_DEFERRED');
+    fallback='AURORA_DRIVE_CONVERSION_NOT_READY';
+    Utilities.sleep(1500);
+    var text=DocumentApp.openById(copyId).getBody().getText();
+    if(Date.now()>=deadline-5000) throw new Error('AURORA_DRIVE_CONVERSION_DEFERRED');
+    if(typeof text!=='string' || !text.trim()) throw new Error('AURORA_DRIVE_EXTRACTION_EMPTY');
+    if(text.length>1048576) throw new Error('AURORA_DRIVE_TEXT_LIMIT');
+    if(/[\uFFFD\u0000]/.test(text)) throw new Error('AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED');
+    return {ok:true,metodo:'google_docs_text',texto:text,
+      observacao:'Texto convertido pelo Google; codificação da fonte não verificada; revisão humana pendente'};
+  } catch(error) {
+    return {ok:false,code:auroraCodigoFalhaExtracaoDrive_(error,fallback)};
+  } finally {
+    if(copyId && copyId!==originalId) {
+      try {DriveApp.getFileById(copyId).setTrashed(true);} catch(ignoreCleanup) {}
+    }
+  }
+}
+
+function extrairConteudoArquivoWMGJ_V1_(file,deadlineMs) {
   var mime = file.getMimeType();
   var resultado = {
     ok: true,
@@ -436,8 +491,20 @@ function extrairConteudoArquivoWMGJ_V1_(file) {
     }
 
     if (mime === MimeType.PLAIN_TEXT || mime.indexOf("text/") === 0 || mime.indexOf("csv") >= 0 || mime.indexOf("json") >= 0) {
+      var textBlob=file.getBlob();
+      if(mime===MimeType.PLAIN_TEXT) {
+        var originalBytes=textBlob.getBytes();
+        if(originalBytes.length>16*1024*1024) throw new Error('AURORA_DRIVE_FILE_SIZE_LIMIT');
+        if(!auroraBytesTextoUtf8Validos_(originalBytes)) {
+          var importedText=auroraConverterTextoProviderDrive_(file,deadlineMs);
+          if(!importedText.ok) throw new Error(importedText.code);
+          resultado.metodo=importedText.metodo;resultado.texto=importedText.texto;
+          resultado.tamanhoTexto=resultado.texto.length;resultado.observacao=importedText.observacao;
+          return resultado;
+        }
+      }
       resultado.metodo = "blob_text";
-      resultado.texto = file.getBlob().getDataAsString("UTF-8");
+      resultado.texto = textBlob.getDataAsString("UTF-8");
       resultado.tamanhoTexto = resultado.texto.length;
       return resultado;
     }
@@ -1320,7 +1387,7 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
         atualizarLinhaFilaWMGJ_Compat_(fila,i+1,idx,{STATUS:'DUPLICADO',ULTIMO_ERRO:'',OBSERVACAO:auroraDriveScopeWrite_(scope)});
         result.aliases++;rememberAttempt(candidate);continue;
       }
-      var extraction=extrairConteudoArquivoWMGJ_V1_(file);
+      var extraction=extrairConteudoArquivoWMGJ_V1_(file,deadlineMs);
       if(!extracaoDocumentalCompletaWMGJ_(extraction)) {
         var empty=extraction && extraction.ok===true && typeof extraction.texto==='string' && !extraction.texto.trim();
         throw new Error(auroraCodigoFalhaExtracaoDrive_(extraction && (extraction.code || extraction.observacao),
@@ -1372,6 +1439,7 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
         'AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED',
         'AURORA_DRIVE_EXTRACTION_QUOTA','AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE',
         'AURORA_DRIVE_CONVERSION_UNSUPPORTED','AURORA_DRIVE_CONVERSION_FAILED','AURORA_DRIVE_CONVERSION_NOT_READY',
+        'AURORA_DRIVE_CONVERSION_DEFERRED',
         'AURORA_DRIVE_EXTRACTION_EMPTY','AURORA_DRIVE_FORMAT_UNSUPPORTED','AURORA_DRIVE_CONTENT_READ_FAILED',
         'AURORA_DRIVE_OFX_SIGNATURE_INVALID','AURORA_DRIVE_OFX_ENCODING_UNSUPPORTED',
         'AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT','AURORA_DRIVE_SOURCE_CHANGED_DURING_EXTRACTION'].indexOf(code)>=0;
