@@ -181,3 +181,17 @@ test('content dedup cannot reuse a canonical receipt outside the current authori
   const readback=f.context.auroraLerPlanoReadbackDriveAutorizado_({...f.options,readbackOffset:0});
   assert.equal(readback.coverage.total,1);assert.equal(readback.coverage.documents,1);assert.equal(readback.coverage.aliases,0);
 });
+
+test('replacement characters or NUL in decoded plain text stay pending while valid documents continue',()=>{
+  for(const character of ['\uFFFD','\u0000']) {
+    const f=fixture();f.addFile('fileexplicit1',null,'unverified '+character+' decoded bytes');f.addFile('fileexplicit2',null,'valid UTF-8 document');
+    f.options.fileIds=['fileexplicit1','fileexplicit2'];f.options.maxScan=10;f.options.processLimit=2;
+    const result=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+    assert.equal(result.ok,true);assert.equal(result.process.accepted,1);assert.equal(result.process.pending,1);
+    assert.equal(result.process.errors,1);assert.equal(result.process.blockingErrors,0);
+    assert.equal(f.rows[1][5],'ERRO_REPROCESSAR');assert.equal(f.rows[1][8],'AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED');
+    assert.equal(result.privateReadbackPlan[0].sourceId,'fileexplicit2');assert.equal(f.sent.length,2);
+    const coverage=f.context.auroraLerPlanoReadbackDriveAutorizado_({...f.options,readbackOffset:0});
+    assert.equal(coverage.coverage.documents,1);assert.equal(coverage.coverage.pending,1);
+  }
+});

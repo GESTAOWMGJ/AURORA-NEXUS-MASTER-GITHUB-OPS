@@ -68,8 +68,30 @@ function fixture(options={}) {
   const makeDoc = file => ({getId:()=>file.id,getBody:()=>({setText:value=>{file.text=value;},getText:()=>{
     calls.sourceReads.push(file.id);expireAfter('extraction');return options.noNonce?'metadata without proof':file.text;
   }}),saveAndClose(){}});
-  const makeSheet = file => ({getId:()=>file.id,getSheets:()=>[{getRange:()=>({setValues:rows=>{file.rows=rows;file.text=JSON.stringify(rows);}}),
-    getDataRange:()=>({getDisplayValues:()=>file.rows}),getName:()=> 'Synthetic'}]});
+  const makeSheet = file => {
+    const dimensions=()=>({rows:(file.rows||[]).length,columns:Math.max(0,...(file.rows||[]).map(row=>row.length))});
+    const range=(startRow,startColumn,rowCount,columnCount)=>{
+      for(const value of [startRow,startColumn,rowCount,columnCount])assert.ok(Number.isSafeInteger(value)&&value>0);
+      return {
+        setValues:values=>{
+          assert.equal(values.length,rowCount);file.rows=file.rows||[];
+          values.forEach((valuesRow,r)=>{
+            assert.equal(valuesRow.length,columnCount);
+            const target=file.rows[startRow-1+r]||(file.rows[startRow-1+r]=[]);
+            valuesRow.forEach((value,c)=>{target[startColumn-1+c]=value;});
+          });
+          file.text=JSON.stringify(file.rows);
+        },
+        getDisplayValues:()=>{
+          calls.sourceReads.push(file.id);expireAfter('extraction');
+          return Array.from({length:rowCount},(_,r)=>Array.from({length:columnCount},(_,c)=>String(file.rows?.[startRow-1+r]?.[startColumn-1+c]??'')));
+        }
+      };
+    };
+    return {getId:()=>file.id,getSheets:()=>[{getName:()=> 'Synthetic',getLastRow:()=>dimensions().rows,
+      getLastColumn:()=>dimensions().columns,getRange:range,
+      getDataRange:()=>range(1,1,Math.max(1,dimensions().rows),Math.max(1,dimensions().columns))}]};
+  };
   const c=vm.createContext({Date:Clock,Number,JSON,MimeType:M,
     Session:{getActiveUser:()=>({getEmail:()=>options.active??'owner@synthetic.invalid'}),getEffectiveUser:()=>({getEmail:()=>options.effective??'owner@synthetic.invalid'})},
     PropertiesService:{getScriptProperties:()=>({getProperty:key=>{calls.configReads++;return props[key]??null;},
@@ -140,6 +162,25 @@ test('real extractor and sender code run four synthetic formats, authentic HMAC,
   for(const item of result.canonicalReadbackPlan)assert.equal(canonical.verifyDocuments(item,[f.canonicalDocs.get('sourceDocuments/'+item.entityId),f.canonicalDocs.get('entityVersions/'+item.versionId),f.canonicalDocs.get('integrationEvents/'+item.idempotencyId)],NONCE).canonicalMaterializationVerified,true);
   const safe=coordinator.sanitizeSummary({response:result},f.request().runtimeFunctionHashes);
   assert.equal(safe.canonicalReadbackPlan,undefined);assert.doesNotMatch(JSON.stringify(safe),/synthetic-file-|owner@|synthetic-key/);
+});
+
+test('Sheets fixture preserves range offsets and extractor covers rows after 200',()=>{
+  const f=fixture(),spreadsheet=f.c.SpreadsheetApp.create('synthetic-range-coverage');
+  const sheet=spreadsheet.getSheets()[0];
+  sheet.getRange(1,1,201,1).setValues(Array.from({length:201},(_,i)=>['row'+(i+1)]));
+  sheet.getRange(201,2,1,1).setValues([['last-column']]);
+  assert.equal(sheet.getLastRow(),201);assert.equal(sheet.getLastColumn(),2);
+  assert.deepEqual(sheet.getRange(201,1,1,2).getDisplayValues(),[['row201','last-column']]);
+  const text=f.c.extrairTextoGoogleSheetsWMGJ_V1_(spreadsheet.getId());
+  assert.match(text,/row201 \| last-column/);
+});
+test('Sheets chunk helper is included in the exact runtime source gate',()=>{
+  const f=fixture(),expected=f.request().runtimeFunctionHashes;
+  assert.match(expected.sheetsComplete,/^[a-f0-9]{64}$/);
+  f.c.auroraExtrairTextoSheetsCompleto_=function(){return 'unreviewed helper';};
+  const result=f.execute(request=>{request.runtimeFunctionHashes=expected;});
+  assert.equal(result.code,'PROBE_RUNTIME_SOURCE_MISMATCH');assert.equal(result.status,'FAIL');
+  assert.equal(f.calls.configReads,0);assert.equal(f.calls.filesCreated,0);assert.equal(f.calls.foldersCreated,0);
 });
 
 test('ordinary sender wrapper preserves dry-run config and existing logger',()=>{

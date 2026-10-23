@@ -1201,6 +1201,8 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
         if(/^AURORA_SHEETS_(TEXT|CELL)_LIMIT$/.test(extractionError)) throw new Error(extractionError);
         throw new Error('PENDING_EXTRACTION');
       }
+      if(extraction.metodo==='blob_text' && /[\uFFFD\u0000]/.test(extraction.texto))
+        throw new Error('AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED');
       if(extraction.texto.length>1048576) throw new Error('AURORA_DRIVE_TEXT_LIMIT');
       if(String(file.getLastUpdated().getTime())!==version) throw new Error('AURORA_DRIVE_SOURCE_CHANGED_DURING_EXTRACTION');
       var textHash=wmgjFirestoreHashString_(extraction.texto);
@@ -1237,6 +1239,7 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
       var code=String(error && error.message || 'AURORA_DRIVE_EXTRACTION_FAILED');
       if(!/^[A-Z][A-Z0-9_:.-]{0,160}$/.test(code)) code='AURORA_DRIVE_EXTRACTION_FAILED';
       var recoverable=['PENDING_EXTRACTION','AURORA_DRIVE_FILE_SIZE_LIMIT','AURORA_DRIVE_TEXT_LIMIT',
+        'AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED',
         'AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT','AURORA_DRIVE_SOURCE_CHANGED_DURING_EXTRACTION'].indexOf(code)>=0;
       scope.coverage='PENDING_EXTRACTION';scope.lastCode=code;
       atualizarLinhaFilaWMGJ_Compat_(fila,i+1,idx,{STATUS:'ERRO_REPROCESSAR',TENTATIVAS:Number(row[idx.TENTATIVAS]||0)+1,

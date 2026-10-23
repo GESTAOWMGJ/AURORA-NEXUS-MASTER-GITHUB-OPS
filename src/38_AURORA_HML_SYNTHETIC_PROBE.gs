@@ -156,7 +156,7 @@ function auroraHmlSyntheticRuntimeHashes_() {
     checkFile: auroraHmlSyntheticCheckFile_, cleanup: auroraHmlSyntheticCleanup_,
     checkReceipt: auroraHmlSyntheticCheckReceipt_, extraction: extrairConteudoArquivoWMGJ_V1_,
     extractionComplete: extracaoDocumentalCompletaWMGJ_, ocr: converterArquivoParaGoogleDocWMGJ_V1_,
-    sheets: extrairTextoGoogleSheetsWMGJ_V1_, event: wmgjFirestoreEventoArquivo_,
+    sheets: extrairTextoGoogleSheetsWMGJ_V1_, sheetsComplete: auroraExtrairTextoSheetsCompleto_, event: wmgjFirestoreEventoArquivo_,
     sender: wmgjFirestoreEnviarEventoComConfig_, publicFailure: wmgjFirestorePublicFailure_, safeCode: auroraHmlSyntheticSafeCode_,
     canonicalHmac: wmgjFirestoreCanonicalHmacV2_,
     hmac: wmgjFirestoreHmacHex_, config: wmgjFirestoreConfig_, parents: auroraHmlSyntheticParents_
