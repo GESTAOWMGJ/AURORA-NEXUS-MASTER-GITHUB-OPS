@@ -10,6 +10,30 @@ const workflow = readFileSync(new URL("../../../.github/workflows/aurora-cmek-hm
 const script = readFileSync(new URL("../../scripts/aurora-cmek-hml.sh", import.meta.url), "utf8");
 const policy = JSON.parse(readFileSync(new URL("../../policy/cmek-hml-baseline-v1.json", import.meta.url), "utf8"));
 
+for (const exitCode of [0, 23]) {
+  test(`workflow runs a non-executable script and retains exit ${exitCode}`, { skip: process.platform === "win32" }, () => {
+    const dir = mkdtempSync(join(tmpdir(), "aurora-cmek-entrypoint-"));
+    try {
+      const block = workflow.match(/- name: Execute selected HML mode\r?\n\s+run: \|\r?\n([\s\S]*?)(?=\r?\n      - name:)/)?.[1];
+      assert.ok(block, "workflow execution block must exist");
+      const scriptPath = join(dir, "guarded script.sh");
+      writeFileSync(scriptPath, `#!/bin/bash\nprintf 'mode=%s\\n' "$1"\nexit ${exitCode}\n`, { mode: 0o644 });
+      const result = spawnSync("bash", ["-c", block.replace(/^          /gm, "")], {
+        env: { ...process.env, SCRIPT: scriptPath, MODE: "restore-test", RUNNER_TEMP: dir,
+          GITHUB_SHA: "synthetic-source", GITHUB_RUN_ID: "synthetic-run" }, encoding: "utf8"
+      });
+      assert.equal(result.status, exitCode, result.stderr);
+      const evidence = join(dir, "aurora-cmek-hml-evidence");
+      assert.equal(readFileSync(join(evidence, "result.txt"), "utf8"), "mode=restore-test\n");
+      const metadata = JSON.parse(readFileSync(join(evidence, "metadata.json"), "utf8"));
+      assert.equal(metadata.exitCode, exitCode);
+      assert.equal(metadata.sha, "synthetic-source");
+      assert.equal(metadata.productionMutation, false);
+      assert.equal(metadata.realDataAllowed, false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+}
+
 test("initial synthetic write can precede active-version proof but missing proof blocks completion", () => {
   const dir = mkdtempSync(join(tmpdir(), "aurora-cmek-first-write-"));
   try {
