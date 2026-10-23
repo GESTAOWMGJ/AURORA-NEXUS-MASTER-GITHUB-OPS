@@ -32,6 +32,11 @@ function parseScope(raw, expectedHash) {
 function makeRequest(scope, mode, scopeSha256, readbackOffset=0) {
   return {mode,orgId:scope.orgId,sources:scope.sources,fileIds:scope.fileIds,excludedFolderIds:scope.excludedFolderIds,maxScan:300,limit:20,expectedScopeSha256:scopeSha256||null,...(mode==='READBACK'?{readbackOffset}:{})};
 }
+function parseDriveMode(value) {
+  const mode=value===undefined || value===''?'EXECUTE':value;
+  if(!['EXECUTE','PROCESS_EXISTING'].includes(mode))fail('DRIVE_MODE_REJECTED');
+  return mode;
+}
 function rejectRuntimeFailure(envelope) {
   const value=envelope?.response;
   if(value?.ok!==false || value.code==='AURORA_DRIVE_BATCH_PENDING')return;
@@ -154,6 +159,52 @@ async function verifyCoverage(getPage,verifyPlan) {
     ||[...aliases.keys()].some(id=>sourceIds.has(id)))fail('DRIVE_COVERAGE_INCOMPLETE');
   return{...expectedTotals,pages,canonicalDocumentsVerified:verified.size,aliasReferencesVerified:aliases.size,allReceiptsVerified:true};
 }
+// The same bounded loop serves both modes; only the published entrypoint decides
+// whether to enumerate. All source/recovery/authorization gates remain in run().
+async function runDriveBatches({scope,mode,maxBatches,beforeBatch,call,verifyPlan,onBatch}) {
+  mode=parseDriveMode(mode);
+  if(!Number.isSafeInteger(maxBatches)||maxBatches<1||maxBatches>300)fail('DRIVE_BATCH_LIMIT_INVALID');
+  let scopeSha256=null,stalledAttempts=0,lastBatch=null,stopReason='BATCH_LIMIT';
+  for(let n=0;n<maxBatches;n++) {
+    await beforeBatch();
+    const preview=await call(makeRequest(scope,'PREVIEW'),n+'-preview');
+    const previewValue=preview?.response;
+    if(preview?.error||previewValue?.ok!==true||!hex(previewValue.scopeSha256))fail('DRIVE_PREVIEW_REJECTED');
+    if(scopeSha256&&scopeSha256!==previewValue.scopeSha256)fail('DRIVE_SCOPE_CHANGED_DURING_EXECUTION');
+    scopeSha256=previewValue.scopeSha256;
+    const envelope=await call(makeRequest(scope,mode,scopeSha256),n+'-'+mode.toLowerCase());
+    const batch=sanitizeBatch(envelope);
+    if(batch.scopeSha256!==scopeSha256)fail('DRIVE_SCOPE_CHANGED_DURING_EXECUTION');
+    if(mode==='PROCESS_EXISTING' && (batch.scan.examined!==0||batch.scan.queued!==0||batch.scan.complete!==false))
+      fail('DRIVE_PROCESS_ONLY_SCAN_REJECTED');
+    const readback=await verifyPlan(envelope.response.privateReadbackPlan||[]);
+    if(readback.verified!==batch.processing.accepted+batch.processing.duplicates
+      ||readback.verified!==batch.processing.replayVerified)fail('DRIVE_RECEIPT_COVERAGE_MISMATCH');
+    batch.canonicalReadback=readback;lastBatch=batch;
+    await onBatch(batch,n+1);
+    if(!batch.ok||batch.processing.failed>0)fail('DRIVE_BATCH_HAS_UNRESOLVED_FAILURE');
+    const progress=batch.processing.accepted+batch.processing.duplicates+batch.scan.aliases;
+    stalledAttempts=progress>0?0:stalledAttempts+batch.processing.attempted;
+    if(mode==='PROCESS_EXISTING') {
+      if(batch.processing.pending===0){stopReason='SCOPED_QUEUE_DRAINED';break;}
+      if(batch.processing.attempted===0){stopReason='NO_ATTEMPTS';break;}
+      // This is a retry budget, not evidence that distinct pending IDs were visited.
+      if(stalledAttempts>=batch.processing.pending){stopReason='NO_PROGRESS_BUDGET';break;}
+    } else {
+      if(batch.scan.complete&&batch.processing.pending===0){stopReason='ENUMERATION_AND_QUEUE_DRAINED';break;}
+      if(batch.scan.complete&&batch.processing.pending>0&&stalledAttempts>=batch.processing.pending){stopReason='NO_PROGRESS_BUDGET';break;}
+    }
+  }
+  return {scopeSha256,lastBatch,stopReason,
+    pendingExtractionRequiresFollowup:stopReason==='NO_PROGRESS_BUDGET'||stopReason==='NO_ATTEMPTS'};
+}
+function completionFromCoverage(mode,lastBatch,coverage) {
+  mode=parseDriveMode(mode);
+  if(!coverage||coverage.allReceiptsVerified!==true||!Number.isSafeInteger(coverage.pending)||coverage.pending<0)
+    fail('DRIVE_COVERAGE_INCOMPLETE');
+  return {complete:mode==='EXECUTE'&&lastBatch?.scan.complete===true&&coverage.pending===0,
+    scopedQueueDrained:coverage.pending===0,fullSynchronizationVerified:false,documentReviewRequired:true};
+}
 function command(exe,args,cwd){const r=cp.spawnSync(exe,args,{cwd,encoding:'utf8',windowsHide:true,timeout:420000,maxBuffer:16000000,env:{...process.env,DEBUG:'',NODE_DEBUG:''},stdio:['ignore','pipe','pipe']});if(r.error||r.status!==0)fail('DRIVE_COORDINATOR_COMMAND_FAILED');return r.stdout;}
 async function verifyRecovery(repo,token) {
   const base='projects/'+PROJECT+'/databases/(default)';
@@ -179,6 +230,7 @@ async function verifyRecovery(repo,token) {
   return {sourceDatabase:'(default)',backupSnapshotTime:backup.snapshotTime,backupAgeHours:age,deleteProtectionEnabled:true,pointInTimeRecoveryEnabled:true,restoreRunId:runId,restoreStepsVerified:true,runConclusion:run.conclusion};
 }
 async function run() {
+  const mode=parseDriveMode(process.env.AURORA_DRIVE_MODE);
   const repo=path.resolve(__dirname,'..'),sourceSha=process.env.EXPECTED_SOURCE_SHA;
   if(!/^[a-f0-9]{40}$/.test(sourceSha||'')||sourceSha!==process.env.GITHUB_SHA||process.env.GITHUB_REF!=='refs/heads/main'
     ||process.env.APPROVED_PROJECT!==PROJECT||command('git',['rev-parse','HEAD'],repo).trim()!==sourceSha)fail('DRIVE_EXACT_SOURCE_REQUIRED');
@@ -191,7 +243,7 @@ async function run() {
   const temporary=process.env.RUNNER_TEMP;if(!temporary||!path.isAbsolute(temporary))fail('DRIVE_PRIVATE_DIRECTORY_REQUIRED');
   const workspace=path.join(temporary,'aurora-drive-private');fs.mkdirSync(workspace,{mode:0o700});
   const reportFile=path.join(temporary,'aurora-drive-intake-summary.json');
-  const summary={schemaVersion:'aurora.real-drive-intake-evidence.v1',startedAtUtc:new Date().toISOString(),checkedSourceSha:sourceSha,sourceScopeSha256:process.env.EXPECTED_SCOPE_SHA256,projectId:PROJECT,status:'RUNNING',batches:[],canonicalReadbacksVerified:0,sourceMutation:false,newSchedulerCreated:false,complete:false};
+  const summary={schemaVersion:'aurora.real-drive-intake-evidence.v1',startedAtUtc:new Date().toISOString(),checkedSourceSha:sourceSha,sourceScopeSha256:process.env.EXPECTED_SCOPE_SHA256,projectId:PROJECT,driveMode:mode,status:'RUNNING',batches:[],canonicalReadbacksVerified:0,sourceMutation:false,newSchedulerCreated:false,complete:false};
   const save=()=>fs.writeFileSync(reportFile,JSON.stringify(summary,null,2)+'\n',{mode:0o600});save();
   const gate=()=>{if(Date.now()>=deadline)fail('DRIVE_HML_WINDOW_EXPIRED');};
   const workflow=fs.readFileSync(path.join(repo,'.github/workflows/deploy-appscript.yml'),'utf8');
@@ -220,38 +272,28 @@ async function run() {
   };
   try{
     summary.recovery=await verifyRecovery(repo,command('gcloud',['auth','print-access-token'],repo).trim());save();
-    let lastScopeSha256=null,stalledAttempts=0;
-    for(let n=0;n<maxBatches;n++){
-      gate();if(stable(deployment())!==stable(before))fail('DRIVE_PUBLISHED_SOURCE_CHANGED');
-      const preview=await call(makeRequest(scope,'PREVIEW'),n+'-preview');
-      const previewValue=preview?.response;if(preview?.error||previewValue?.ok!==true||!hex(previewValue.scopeSha256))fail('DRIVE_PREVIEW_REJECTED');
-      if(lastScopeSha256&&lastScopeSha256!==previewValue.scopeSha256)fail('DRIVE_SCOPE_CHANGED_DURING_EXECUTION');lastScopeSha256=previewValue.scopeSha256;
-      const envelope=await call(makeRequest(scope,'EXECUTE',previewValue.scopeSha256),n+'-execute');
-      const batch=sanitizeBatch(envelope);if(batch.scopeSha256!==previewValue.scopeSha256)fail('DRIVE_SCOPE_CHANGED_DURING_EXECUTION');
-      const token=command('gcloud',['auth','print-access-token'],repo).trim();
-      const readback=await verifyReadback(envelope.response.privateReadbackPlan||[],scope.orgId,token);
-      if(readback.verified!==batch.processing.accepted+batch.processing.duplicates||readback.verified!==batch.processing.replayVerified)fail('DRIVE_RECEIPT_COVERAGE_MISMATCH');
-      batch.canonicalReadback=readback;summary.batches.push(batch);summary.canonicalReadbacksVerified+=readback.verified;save();
-      console.log(JSON.stringify({batch:n+1,scan:batch.scan,processing:batch.processing,canonicalReadbacksVerified:readback.verified}));
-      if(!batch.ok||batch.processing.failed>0)fail('DRIVE_BATCH_HAS_UNRESOLVED_FAILURE');
-      const progress=batch.processing.accepted+batch.processing.duplicates+batch.scan.aliases;
-      stalledAttempts=progress>0?0:stalledAttempts+batch.processing.attempted;
-      if(batch.scan.complete&&batch.processing.pending===0)break;
-      if(batch.scan.complete&&batch.processing.pending>0&&stalledAttempts>=batch.processing.pending){summary.pendingExtractionRequiresFollowup=true;break;}
-    }
+    const execution=await runDriveBatches({scope,mode,maxBatches,call,
+      beforeBatch:()=>{gate();if(stable(deployment())!==stable(before))fail('DRIVE_PUBLISHED_SOURCE_CHANGED');},
+      verifyPlan:plan=>verifyReadback(plan,scope.orgId,command('gcloud',['auth','print-access-token'],repo).trim()),
+      onBatch:(batch,n)=>{
+        summary.batches.push(batch);summary.canonicalReadbacksVerified+=batch.canonicalReadback.verified;save();
+        console.log(JSON.stringify({batch:n,scan:batch.scan,processing:batch.processing,canonicalReadbacksVerified:batch.canonicalReadback.verified}));
+      }});
+    summary.stopReason=execution.stopReason;
+    if(execution.pendingExtractionRequiresFollowup)summary.pendingExtractionRequiresFollowup=true;
+    save();
     let pageNumber=0;
     const token=command('gcloud',['auth','print-access-token'],repo).trim();
     summary.coverage=await verifyCoverage(async offset=>{
-      const envelope=await call(makeRequest(scope,'READBACK',lastScopeSha256,offset),'coverage-'+(++pageNumber));
-      if(envelope?.error||envelope?.response?.scopeSha256!==lastScopeSha256)fail('DRIVE_COVERAGE_SCOPE_MISMATCH');return envelope.response;
+      const envelope=await call(makeRequest(scope,'READBACK',execution.scopeSha256,offset),'coverage-'+(++pageNumber));
+      if(envelope?.error||envelope?.response?.scopeSha256!==execution.scopeSha256)fail('DRIVE_COVERAGE_SCOPE_MISMATCH');return envelope.response;
     },plan=>verifyReadback(plan,scope.orgId,token));
-    summary.complete=summary.batches.at(-1)?.scan.complete===true&&summary.coverage.pending===0;
-    summary.fullSynchronizationVerified=false;summary.documentReviewRequired=true;save();
+    Object.assign(summary,completionFromCoverage(mode,execution.lastBatch,summary.coverage));save();
     if(stable(deployment())!==stable(before))fail('DRIVE_PUBLISHED_SOURCE_CHANGED');
     summary.status=summary.complete?'VERIFIED':'RESUMABLE';
   }catch(error){summary.status='INCOMPLETE';summary.code=/^[A-Z_0-9]{1,100}$/.test(error.message)?error.message:'DRIVE_EXECUTION_UNCONFIRMED';if(error.failureStage)summary.failureStage=error.failureStage;throw error;}
   finally{summary.finishedAtUtc=new Date().toISOString();save();}
   return summary;
 }
-module.exports={parseScope,makeRequest,sanitizeBatch,verifyReadback,verifyCoverage,sha,rejectRuntimeFailure,withSharedLockRetry};
+module.exports={parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage};
 if(require.main===module)run().then(result=>console.log(JSON.stringify({status:result.status,complete:result.complete,batches:result.batches.length,canonicalReadbacksVerified:result.canonicalReadbacksVerified}))).catch(error=>{console.error(/^[A-Z_0-9]{1,100}$/.test(error.message)?error.message:'DRIVE_INTAKE_UNCONFIRMED');process.exitCode=1;});

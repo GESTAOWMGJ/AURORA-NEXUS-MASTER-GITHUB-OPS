@@ -53,3 +53,13 @@ READBACK acrescenta um diagnóstico limitado às duas propriedades do tenant e f
 O preview legado de publicação registra fase e motivo por listas fechadas, inclusive em falha. Seus gates, contrato de sucesso e erro público permanecem iguais; stdout, stderr, argumentos e exceções brutas nunca entram no artefato.
 
 Baseline deste incremento: 1ae49855b9ee1fd8f12e896c77ca98fdb4e5ca23. Testes sintéticos cobrem privacidade, ausência de escrita, rejeição por identidade/escopo, falha posterior do readback e proibição de retry dos novos códigos. O incremento não reconcilia estados legados, não comprova ociosidade de executores e não declara a carga completa. A causa e a recuperação reais dependem da leitura do runtime publicado. Rollback conserva o checkpoint e usa a fonte/publicação anteriores.
+
+## Processamento da fila existente
+
+Quando a enumeração encontra uma linha legada em EXTRAINDO ou CLASSIFICANDO, ela mantém o bloqueio AURORA_DRIVE_INFLIGHT_RECONCILIATION_REQUIRED. O workflow existente permite selecionar drive_mode=PROCESS_EXISTING dentro de operation=DRIVE_TOTAL para processar somente registros já vinculados ao escopo autorizado.
+
+Esse modo conserva o fingerprint, os gates de proprietário, tenant, configuração, versão publicada, recuperação, trava compartilhada e HMAC por solicitação. Exige os cabeçalhos ID_ORIGEM, STATUS e OBSERVACAO; reutiliza o processador e o READBACK paginado existentes. Não enumera, não avança o cursor da varredura nem adota linhas legadas.
+
+O coordenador verifica os recibos canônicos e versões imutáveis de cada lote. As paradas são fila drenada, ausência de tentativas, orçamento limitado sem progresso ou limite de lotes. complete permanece false; scopedQueueDrained descreve somente a fila do escopo. EXECUTE continua como padrão e não faz fallback automático.
+
+Validação: 74 testes direcionados; cenário integrado sintético com 245 documentos scoped, 43 linhas legadas, uma linha de outro tenant e retomada após resposta perdida. Os módulos de scanner, extração e idempotência não foram alterados por esta mudança. A execução sobre dados reais exige os gates e a evidência normal do workflow.

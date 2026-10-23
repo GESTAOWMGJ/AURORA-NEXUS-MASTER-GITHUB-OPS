@@ -1,7 +1,9 @@
 'use strict';
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {parseScope,makeRequest,sanitizeBatch,verifyReadback,verifyCoverage,sha,rejectRuntimeFailure,withSharedLockRetry}=require('./aurora-drive-ingest-run.cjs');
+const fs=require('node:fs');
+const path=require('node:path');
+const {parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage}=require('./aurora-drive-ingest-run.cjs');
 const scope=()=>({schemaVersion:'aurora.authorized-drive-source-scope.v1',orgId:'wmgj',projectId:'wmgj-hml-jfn-20260927',authorization:{realDataAuthorized:true,sourceMutationAllowed:false},sources:[{sourceId:'fixture-root',system:'DRIVE',folderId:'synthetic-folder-only',active:true,slaMinutes:1440}],fileIds:['synthetic-file-only'],excludedFolderIds:[]});
 function encoded(v){if(v===null)return{nullValue:null};if(typeof v==='string')return{stringValue:v};if(typeof v==='boolean')return{booleanValue:v};if(typeof v==='number')return{integerValue:String(v)};return{mapValue:{fields:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encoded(x)]))}};}
 function readbackFixture(){
@@ -62,4 +64,110 @@ test('scanner and process-cursor failures preserve the fixed cause and are never
   }
   assert.throws(()=>rejectRuntimeFailure({response:{ok:false,code:'AURORA_DRIVE_CURSOR_LIMIT:PRIVATE_TOKEN',failureStage:'EXECUTE'}}),
     error=>error.message==='DRIVE_RUNTIME_REJECTED' && error.failureStage==='EXECUTE');
+});
+
+function batchResponse({attempted=0,accepted=0,duplicates=0,aliases=0,pending=0,failed=0,complete=false,plan=[]}={}) {
+  return {response:{ok:failed===0,code:failed?'AURORA_DRIVE_BATCH_PENDING':'AURORA_DRIVE_BATCH_EXECUTED',
+    scopeSha256:'a'.repeat(64),triggersChanged:false,globalSettingsChanged:false,
+    scan:{examined:0,queued:0,aliases,complete},
+    processing:{attempted,accepted,duplicates,pending,failed,review:accepted+duplicates,
+      extractionErrors:0,replayVerified:plan.length},privateReadbackPlan:plan}};
+}
+function batchHarness(responses,mode='PROCESS_EXISTING',maxBatches=20,verifyPlan=async plan=>({verified:plan.length,evidence:[]})) {
+  const requests=[],saved=[],events=[];let index=0,guards=0;
+  const execute=()=>runDriveBatches({scope:scope(),mode,maxBatches,
+    beforeBatch:()=>{guards++;events.push('guard');},
+    call:async request=>{
+      requests.push(request);
+      if(request.mode==='PREVIEW')return {response:{ok:true,scopeSha256:'a'.repeat(64)}};
+      assert.equal(request.mode,parseDriveMode(mode));
+      assert.equal(request.expectedScopeSha256,'a'.repeat(64));
+      return responses[Math.min(index++,responses.length-1)];
+    },
+    verifyPlan:async plan=>{events.push('readback');return verifyPlan(plan);},
+    onBatch:batch=>{events.push('saved');saved.push(batch);}});
+  return {execute,requests,saved,events,get guards(){return guards;}};
+}
+test('Drive mode is closed, defaults to EXECUTE, and invalid mode fails before any request',async()=>{
+  assert.equal(parseDriveMode(undefined),'EXECUTE');assert.equal(parseDriveMode(''),'EXECUTE');
+  assert.equal(parseDriveMode('PROCESS_EXISTING'),'PROCESS_EXISTING');
+  for(const mode of ['READBACK','PROCESS_EXISTING private',null,{}]) {
+    const f=batchHarness([batchResponse()],mode);
+    await assert.rejects(f.execute,/DRIVE_MODE_REJECTED/);assert.equal(f.guards,0);assert.deepEqual(f.requests,[]);
+  }
+});
+test('PROCESS_EXISTING uses the same preview scope, verifies every receipt, and stops when its queue drains',async()=>{
+  const proof=readbackFixture();
+  const f=batchHarness([batchResponse({attempted:1,accepted:1,pending:1,plan:[proof.row]}),
+    batchResponse({attempted:1,aliases:1})],'PROCESS_EXISTING',20,
+    plan=>verifyReadback(plan,'wmgj','synthetic-token',proof.fetcher));
+  const result=await f.execute();
+  assert.equal(result.stopReason,'SCOPED_QUEUE_DRAINED');assert.equal(result.scopeSha256,'a'.repeat(64));
+  assert.equal(f.guards,2);assert.equal(f.saved.length,2);
+  assert.deepEqual(f.requests.map(x=>x.mode),['PREVIEW','PROCESS_EXISTING','PREVIEW','PROCESS_EXISTING']);
+  assert.equal(f.saved[0].canonicalReadback.verified,1);assert.equal(f.saved[1].scan.aliases,1);
+  assert.equal(f.saved.every(x=>x.scan.complete===false),true);
+  const coverage=await verifyCoverage(async offset=>coveragePage(proof.row,offset),
+    plan=>verifyReadback(plan,'wmgj','synthetic-token',proof.fetcher));
+  const summary=completionFromCoverage('PROCESS_EXISTING',result.lastBatch,coverage);
+  assert.equal(summary.scopedQueueDrained,true);assert.equal(summary.complete,false);
+  assert.equal(summary.fullSynchronizationVerified,false);assert.equal(coverage.canonicalDocumentsVerified,1);
+});
+test('PROCESS_EXISTING resume recovers earlier receipts through final READBACK even with an empty new batch',async()=>{
+  const proof=readbackFixture(),f=batchHarness([batchResponse()]);
+  const result=await f.execute();assert.equal(f.saved.length,1);assert.equal(f.saved[0].canonicalReadback.verified,0);
+  let pages=0;
+  const coverage=await verifyCoverage(async offset=>{pages++;return coveragePage(proof.row,offset);},
+    plan=>verifyReadback(plan,'wmgj','synthetic-token',proof.fetcher));
+  assert.equal(pages,2);assert.equal(coverage.canonicalDocumentsVerified,1);assert.equal(coverage.aliasReferencesVerified,1);
+  assert.equal(coverage.pending,0);assert.equal(coverage.allReceiptsVerified,true);
+  assert.equal(completionFromCoverage('PROCESS_EXISTING',result.lastBatch,coverage).complete,false);
+});
+test('PROCESS_EXISTING stops on no attempts, bounded retry budget or max batches without claiming distinct IDs were visited',async()=>{
+  for(const fixture of [
+    {response:batchResponse({pending:5}),max:300,count:1,reason:'NO_ATTEMPTS'},
+    {response:batchResponse({attempted:2,pending:5}),max:300,count:3,reason:'NO_PROGRESS_BUDGET'},
+    {response:batchResponse({attempted:1,pending:100}),max:2,count:2,reason:'BATCH_LIMIT'}
+  ]) {
+    const f=batchHarness([fixture.response],'PROCESS_EXISTING',fixture.max),result=await f.execute();
+    assert.equal(result.stopReason,fixture.reason);assert.equal(f.saved.length,fixture.count);
+    assert.equal(result.lastBatch.processing.pending,fixture.response.response.processing.pending);
+    assert.equal(result.lastBatch.scan.complete,false);assert.equal(result.allPendingIdsAttempted,undefined);
+  }
+});
+test('PROCESS_EXISTING rejects enumeration claims and saves verified partial receipts before a blocking failure',async()=>{
+  for(const mutate of [v=>{v.scan.examined=1;},v=>{v.scan.queued=1;},v=>{v.scan.complete=true;}]) {
+    const response=batchResponse();mutate(response.response);const f=batchHarness([response]);
+    await assert.rejects(f.execute,/DRIVE_PROCESS_ONLY_SCAN_REJECTED/);assert.equal(f.saved.length,0);
+  }
+  const proof=readbackFixture(),f=batchHarness([batchResponse({attempted:2,accepted:1,pending:1,failed:1,plan:[proof.row]})],
+    'PROCESS_EXISTING',20,plan=>verifyReadback(plan,'wmgj','synthetic-token',proof.fetcher));
+  await assert.rejects(f.execute,/DRIVE_BATCH_HAS_UNRESOLVED_FAILURE/);
+  assert.equal(f.saved.length,1);assert.equal(f.saved[0].canonicalReadback.verified,1);
+  assert.deepEqual(f.events,['guard','readback','saved']);
+});
+test('default EXECUTE keeps enumeration completion and does not silently fall back from a scanner failure',async()=>{
+  const f=batchHarness([batchResponse({attempted:1,pending:1}),batchResponse({complete:true})],'',20);
+  const result=await f.execute();assert.equal(result.stopReason,'ENUMERATION_AND_QUEUE_DRAINED');assert.equal(f.saved.length,2);
+  assert.deepEqual(f.requests.map(x=>x.mode),['PREVIEW','EXECUTE','PREVIEW','EXECUTE']);
+  const complete=completionFromCoverage('EXECUTE',result.lastBatch,{allReceiptsVerified:true,pending:0});
+  assert.equal(complete.complete,true);
+  assert.equal(completionFromCoverage('PROCESS_EXISTING',result.lastBatch,{allReceiptsVerified:true,pending:0,complete:true}).complete,false);
+  assert.throws(()=>completionFromCoverage('PROCESS_EXISTING',result.lastBatch,{pending:0}),/COVERAGE_INCOMPLETE/);
+  const blocked=batchHarness([{response:{ok:false,code:'AURORA_DRIVE_INFLIGHT_RECONCILIATION_REQUIRED',failureStage:'EXECUTE'}}],'EXECUTE');
+  await assert.rejects(blocked.execute,/INFLIGHT_RECONCILIATION_REQUIRED/);
+  assert.deepEqual(blocked.requests.map(x=>x.mode),['PREVIEW','EXECUTE']);assert.equal(blocked.saved.length,0);
+});
+test('drive_mode stays inside DRIVE_TOTAL and preserves workflow execution, source, environment and cleanup gates',()=>{
+  const workflow=fs.readFileSync(path.join(__dirname,'../.github/workflows/aurora-rc11-recovery-real-ingest.yml'),'utf8');
+  assert.match(workflow,/options: \[RC11_SAMPLE, DRIVE_TOTAL\]/);
+  assert.match(workflow,/drive_mode:\n(?:[^\n]*\n){0,5}\s+default: EXECUTE\n\s+options: \[EXECUTE, PROCESS_EXISTING\]/);
+  assert.match(workflow,/if: github\.event_name != 'workflow_dispatch' \|\| inputs\.operation != 'DRIVE_TOTAL'/);
+  const drive=workflow.split('\n  drive_total:\n')[1];assert.ok(drive);
+  assert.match(drive,/if: github\.event_name == 'workflow_dispatch' && inputs\.operation == 'DRIVE_TOTAL' && github\.ref == 'refs\/heads\/main' && inputs\.expected_sha == github\.sha && inputs\.confirmation == 'RUN_AUTHORIZED_REAL_DRIVE_INTAKE'/);
+  assert.match(drive,/environment: firebase-homologation/);
+  assert.match(drive,/AURORA_DRIVE_MODE: \$\{\{ inputs\.drive_mode \|\| 'EXECUTE' \}\}/);
+  assert.match(drive,/run: node tools\/aurora-drive-ingest-run\.cjs/);
+  assert.match(drive,/Remove runner OAuth and private execution responses\n\s+if: always\(\)/);
+  assert.match(workflow,/group: aurora-rc11-hml\n\s+cancel-in-progress: false/);
 });

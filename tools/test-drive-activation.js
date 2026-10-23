@@ -29,8 +29,16 @@ function fixture() {
     ScriptApp:{getProjectTriggers(){throw Error('TRIGGER_READ_FORBIDDEN');},newTrigger(){throw Error('TRIGGER_WRITE_FORBIDDEN');}},
     Logger:{log(){throw Error('LOG_FORBIDDEN');}},
     wmgjFirestoreConfig_:()=>({orgId:state.org,url:'https://synthetic.example/ingestWmgjEvent',keyId:'synthetic-key',secret:state.secret,dryRun:true,maxRows:50}),
+    getConfigWMGJ_Compat_:()=>({SHEETS:{FILA:'existing-queue'}}),
+    getPlanilhaWMGJ_Compat_:()=>({getSheetByName:name=>{assert.equal(state.lock,true);assert.equal(name,'existing-queue');return state.queue;}}),
     comTravaIngestaoGmailWMGJ_:callback=>{state.calls.push('lock');state.lock=true;try{return callback();}finally{state.lock=false;}},
     auroraExecutarCicloDriveAutorizado_:options=>{assert.equal(state.lock,true);state.calls.push('execute');state.options=options;options.beforeRequest();return data;},
+    auroraProcessarFilaDriveAutorizada_:(sheet,options,limit,deadline)=>{
+      assert.equal(state.lock,true);assert.equal(sheet,state.queue);assert.equal(limit,20);
+      assert.equal(deadline,options.deadlineMs);assert.ok(deadline>Date.now());
+      state.calls.push('process-existing');state.options=options;options.beforeRequest();
+      return {...data.process,privateReadbackPlan:data.privateReadbackPlan};
+    },
     auroraLerPlanoReadbackDriveAutorizado_:options=>{
       assert.equal(state.lock,true);state.calls.push('readback');state.readbackOptions=options;
       const count=options.readbackOffset===0?1:0;
@@ -38,6 +46,7 @@ function fixture() {
         total:1,documents:1,aliases:0,pending:0,complete:true,returned:count,pageDocuments:count,pageAliases:0,pagePending:0}};
     }
   });
+  state.queue={name:'synthetic-existing-queue',getDataRange:()=>({getValues:()=>[['ID_ORIGEM','STATUS','OBSERVACAO']]})};
   vm.runInContext(source,context);
   context.AURORA_CONNECTOR_REUSE_OWNER_HASH=sha('owner@fixture.test');
   const request = {mode:'PREVIEW',orgId:'synthetic',sources:[{sourceId:'drive-primary',system:'DRIVE',folderId:'synthetic-root-00001',slaMinutes:1440,active:true}],
@@ -226,4 +235,47 @@ test('closed scanner and process-cursor failures retain their cause while arbitr
   f.context.auroraExecutarCicloDriveAutorizado_=()=>{throw new SyntaxError('PRIVATE_TOKEN PRIVATE_SOURCE_ID');};
   const response=f.execute();assert.equal(response.code,'AURORA_DRIVE_EXECUTION_UNCONFIRMED');assert.equal(response.failureStage,'EXECUTE');
   assert.equal(JSON.stringify(response).includes('PRIVATE_'),false);
+});
+
+test('PROCESS_EXISTING keeps the preview fingerprint, shared lock and receipts without the scanner or enumeration cursor',()=>{
+  const f=fixture(),preview=f.call();
+  delete f.context.auroraExecutarCicloDriveAutorizado_;
+  const result=f.call({...f.request,mode:'PROCESS_EXISTING',expectedScopeSha256:preview.scopeSha256});
+  assert.equal(result.ok,true);assert.equal(result.scopeSha256,preview.scopeSha256);
+  assert.deepEqual(result.scan,{examined:0,queued:0,aliases:0,revisited:0,complete:false});
+  assert.equal(result.processing.accepted,1);assert.equal(result.processing.pending,0);
+  assert.equal(result.processing.replayVerified,1);assert.equal(result.privateReadbackPlan.length,1);
+  assert.equal(result.fullSynchronizationVerified,false);assert.equal(result.firstIngestionVerified,false);
+  assert.equal(f.state.options.config.dryRun,false);assert.equal(f.context.wmgjFirestoreConfig_().dryRun,true);
+  assert.equal(f.state.calls.filter(x=>x==='process-existing').length,1);
+  assert.equal(f.state.calls.includes('execute'),false);assert.deepEqual(f.state.propertyReads,[]);
+  assert.equal(result.triggersChanged,false);assert.equal(result.globalSettingsChanged,false);
+  assert.equal(JSON.stringify(result).includes(f.state.secret),false);
+});
+test('PROCESS_EXISTING preserves owner, tenant and scope guards before obtaining the queue',()=>{
+  for(const mutate of [f=>{f.state.effective='other@fixture.test';},f=>{f.state.org='other';},f=>{f.state.secret='f'.repeat(64);}]) {
+    const f=fixture(),preview=f.call();mutate(f);
+    const result=f.call({...f.request,mode:'PROCESS_EXISTING',expectedScopeSha256:preview.scopeSha256});
+    assert.equal(result.ok,false);assert.equal(f.state.calls.includes('process-existing'),false);
+    assert.equal(f.state.calls.includes('lock'),false);assert.equal(f.state.calls.includes('execute'),false);
+  }
+});
+test('PROCESS_EXISTING refuses a missing or malformed queue and missing processor without falling back to enumeration',()=>{
+  const f=fixture(),preview=f.call(),request={...f.request,mode:'PROCESS_EXISTING',expectedScopeSha256:preview.scopeSha256};
+  f.state.queue.getDataRange=()=>({getValues:()=>[['PRIVATE_QUEUE_FIELD','STATUS']]});
+  const malformed=f.call(request);assert.equal(malformed.code,'AURORA_DRIVE_QUEUE_CONTRACT');
+  assert.equal(JSON.stringify(malformed).includes('PRIVATE_QUEUE_FIELD'),false);
+  f.state.queue=null;
+  assert.equal(f.call(request).code,'AURORA_DRIVE_QUEUE_CONTRACT');
+  f.context.auroraProcessarFilaDriveAutorizada_=undefined;
+  assert.equal(f.call(request).code,'AURORA_DRIVE_DEPENDENCY_MISSING');
+  assert.equal(f.state.calls.includes('execute'),false);assert.equal(f.state.calls.includes('process-existing'),false);
+});
+test('PROCESS_EXISTING rechecks per-request authority and rejects an unproved replay',()=>{
+  const f=fixture(),preview=f.call(),request={...f.request,mode:'PROCESS_EXISTING',expectedScopeSha256:preview.scopeSha256};
+  f.receipt.replayVerified=false;
+  assert.equal(f.call(request).code,'AURORA_DRIVE_RESULT_INVALID');
+  f.context.auroraProcessarFilaDriveAutorizada_=(_sheet,options)=>{f.state.secret='f'.repeat(64);options.beforeRequest();};
+  assert.equal(f.call(request).code,'AURORA_DRIVE_SCOPE_CHANGED');
+  assert.equal(f.state.calls.includes('execute'),false);
 });

@@ -714,7 +714,7 @@ function auroraDriveIntakeScope_(request) {
   var isId = function(value) { return typeof value === 'string' && /^[A-Za-z0-9_-]{10,200}$/.test(value); };
   if (!request || typeof request !== 'object' || Array.isArray(request)
     || Object.keys(request).sort().join(',') !== fields.sort().join(',')
-    || ['PREVIEW','EXECUTE','READBACK'].indexOf(request.mode) < 0
+    || ['PREVIEW','EXECUTE','PROCESS_EXISTING','READBACK'].indexOf(request.mode) < 0
     || (request.mode==='READBACK' && (!Number.isSafeInteger(request.readbackOffset) || request.readbackOffset<0))
     || typeof request.orgId !== 'string' || !/^[a-z0-9][a-z0-9-]{1,62}$/.test(request.orgId)
     || !Array.isArray(request.sources) || request.sources.length < 1 || request.sources.length > 12
@@ -937,7 +937,10 @@ function auroraExecutarIngestaoDriveAutorizada(request) {
       result.ok = true; result.code = 'AURORA_DRIVE_PREVIEW_VERIFIED'; return result;
     }
     if (typeof comTravaIngestaoGmailWMGJ_ !== 'function'
-      || (request.mode==='READBACK' ? typeof auroraLerPlanoReadbackDriveAutorizado_ !== 'function' : typeof auroraExecutarCicloDriveAutorizado_ !== 'function')) {
+      || (request.mode==='READBACK' ? typeof auroraLerPlanoReadbackDriveAutorizado_ !== 'function'
+        : request.mode==='PROCESS_EXISTING' ? typeof auroraProcessarFilaDriveAutorizada_ !== 'function'
+          || typeof getPlanilhaWMGJ_Compat_ !== 'function' || typeof getConfigWMGJ_Compat_ !== 'function'
+        : typeof auroraExecutarCicloDriveAutorizado_ !== 'function')) {
       throw new Error('AURORA_DRIVE_DEPENDENCY_MISSING');
     }
     stage = 'SHARED_LOCK';
@@ -953,7 +956,7 @@ function auroraExecutarIngestaoDriveAutorizada(request) {
       }
       var deadline = Date.now() + 150000;
       stage = 'EXECUTE';
-      var value = auroraExecutarCicloDriveAutorizado_({
+      var options = {
         orgId:scope.orgId,sources:scope.sources,sourceIds:scope.sources.map(function(s) { return s.sourceId; }),
         fileIds:scope.fileIds,excludedFolderIds:scope.excludedFolderIds,maxScan:scope.maxScan,
         limit:scope.limit,processLimit:scope.limit,scopeSha256:current.scopeSha256,
@@ -962,7 +965,24 @@ function auroraExecutarIngestaoDriveAutorizada(request) {
           if (Date.now() >= deadline) throw new Error('AURORA_DRIVE_DEADLINE_EXCEEDED');
           auroraDriveIntakeGuard_(scope, current.scopeSha256, false);
         }
-      });
+      };
+      var value;
+      if(request.mode==='PROCESS_EXISTING') {
+        // Reuse only already scoped pending rows. Do not enumerate, adopt legacy
+        // rows, create sheets, or read/write the enumeration checkpoint.
+        var sheet=getPlanilhaWMGJ_Compat_().getSheetByName(getConfigWMGJ_Compat_().SHEETS.FILA);
+        if(!sheet) throw new Error('AURORA_DRIVE_QUEUE_CONTRACT');
+        var header=sheet.getDataRange().getValues()[0];
+        if(!Array.isArray(header) || ['ID_ORIGEM','STATUS','OBSERVACAO'].some(function(name) {
+          return !header.some(function(cell) {return String(cell || '').trim()===name;});
+        })) throw new Error('AURORA_DRIVE_QUEUE_CONTRACT');
+        var processing=auroraProcessarFilaDriveAutorizada_(sheet,options,scope.limit,deadline);
+        value={ok:processing.blockingErrors===0,
+          scan:{visited:0,enqueued:0,duplicates:0,enumerationComplete:false},
+          process:processing,privateReadbackPlan:processing.privateReadbackPlan};
+      } else {
+        value=auroraExecutarCicloDriveAutorizado_(options);
+      }
       stage = 'RESULT';
       return auroraDriveIntakeResult_(value, result);
     });
