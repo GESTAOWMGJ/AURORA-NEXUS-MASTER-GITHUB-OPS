@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "decisionId": "AURORA-WMGJ-CONFIG-REGULARIZATION-20261022",
+  "approvalSource": "DIRECT_OWNER_CHAT",
+  "ownerInstruction": "regularize",
+  "recordedAtUtc": "2026-10-22T23:27:22.000Z",
+  "status": "IMPLEMENTED_PENDING_REVIEW_CI_AND_DEPLOYMENT",
+  "scope": {
+    "projectId": "wmgj-hml-jfn-20260927",
+    "orgId": "wmgj",
+    "notBeforeUtc": "2026-10-22T23:27:22.000Z",
+    "validUntilUtc": "2026-10-23T23:27:22.000Z",
+    "purpose": "RECONCILE_MISSING_CAPTURE_HANDLER_AND_REGISTER_EXISTING_SOURCE_INACTIVE"
+  },
+  "requiredControls": [
+    "AUTHENTICATED_OWNER_ACTIVE_EQUALS_EFFECTIVE",
+    "EXISTING_TENANT_AND_SOURCE_BINDING",
+    "DRY_RUN_TRUE_AND_NO_ACTIVE_SOURCE",
+    "SHARED_SCRIPT_LOCK",
+    "EXACT_TRIGGER_METADATA_FINGERPRINT",
+    "HANDLER_ABSENT_IN_EXECUTING_CODE",
+    "NO_OTHER_TRIGGER_REMOVAL",
+    "CONFIGURATION_CAS_AND_READBACK",
+    "PRESERVED_HMAC_AND_RUNTIME_FLAGS"
+  ],
+  "hmlPublicationRenewed": false,
+  "riskAcceptanceRenewed": false,
+  "realSourceActivationAuthorized": false,
+  "productionAuthorized": false,
+  "clinicalSensitiveAuthorized": false,
+  "independentReviewClaimed": false,
+  "deploymentClaimed": false,
+  "ingestionClaimed": false
+}

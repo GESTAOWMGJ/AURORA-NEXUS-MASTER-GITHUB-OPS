@@ -5,10 +5,15 @@
  * Segredos entram somente por parâmetro de uma chamada autenticada/administrativa
  * e são persistidos em ScriptProperties. Nunca são retornados ou logados.
  */
-var AURORA_CONNECTOR_SETUP_VERSION = 'v1.1.3-inactive-source-reuse';
+var AURORA_CONNECTOR_SETUP_VERSION = 'v1.1.4-scoped-configuration-repair';
 var AURORA_CONNECTOR_REUSE_OWNER_HASH = 'bb3a1e4a24554f0cd324e0fb8a14559df4fe22a1f3b40e8d7d1f454f9d2ffc09';
 var AURORA_CONNECTOR_REUSE_FOLDER = '1Gz0GtUfvKezI8OmAH0h8fkNLlqEzfYU-';
 var AURORA_CONNECTOR_REUSE_DEADLINE = '2026-10-16T03:00:00.000Z';
+// Separate, bounded owner instruction. This does not renew HML publication,
+// R029, real-source activation, processing or the historical reuse pilot.
+var AURORA_CONNECTOR_REPAIR_DECISION = 'AURORA-WMGJ-CONFIG-REGULARIZATION-20261022';
+var AURORA_CONNECTOR_REPAIR_NOT_BEFORE = '2026-10-22T23:27:22.000Z';
+var AURORA_CONNECTOR_REPAIR_DEADLINE = '2026-10-23T23:27:22.000Z';
 
 function auroraNormalizarSistemaFonte_(value) {
   var system = String(value || 'DRIVE').trim().toUpperCase();
@@ -109,8 +114,17 @@ function auroraConnectorReuseOwner_() {
   }
 }
 
-function auroraConnectorReuseWindow_() {
-  if (Date.now() >= Date.parse(AURORA_CONNECTOR_REUSE_DEADLINE)) throw new Error('AURORA_CONNECTOR_REUSE_EXPIRED');
+function auroraConnectorReuseWindow_(authorization) {
+  var deadline = Date.parse(authorization ? authorization.deadline : AURORA_CONNECTOR_REUSE_DEADLINE);
+  var start = authorization && authorization.notBefore ? Date.parse(authorization.notBefore) : -Infinity;
+  if (!Number.isFinite(deadline) || Number.isNaN(start) || Date.now() < start || Date.now() >= deadline) {
+    throw new Error('AURORA_CONNECTOR_REUSE_EXPIRED');
+  }
+}
+
+function auroraConnectorRepairAuthorization_() {
+  return {confirmation: 'REGULARIZE_EXISTING_WMGJ_SOURCE_CONFIG_ONLY',
+    notBefore: AURORA_CONNECTOR_REPAIR_NOT_BEFORE, deadline: AURORA_CONNECTOR_REPAIR_DEADLINE};
 }
 
 function auroraConnectorReuseTriggers_() {
@@ -141,6 +155,17 @@ function auroraConnectorReuseSnapshot_(props) {
 // No provider enrollment, secret argument, activation or operational execution.
 // CONFIGURE only registers an INACTIVE candidate in the existing properties.
 function auroraReaproveitarFonteWmgjConfigOnly(request) {
+  return auroraReaproveitarFonteWmgjConfigOnly_(request, {
+    confirmation: 'REUSE_EXISTING_WMGJ_SOURCE_CONFIG_ONLY', deadline: AURORA_CONNECTOR_REUSE_DEADLINE});
+}
+
+function auroraRegularizarFonteWmgjConfigOnly(request) {
+  var result = auroraReaproveitarFonteWmgjConfigOnly_(request, auroraConnectorRepairAuthorization_());
+  result.authorizationDecisionId = AURORA_CONNECTOR_REPAIR_DECISION;
+  return result;
+}
+
+function auroraReaproveitarFonteWmgjConfigOnly_(request, authorization) {
   var result = {ok: false, code: 'AURORA_CONNECTOR_REUSE_PENDING', state: 'PENDING_CONFIGURATION',
     scope: 'WMGJ_EXISTING_SOURCE_CONFIG_ONLY', sourceIdentified: false, sourceCount: 0,
     metadataAccessVerified: false, existingHmacReused: false, configurationSha256: null,
@@ -152,11 +177,11 @@ function auroraReaproveitarFonteWmgjConfigOnly(request) {
   var lock = null, held = false, props = null, before = null, changes = null, attempted = false;
   try {
     auroraConnectorReuseOwner_();
-    auroraConnectorReuseWindow_();
+    auroraConnectorReuseWindow_(authorization);
     var keys = ['confirmation', 'configOnly', 'mode', 'orgId', 'expectedFolderId', 'expectedSourceId', 'expectedSlaMinutes', 'expectedConfigurationSha256'];
     if (!request || typeof request !== 'object' || Array.isArray(request)
       || Object.keys(request).sort().join(',') !== keys.sort().join(',')
-      || request.confirmation !== 'REUSE_EXISTING_WMGJ_SOURCE_CONFIG_ONLY' || request.configOnly !== true
+      || request.confirmation !== authorization.confirmation || request.configOnly !== true
       || ['PREVIEW', 'CONFIGURE'].indexOf(request.mode) < 0 || request.orgId !== 'wmgj'
       || request.expectedFolderId !== AURORA_CONNECTOR_REUSE_FOLDER || request.expectedSourceId !== 'drive-primary'
       || !Number.isSafeInteger(request.expectedSlaMinutes) || request.expectedSlaMinutes < 15 || request.expectedSlaMinutes > 43200
@@ -180,12 +205,12 @@ function auroraReaproveitarFonteWmgjConfigOnly(request) {
       || (before.WMGJ_PASTA_ENTRADA_ID && before.WMGJ_PASTA_ENTRADA_ID !== selected.folderId)) {
       throw new Error('AURORA_CONNECTOR_REUSE_SOURCE_CONFLICT');
     }
-    auroraConnectorReuseWindow_();
+    auroraConnectorReuseWindow_(authorization);
     if (DriveApp.getFolderById(selected.folderId).getId() !== selected.folderId) throw new Error('AURORA_CONNECTOR_REUSE_SOURCE_CONFLICT');
     result.sourceIdentified = true; result.sourceCount = 1; result.metadataAccessVerified = true;
     result.existingHmacReused = true; result.state = 'SOURCE_IDENTIFIED';
     result.sourceActive = selected.active !== false;
-    auroraConnectorReuseWindow_();
+    auroraConnectorReuseWindow_(authorization);
     var handlers = auroraConnectorReuseTriggers_();
     result.triggerCount = handlers.length; result.handlerHashes = handlers;
     result.triggerReviewRequired = handlers.length > 0;
@@ -203,7 +228,7 @@ function auroraReaproveitarFonteWmgjConfigOnly(request) {
         : JSON.stringify([{sourceId: selected.sourceId, system: 'DRIVE', mode: 'DRIVE_FOLDER',
           folderId: selected.folderId, slaMinutes: selected.slaMinutes, active: false}]),
         AURORA_CONNECTOR_SETUP_VERSION: AURORA_CONNECTOR_SETUP_VERSION};
-      auroraConnectorReuseWindow_();
+      auroraConnectorReuseWindow_(authorization);
       if (Object.keys(changes).some(function(key) { return changes[key] !== before[key]; })) {
         attempted = true;
         props.setProperties(changes, false);
@@ -214,13 +239,13 @@ function auroraReaproveitarFonteWmgjConfigOnly(request) {
       if (!Object.keys(expectedAfter).every(function(key) { return after[key] === expectedAfter[key]; })) {
         throw new Error('AURORA_CONNECTOR_REUSE_CAS_CONFLICT');
       }
-      auroraConnectorReuseWindow_();
+      auroraConnectorReuseWindow_(authorization);
       result.configurationChanged = JSON.stringify(after) !== JSON.stringify(before);
       result.configurationSha256 = auroraConnectorReuseSha_(JSON.stringify(after));
       result.state = 'CONFIGURED_INACTIVE';
     } else {
       if (auroraConnectorReuseSha_(JSON.stringify(auroraConnectorReuseSnapshot_(props))) !== fingerprint) throw new Error('AURORA_CONNECTOR_REUSE_CAS_CONFLICT');
-      auroraConnectorReuseWindow_();
+      auroraConnectorReuseWindow_(authorization);
     }
     result.ok = true; result.code = 'AURORA_CONNECTOR_REUSE_CONFIG_ONLY_VERIFIED';
   } catch (error) {
@@ -263,6 +288,115 @@ function auroraReaproveitarFonteWmgjConfigOnly(request) {
   return result;
 }
 
+
+// Repairs only the known orphan. Names/IDs never leave the authenticated
+// script, and the caller must bind REMOVE to the exact PREVIEW fingerprint.
+function auroraConnectorOrphanSnapshot_() {
+  var triggers = ScriptApp.getProjectTriggers();
+  if (!Array.isArray(triggers) || triggers.length > 12) throw new Error('AURORA_CONNECTOR_ORPHAN_TRIGGER_REVIEW_REQUIRED');
+  var ids = {};
+  var entries = triggers.map(function(trigger) {
+    var id = String(trigger.getUniqueId() || '');
+    var handler = String(trigger.getHandlerFunction() || '');
+    var event = String(trigger.getEventType() || '');
+    var source = String(trigger.getTriggerSource() || '');
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(id) || ids[id]
+      || !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(handler)
+      || !/^[A-Z_]{1,64}$/.test(event) || !/^[A-Z_]{1,64}$/.test(source)) {
+      throw new Error('AURORA_CONNECTOR_ORPHAN_TRIGGER_REVIEW_REQUIRED');
+    }
+    ids[id] = true;
+    return {trigger: trigger, metadata: {id: id, handler: handler, event: event, source: source}};
+  });
+  entries.sort(function(a, b) { return a.metadata.id < b.metadata.id ? -1 : a.metadata.id > b.metadata.id ? 1 : 0; });
+  return {entries: entries, sha256: auroraConnectorReuseSha_(JSON.stringify(entries.map(function(item) { return item.metadata; })))};
+}
+
+function auroraConnectorOrphanGuard_(props) {
+  auroraConnectorReuseOwner_();
+  auroraConnectorReuseWindow_(auroraConnectorRepairAuthorization_());
+  if (props.getProperty('WMGJ_FIRESTORE_ORG_ID') !== 'wmgj') throw new Error('AURORA_CONNECTOR_ORPHAN_TENANT_MISMATCH');
+  if (props.getProperty('WMGJ_FIRESTORE_DRY_RUN') !== 'true'
+    || ['false', null].indexOf(props.getProperty('AURORA_FIRESTORE_MIRROR_REQUIRED')) < 0
+    || auroraResolverFontesDocumentais_(props).sources.length) throw new Error('AURORA_CONNECTOR_ORPHAN_ACTIVE_STATE_REQUIRES_REVIEW');
+  // Fail closed even if the symbol was reintroduced with a non-function value.
+  if (typeof auroraNexusCaptureCycle !== 'undefined') throw new Error('AURORA_CONNECTOR_ORPHAN_HANDLER_PRESENT');
+}
+
+function auroraRemoverGatilhoOrfaoWmgjConfigOnly(request) {
+  var result = {ok: false, code: 'AURORA_CONNECTOR_ORPHAN_PENDING',
+    authorizationDecisionId: AURORA_CONNECTOR_REPAIR_DECISION, configOnly: true,
+    triggerCount: null, expectedTriggerSetSha256: null, removedCount: 0,
+    triggersChanged: false, removalUncertain: false, absenceVerified: false,
+    configurationChanged: false, contentRead: false, operationalReady: false, complete: false};
+  var lock = null, held = false, attempted = false;
+  try {
+    auroraConnectorReuseOwner_();
+    auroraConnectorReuseWindow_(auroraConnectorRepairAuthorization_());
+    var keys = ['confirmation', 'configOnly', 'orgId', 'mode', 'expectedTriggerSetSha256'];
+    if (!request || typeof request !== 'object' || Array.isArray(request)
+      || Object.keys(request).sort().join(',') !== keys.sort().join(',')
+      || request.confirmation !== 'REMOVE_MISSING_WMGJ_CAPTURE_HANDLER_CONFIG_ONLY'
+      || request.configOnly !== true || request.orgId !== 'wmgj'
+      || ['PREVIEW', 'REMOVE'].indexOf(request.mode) < 0
+      || (request.mode === 'PREVIEW' ? request.expectedTriggerSetSha256 !== null
+        : typeof request.expectedTriggerSetSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(request.expectedTriggerSetSha256))) {
+      throw new Error('AURORA_CONNECTOR_ORPHAN_REQUEST_REJECTED');
+    }
+    lock = LockService.getScriptLock(); held = lock.tryLock(1000);
+    if (!held) throw new Error('AURORA_CONNECTOR_ORPHAN_LOCK_BUSY');
+    var props = PropertiesService.getScriptProperties();
+    auroraConnectorOrphanGuard_(props);
+    var before = auroraConnectorOrphanSnapshot_();
+    result.triggerCount = before.entries.length;
+    if (before.entries.length > 1 || before.entries.some(function(item) {
+      return item.metadata.handler !== 'auroraNexusCaptureCycle' || item.metadata.event !== 'CLOCK' || item.metadata.source !== 'CLOCK';
+    })) throw new Error('AURORA_CONNECTOR_ORPHAN_TRIGGER_REVIEW_REQUIRED');
+    result.expectedTriggerSetSha256 = before.sha256;
+    if (!before.entries.length) {
+      // A repeated call certifies current absence, not a second deletion.
+      result.absenceVerified = true;
+      result.code = 'AURORA_CONNECTOR_ORPHAN_ALREADY_ABSENT';
+    } else if (request.mode === 'PREVIEW') {
+      result.code = 'AURORA_CONNECTOR_ORPHAN_PREVIEW_VERIFIED';
+    } else {
+      if (request.expectedTriggerSetSha256 !== before.sha256) throw new Error('AURORA_CONNECTOR_ORPHAN_CAS_CONFLICT');
+      auroraConnectorOrphanGuard_(props);
+      var current = auroraConnectorOrphanSnapshot_();
+      if (current.sha256 !== before.sha256) throw new Error('AURORA_CONNECTOR_ORPHAN_CAS_CONFLICT');
+      // Recheck state after metadata retrieval, immediately before deletion.
+      auroraConnectorOrphanGuard_(props);
+      attempted = true;
+      ScriptApp.deleteTrigger(current.entries[0].trigger);
+      var after = auroraConnectorOrphanSnapshot_();
+      if (after.entries.length) throw new Error('AURORA_CONNECTOR_ORPHAN_READBACK_FAILED');
+      result.removedCount = 1; result.triggersChanged = true; result.absenceVerified = true;
+      result.triggerCount = 0; result.expectedTriggerSetSha256 = after.sha256;
+      result.code = 'AURORA_CONNECTOR_ORPHAN_REMOVAL_VERIFIED';
+    }
+    auroraConnectorReuseWindow_(auroraConnectorRepairAuthorization_());
+    result.ok = true;
+  } catch (error) {
+    var message = String(error && error.message || '');
+    var allowed = ['OWNER_REQUIRED', 'EXPIRED', 'REQUEST_REJECTED', 'LOCK_BUSY', 'TENANT_MISMATCH',
+      'ACTIVE_STATE_REQUIRES_REVIEW', 'HANDLER_PRESENT', 'TRIGGER_REVIEW_REQUIRED', 'CAS_CONFLICT', 'READBACK_FAILED'];
+    if (message === 'AURORA_CONNECTOR_REUSE_OWNER_REQUIRED') message = 'AURORA_CONNECTOR_ORPHAN_OWNER_REQUIRED';
+    if (message === 'AURORA_CONNECTOR_REUSE_EXPIRED') message = 'AURORA_CONNECTOR_ORPHAN_EXPIRED';
+    result.code = allowed.some(function(code) { return message === 'AURORA_CONNECTOR_ORPHAN_' + code; })
+      ? message : 'AURORA_CONNECTOR_ORPHAN_DEPENDENCY_FAILED';
+    if (attempted && !result.absenceVerified) {
+      result.triggersChanged = null; result.removalUncertain = true;
+      result.code = 'AURORA_CONNECTOR_ORPHAN_REMOVAL_UNCERTAIN';
+    }
+    result.expectedTriggerSetSha256 = null;
+  } finally {
+    if (held) {
+      try { lock.releaseLock(); }
+      catch (ignoreRelease) { result.ok = false; result.code = 'AURORA_CONNECTOR_ORPHAN_DEPENDENCY_FAILED'; }
+    }
+  }
+  return result;
+}
 
 function auroraConfigurarConectoresPlugAndPlay(config) {
   config = config || {};

@@ -216,7 +216,7 @@ function reuseFixture(options = {}) {
   const request=(mode='PREVIEW',expected=null)=>({confirmation:'REUSE_EXISTING_WMGJ_SOURCE_CONFIG_ONLY',configOnly:true,mode,
     orgId:'wmgj',expectedFolderId:reuseFolder,expectedSourceId:'drive-primary',expectedSlaMinutes:1440,expectedConfigurationSha256:expected});
   const execute=input=>JSON.parse(JSON.stringify(context.auroraReaproveitarFonteWmgjConfigOnly(input??request())));
-  return {c:context,calls,props,request,execute,onMetadata(fn){metadataHook=fn;},onWrite(fn){writeHook=fn;},expire(){now=Date.parse(context.AURORA_CONNECTOR_REUSE_DEADLINE);}};
+  return {c:context,calls,props,request,execute,onMetadata(fn){metadataHook=fn;},onWrite(fn){writeHook=fn;},at(value){now=Date.parse(value);},expire(){now=Date.parse(context.AURORA_CONNECTOR_REUSE_DEADLINE);}};
 }
 function assertReuseSafe(f,result) {
   assert.equal(result.operationalReady,false); assert.equal(result.installationComplete,false);
@@ -353,4 +353,156 @@ test('synthetic HML renewal cannot revive an expired customer-source reuse pilot
   assert.equal(result.code,'AURORA_CONNECTOR_REUSE_EXPIRED');
   assert.ok(!f.calls.includes('configure'));assert.ok(!f.calls.includes('metadata'));
   assertReuseSafe(f,result);
+});
+
+const repairTime = '2026-10-22T23:30:00Z';
+function repairRequest(f, mode='PREVIEW', expected=null) {
+  return {...f.request(mode,expected),confirmation:'REGULARIZE_EXISTING_WMGJ_SOURCE_CONFIG_ONLY'};
+}
+function repairSource(f, request=repairRequest(f)) {
+  return JSON.parse(JSON.stringify(f.c.auroraRegularizarFonteWmgjConfigOnly(request)));
+}
+
+test('the separate owner repair window never revives the historical endpoint or accepts its confirmation',()=>{
+  const f=reuseFixture({now:Date.parse(repairTime)});
+  assert.equal(f.execute().code,'AURORA_CONNECTOR_REUSE_EXPIRED');
+  assert.equal(repairSource(f,f.request()).code,'AURORA_CONNECTOR_REUSE_REQUEST_REJECTED');
+  const preview=repairSource(f);
+  assert.equal(preview.ok,true);assert.equal(preview.configurationChanged,false);
+  assert.equal(preview.authorizationDecisionId,'AURORA-WMGJ-CONFIG-REGULARIZATION-20261022');
+  const result=repairSource(f,repairRequest(f,'CONFIGURE',preview.configurationSha256));
+  assert.equal(result.state,'CONFIGURED_INACTIVE');assertReuseSafe(f,result);
+  assert.equal(JSON.parse(f.props.get('AURORA_DOCUMENT_SOURCE_REGISTRY'))[0].active,false);
+  assert.equal(f.props.get('WMGJ_FIRESTORE_DRY_RUN'),'true');
+  assert.equal(f.props.get('AURORA_FIRESTORE_MIRROR_REQUIRED'),'false');
+});
+
+test('source regularization retains owner, trigger, CAS and rollback controls',()=>{
+  const foreign=reuseFixture({now:Date.parse(repairTime),active:'foreign@fixture.invalid'});
+  assert.equal(repairSource(foreign).code,'AURORA_CONNECTOR_REUSE_OWNER_REQUIRED');assert.deepEqual(foreign.calls,[]);
+  const triggered=reuseFixture({now:Date.parse(repairTime),handlers:['auroraNexusCaptureCycle']});
+  const preview=repairSource(triggered);
+  assert.equal(preview.configurationWriteEligible,false);
+  assert.equal(repairSource(triggered,repairRequest(triggered,'CONFIGURE',preview.configurationSha256)).code,
+    'AURORA_CONNECTOR_REUSE_ACTIVE_STATE_REQUIRES_REVIEW');
+  const f=reuseFixture({now:Date.parse(repairTime)}),before=[...f.props],p=repairSource(f);
+  f.onWrite(values=>{f.props.set('AURORA_DOCUMENT_SOURCE_REGISTRY',values.AURORA_DOCUMENT_SOURCE_REGISTRY);throw Error('private-write-error');});
+  const failed=repairSource(f,repairRequest(f,'CONFIGURE',p.configurationSha256));
+  assert.equal(failed.rollbackVerified,true);assert.deepEqual([...f.props],before);assertReuseSafe(f,failed);
+});
+
+test('repair window fails closed before its start, at expiry, and for invalid constants',()=>{
+  for(const now of ['2026-10-22T23:27:21Z','2026-10-23T23:27:22Z']){
+    const f=reuseFixture({now:Date.parse(now)});
+    assert.equal(repairSource(f).code,'AURORA_CONNECTOR_REUSE_EXPIRED');assert.deepEqual(f.calls,[]);
+  }
+  for(const field of ['AURORA_CONNECTOR_REPAIR_DEADLINE','AURORA_CONNECTOR_REPAIR_NOT_BEFORE']){
+    const f=reuseFixture({now:Date.parse(repairTime)});f.c[field]='invalid';
+    assert.equal(repairSource(f).code,'AURORA_CONNECTOR_REUSE_EXPIRED');
+  }
+  const f=reuseFixture({now:Date.parse(repairTime)}),before=[...f.props],p=repairSource(f);
+  f.onWrite(values=>{for(const [key,value]of Object.entries(values))f.props.set(key,value);f.at(f.c.AURORA_CONNECTOR_REPAIR_DEADLINE);});
+  const result=repairSource(f,repairRequest(f,'CONFIGURE',p.configurationSha256));
+  assert.equal(result.code,'AURORA_CONNECTOR_REUSE_EXPIRED');assert.equal(result.rollbackVerified,true);
+  assert.deepEqual([...f.props],before);
+});
+
+function orphanFixture(options={}) {
+  const f=reuseFixture({now:Date.parse(repairTime),...options});
+  let entries=options.entries??[{id:'synthetic-orphan-id',handler:'auroraNexusCaptureCycle',event:'CLOCK',source:'CLOCK'}];
+  let reads=0,hook=null,deleteHook=null;
+  f.c.ScriptApp={
+    getProjectTriggers:()=>{
+      reads++;if(hook)hook(reads);
+      return entries.map(e=>({getUniqueId:()=>e.id,getHandlerFunction:()=>e.handler,
+        getEventType:()=>e.event,getTriggerSource:()=>e.source}));
+    },
+    deleteTrigger:t=>{f.calls.push('delete-trigger');entries=entries.filter(e=>e.id!==t.getUniqueId());if(deleteHook)deleteHook();},
+    newTrigger:()=>{throw Error('forbidden-trigger-creation');}
+  };
+  const request=(mode='PREVIEW',expected=null)=>({confirmation:'REMOVE_MISSING_WMGJ_CAPTURE_HANDLER_CONFIG_ONLY',
+    configOnly:true,orgId:'wmgj',mode,expectedTriggerSetSha256:expected});
+  const execute=r=>JSON.parse(JSON.stringify(f.c.auroraRemoverGatilhoOrfaoWmgjConfigOnly(r??request())));
+  return {...f,requestOrphan:request,orphan:execute,replace(values){entries=values;},onRead(fn){hook=fn;},onDelete(fn){deleteHook=fn;},resetReads(){reads=0;}};
+}
+function assertOrphanSafe(f,r){
+  assert.equal(r.configurationChanged,false);assert.equal(r.contentRead,false);assert.equal(r.complete,false);
+  assert.equal(r.operationalReady,false);assert.equal(r.configOnly,true);
+  assert.ok(!f.calls.includes('configure')&&!f.calls.includes('FORBIDDEN'));
+  for(const value of ['synthetic-orphan-id','auroraNexusCaptureCycle','owner@fixture.invalid','e'.repeat(64)]){
+    assert.ok(!JSON.stringify(r).includes(value));
+  }
+}
+
+test('orphan repair previews metadata, removes exactly one missing clock handler and verifies absence',()=>{
+  const f=orphanFixture(),before=[...f.props],p=f.orphan();
+  assert.equal(p.code,'AURORA_CONNECTOR_ORPHAN_PREVIEW_VERIFIED');assert.match(p.expectedTriggerSetSha256,/^[a-f0-9]{64}$/);
+  assert.equal(f.calls.filter(x=>x==='delete-trigger').length,0);
+  const request=f.requestOrphan('REMOVE',p.expectedTriggerSetSha256),r=f.orphan(request);
+  assert.equal(r.ok,true);assert.equal(r.removedCount,1);assert.equal(r.absenceVerified,true);assert.equal(r.triggersChanged,true);
+  assert.deepEqual([...f.props],before);assertOrphanSafe(f,r);
+  const replay=f.orphan(request);
+  assert.equal(replay.code,'AURORA_CONNECTOR_ORPHAN_ALREADY_ABSENT');assert.equal(replay.removedCount,0);
+  assert.equal(replay.triggersChanged,false);assert.equal(f.calls.filter(x=>x==='delete-trigger').length,1);
+});
+
+test('orphan repair refuses an existing handler, live source, foreign tenant, unknown trigger or non-clock trigger',()=>{
+  const cases=[
+    f=>{f.c.auroraNexusCaptureCycle=()=>{};},f=>{f.c.auroraNexusCaptureCycle='present';},
+    f=>f.props.set('WMGJ_FIRESTORE_ORG_ID','foreign'),f=>f.props.set('WMGJ_FIRESTORE_DRY_RUN','false'),
+    f=>f.props.set('AURORA_FIRESTORE_MIRROR_REQUIRED','true'),f=>f.props.set('WMGJ_PASTA_ENTRADA_ID',reuseFolder),
+    f=>f.replace([{id:'other',handler:'executarAutomacaoOperacionalWMGJ',event:'CLOCK',source:'CLOCK'}]),
+    f=>f.replace([{id:'other',handler:'auroraNexusCaptureCycle',event:'ON_OPEN',source:'SPREADSHEETS'}]),
+    f=>f.replace([{id:'one',handler:'auroraNexusCaptureCycle',event:'CLOCK',source:'CLOCK'},
+      {id:'two',handler:'unknownHandler',event:'CLOCK',source:'CLOCK'}])
+  ];
+  for(const change of cases){const f=orphanFixture();change(f);const r=f.orphan();
+    assert.equal(r.ok,false);assert.ok(!f.calls.includes('delete-trigger'));assertOrphanSafe(f,r);}
+});
+
+test('orphan repair rejects mismatched owner, malformed requests, busy lock and stale trigger fingerprints',()=>{
+  const foreign=orphanFixture({active:'foreign@fixture.invalid'});assert.equal(foreign.orphan().code,'AURORA_CONNECTOR_ORPHAN_OWNER_REQUIRED');assert.deepEqual(foreign.calls,[]);
+  const busy=orphanFixture({busy:true});assert.equal(busy.orphan().code,'AURORA_CONNECTOR_ORPHAN_LOCK_BUSY');
+  for(const change of [r=>r.activate=true,r=>r.orgId='foreign',r=>r.configOnly=false,r=>r.mode='DELETE_ALL',r=>r.expectedTriggerSetSha256='bad']){
+    const f=orphanFixture(),r=f.requestOrphan();change(r);assert.equal(f.orphan(r).code,'AURORA_CONNECTOR_ORPHAN_REQUEST_REJECTED');assert.deepEqual(f.calls,[]);
+  }
+  const f=orphanFixture();assert.equal(f.orphan(f.requestOrphan('REMOVE','0'.repeat(64))).code,'AURORA_CONNECTOR_ORPHAN_CAS_CONFLICT');assert.ok(!f.calls.includes('delete-trigger'));
+});
+
+test('orphan repair checks changed trigger identity and runtime flags immediately before deletion',()=>{
+  for(const change of [f=>f.replace([{id:'replaced-id',handler:'auroraNexusCaptureCycle',event:'CLOCK',source:'CLOCK'}]),
+    f=>f.props.set('WMGJ_FIRESTORE_DRY_RUN','false'),f=>f.at(f.c.AURORA_CONNECTOR_REPAIR_DEADLINE)]){
+    const f=orphanFixture(),p=f.orphan();f.resetReads();f.onRead(n=>{if(n===2)change(f);});
+    const r=f.orphan(f.requestOrphan('REMOVE',p.expectedTriggerSetSha256));
+    assert.equal(r.ok,false);assert.ok(!f.calls.includes('delete-trigger'));assertOrphanSafe(f,r);
+  }
+});
+
+test('an uncertain orphan deletion is reconciled by fresh absence rather than a second deletion',()=>{
+  const f=orphanFixture(),p=f.orphan();f.onDelete(()=>{throw Error('private transport detail');});
+  const request=f.requestOrphan('REMOVE',p.expectedTriggerSetSha256),r=f.orphan(request);
+  assert.equal(r.code,'AURORA_CONNECTOR_ORPHAN_REMOVAL_UNCERTAIN');assert.equal(r.removalUncertain,true);
+  assert.equal(r.triggersChanged,null);assert.equal(r.expectedTriggerSetSha256,null);
+  assert.ok(!JSON.stringify(r).includes('private transport detail'));assertOrphanSafe(f,r);
+  assert.equal(f.orphan().code,'AURORA_CONNECTOR_ORPHAN_ALREADY_ABSENT');
+  assert.equal(f.calls.filter(x=>x==='delete-trigger').length,1);
+});
+
+test('orphan cleanup and source configuration stay separate and do not activate processing',()=>{
+  const f=orphanFixture(),p=f.orphan();assert.equal(repairSource(f).configurationWriteEligible,false);
+  assert.equal(f.orphan(f.requestOrphan('REMOVE',p.expectedTriggerSetSha256)).absenceVerified,true);
+  const source=repairSource(f);assert.equal(source.configurationWriteEligible,true);
+  const r=repairSource(f,repairRequest(f,'CONFIGURE',source.configurationSha256));
+  assert.equal(r.state,'CONFIGURED_INACTIVE');assertReuseSafe(f,r);
+});
+
+test('configuration repair decision does not renew publication, risk acceptance or real ingestion',()=>{
+  const policy=JSON.parse(fs.readFileSync(path.join(__dirname,'..','firebase-migration/policy/wmgj-connector-regularization-20261022.json'),'utf8'));
+  const f=reuseFixture();
+  assert.equal(policy.decisionId,f.c.AURORA_CONNECTOR_REPAIR_DECISION);
+  assert.equal(policy.scope.notBeforeUtc,f.c.AURORA_CONNECTOR_REPAIR_NOT_BEFORE);
+  assert.equal(policy.scope.validUntilUtc,f.c.AURORA_CONNECTOR_REPAIR_DEADLINE);
+  assert.equal(Date.parse(policy.scope.validUntilUtc)-Date.parse(policy.scope.notBeforeUtc),86400000);
+  for(const key of ['hmlPublicationRenewed','riskAcceptanceRenewed','realSourceActivationAuthorized','productionAuthorized','clinicalSensitiveAuthorized'])assert.equal(policy[key],false);
+  assert.equal(f.c.AURORA_CONNECTOR_REUSE_DEADLINE,'2026-10-16T03:00:00.000Z');
 });
