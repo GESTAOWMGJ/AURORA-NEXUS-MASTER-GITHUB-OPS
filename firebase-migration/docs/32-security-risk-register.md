@@ -98,7 +98,7 @@ O aceite cobre o head revisado do PR #184 `bf5bbc1146245bdf112cedfd9a9c6cc558e46
 
 Rollback do candidato: reverter o commit que altera manifesto, lockfile e este registro, mantendo o risco aberto e a promoção bloqueada. Não aplicar downgrade do Firebase SDK, `npm audit fix --force` ou alteração de política para ocultar os advisories.
 
-## 7. Renovação vigente de R029 — 22/10/2026
+## 7. Renovação de R029 para o PR #299 — 22/10/2026
 
 A decisão `AURORA-HML-OWNER-RENEWAL-20261022` registra a resposta afirmativa do
  titular (“fewito”) à publicação do PR #299 em homologação e à renovação HML/R029
@@ -109,3 +109,22 @@ compensações e o escopo exclusivo das ferramentas de teste HML. Não constitui
 nova auditoria, review independente ou autorização produtiva/clínica. O código
 do conector não muda dependências; a fonte real permanece inativa. Os demais
 gates técnicos e de publicação continuam aplicáveis.
+
+## 8. Renovação vigente de R029 até 26/10 — 22/10/2026
+
+Nova decisão expressa `AURORA-HML-OWNER-RENEWAL-20261022-TO-20261026`, resposta
+“Renovar nesse escopo até 26/10” à pergunta
+`call_8636915dde044199adf7c46270661d0f`, estende a validade até
+**26/10/2026 às 00h de Brasília** (`2026-10-26T03:00:00.000Z`), com revisão até
+25/10. Os cinco registros anteriores permanecem preservados; o aceite específico
+do código do PR #299 não é transformado em revisão dos candidatos posteriores.
+Mantém as 11 agregações residuais aceitas (7 HIGH, 4 MODERATE, 0 CRITICAL), as
+compensações descritas acima e exclusivamente publicação da beta/testes sintéticos
+Windows/nuvem em HML. Não é nova auditoria nem dispensa reavaliação diante de
+mudança de escopo, credenciais/dados reais, falha de teste ou novo advisory.
+
+Credenciais, concessão HMAC documental, piloto da pasta real e a janela separada
+de regularização da fonte inativa conservam seus próprios prazos. IAM, produção,
+dados clínicos e ativação da fonte real não são autorizados por esta renovação.
+CI exato, revisão e demais gates de publicação, assinatura, smokes e CAS continuam
+necessários. Registro de decisão não comprova publicação ou instalação.

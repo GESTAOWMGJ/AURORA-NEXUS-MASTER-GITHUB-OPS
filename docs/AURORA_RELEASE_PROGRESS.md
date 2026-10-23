@@ -212,3 +212,15 @@ aprovados: publicação em homologação e renovação até `2026-10-23T23:00:00
 com os mesmos 11 riscos residuais e registro de predecessor. O cadastro permanece
 inativo; fonte real, produção e dados clínicos não são ativados. A autorização
 não comprova review independente, aprovação de run, deploy ou ingestão.
+
+### 22/10/2026 — renovação HML/R029 até 26/10
+
+Resposta explícita “Renovar nesse escopo até 26/10” registrada na decisão
+`AURORA-HML-OWNER-RENEWAL-20261022-TO-20261026`, posterior ao aceite específico do
+PR #299, sem reescrever seus termos. Novo corte `2026-10-26T03:00:00.000Z`,
+revisão até 25/10 e os mesmos 11 riscos das ferramentas de teste HML. Probe e
+readback sintéticos usam o mesmo limite e continuam bloqueados no instante do
+vencimento. Credenciais, escopo documental, piloto real e janela de regularização
+da fonte não são prorrogados; produção, dados clínicos e ativação da pasta real
+permanecem excluídos. Estado: `IMPLEMENTED_PENDING_CI_REVIEW_DEPLOYMENT`, sem
+alegação de review independente, publicação, ingestão real ou instalação concluídas.

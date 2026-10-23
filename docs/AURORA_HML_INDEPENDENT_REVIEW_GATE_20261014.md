@@ -24,6 +24,22 @@ ativação da pasta real, IAM ou rotação de segredos. A concessão documental 
 não recebe extensão implícita de credencial. Os gates técnicos e de revisão acima
 permanecem; esta decisão não declara revisão independente ou execução concluída.
 
+## Renovação direta de 22/10/2026 até 26/10
+
+O titular respondeu “Renovar nesse escopo até 26/10” à pergunta
+`call_8636915dde044199adf7c46270661d0f`. A decisão adicional
+`AURORA-HML-OWNER-RENEWAL-20261022-TO-20261026` vence em
+`2026-10-26T03:00:00.000Z` (26/10 às 00h de Brasília), com revisão até 25/10.
+Preserva integralmente a decisão anterior de 22/10, específica do PR #299 e
+válida até `2026-10-23T23:00:00.000Z`, sem atribuir sua aprovação de código a
+outros candidatos. Mantém os mesmos 11 riscos (7 altos, 4 moderados, zero crítico)
+somente nas ferramentas de teste HML, publicação da beta e testes sintéticos
+Windows/nuvem. Não renova credenciais, a concessão documental de 15/10, o piloto
+da pasta real ou a janela separada de regularização da fonte inativa. IAM,
+produção e dados clínicos permanecem fora do escopo. CI no SHA exato, revisão,
+aprovação real do run protegido, smokes, assinatura, predecessor e CAS continuam
+exigidos; a renovação não é prova de execução, convergência ou revisão independente.
+
 ## Evidência de aceite
 Registrar URL do PR, autor, reviewer ID/login, estado, commit exato, data, checks, decisão de merge e recibo do publisher. Sem evidência, estado `PENDING_INDEPENDENT_REVIEW` e nenhuma alegação de publicação.
 
