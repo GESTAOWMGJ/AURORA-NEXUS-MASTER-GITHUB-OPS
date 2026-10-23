@@ -41,7 +41,8 @@ function docx(parts:Record<string,string>,extraRelationships='') {
 function xlsx(parts:Record<string,string>,targetOverride?:string) {
   const worksheets=Object.keys(parts).filter(name=>name.startsWith('xl/worksheets/'));
   const sheets=worksheets.map((_name,index)=>'<sheet name="Aba'+index+'" sheetId="'+(index+1)+'" r:id="r'+index+'"/>').join('');
-  const relations=worksheets.map((name,index)=>'<Relationship Id="r'+index+'" Type="'+officeRel+'/worksheet" Target="'+(targetOverride??name.slice(3))+'"/>').join('');
+  const relations=worksheets.map((name,index)=>'<Relationship Id="r'+index+'" Type="'+officeRel+'/worksheet" Target="'+(targetOverride??name.slice(3))+'"/>').join('')+
+    (Object.hasOwn(parts,'xl/sharedStrings.xml')?'<Relationship Id="shared" Type="'+officeRel+'/sharedStrings" Target="sharedStrings.xml"/>':'');
   return zip({'[Content_Types].xml':'<Types xmlns="'+typesNs+'"><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+
       worksheets.map(name=>'<Override PartName="/'+name+'" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join('')+'</Types>',
     '_rels/.rels':'<Relationships xmlns="'+relNs+'"><Relationship Id="office" Type="'+officeRel+'/officeDocument" Target="xl/workbook.xml"/></Relationships>',
@@ -79,6 +80,23 @@ test('XML declarations, entities and unbound prefixes fail without text escape',
     const result=await engine.extract(encode(body),'application/xml');assert.equal(result.extraction.status,'FAILED');assert.equal(result.text,'');assert.equal(result.extraction.textSha256,null);
   }
 });
+
+test('XML namespace budgets fail closed while normal inherited and shadowed prefixes remain readable',async()=>{
+  const normal=await engine.extract(encode('<a xmlns:p="urn:one"><p:b>One</p:b><c xmlns:p="urn:two"><p:b>Two</p:b></c><p:b>Three</p:b></a>'),'application/xml');
+  assert.equal(normal.extraction.status,'COMPLETE');
+  assert.deepEqual(normal.xmlLeaves.map(leaf=>leaf.namespaceURI),['urn:one','urn:two','urn:one']);
+  const declarations=Array.from({length:256},(_value,index)=>' xmlns:n'+index+'="urn:'+index+'"').join('');
+  const result=await engine.extract(encode('<a'+declarations+'>Text</a>'),'application/xml');
+  assert.equal(result.extraction.code,'LIMIT_EXCEEDED');assert.equal(result.text,'');assert.deepEqual(result.xmlLeaves,[]);
+});
+
+test('XML cumulative namespace retention has a bounded failure and no partial output',async()=>{
+  // Small encoded fixture: bounded maps reach the admission limit; no host
+  // exhaustion, timing threshold or crash is part of this regression.
+  const declarations=Array.from({length:63},(_value,index)=>' xmlns:n'+index+'="urn:'+index+'"').join('');
+  const result=await engine.extract(encode('<a'+declarations+'><b>Text</b>'+'<c/>'.repeat(4096)+'</a>'),'application/xml');
+  assert.equal(result.extraction.code,'LIMIT_EXCEEDED');assert.equal(result.text,'');assert.deepEqual(result.segments,[]);
+});
 test('DOCX reads real deflated document, header and footer bytes',async()=>{
   const input=docx({'word/document.xml':'<w:document xmlns:w="'+wordNs+'"><w:body><w:p><w:r><w:t>Documento sintético</w:t></w:r></w:p></w:body></w:document>',
     'word/header1.xml':'<w:hdr xmlns:w="'+wordNs+'"><w:p><w:r><w:t>Cabeçalho</w:t></w:r></w:p></w:hdr>',
@@ -100,6 +118,25 @@ test('XLSX extracts every declared worksheet; formulas never evaluate',async()=>
     'xl/worksheets/sheet2.xml':'<worksheet xmlns="'+sheetNs+'"><sheetData><row><c r="A1"><f>HYPERLINK("https://not-fetched")</f><v>99</v></c></row></sheetData></worksheet>'}),
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',options);
   assert.equal(result.tables.length,2);assert.equal(result.extraction.status,'PARTIAL');assert.match(result.text,/42/);assert.match(result.text,/FORMULA_NOT_EVALUATED/);assert.doesNotMatch(result.text,/https|99/);
+});
+
+test('XLSX shared text accounts for UTF8 and sparse tabs before joining rows',async()=>{
+  const mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const sheet=(cells:string)=>'<worksheet xmlns="'+sheetNs+'"><sheetData><row>'+cells+'</row></sheetData></worksheet>';
+  const shared=(value:string)=>'<sst xmlns="'+sheetNs+'"><si><t>'+value+'</t></si></sst>';
+  const cell=(ref:string)=>'<c r="'+ref+'" t="s"><v>0</v></c>';
+  const normal=await engine.extract(xlsx({'xl/sharedStrings.xml':shared('Café'),'xl/worksheets/sheet1.xml':sheet(cell('C1')+cell('A1'))}),mime,options);
+  assert.equal(normal.extraction.status,'COMPLETE');assert.equal(normal.text,'Café\t\tCafé');
+  const limited=await engine.extract(xlsx({'xl/sharedStrings.xml':shared('é'.repeat(65536)),
+    'xl/worksheets/sheet1.xml':sheet(cell('A1')+cell('B1'))}),mime,options);
+  assert.equal(limited.extraction.code,'LIMIT_EXCEEDED');assert.equal(limited.text,'');assert.deepEqual(limited.tables,[]);
+});
+
+test('XLSX expanded text budget is shared by every worksheet',async()=>{
+  const sheet='<worksheet xmlns="'+sheetNs+'"><sheetData><row><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>';
+  const result=await engine.extract(xlsx({'xl/sharedStrings.xml':'<sst xmlns="'+sheetNs+'"><si><t>'+'a'.repeat(131072)+'</t></si></sst>',
+    'xl/worksheets/sheet1.xml':sheet,'xl/worksheets/sheet2.xml':sheet}),'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',options);
+  assert.equal(result.extraction.code,'LIMIT_EXCEEDED');assert.equal(result.text,'');assert.deepEqual(result.segments,[]);
 });
 test('ODT reads actual content XML bytes with explicit empty unsupported formats',async()=>{
   const result=await engine.extract(odf('<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><text:p>Texto ODT</text:p></office:body></office:document-content>'),

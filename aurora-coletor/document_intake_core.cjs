@@ -4,6 +4,9 @@ exports.createDocumentIntakeEngine = createDocumentIntakeEngine;
 exports.documentIntakeClientEngine = documentIntakeClientEngine;
 function createDocumentIntakeEngine() {
     const VERSION = '1.0.0', MAX_BYTES = 1048576, MAX_TEXT = 262144, MAX_PARTS = 128, MAX_EXPANDED = 8388608;
+    // Bound retained namespace maps as well as XML input/node counts. Charge
+    // inherited entries BEFORE cloning, and new bindings BEFORE retaining them.
+    const MAX_XML_NAMESPACES = 256, MAX_XML_NAMESPACE_ENTRIES = 262144;
     const WORD = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
     const SHEET = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
     const OFFICE_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
@@ -37,7 +40,7 @@ function createDocumentIntakeEngine() {
     function xml(input, prefix = 'xml') {
         need(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(input));
         const stack = [], nodes = [], leaves = [], segments = [];
-        let offset = 0, roots = 0, nodeCount = 0;
+        let offset = 0, roots = 0, nodeCount = 0, namespaceEntries = 0;
         function text(value, cdata = false) {
             if (!stack.length) {
                 need(!value.trim());
@@ -106,7 +109,19 @@ function createDocumentIntakeEngine() {
             need(match);
             const qname = match[1], tail = match[2], selfClosing = match[3] === '/';
             need(/^[A-Za-z_][A-Za-z0-9_.-]*(?::[A-Za-z_][A-Za-z0-9_.-]*)?$/.test(qname));
-            const parent = stack[stack.length - 1], namespaces = Object.assign(Object.create(null), parent?.namespaces ?? { xml: 'http://www.w3.org/XML/1998/namespace' });
+            need(++nodeCount <= 100000 && stack.length < 64, 'LIMIT_EXCEEDED');
+            const parent = stack[stack.length - 1], inherited = parent?.namespaces ?? { xml: 'http://www.w3.org/XML/1998/namespace' };
+            let namespaceCount = Object.keys(inherited).length;
+            namespaceEntries += namespaceCount;
+            need(namespaceEntries <= MAX_XML_NAMESPACE_ENTRIES, 'LIMIT_EXCEEDED');
+            const namespaces = Object.assign(Object.create(null), inherited);
+            const bindNamespace = (name, value) => {
+                need(value.length <= 512, 'LIMIT_EXCEEDED');
+                if (!Object.hasOwn(namespaces, name)) {
+                    need(++namespaceCount <= MAX_XML_NAMESPACES && ++namespaceEntries <= MAX_XML_NAMESPACE_ENTRIES, 'LIMIT_EXCEEDED');
+                }
+                namespaces[name] = value;
+            };
             const attrs = Object.assign(Object.create(null), { '#qname': qname });
             let at = 0;
             while (at < tail.length) {
@@ -119,11 +134,11 @@ function createDocumentIntakeEngine() {
                 attrs[name] = value;
                 at += attr[0].length;
                 if (name === 'xmlns')
-                    namespaces[''] = value;
+                    bindNamespace('', value);
                 else if (name.startsWith('xmlns:')) {
                     const key = name.slice(6);
                     need(key !== 'xmlns' && (key !== 'xml' || value === 'http://www.w3.org/XML/1998/namespace'));
-                    namespaces[key] = value;
+                    bindNamespace(key, value);
                 }
             }
             const qualified = qname.split(':'), local = qualified[qualified.length - 1], ns = qualified.length === 2 ? namespaces[qualified[0]] : namespaces[''] ?? '';
@@ -143,7 +158,6 @@ function createDocumentIntakeEngine() {
             counts[qname] = number;
             const node = { name: local, namespaceURI: ns, path: [...(parent?.path ?? []), local], namespacePath: [...(parent?.namespacePath ?? []), ns],
                 locator: (parent?.locator ?? prefix) + '/' + qname + '[' + number + ']', attrs, expandedAttrs, text: '', children: [], namespaces, counts: Object.create(null) };
-            need(++nodeCount <= 100000 && stack.length < 64, 'LIMIT_EXCEEDED');
             if (parent)
                 parent.children.push(node);
             else {
@@ -430,6 +444,10 @@ function createDocumentIntakeEngine() {
                     const shared = sharedPath ? (need(files.has(sharedPath)), walk(xml(decode(files.get(sharedPath))).nodes, 'si').map(nodeText)) : [];
                     need(shared.length <= 10000, 'LIMIT_EXCEEDED');
                     totalUnits = sheetPaths.length;
+                    // Shared-string references amplify encoded input. Reserve UTF-8 text,
+                    // sparse-cell tabs and row separators before retaining values or join.
+                    let expandedTextBytes = 0, expandedRows = 0;
+                    const reserveText = (size) => { expandedTextBytes += size; need(expandedTextBytes <= MAX_TEXT, 'LIMIT_EXCEEDED'); };
                     partial = relations.some(rel => rel.external) || Array.from(files.keys()).some(path => /^xl\/(media|charts|drawings|embeddings)\//.test(path));
                     for (const path of sheetPaths) {
                         need(files.has(path) && pkg.types.get(path) === 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml');
@@ -440,6 +458,8 @@ function createDocumentIntakeEngine() {
                         for (const row of walk(doc.nodes, 'row')) {
                             need(rows.length < 10000, 'LIMIT_EXCEEDED');
                             const values = [];
+                            if (expandedRows++)
+                                reserveText(1);
                             need(row.namespaceURI === SHEET);
                             for (const cell of row.children.filter(node => node.name === 'c')) {
                                 need(cell.namespaceURI === SHEET && cell.children.every(node => node.namespaceURI === SHEET));
@@ -456,6 +476,8 @@ function createDocumentIntakeEngine() {
                                 const raw = cell.children.find(node => node.name === 'v')?.text ?? '';
                                 const value = formula ? '[FORMULA_NOT_EVALUATED]' : cell.attrs.t === 's' ? (need(/^[0-9]+$/.test(raw) && Number(raw) < shared.length), shared[Number(raw)]) :
                                     cell.attrs.t === 'inlineStr' ? nodeText(cell.children.find(node => node.name === 'is') ?? cell) : raw;
+                                need(value.length <= MAX_TEXT, 'LIMIT_EXCEEDED');
+                                reserveText(encoder.encode(value).length + Math.max(0, column - Math.max(1, values.length)));
                                 values[column - 1] = value;
                             }
                             rows.push(Array.from({ length: values.length }, (_item, index) => values[index] ?? ''));

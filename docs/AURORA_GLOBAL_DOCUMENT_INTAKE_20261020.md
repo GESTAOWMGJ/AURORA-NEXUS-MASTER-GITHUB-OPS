@@ -43,6 +43,14 @@ Limites iniciais: aquisição de 1 MiB, texto normalizado de 256 KiB, 128 partes
 linhas/128 colunas. Validar tamanho antes de copiar ou calcular hash. Corte,
 backend ausente, proteção, corrupção ou conteúdo vazio não podem virar COMPLETE.
 Partes não interpretadas mantêm cobertura parcial ou pendência explícita.
+O XML admite no máximo 256 bindings de namespace por nó e 262.144 entradas
+retidas no conjunto dos mapas: a herança é debitada antes da cópia, e novos
+bindings antes da retenção. XLSX debita cumulativamente bytes UTF-8 expandidos,
+tabs de células esparsas e separadores de linhas de todas as abas antes de
+guardar referências ou executar joins, no mesmo orçamento de texto de 256 KiB.
+Exceder esses limites retorna `LIMIT_EXCEEDED`, sem texto, tabela ou recibo
+parcial apresentado como completo. Esses gates corrigem dois achados LOW da
+revisão estática da candidata; não constituem prova de crash, benchmark ou adoção.
 Referências ODF usam namespace e ancestralidade, independentemente do prefixo
 ou pasta do recurso. `office:binary-data` não integra texto, folhas ou tabelas;
 elementos XML dentro desse campo binário invalidam a extração. Documentos só
