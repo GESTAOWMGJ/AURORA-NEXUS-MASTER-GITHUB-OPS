@@ -62,12 +62,12 @@ function finding(
 function matchesIntent(item: NativeInsightFinding, intent: NativeInsightIntent): boolean {
   if (intent === "EXECUTIVE" || intent === "NEXT_ACTION") return true;
   if (intent === "REVENUE_RISK") {
-    return ["FINANCIAL_DATA_QUALITY", "REVENUE_GAP", "GLOSS_EXPOSURE", "RECONCILIATION_GAP"].includes(item.code);
+    return ["INVOICE_ADVANCE_PENDING", "FINANCIAL_DATA_QUALITY", "REVENUE_GAP", "GLOSS_EXPOSURE", "RECONCILIATION_GAP"].includes(item.code);
   }
   if (intent === "SLA_RISK") {
     return ["SLA_OVERDUE", "DOCUMENT_SLA_OVERDUE", "FLOW_BOTTLENECK", "AUDIT_FINDINGS"].includes(item.code);
   }
-  return ["FINANCIAL_DATA_QUALITY", "EVIDENCE_GAP", "NO_SOURCE", "FIREBASE_NATIVE_GAP", "DOCUMENT_FRAGILITY", "EXTERNAL_AI_PATH"].includes(item.code);
+  return ["INVOICE_ADVANCE_PENDING", "FINANCIAL_DATA_QUALITY", "EVIDENCE_GAP", "NO_SOURCE", "FIREBASE_NATIVE_GAP", "DOCUMENT_FRAGILITY", "EXTERNAL_AI_PATH"].includes(item.code);
 }
 
 export function generateNativeInsight(
@@ -85,6 +85,13 @@ export function generateNativeInsight(
   const routineCounts = record(nativeRoutines.counts);
 
   const findings: NativeInsightFinding[] = [];
+  const advance = record(projection.invoiceAdvanceReconciliation);
+  if (advance.status === "PENDING_EVIDENCE") findings.push(finding(
+    "INVOICE_ADVANCE_PENDING", "HIGH", "Conciliação de adiantamentos pendente",
+    "O vínculo entre obrigação, nota, razão e pagamentos ainda exige comprovação. Custo total e resultado líquido permanecem não apurados.",
+    "Revisar os vínculos e versões na conciliação existente. Consultar a pendência e as respostas anteriores antes de solicitar complementos.",
+    "projection.invoiceAdvanceReconciliation"
+  ));
   const sourcePresent = dataQuality.sourcePresent === true;
   const invalidFinancialRecords = finiteNumber(dataQuality.invalidFinancialRecords) ?? 0;
   const outstandingCents = finiteNumber(financial.outstandingCents);

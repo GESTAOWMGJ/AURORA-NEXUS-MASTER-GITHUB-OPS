@@ -4,14 +4,14 @@ import {createHash} from 'node:crypto';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync,unlinkSync,linkSync,symlinkSync} from 'node:fs';
 import {join,dirname} from 'node:path';
 import {tmpdir} from 'node:os';
-import {IA_MASTER_FILES,WINDOWS_INTEGRATION_FILES,readComponentPackage,windowsIntegrationPackage,
+import {IA_MASTER_FILES,IA_MASTER_EXTENDED_FILES,WINDOWS_INTEGRATION_FILES,readComponentPackage,windowsIntegrationPackage,
   retainComponentPackage,retainComponentZip} from '../../scripts/release-component-packages.mjs';
 const sourceSha='a'.repeat(40),hash=(bytes:Uint8Array)=>createHash('sha256').update(bytes).digest('hex');
-function fixture(t:any){
+function fixture(t:any,names:readonly string[]=IA_MASTER_FILES){
   const temporary=mkdtempSync(join(tmpdir(),'aurora-components-contract-'));
   t.after(()=>{assert.equal(dirname(temporary),tmpdir());assert.ok(temporary.split(/[\\/]/).at(-1)?.startsWith('aurora-components-contract-'));rmSync(temporary,{recursive:true,force:true});});
   const directory=join(temporary,'ia-master');mkdirSync(directory);
-  const fileBytes=Object.fromEntries(IA_MASTER_FILES.map((name:string)=>[name,Buffer.from('synthetic public '+name+'\n')]));
+  const fileBytes=Object.fromEntries(names.map((name:string)=>[name,Buffer.from('synthetic public '+name+'\n')]));
   const manifest:any={component:'AURORA_IA_MASTER',version:'1.1.0',sourceRevision:sourceSha,dirty:false,nodeMinimumMajor:22,externalAiEnabled:false,
     clientAgent:{component:'AURORA_CLIENT_AGENT',version:'1.0.5',configured:false,sourceAuthorizationRequired:true,providerConnectionsVerified:false},
     files:Object.fromEntries(Object.entries(fileBytes).map(([name,bytes])=>[name,hash(bytes as Uint8Array)]))};
@@ -104,4 +104,29 @@ test('archive binds the exact expanded manifest and public files and is determin
   const second=await retainComponentZip(process.platform==='win32'?'python':'python3',target,zip,ia);
   assert.equal(first.sha256,second.sha256);assert.equal(first.sha256,hash(readFileSync(zip)));
   assert.ok(first.size>0);assert.equal(readFileSync(zip).subarray(0,2).toString(),'PK');
+});
+
+test('closed IA36 extension round-trips retention and deterministic archive with Windows7 unchanged',async t=>{
+  const f=fixture(t,IA_MASTER_EXTENDED_FILES),ia=await readComponentPackage(f.directory,'iaMaster',sourceSha);
+  assert.equal(Object.keys(ia.fileBytes).length,36);
+  assert.deepEqual(Object.keys(ia.fileBytes).sort(),[...IA_MASTER_FILES,'kernel/auroraInvoiceAdvance.js','kernel/auroraEvidence.js'].sort());
+  const windows=windowsIntegrationPackage(ia,sourceSha);
+  assert.deepEqual(Object.keys(windows.fileBytes).sort(),[...WINDOWS_INTEGRATION_FILES].sort());
+  const output=join(f.temporary,'retained'),target=await retainComponentPackage(output,'ia-master-package',ia);
+  const retained=await readComponentPackage(target,'iaMaster',sourceSha);
+  assert.ok(retained.manifestBytes.equals(ia.manifestBytes));
+  const zip=join(output,'ia-master.zip');
+  const first=await retainComponentZip(process.platform==='win32'?'python':'python3',target,zip,ia);
+  const second=await retainComponentZip(process.platform==='win32'?'python':'python3',target,zip,ia);
+  assert.equal(first.sha256,second.sha256);
+});
+for(const scenario of ['partial extension','unknown kernel','changed extension','missing extension','wrong source','extra private file'])test(`IA36 extension rejects ${scenario}`,async t=>{
+  const f=fixture(t,IA_MASTER_EXTENDED_FILES);
+  if(scenario==='partial extension'){delete f.manifest.files['kernel/auroraEvidence.js'];unlinkSync(join(f.directory,'kernel/auroraEvidence.js'));}
+  if(scenario==='unknown kernel'){delete f.manifest.files['kernel/auroraEvidence.js'];f.manifest.files['kernel/unreviewed.js']=hash(Buffer.from('synthetic'));}
+  if(scenario==='changed extension')writeFileSync(join(f.directory,'kernel/auroraInvoiceAdvance.js'),'changed');
+  if(scenario==='missing extension')unlinkSync(join(f.directory,'kernel/auroraEvidence.js'));
+  if(scenario==='wrong source')f.manifest.sourceRevision='b'.repeat(40);
+  if(scenario==='extra private file')writeFileSync(join(f.directory,'control.key'),'synthetic extra');
+  f.rewrite();await assert.rejects(readComponentPackage(f.directory,'iaMaster',sourceSha),/COMPONENT_/);
 });

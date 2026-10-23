@@ -93,7 +93,7 @@ jobs:
           assert manifest['sourceRevision'] == sys.argv[2], 'Local Master source does not match the checked-out SHA'
           assert manifest['files']['knowledge-registry.cjs'] == 'dc6c99e407faa11adb46e68d798bd49374e54ada820c0f755520fcfec32abbb8', 'Knowledge registry byte hash mismatch'
           files = manifest['files']
-          assert isinstance(files, dict) and len(files) == 34 and 'manifest.json' not in files, 'Unexpected local Master file composition'
+          assert isinstance(files, dict) and len(files) == 36 and 'manifest.json' not in files, 'Unexpected local Master file composition'
           assert 'published-update.cjs' in files, 'Missing explicit published release consumer'
           agent_names = {'client-agent/' + name for name in ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py', 'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py')}
           assert {name for name in files if name.startswith('client-agent/')} == agent_names, 'Unexpected client agent composition'
@@ -139,7 +139,7 @@ jobs:
               for name in names:
                   safe_name(name)
               assert len(set(names)) == len(names) and len({name.casefold() for name in names}) == len(names), 'Duplicate ZIP entry'
-              assert len(entries) == 35 and set(names) == expected_names, 'ZIP has extra or missing files'
+              assert len(entries) == len(expected_names) and set(names) == expected_names, 'ZIP has extra or missing files'
               assert sum(entry.file_size for entry in entries) <= 16 * 1024 * 1024, 'Oversized package ZIP'
               for entry in entries:
                   assert not entry.is_dir() and stat.S_IFMT(entry.external_attr >> 16) in (0, stat.S_IFREG), 'Linked or non-regular ZIP entry'

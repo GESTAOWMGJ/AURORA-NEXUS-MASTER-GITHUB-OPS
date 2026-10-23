@@ -187,6 +187,21 @@ O sistema não deve tratar ausência de evidência como zero, nem corrigir diver
 
 ## 2. Cadeia financeira canônica
 
+Incremento de integração de 21/10/2026: `AURORA-FIN-ADVANCE-001` possui aplicação
+somente leitura na projeção canônica e na rota local `/api/native`. Recibo versionado,
+vínculos documentais e reconhecimento econômico único são testáveis sem modelo.
+O corpus privado e o loader são preservados; adoção via adaptador instalado,
+sincronização cloud/Xeon e operação real permanecem pendentes de provas próprias.
+Não há outro executor de escrita, fechamento ou cobrança. Contrato e limites em
+`docs/AURORA_INVOICE_ADVANCE_RECONCILIATION.md`.
+
+
+Incremento de 21/10/2026: o método `AURORA-FIN-ADVANCE-001` integra as rotinas
+de saneamento e fechamento existentes para vincular notas a adiantamentos e
+liquidações, separar competência e caixa e impedir dupla contagem. Contrato,
+limites e adoção pendente em [AURORA_INVOICE_ADVANCE_RECONCILIATION.md](AURORA_INVOICE_ADVANCE_RECONCILIATION.md).
+Presença no registro não comprova executor instalado ou conciliação automática.
+
 ```text
 Produção
 → validação assistencial

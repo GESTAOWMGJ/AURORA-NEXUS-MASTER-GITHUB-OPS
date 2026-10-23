@@ -545,3 +545,29 @@ test('manual portal pairing places only an ephemeral ticket in clipboard and nev
   assert.ok(!a.messages.join('\n').includes(token)); assert.ok(!a.messages.join('\n').includes('t'.repeat(43)));
   assert.match(a.messages.join('\n'), /COPIED_VALID_60_SECONDS/);
 });
+
+test('invoice advance uses the existing authenticated native route without model calls or corpus writes', async t => {
+  const fixtureAdvance = require('../../firebase-migration/functions/test/fixtures/invoice-advance.cjs');
+  const f = fixtureAdvance('tenant-test'), a = await fixture(t);
+  const corpus = path.join(a.stateDir, 'knowledge_registry.v1.json'); fs.writeFileSync(corpus, 'synthetic-private-corpus');
+  const before = fs.readFileSync(corpus);
+  const body = { classification: 'INTERNAL', snapshot: { orgId: 'tenant-test', competence: f.competence, sensitivity: 'INTERNAL' }, invoiceAdvanceSource: f.source };
+  assert.equal((await a.request('/api/native', body, { Authorization: '' })).status, 401);
+  assert.equal((await a.request('/api/native', body, { Origin: 'https://evil.invalid' })).status, 403);
+  assert.equal((await a.request('/api/native', body, { 'X-Aurora-Local': '' })).status, 403);
+  const response = await a.request('/api/native', body); assert.equal(response.status, 200);
+  const result = await response.json(), replay = await (await a.request('/api/native', body)).json();
+  assert.equal(result.authority, 'LOCAL_UNVERIFIED_PREVIEW'); assert.equal(result.cloudSyncVerified, false);
+  assert.equal(result.invoiceAdvanceReconciliation.recognizedCostCents, 10000);
+  assert.equal(result.invoiceAdvanceReconciliation.financialEffect, false);
+  assert.deepEqual(replay.invoiceAdvanceReconciliation, result.invoiceAdvanceReconciliation);
+  assert.equal(a.metrics.localModelCalls, 0); assert.equal(a.metrics.externalAiCalls, 0);
+  assert.deepEqual(fs.readFileSync(corpus), before);
+  const audit = fs.readFileSync(path.join(a.stateDir, 'audit.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(audit.at(-1).methodReceiptHash, result.invoiceAdvanceReconciliation.receiptHash);
+  assert.equal(JSON.stringify(audit).includes('supplier-1'), false);
+  for (const patch of [{ orgId: 'tenant-other' }, { sensitivity: 'CLINICAL_SENSITIVE' }]) {
+    const changed = structuredClone(body); Object.assign(changed.invoiceAdvanceSource.sourceDocuments[0], patch);
+    assert.equal((await a.request('/api/native', changed)).status, 403);
+  }
+});

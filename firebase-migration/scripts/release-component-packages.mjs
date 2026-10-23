@@ -18,6 +18,8 @@ export const IA_MASTER_FILES=Object.freeze([
   'assets/fonts/Atkinson-Hyperlegible-Next-OFL.txt','assets/fonts/provenance.json',
   ...['auroraMasterEngine','auroraNativeIntelligence','auroraNativeRoutines','auroraIaMaster','auroraProductionOrchestrator','auroraDataGovernance']
     .map(name=>'kernel/'+name+'.js')]);
+export const IA_MASTER_EXTENDED_FILES=Object.freeze([...IA_MASTER_FILES,
+  'kernel/auroraInvoiceAdvance.js','kernel/auroraEvidence.js']);
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const demand=(condition,code)=>{if(!condition)throw Error(code);};
 const safeName=name=>typeof name==='string'&&/^[A-Za-z0-9._/-]+$/.test(name)&&!name.startsWith('/')
@@ -59,7 +61,10 @@ export async function readComponentPackage(directory,component,expectedSourceSha
   const manifestBytes=await readPackageFile(directory,'manifest.json',65536);
   let manifest;try{manifest=JSON.parse(manifestBytes.toString('utf8'));}catch{throw Error('COMPONENT_MANIFEST_INVALID');}
   demand(manifest&&typeof manifest==='object'&&!Array.isArray(manifest),'COMPONENT_MANIFEST_INVALID');
-  const expected=component==='iaMaster'?IA_MASTER_FILES:WINDOWS_INTEGRATION_FILES;
+  // Accept only the two reviewed closed compositions; a partial extension is invalid.
+  const extended=component==='iaMaster'&&manifest.files&&typeof manifest.files==='object'
+    &&sameNames(Object.keys(manifest.files),IA_MASTER_EXTENDED_FILES);
+  const expected=component==='iaMaster'?(extended?IA_MASTER_EXTENDED_FILES:IA_MASTER_FILES):WINDOWS_INTEGRATION_FILES;
   const revision=component==='iaMaster'?manifest.sourceRevision:manifest.sourceSha;
   demand(manifest&&revision===expectedSourceSha&&manifest.files&&typeof manifest.files==='object'&&!Array.isArray(manifest.files)
     &&sameNames(Object.keys(manifest.files),expected),'COMPONENT_MANIFEST_INVALID');

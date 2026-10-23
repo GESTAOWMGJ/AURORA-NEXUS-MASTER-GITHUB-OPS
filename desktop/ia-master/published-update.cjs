@@ -186,7 +186,9 @@ function inspectPackage(candidate, component, directory, manifestBytes) {
     'PACKAGE_IDENTITY_CONFLICT');
   const files = packageFiles(directory), names = Object.keys(manifest.files);
   const physicalNames = Object.keys(files).filter(name => name !== 'manifest.json');
-  demand(names.length === (component === 'iaMaster' ? 34 : 7)
+  const masterClosure = names.length === 34 || (names.length === 36
+    && ['kernel/auroraInvoiceAdvance.js', 'kernel/auroraEvidence.js'].every(name => Object.hasOwn(manifest.files, name)));
+  demand((component === 'iaMaster' ? masterClosure : names.length === 7)
     && (component !== 'windowsIntegration' || canonical([...names].sort()) === canonical([...WINDOWS_FILES].sort()))
     && names.every(name => safeName(name) && name !== 'manifest.json' && hex(manifest.files[name], 64))
     && canonical([...physicalNames].sort()) === canonical([...names].sort()), 'PACKAGE_CLOSURE_CONFLICT');

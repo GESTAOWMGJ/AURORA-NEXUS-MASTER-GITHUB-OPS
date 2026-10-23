@@ -137,8 +137,7 @@ async function readProjectionSource(orgId: string, tx: Transaction): Promise<Pro
   const entries = await Promise.all(sourceCollections.map(async (name) => {
     const snapshot = await tx.get(auroraDb.collection(`organizations/${orgId}/${name}`).limit(SOURCE_LIMIT + 1));
     if (snapshot.size > SOURCE_LIMIT) throw new Error(`SOURCE_LIMIT_EXCEEDED:${name}`);
-    return [name, snapshot.docs.map((doc) => name === 'sourceDocuments'
-      ? {...doc.data(), _documentId:doc.id} : doc.data())] as const;
+    return [name, snapshot.docs.map((doc): Record<string, unknown> => ({...doc.data(), _documentId:doc.id}))] as const;
   }));
   return Object.fromEntries(entries) as ProjectionSource;
 }
@@ -184,7 +183,7 @@ export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: Projectio
 
   const sourceHash = createHash("sha256").update(JSON.stringify(stableValue(source))).digest("hex");
   const snapshotId = actor.source === 'INTEGRATION'
-    ? createHash('sha256').update(`integration:${settings.competence}:${sourceHash}`).digest('hex')
+    ? createHash('sha256').update(`integration:${settings.competence}:${sourceHash}:invoice-advance-v1`).digest('hex')
     : randomUUID();
   const storedProjection = {
     ...projection,
@@ -237,11 +236,12 @@ export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: Projectio
   });
 }
 
-function visibleProjection(projection: Record<string, unknown>, member: AuroraMember): Record<string, unknown> {
+export function visibleProjection(projection: Record<string, unknown>, member: AuroraMember): Record<string, unknown> {
   const mayReadFinance = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
   if (mayReadFinance) return projection;
   return {
     ...projection,
+    invoiceAdvanceReconciliation: null,
     financial: { billedAmount: null, receivedAmount: null, pendingAmount: null, reconciliationDifference: null, currency: "BRL" },
     financialCents: { invoicedCents: null, receivedCents: null, glossCents: null, outstandingCents: null }
   };

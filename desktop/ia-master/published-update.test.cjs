@@ -811,3 +811,17 @@ test('partial exclusive restoration fails closed and retains both complete backu
   await assert.rejects(f.api.recoverPublished({mode:'recover',layout:f.layout,attemptDirectory:attempt,trust:f.pair.trust}),/RECOVERY_METADATA_CHANGED/);
   assert.equal(fs.readFileSync(installation).length,0);assert.deepEqual(f.commands,commands);f.assertIdentity();
 });
+
+
+test('signed 36-file method extension preserves legacy closure and rejects missing kernel dependencies', t => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'aurora-method-package-')), pair = keyPair();
+  t.after(() => fs.rmSync(base, {recursive:true, force:true}));
+  const names = [...Array.from({length:34}, (_,i) => 'public-'+i+'.txt'), 'kernel/auroraInvoiceAdvance.js', 'kernel/auroraEvidence.js'];
+  const dir = path.join(base, 'method'), pack = packageFixture(dir, names);
+  const candidate = real.verifyCandidate(envelope(pair, {iaMaster:h(pack.bytes)}), pair.trust, NEXT);
+  assert.equal(Object.keys(real.inspectPackage(candidate, 'iaMaster', dir, pack.bytes).files).length, 37);
+  const brokenDir = path.join(base, 'broken');
+  const broken = packageFixture(brokenDir, [...names.slice(0,-1), 'unrelated.txt']);
+  const signed = real.verifyCandidate(envelope(pair, {iaMaster:h(broken.bytes)}), pair.trust, NEXT);
+  assert.throws(() => real.inspectPackage(signed, 'iaMaster', brokenDir, broken.bytes), /CLOSURE/);
+});

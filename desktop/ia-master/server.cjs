@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const os = require('node:os');
+const { evaluateInvoiceAdvances } = require('./kernel/auroraInvoiceAdvance.js');
 const { buildMasterOperationalState } = require('./kernel/auroraMasterEngine.js');
 const { IA_MASTER_POLICY, IA_MASTER_INTEGRATIONS } = require('./kernel/auroraIaMaster.js');
 const { createStudio, StudioError, SECRET, LIMITS } = require('./studio.cjs');
@@ -243,11 +244,20 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
       if (!['/api/native', '/api/improve'].includes(req.url)) return send(404, { code: 'NOT_FOUND' });
       const body = await bodyJson(req);
       if (req.url === '/api/native') {
-        closed(body, ['snapshot', 'classification']);
+        closed(body, ['snapshot', 'classification', 'invoiceAdvanceSource']);
         if (!['PUBLIC', 'INTERNAL'].includes(body.classification) || body.snapshot?.orgId !== orgId || !['PUBLIC', 'INTERNAL'].includes(body.snapshot?.sensitivity)) return send(403, { code: 'TENANT_OR_CLASSIFICATION_REJECTED' });
-        const result = buildMasterOperationalState(body.snapshot, {}, new Date(now()));
-        metrics.nativeEvaluations++; audit('NATIVE_PREVIEW', { inputHash: hash(JSON.stringify(body.snapshot)) });
-        return send(200, { authority: 'LOCAL_UNVERIFIED_PREVIEW', cloudSyncVerified: false, externalAiCalls: 0, master: { ...result, mode: 'LOCAL_PREVIEW', source: { ...result.source, authenticity: 'NOT_VERIFIED_BY_LOCAL_IMPORT' } } });
+        let invoiceAdvanceReconciliation = null;
+        if (body.invoiceAdvanceSource !== undefined) {
+          const source = body.invoiceAdvanceSource;
+          closed(source, ['invoices', 'bankTransactions', 'sourceDocuments', 'reconciliations']);
+          if (!['invoices', 'bankTransactions', 'sourceDocuments', 'reconciliations'].every(key => Array.isArray(source[key])
+            && source[key].length <= 1000 && source[key].every(row => row && typeof row === 'object' && !Array.isArray(row)
+              && row.orgId === orgId && ['PUBLIC', 'INTERNAL'].includes(row.sensitivity)))) return send(403, { code: 'TENANT_OR_CLASSIFICATION_REJECTED' });
+          invoiceAdvanceReconciliation = evaluateInvoiceAdvances(source, orgId, body.snapshot.competence);
+        }
+        const result = buildMasterOperationalState(invoiceAdvanceReconciliation ? { ...body.snapshot, invoiceAdvanceReconciliation } : body.snapshot, {}, new Date(now()));
+        metrics.nativeEvaluations++; audit('NATIVE_PREVIEW', { inputHash: hash(JSON.stringify(body.snapshot)), methodReceiptHash: invoiceAdvanceReconciliation?.receiptHash ?? null });
+        return send(200, { authority: 'LOCAL_UNVERIFIED_PREVIEW', invoiceAdvanceReconciliation, cloudSyncVerified: false, externalAiCalls: 0, master: { ...result, mode: 'LOCAL_PREVIEW', source: { ...result.source, authenticity: 'NOT_VERIFIED_BY_LOCAL_IMPORT' } } });
       }
       closed(body, ['prompt', 'classification']);
       if (!['PUBLIC', 'INTERNAL'].includes(body.classification)) return send(403, { code: 'CLASSIFICATION_REJECTED' });
