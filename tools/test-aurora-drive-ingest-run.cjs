@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {parseScope,makeRequest,sanitizeBatch,verifyReadback,verifyCoverage,sha}=require('./aurora-drive-ingest-run.cjs');
+const {parseScope,makeRequest,sanitizeBatch,verifyReadback,verifyCoverage,sha,rejectRuntimeFailure,withSharedLockRetry}=require('./aurora-drive-ingest-run.cjs');
 const scope=()=>({schemaVersion:'aurora.authorized-drive-source-scope.v1',orgId:'wmgj',projectId:'wmgj-hml-jfn-20260927',authorization:{realDataAuthorized:true,sourceMutationAllowed:false},sources:[{sourceId:'fixture-root',system:'DRIVE',folderId:'synthetic-folder-only',active:true,slaMinutes:1440}],fileIds:['synthetic-file-only'],excludedFolderIds:[]});
 function encoded(v){if(v===null)return{nullValue:null};if(typeof v==='string')return{stringValue:v};if(typeof v==='boolean')return{booleanValue:v};if(typeof v==='number')return{integerValue:String(v)};return{mapValue:{fields:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encoded(x)]))}};}
 function readbackFixture(){
@@ -27,3 +27,24 @@ function coveragePage(row,offset){return {ok:true,code:'AURORA_DRIVE_READBACK_PL
 test('restart verifies durable receipts and aliases even with no newly accepted event',async()=>{const f=readbackFixture();let checks=0;const result=await verifyCoverage(async offset=>coveragePage(f.row,offset),async plan=>{checks++;return verifyReadback(plan,'wmgj','synthetic-token',f.fetcher);});assert.equal(checks,1);assert.equal(result.total,2);assert.equal(result.canonicalDocumentsVerified,1);assert.equal(result.aliasReferencesVerified,1);assert.equal(result.pending,0);});
 test('coverage cannot omit a durable receipt or change a page total',async()=>{const f=readbackFixture();await assert.rejects(()=>verifyCoverage(async offset=>{const page=coveragePage(f.row,offset);page.privateReadbackPlan=[];return page;},async()=>({verified:1})),/COVERAGE_PAGINATION_REJECTED/);await assert.rejects(()=>verifyCoverage(async offset=>{const page=coveragePage(f.row,offset);if(offset){page.coverage.total=3;page.coverage.pending=1;}return page;},async()=>({verified:1})),/COVERAGE_CHANGED/);});
 test('an alias requires the primary content hash and actual receipt',async()=>{const f=readbackFixture();await assert.rejects(()=>verifyCoverage(async offset=>{const page=coveragePage(f.row,offset);if(offset)page.privateAliasRows[0].contentHash='f'.repeat(64);return page;},async()=>({verified:1})),/ALIAS_PROOF_REJECTED/);});
+
+function busyResponse(){return {response:{ok:false,code:'AURORA_DRIVE_ENGINE_BUSY',failureStage:'SHARED_LOCK',scopeSha256:'a'.repeat(64),triggersChanged:false,globalSettingsChanged:false,sourceMutation:false,privateReadbackPlan:[],scan:{examined:0,queued:0,aliases:0,complete:false},processing:{attempted:0,accepted:0,duplicates:0,pending:0,failed:0,review:0,extractionErrors:0,aliases:0,replayVerified:0}}};}
+test('runtime failure retains the closed cause and stage instead of hiding it behind missing counters',()=>{
+  assert.throws(()=>sanitizeBatch({response:{ok:false,code:'AURORA_DRIVE_SERVICE_QUOTA',failureStage:'EXECUTE'}}),error=>error.message==='AURORA_DRIVE_SERVICE_QUOTA'&&error.failureStage==='EXECUTE');
+  assert.throws(()=>rejectRuntimeFailure({response:{ok:false,code:'PRIVATE_CONTENT',failureStage:'PRIVATE_CONTENT'}}),error=>error.message==='DRIVE_RUNTIME_REJECTED'&&error.failureStage===undefined);
+});
+test('only a proved shared-lock refusal is retried with bounded wait and source recheck',async()=>{
+  let calls=0,rechecks=0;const waits=[];
+  const accepted={response:{ok:true,code:'AURORA_DRIVE_BATCH_EXECUTED'}};
+  const result=await withSharedLockRetry(()=>++calls<3?busyResponse():accepted,()=>{rechecks++;},async ms=>{waits.push(ms);});
+  assert.equal(result,accepted);assert.equal(calls,3);assert.equal(rechecks,2);assert.deepEqual(waits,[10000,20000]);
+  calls=0;await assert.rejects(()=>withSharedLockRetry(()=>{calls++;return busyResponse();},()=>{},async()=>{}),/AURORA_DRIVE_ENGINE_BUSY/);assert.equal(calls,5);
+});
+test('a partial write or non-lock failure cannot enter the shared-lock retry path',async()=>{
+  for(const alter of [v=>{v.processing.accepted=1;},v=>{v.processing.aliases=1;},v=>{v.scan.complete=true;},v=>{v.failureStage='EXECUTE';},v=>{v.privateReadbackPlan=[{}];}]){
+    let calls=0;const value=busyResponse();alter(value.response);
+    await assert.rejects(()=>withSharedLockRetry(()=>{calls++;return value;},()=>{},async()=>{}),/DRIVE_BUSY_RESPONSE_REJECTED/);assert.equal(calls,1);
+  }
+  let calls=0;const quota={response:{ok:false,code:'AURORA_DRIVE_SERVICE_QUOTA'}};
+  assert.equal(await withSharedLockRetry(()=>{calls++;return quota;},()=>{},async()=>{}),quota);assert.equal(calls,1);
+});

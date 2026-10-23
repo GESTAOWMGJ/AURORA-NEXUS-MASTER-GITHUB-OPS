@@ -118,3 +118,17 @@ test('READBACK rejects uncovered aliases and strips noncontract private fields',
   assert.ok(!JSON.stringify(result).includes('PRIVATE'));
   f.receipt.contentHash='8'.repeat(64);result=f.call(request);assert.equal(result.ok,false);
 });
+
+test('shared-lock refusal has a complete zero-write contract and a distinct bounded code',()=>{
+  const f=fixture();f.context.comTravaIngestaoGmailWMGJ_=()=>{throw Error('GMAIL_REPLAY_LOCK_BUSY');};
+  const result=f.execute();assert.equal(result.code,'AURORA_DRIVE_ENGINE_BUSY');assert.equal(result.failureStage,'SHARED_LOCK');
+  assert.equal(result.ok,false);assert.equal(result.privateReadbackPlan.length,0);assert.ok(!f.state.calls.includes('execute'));
+  for(const key of ['attempted','accepted','duplicates','pending','failed','review','extractionErrors','aliases','replayVerified'])assert.equal(result.processing[key],0);
+});
+test('exceptions after entering the engine cannot masquerade as a safe lock refusal',()=>{
+  const f=fixture();f.context.auroraExecutarCicloDriveAutorizado_=()=>{throw Error('GMAIL_REPLAY_LOCK_BUSY');};
+  let result=f.execute();assert.equal(result.code,'AURORA_DRIVE_EXECUTION_UNCONFIRMED');assert.equal(result.failureStage,'EXECUTE');
+  f.context.auroraExecutarCicloDriveAutorizado_=()=>{throw Error('Service invoked too many times: PRIVATE_IDENTIFIER');};
+  result=f.execute();assert.equal(result.code,'AURORA_DRIVE_SERVICE_QUOTA');assert.equal(result.failureStage,'EXECUTE');
+  assert.ok(!JSON.stringify(result).includes('PRIVATE_IDENTIFIER'));
+});

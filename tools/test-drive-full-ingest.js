@@ -33,8 +33,10 @@ function fixture() {
     DriveApp:{getFileById:id=>{if(!files.has(id))throw Error('MISSING_FILE');return files.get(id);},getFolderById:id=>{if(!folders.has(id))throw Error('MISSING_FOLDER');return folders.get(id);},
       continueFileIterator:t=>{const x=tokens.get(t);if(!x)throw Error('CURSOR_EXPIRED');return iterator(x.array,x.index);},
       continueFolderIterator:t=>{const x=tokens.get(t);if(!x)throw Error('CURSOR_EXPIRED');return iterator(x.array,x.index);}},
-    SpreadsheetApp:{},MimeType:{},Utilities:{}});
+    SpreadsheetApp:{},MimeType:{GOOGLE_DOCS:'application/vnd.google-apps.document',
+      GOOGLE_SHEETS:'application/vnd.google-apps.spreadsheet',PLAIN_TEXT:'text/plain',PDF:'application/pdf'},Utilities:{sleep:()=>{}}});
   vm.runInContext(code,context);
+  const realExtract=context.extrairConteudoArquivoWMGJ_V1_;
   context.garantirAbasControleExtracaoWMGJ_V1_=()=>{};
   context.getConfigWMGJ_Compat_=()=>({SHEETS:{FILA:'queue'}});
   context.getPlanilhaWMGJ_Compat_=()=>({getSheetByName:()=>sheet});
@@ -65,7 +67,7 @@ function fixture() {
   context.registrarExtracaoDocumentalWMGJ_V1_=()=>{};context.registrarFirestoreMirrorWMGJ_=()=>{};
   const options={orgId:ORG,scopeSha256:H,sources:[],fileIds:[],excludedFolderIds:[],maxScan:1,processLimit:0,
     config:{orgId:ORG,dryRun:false},deadlineMs:Date.now()+140000};
-  return {context,props,tokens,files,folders,rows,sent,receipts,entities,addFile,addFolder,options};
+  return {context,props,tokens,files,folders,rows,sent,receipts,entities,addFile,addFolder,options,realExtract};
 }
 test('recursive cursor resumes beyond duplicates and preserves one row per source',()=>{
   const f=fixture();f.addFile('file000000001','folder000001');f.addFile('file000000002','folder000002');
@@ -243,4 +245,106 @@ test('replacement characters or NUL in decoded plain text stay pending while val
     const coverage=f.context.auroraLerPlanoReadbackDriveAutorizado_({...f.options,readbackOffset:0});
     assert.equal(coverage.coverage.documents,1);assert.equal(coverage.coverage.pending,1);
   }
+});
+
+test('XLSX and XLS convert to temporary Sheets and extract every populated tab before cleanup',()=>{
+  for(const mime of ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel']) {
+    const f=fixture(),copied=[],trashed=[],readRanges=[];
+    const original=f.addFile('fileexcel0001',null,'binary workbook',mime);
+    original.getName=()=>mime.endsWith('ms-excel')?'synthetic.XLS':'synthetic.xlsx';
+    const temporary=f.addFile('temporarysheet01',null,'',f.context.MimeType.GOOGLE_SHEETS);
+    temporary.setTrashed=value=>trashed.push([temporary.getId(),value]);
+    f.context.Drive={Files:{copy:(resource,id,options)=>{copied.push({resource,id,options});
+      return {id:temporary.getId(),mimeType:f.context.MimeType.GOOGLE_SHEETS};}}};
+    f.context.SpreadsheetApp.openById=id=>{assert.equal(id,temporary.getId());return {getSheets:()=>[
+      {getName:()=> 'First',getLastRow:()=>201,getLastColumn:()=>1,
+        getRange:(start,col,count)=>{readRanges.push([start,count]);return {getDisplayValues:()=>Array.from({length:count},(_,i)=>['row'+(start+i)])};}},
+      {getName:()=> 'Second',getLastRow:()=>1,getLastColumn:()=>1,getRange:()=>({getDisplayValues:()=>[['last tab value']]})}
+    ]};};
+    const result=f.realExtract(original);
+    assert.equal(result.ok,true);assert.equal(result.metodo,'google_sheets_values');
+    assert.equal(f.context.extracaoDocumentalCompletaWMGJ_(result),true);
+    assert.match(result.texto,/row201/);assert.match(result.texto,/last tab value/);
+    assert.deepEqual(readRanges,[[1,200],[201,1]]);
+    assert.equal(copied.length,1);assert.equal(copied[0].id,original.getId());
+    assert.equal(copied[0].resource.mimeType,f.context.MimeType.GOOGLE_SHEETS);
+    assert.equal(copied[0].options.convert,true);assert.equal(copied[0].options.ocr,undefined);
+    assert.deepEqual(trashed,[[temporary.getId(),true]]);
+  }
+});
+
+test('Excel conversion failure reports fixed codes and cleans only the temporary copy',()=>{
+  const f=fixture(),trashed=[];
+  const original=f.addFile('fileexcel0001',null,'binary workbook','application/vnd.ms-excel');
+  const temporary=f.addFile('temporarysheet01',null);temporary.setTrashed=value=>trashed.push(value);
+  f.context.Drive={Files:{copy:()=>({id:temporary.getId(),mimeType:f.context.MimeType.GOOGLE_SHEETS})}};
+  f.context.SpreadsheetApp.openById=()=>{throw Error('Service unavailable: PRIVATE_FILE_NAME PRIVATE_SOURCE_ID');};
+  let result=f.realExtract(original);
+  assert.equal(result.ok,false);assert.equal(result.code,'AURORA_DRIVE_CONVERSION_NOT_READY');assert.deepEqual(trashed,[true]);
+  assert.equal(result.observacao.includes('PRIVATE_'),false);
+  f.context.Drive.Files.copy=()=>{throw Error('User quota exceeded PRIVATE_FILE_NAME');};
+  result=f.realExtract(original);assert.equal(result.code,'AURORA_DRIVE_EXTRACTION_QUOTA');
+  f.context.Drive.Files.copy=()=>{throw Error('Permission denied PRIVATE_SOURCE_ID');};
+  result=f.realExtract(original);assert.equal(result.code,'AURORA_DRIVE_EXTRACTION_AUTH_FAILED');
+});
+
+function ofxFile(f,name,content) {
+  const bytes=Buffer.isBuffer(content)?content:Buffer.from(content,'utf8');
+  const file=f.addFile('fileofx000001',null,'','application/octet-stream');file.getName=()=>name;
+  file.getBlob=()=>({getBytes:()=>Array.from(bytes,b=>b>127?b-256:b),
+    getDataAsString:encoding=>new TextDecoder(encoding).decode(bytes)});
+  return file;
+}
+const ofxHeader='\r\nOFXHEADER:100\r\nDATA:OFXSGML\r\nVERSION:102\r\nSECURITY:NONE\r\nENCODING:USASCII\r\nCHARSET:1252\r\nCOMPRESSION:NONE\r\n\r\n';
+test('actual OFX signature shape accepts leading CRLF and declared ASCII/1252 as review-only text',()=>{
+  const f=fixture(),text=ofxHeader+'<OFX>\r\n<STATUS><CODE>0</STATUS>\r\n</OFX>\r\n';
+  const result=f.realExtract(ofxFile(f,'synthetic.OFX',text));
+  assert.equal(result.ok,true);assert.equal(result.metodo,'blob_text');assert.equal(result.texto,text);
+  assert.equal(result.tamanhoTexto,text.length);assert.equal(f.context.extracaoDocumentalCompletaWMGJ_(result),true);
+  assert.equal(result.financialFactsApproved,undefined);assert.equal(result.valor_total,undefined);
+});
+test('octet-stream rejects wrong extension, invalid OFX signature, unsupported encoding and damaged text',()=>{
+  const cases=[
+    ['synthetic.bin',ofxHeader+'<OFX></OFX>','AURORA_DRIVE_FORMAT_UNSUPPORTED'],
+    ['synthetic.ofx','not an OFX file','AURORA_DRIVE_OFX_SIGNATURE_INVALID'],
+    ['synthetic.ofx',ofxHeader+'<OFX>unclosed','AURORA_DRIVE_OFX_SIGNATURE_INVALID'],
+    ['synthetic.ofx',ofxHeader.replace('CHARSET:1252','CHARSET:UNKNOWN')+'<OFX></OFX>','AURORA_DRIVE_OFX_ENCODING_UNSUPPORTED'],
+    ['synthetic.ofx',ofxHeader+'<OFX>\0</OFX>','AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED'],
+    ['synthetic.ofx',Buffer.concat([Buffer.from('<?xml version="1.0" encoding="UTF-8"?><OFX>'),Buffer.from([0xff]),Buffer.from('</OFX>')]),'AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED']
+  ];
+  for(const [name,content,code] of cases) {
+    const f=fixture(),result=f.realExtract(ofxFile(f,name,content));
+    assert.equal(result.ok,false);assert.equal(result.code,code);assert.equal(result.observacao,code);
+    assert.equal(f.context.extracaoDocumentalCompletaWMGJ_(result),false);
+  }
+});
+
+test('processing honors explicit request order and source order ahead of legacy rows and cursor',()=>{
+  const f=fixture();f.addFile('rawfile000001','folderraw001','raw');f.addFile('firstfile0001','folderfirst1','first source');
+  f.addFile('explicit00001',null,'explicit first');f.addFile('explicit00002',null,'explicit second');
+  f.addFolder('folderraw001',null,['rawfile000001']);f.addFolder('folderfirst1',null,['firstfile0001']);
+  f.options.sources=[{sourceId:'01-first',folderId:'folderfirst1'},{sourceId:'99-raw',folderId:'folderraw001'}];
+  f.options.fileIds=['explicit00001','explicit00002'];f.options.maxScan=10;
+  f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+  const byId=new Map(f.rows.slice(1).map(row=>[row[2],row]));
+  f.rows.splice(1,4,...['rawfile000001','explicit00002','firstfile0001','explicit00001'].map(id=>byId.get(id)));
+  f.props.set('AURORA_DRIVE_PROCESS_'+ORG+'_'+H.slice(0,24),'4000');
+  f.options.processLimit=20;
+  const result=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+  assert.equal(result.process.accepted,4);
+  assert.deepEqual(f.sent.filter((_,index)=>index%2===0).map(event=>event.source.sourceId),
+    ['explicit00001','explicit00002','firstfile0001','rawfile000001']);
+});
+test('a recoverable explicit failure does not starve a healthy root and retries rotate within their group',()=>{
+  const f=fixture();f.addFile('explicit00001',null,'bad first');f.addFile('explicit00002',null,'bad second');
+  f.addFile('rootfile00001','folderroot01','healthy');f.addFolder('folderroot01',null,['rootfile00001']);
+  f.options.fileIds=['explicit00001','explicit00002'];f.options.sources=[{sourceId:'drive-main',folderId:'folderroot01'}];
+  f.options.maxScan=10;f.options.processLimit=1;
+  const calls=[],extract=f.context.extrairConteudoArquivoWMGJ_V1_;
+  f.context.extrairConteudoArquivoWMGJ_V1_=file=>{calls.push(file.getId());return file.getId().startsWith('explicit')?
+    {ok:false,code:'AURORA_DRIVE_CONVERSION_NOT_READY'}:extract(file);};
+  for(let i=0;i<5;i++)f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+  assert.deepEqual(calls,['explicit00001','explicit00002','rootfile00001','explicit00001','explicit00002']);
+  assert.equal(f.sent.length,2);assert.equal(f.sent[0].source.sourceId,'rootfile00001');
+  assert.equal(f.rows[1][8],'AURORA_DRIVE_CONVERSION_NOT_READY');
 });
