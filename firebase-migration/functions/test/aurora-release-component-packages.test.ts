@@ -14,19 +14,37 @@ function fixture(t:any){
   const fileBytes=Object.fromEntries(IA_MASTER_FILES.map((name:string)=>[name,Buffer.from('synthetic public '+name+'\n')]));
   const manifest:any={component:'AURORA_IA_MASTER',version:'1.1.0',sourceRevision:sourceSha,dirty:false,nodeMinimumMajor:22,externalAiEnabled:false,
     clientAgent:{component:'AURORA_CLIENT_AGENT',version:'1.0.5',configured:false,sourceAuthorizationRequired:true,providerConnectionsVerified:false},
+    tissTool:{id:'AURORA-TISS-SADT-001',version:'1.0.1',configured:false,processing:'LOCAL_EPHEMERAL',realPortalEnabled:false,submissionEnabled:false},
     files:Object.fromEntries(Object.entries(fileBytes).map(([name,bytes])=>[name,hash(bytes as Uint8Array)]))};
   const rewrite=()=>writeFileSync(join(directory,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
   for(const [name,bytes] of Object.entries(fileBytes)){const file=join(directory,...name.split('/'));mkdirSync(dirname(file),{recursive:true});writeFileSync(file,bytes as Uint8Array);}
   rewrite();return {temporary,directory,manifest,fileBytes,rewrite};
 }
-test('existing package closure yields separate real IA34 and Windows7 manifests without config or acceptance claims',async t=>{
+test('current package closure yields IA45 with TISS and unchanged Windows7 without activation claims',async t=>{
   const f=fixture(t),ia=await readComponentPackage(f.directory,'iaMaster',sourceSha),windows=windowsIntegrationPackage(ia,sourceSha);
-  assert.equal(Object.keys(ia.fileBytes).length,34);assert.equal(Object.keys(windows.fileBytes).length,7);
+  assert.equal(Object.keys(ia.fileBytes).length,45);assert.equal(Object.keys(windows.fileBytes).length,7);
+  assert.equal(ia.manifest.tissTool.id,'AURORA-TISS-SADT-001');
+  assert.equal(ia.manifest.tissTool.realPortalEnabled,false);assert.equal(ia.manifest.tissTool.submissionEnabled,false);
+  assert.ok(ia.fileBytes['client-agent/aurora_tiss.py']);assert.equal(Object.hasOwn(windows.fileBytes,'aurora_tiss.py'),false);
   assert.deepEqual(Object.keys(windows.fileBytes).sort(),[...WINDOWS_INTEGRATION_FILES].sort());
   for(const name of WINDOWS_INTEGRATION_FILES)assert.ok(Buffer.from(windows.fileBytes[name]).equals(Buffer.from(ia.fileBytes['client-agent/'+name])));
   assert.equal(windows.manifest.sourceSha,sourceSha);assert.equal(windows.manifest.component,'AURORA_WINDOWS_INTEGRATION');
   assert.equal(windows.manifest.version,'1.0.7');assert.equal(ia.manifest.clientAgent.version,'1.0.5');
   assert.equal('configured' in windows.manifest,false);assert.equal('installationVerified' in windows.manifest,false);
+});
+test('current TISS release refuses incomplete metadata or operational activation claims',async t=>{
+  const f=fixture(t),original={...f.manifest.tissTool};
+  for(const metadata of [undefined,null,{}, {...original,id:'OTHER'}, {...original,version:'2.0.0'},
+    {...original,configured:true}, {...original,processing:'PERSISTENT'}, {...original,realPortalEnabled:true},
+    {...original,submissionEnabled:true}, {...original,extra:true}]){
+    f.manifest.tissTool=metadata;f.rewrite();
+    await assert.rejects(readComponentPackage(f.directory,'iaMaster',sourceSha),/COMPONENT_IDENTITY_CONFLICT/);
+  }
+});
+for(const name of IA_MASTER_FILES.filter((name:string)=>name.startsWith('tiss-')||name.startsWith('client-agent/tiss-schemas/')||name==='client-agent/aurora_tiss.py'))
+test(`current release cannot silently omit TISS payload ${name}`,async t=>{
+  const f=fixture(t);delete f.manifest.files[name];unlinkSync(join(f.directory,...name.split('/')));f.rewrite();
+  await assert.rejects(readComponentPackage(f.directory,'iaMaster',sourceSha),/COMPONENT_MANIFEST_INVALID/);
 });
 test('Windows Integration1.0.7 round-trips the seven-file package and rejects prior component versions',async t=>{
   const f=fixture(t),ia=await readComponentPackage(f.directory,'iaMaster',sourceSha),windows=windowsIntegrationPackage(ia,sourceSha);

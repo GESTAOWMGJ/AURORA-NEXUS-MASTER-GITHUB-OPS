@@ -17,13 +17,17 @@ def build(output):
                     'src/auroraMasterEngine.ts', '--module', 'commonjs', '--target', 'ES2022',
                     '--outDir', str(output / 'kernel'), '--rootDir', 'src', '--strict',
                     '--esModuleInterop', '--skipLibCheck'], cwd=functions, check=True)
-    for name in ['server.cjs', 'studio.cjs', 'knowledge-registry.cjs', 'update.cjs', 'published-update.cjs', 'safe-read.cjs', 'publisher.cjs', 'index.html', 'app.js', 'app.css', 'studio-local.js', 'studio-local.css', 'manage.cjs', 'README.md']:
+    for name in ['server.cjs', 'studio.cjs', 'knowledge-registry.cjs', 'update.cjs', 'published-update.cjs', 'safe-read.cjs', 'publisher.cjs', 'index.html', 'app.js', 'app.css', 'studio-local.js', 'studio-local.css', 'manage.cjs', 'README.md', 'tiss-tool.cjs', 'tiss-browser.cjs', 'tiss-local.js']:
         shutil.copyfile(Path(__file__).parent / name, output / name)
     # Same installer package: lightweight intake is a separate, declared child component.
     # Packaging does not authorize roots, activate providers or install another model.
     agent_output=output/'client-agent';agent_output.mkdir()
-    for name in ['client_agent.py','provider_connectors.py','client_secret_store.py','install_client_agent.py','aurora_cloud_sync.py','aurora_deployment.py','published_release.py']:
+    for name in ['client_agent.py','provider_connectors.py','client_secret_store.py','install_client_agent.py','aurora_cloud_sync.py','aurora_deployment.py','published_release.py','aurora_tiss.py']:
         shutil.copyfile(ROOT/'aurora-coletor'/name,agent_output/name)
+    shutil.copytree(ROOT / 'aurora-coletor/tiss-schemas', agent_output / 'tiss-schemas')
+    fixture_output = output / 'tiss-fixtures'
+    fixture_output.mkdir()
+    shutil.copyfile(ROOT / 'aurora-coletor/fixtures/tiss/sp-sadt-4.03.00.synthetic.xml', fixture_output / 'sadt-valid.xml')
     fonts = ROOT / 'firebase-migration/hosting/aurora-nexus/assets/fonts'
     font_output = output / 'assets/fonts'
     font_output.mkdir(parents=True)
@@ -44,6 +48,8 @@ def build(output):
     manifest = {'component': 'AURORA_IA_MASTER', 'version': '1.1.0', 'sourceRevision': revision,
                 'clientAgent': {'component':'AURORA_CLIENT_AGENT','version':'1.0.5','platforms':['windows','macos'],
                                 'configured':False,'sourceAuthorizationRequired':True,'providerConnectionsVerified':False},
+                'tissTool': {'id':'AURORA-TISS-SADT-001','version':'1.0.1','configured':False,
+                             'processing':'LOCAL_EPHEMERAL','realPortalEnabled':False,'submissionEnabled':False},
                 'dirty': dirty, 'nodeMinimumMajor': 22, 'externalAiEnabled': False,
                 'files': {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()
                           for p in sorted(output.rglob('*')) if p.is_file()}}

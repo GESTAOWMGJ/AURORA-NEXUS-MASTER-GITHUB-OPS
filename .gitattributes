@@ -4,3 +4,7 @@ desktop/ia-master/knowledge-registry.cjs text eol=lf
 firebase-migration/hosting/aurora-nexus/assets/fonts/*.txt text eol=lf
 firebase-migration/hosting/aurora-nexus/assets/fonts/provenance.json text eol=lf
 firebase-migration/hosting/aurora-nexus/assets/fonts/Atkinson-Hyperlegible-Next-OFL.txt -whitespace
+# Official ANS schema bytes are pinned; do not translate CRLF on checkout.
+aurora-coletor/tiss-schemas/**/*.xsd -text
+# Upstream whitespace is preserved and covered by the pinned byte hashes.
+aurora-coletor/tiss-schemas/**/*.xsd -whitespace

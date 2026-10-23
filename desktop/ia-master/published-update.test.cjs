@@ -9,6 +9,9 @@ const crypto = require('node:crypto'), vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 const real = require('./published-update.cjs');
 const WINDOWS = ['client_agent.py','provider_connectors.py','client_secret_store.py','install_client_agent.py','aurora_cloud_sync.py','aurora_deployment.py','published_release.py'];
+const TISS_FILES = ['tiss-tool.cjs','tiss-browser.cjs','tiss-local.js','client-agent/aurora_tiss.py','tiss-fixtures/sadt-valid.xml'];
+const TISS_XSD_FILES = ['client-agent/tiss-schemas/4.03.00/tissAssinaturaDigital_v1.01.xsd', 'client-agent/tiss-schemas/4.03.00/tissComplexTypesV4_03_00.xsd', 'client-agent/tiss-schemas/4.03.00/tissGuiasV4_03_00.xsd', 'client-agent/tiss-schemas/4.03.00/tissSimpleTypesV4_03_00.xsd', 'client-agent/tiss-schemas/4.03.00/tissV4_03_00.xsd', 'client-agent/tiss-schemas/4.03.00/xmldsig-core-schema.xsd'];
+const TISS_TOOL = {id:'AURORA-TISS-SADT-001',version:'1.0.0',configured:false,processing:'LOCAL_EPHEMERAL',realPortalEnabled:false,submissionEnabled:false};
 const OLD = '56a813aac38390d928122cb774a16b3503977d72', NEXT = 'a'.repeat(40);
 const h = real.digest, encode = value => Buffer.from(JSON.stringify(value));
 function keyPair() {
@@ -204,6 +207,61 @@ test('34-file signed IA and 7-file Windows closures reject extras and changed by
   fs.writeFileSync(path.join(base,'ia','extra.txt'),'public extra');assert.throws(()=>real.inspectPackage(candidate,'iaMaster',path.join(base,'ia'),ia.bytes),/CLOSURE/);
   fs.writeFileSync(path.join(base,'win','client_agent.py'),'changed');assert.throws(()=>real.inspectPackage(candidate,'windowsIntegration',path.join(base,'win'),win.bytes),/FILE_BYTES/);
 });
+for (const xsdRuntime of [false, true]) test(`TISS ${xsdRuntime ? 45 : 39} package requires signed closure and exact capabilities`,t=>{
+  const payloads = xsdRuntime ? [...TISS_FILES, ...TISS_XSD_FILES] : TISS_FILES;
+  const metadata = {...TISS_TOOL, version: xsdRuntime ? '1.0.1' : '1.0.0'};
+  const count = xsdRuntime ? 45 : 39;
+  const base=fs.mkdtempSync(path.join(os.tmpdir(),'aurora-tiss-package-proof-'));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
+  const pair=keyPair(),names=[...Array.from({length:34},(_,i)=>'public-'+i+'.txt'),...payloads];
+  function make(label,mutate=()=>{}){
+    const directory=path.join(base,label),pack=packageFixture(directory,names);
+    pack.manifest.tissTool={...metadata};mutate(pack,directory);
+    pack.bytes=encode(pack.manifest);fs.writeFileSync(path.join(directory,'manifest.json'),pack.bytes);
+    const candidate=real.verifyCandidate(envelope(pair,{iaMaster:h(pack.bytes)}),pair.trust,NEXT);
+    return {pack,directory,candidate};
+  }
+  const valid=make('valid'),checked=real.inspectPackage(valid.candidate,'iaMaster',valid.directory,valid.pack.bytes);
+  assert.equal(Object.keys(checked.files).length,count+1);
+  for(const name of payloads)assert.equal(h(checked.files[name]),valid.pack.manifest.files[name]);
+  const stage=real.stageCandidate({candidate:valid.candidate,packageDirectory:valid.directory,manifestBytes:valid.pack.bytes,destination:path.join(base,'stage')});
+  assert.equal(stage.activated,false);assert.equal(stage.installed,false);
+  assert.throws(()=>real.inspectPackage({...valid.candidate},'iaMaster',valid.directory,valid.pack.bytes),/V2_COMPONENT_COVERAGE/);
+  assert.throws(()=>real.inspectPackage(valid.candidate,'iaMaster',valid.directory,Buffer.concat([valid.pack.bytes,Buffer.from(' ')])),/SIGNED_MANIFEST_BYTES/);
+  const mutations=[
+    pack=>{delete pack.manifest.tissTool;},pack=>{pack.manifest.tissTool=null;},
+    ...Object.keys(TISS_TOOL).map(key=>pack=>{delete pack.manifest.tissTool[key];}),
+    pack=>{pack.manifest.tissTool.extra=true;},pack=>{pack.manifest.tissTool.id='OTHER';},
+    pack=>{pack.manifest.tissTool.version='2.0.0';},pack=>{pack.manifest.tissTool.configured=true;},
+    pack=>{pack.manifest.tissTool.processing='PERSISTED';},pack=>{pack.manifest.tissTool.realPortalEnabled=true;},
+    pack=>{pack.manifest.tissTool.submissionEnabled=true;},pack=>{pack.manifest.tissTool.submissionEnabled='false';}
+  ];
+  mutations.forEach((mutate,index)=>{const f=make('gate-'+index,mutate);assert.throws(()=>real.inspectPackage(f.candidate,'iaMaster',f.directory,f.pack.bytes),/PACKAGE_CLOSURE/);});
+  payloads.forEach((missing,index)=>{
+    const f=make('missing-'+index,(pack,directory)=>{
+      delete pack.manifest.files[missing];fs.unlinkSync(path.join(directory,missing));
+      const replacement='unrelated-'+index+'.txt',bytes=Buffer.from('synthetic unrelated replacement');
+      pack.manifest.files[replacement]=h(bytes);fs.writeFileSync(path.join(directory,replacement),bytes);
+    });
+    assert.equal(Object.keys(f.pack.manifest.files).length,count);
+    assert.throws(()=>real.inspectPackage(f.candidate,'iaMaster',f.directory,f.pack.bytes),/PACKAGE_CLOSURE/);
+  });
+  const missingPhysical=make('missing-physical');fs.unlinkSync(path.join(missingPhysical.directory,TISS_FILES[0]));
+  assert.throws(()=>real.inspectPackage(missingPhysical.candidate,'iaMaster',missingPhysical.directory,missingPhysical.pack.bytes),/PACKAGE_CLOSURE/);
+  const changed=make('changed');fs.writeFileSync(path.join(changed.directory,TISS_FILES[3]),'changed synthetic parser bytes');
+  assert.throws(()=>real.inspectPackage(changed.candidate,'iaMaster',changed.directory,changed.pack.bytes),/PACKAGE_FILE_BYTES/);
+});
+test('legacy 34-file package cannot smuggle TISS metadata or partial TISS payloads',t=>{
+  const base=fs.mkdtempSync(path.join(os.tmpdir(),'aurora-tiss-legacy-proof-'));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
+  const pair=keyPair(),names=Array.from({length:34},(_,i)=>'public-'+i+'.txt');
+  for(const [index,tissName]of [null,...TISS_FILES,TISS_FILES[0].toUpperCase()].entries()){
+    const directory=path.join(base,String(index)),legacyNames=tissName?[tissName,...names.slice(1)]:names;
+    const pack=packageFixture(directory,legacyNames);
+    if(!tissName)pack.manifest.tissTool={...TISS_TOOL};
+    pack.bytes=encode(pack.manifest);fs.writeFileSync(path.join(directory,'manifest.json'),pack.bytes);
+    const candidate=real.verifyCandidate(envelope(pair,{iaMaster:h(pack.bytes)}),pair.trust,NEXT);
+    assert.throws(()=>real.inspectPackage(candidate,'iaMaster',directory,pack.bytes),/PACKAGE_CLOSURE/);
+  }
+});
 test('stage is idempotent, resumable when complete and never activated',t=>{
   const f=transactionFixture(t),candidate=f.api.verifyCandidate(f.env,f.pair.trust,NEXT),destination=path.join(f.root,'stage');
   const options={candidate,packageDirectory:f.candidateDir,manifestBytes:f.candidate.bytes,destination};
@@ -391,6 +449,38 @@ async function successorOptions(f, source) {
   return {...await f.options(),packageDirectory:directory,manifestBytes:candidate.bytes,
     stageDirectory:path.join(f.root,'reviewed-stage-'+source.slice(0,8))};
 }
+
+for (const xsdRuntime of [false, true]) test(`signed legacy and TISS ${xsdRuntime ? 45 : 39} preserve lineage and identity`,async t=>{
+  const payloads = xsdRuntime ? [...TISS_FILES, ...TISS_XSD_FILES] : TISS_FILES;
+  const metadata = {...TISS_TOOL, version: xsdRuntime ? '1.0.1' : '1.0.0'};
+  const f=transactionFixture(t),legacy=await f.api.activatePublished(await f.options());
+  const source='b'.repeat(40),options=await successorOptions(f,source);
+  const manifest=JSON.parse(options.manifestBytes);manifest.tissTool={...metadata};
+  for(const name of payloads){
+    const bytes=Buffer.from('synthetic TISS payload '+name);
+    writeFiles(options.packageDirectory,{[name]:bytes});manifest.files[name]=h(bytes);
+  }
+  options.manifestBytes=encode(manifest);fs.writeFileSync(path.join(options.packageDirectory,'manifest.json'),options.manifestBytes);
+  Object.assign(f.env,envelope(f.pair,{iaMaster:h(options.manifestBytes)},2,source));
+  options.pin=await f.api.readActivePin('synthetic-process-bearer',f.pair.trust,source,'fixture-org');
+  const applied=await f.api.activatePublished(options);
+  assert.equal(applied.status,'SIGNED_LOCAL_COMPONENT_APPLIED');
+  const installed=JSON.parse(fs.readFileSync(path.join(f.pkg,'manifest.json')));
+  assert.equal(Object.keys(installed.files).length,xsdRuntime ? 45 : 39);assert.deepEqual(installed.tissTool,metadata);
+  const journal=JSON.parse(fs.readFileSync(path.join(applied.attempt,'journal.json')));
+  assert.equal(journal.previousRelease.kind,'SIGNED_COMPLETED');assert.equal(journal.previousRelease.sourceSha,NEXT);
+  assert.equal(journal.previousRelease.journalSha256,h(fs.readFileSync(path.join(legacy.attempt,'journal.json'))));
+  f.assertIdentity();
+  // An independently signed legacy successor still verifies the 39-file
+  // predecessor. Neither compatibility path changes the bootstrap contract.
+  const restored=await f.api.activatePublished(await successorOptions(f,'c'.repeat(40)));
+  assert.equal(restored.status,'SIGNED_LOCAL_COMPONENT_APPLIED');
+  const restoredManifest=JSON.parse(fs.readFileSync(path.join(f.pkg,'manifest.json')));
+  assert.equal(Object.keys(restoredManifest.files).length,34);assert.equal(Object.hasOwn(restoredManifest,'tissTool'),false);
+  const restoredJournal=JSON.parse(fs.readFileSync(path.join(restored.attempt,'journal.json')));
+  assert.equal(restoredJournal.previousRelease.sourceSha,source);
+  assert.equal(restoredJournal.previousRelease.manifestSha256,h(options.manifestBytes));f.assertIdentity();
+});
 
 function signedWindowsFixture(f, source, iaBytes, windowsVersion='1.0.1') {
   const directory=path.join(f.base,'windows-'+source.slice(0,8)),pack=packageFixture(directory,WINDOWS,source,'windowsIntegration',windowsVersion);

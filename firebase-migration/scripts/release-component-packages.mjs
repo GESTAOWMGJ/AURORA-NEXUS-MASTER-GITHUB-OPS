@@ -13,6 +13,8 @@ export const IA_MASTER_FILES=Object.freeze([
   'README.md','app.css','app.js','index.html','knowledge-registry.cjs','manage.cjs','modus-operandi.md','published-update.cjs',
   'publisher.cjs','safe-read.cjs','server.cjs','studio-local.css','studio-local.js','studio.cjs','update.cjs',
   ...WINDOWS_INTEGRATION_FILES.map(name=>'client-agent/'+name),
+  'tiss-tool.cjs','tiss-browser.cjs','tiss-local.js','client-agent/aurora_tiss.py','tiss-fixtures/sadt-valid.xml',
+  'client-agent/tiss-schemas/4.03.00/tissAssinaturaDigital_v1.01.xsd','client-agent/tiss-schemas/4.03.00/tissComplexTypesV4_03_00.xsd','client-agent/tiss-schemas/4.03.00/tissGuiasV4_03_00.xsd','client-agent/tiss-schemas/4.03.00/tissSimpleTypesV4_03_00.xsd','client-agent/tiss-schemas/4.03.00/tissV4_03_00.xsd','client-agent/tiss-schemas/4.03.00/xmldsig-core-schema.xsd',
   'assets/fonts/source-serif-4-regular.woff2','assets/fonts/source-serif-4-semibold.woff2',
   'assets/fonts/atkinson-hyperlegible-next.woff2','assets/fonts/Source-Serif-OFL.txt',
   'assets/fonts/Atkinson-Hyperlegible-Next-OFL.txt','assets/fonts/provenance.json',
@@ -24,6 +26,8 @@ const safeName=name=>typeof name==='string'&&/^[A-Za-z0-9._/-]+$/.test(name)&&!n
   &&name.split('/').every(part=>part&&part!=='.'&&part!=='..'
     &&!/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part));
 const sameNames=(left,right)=>JSON.stringify([...left].sort())===JSON.stringify([...right].sort());
+const TISS_TOOL_METADATA=Object.freeze({id:'AURORA-TISS-SADT-001',version:'1.0.1',configured:false,
+  processing:'LOCAL_EPHEMERAL',realPortalEnabled:false,submissionEnabled:false});
 
 export async function readPackageFile(directory,name,maximum=8*1024*1024){
   demand(safeName(name),'COMPONENT_PATH_REJECTED');
@@ -67,7 +71,9 @@ export async function readComponentPackage(directory,component,expectedSourceSha
     &&manifest.nodeMinimumMajor===22&&manifest.externalAiEnabled===false
     &&manifest.clientAgent?.component==='AURORA_CLIENT_AGENT'&&manifest.clientAgent.version==='1.0.5'
     &&manifest.clientAgent.configured===false&&manifest.clientAgent.sourceAuthorizationRequired===true
-    &&manifest.clientAgent.providerConnectionsVerified===false,'COMPONENT_IDENTITY_CONFLICT');
+    &&manifest.clientAgent.providerConnectionsVerified===false
+    &&manifest.tissTool&&sameNames(Object.keys(manifest.tissTool),Object.keys(TISS_TOOL_METADATA))
+    &&Object.entries(TISS_TOOL_METADATA).every(([key,value])=>manifest.tissTool[key]===value),'COMPONENT_IDENTITY_CONFLICT');
   else demand(manifest.schemaVersion===1&&manifest.component==='AURORA_WINDOWS_INTEGRATION'&&manifest.version===WINDOWS_INTEGRATION_VERSION
     &&manifest.platform==='windows','COMPONENT_IDENTITY_CONFLICT');
   const actualNames=await packageNames(directory);

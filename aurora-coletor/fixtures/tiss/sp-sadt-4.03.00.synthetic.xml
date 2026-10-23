@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic engineering fixture: no patient, provider or financial operation. -->
+<ans:mensagemTISS xmlns:ans="http://www.ans.gov.br/padroes/tiss/schemas">
+  <ans:cabecalho>
+    <ans:identificacaoTransacao>
+      <ans:tipoTransacao>ENVIO_LOTE_GUIAS</ans:tipoTransacao>
+      <ans:sequencialTransacao>TESTE0001</ans:sequencialTransacao>
+      <ans:dataRegistroTransacao>2026-10-21</ans:dataRegistroTransacao>
+      <ans:horaRegistroTransacao>12:00:00</ans:horaRegistroTransacao>
+    </ans:identificacaoTransacao>
+    <ans:origem><ans:identificacaoPrestador><ans:codigoPrestadorNaOperadora>TESTE000001</ans:codigoPrestadorNaOperadora></ans:identificacaoPrestador></ans:origem>
+    <ans:destino><ans:registroANS>999999</ans:registroANS></ans:destino>
+    <ans:Padrao>4.03.00</ans:Padrao>
+  </ans:cabecalho>
+  <ans:prestadorParaOperadora>
+    <ans:loteGuias>
+      <ans:numeroLote>LOTE-TESTE-1</ans:numeroLote>
+      <ans:guiasTISS>
+        <ans:guiaSP-SADT>
+          <ans:cabecalhoGuia><ans:registroANS>999999</ans:registroANS><ans:numeroGuiaPrestador>GUIA-SINTETICA-1</ans:numeroGuiaPrestador></ans:cabecalhoGuia>
+          <ans:dadosAutorizacao><ans:numeroGuiaOperadora>OPERADORA-TESTE-1</ans:numeroGuiaOperadora><ans:dataAutorizacao>2026-10-20</ans:dataAutorizacao><ans:senha>SENHA-GUIA-TESTE</ans:senha></ans:dadosAutorizacao>
+          <ans:dadosBeneficiario><ans:numeroCarteira>CARTEIRA-SINTETICA</ans:numeroCarteira><ans:atendimentoRN>N</ans:atendimentoRN></ans:dadosBeneficiario>
+          <ans:dadosSolicitante>
+            <ans:contratadoSolicitante><ans:codigoPrestadorNaOperadora>TESTE000001</ans:codigoPrestadorNaOperadora></ans:contratadoSolicitante>
+            <ans:nomeContratadoSolicitante>PRESTADOR SINTETICO</ans:nomeContratadoSolicitante>
+            <ans:profissionalSolicitante><ans:nomeProfissional>PROFISSIONAL SINTETICO</ans:nomeProfissional><ans:conselhoProfissional>06</ans:conselhoProfissional><ans:numeroConselhoProfissional>000000</ans:numeroConselhoProfissional><ans:UF>41</ans:UF><ans:CBOS>225125</ans:CBOS></ans:profissionalSolicitante>
+          </ans:dadosSolicitante>
+          <ans:dadosSolicitacao><ans:dataSolicitacao>2026-10-20</ans:dataSolicitacao><ans:caraterAtendimento>1</ans:caraterAtendimento></ans:dadosSolicitacao>
+          <ans:dadosExecutante><ans:contratadoExecutante><ans:codigoPrestadorNaOperadora>TESTE000001</ans:codigoPrestadorNaOperadora></ans:contratadoExecutante><ans:CNES>0000000</ans:CNES></ans:dadosExecutante>
+          <ans:dadosAtendimento><ans:tipoAtendimento>04</ans:tipoAtendimento><ans:indicacaoAcidente>9</ans:indicacaoAcidente><ans:regimeAtendimento>01</ans:regimeAtendimento></ans:dadosAtendimento>
+          <ans:procedimentosExecutados>
+            <ans:procedimentoExecutado><ans:sequencialItem>1</ans:sequencialItem><ans:dataExecucao>2026-10-21</ans:dataExecucao><ans:procedimento><ans:codigoTabela>22</ans:codigoTabela><ans:codigoProcedimento>10101012</ans:codigoProcedimento><ans:descricaoProcedimento>PROCEDIMENTO SINTETICO SEM PACIENTE REAL</ans:descricaoProcedimento></ans:procedimento><ans:quantidadeExecutada>2</ans:quantidadeExecutada><ans:reducaoAcrescimo>1.00</ans:reducaoAcrescimo><ans:valorUnitario>50.25</ans:valorUnitario><ans:valorTotal>100.50</ans:valorTotal></ans:procedimentoExecutado>
+          </ans:procedimentosExecutados>
+          <ans:outrasDespesas>
+            <ans:despesa><ans:sequencialItem>2</ans:sequencialItem><ans:codigoDespesa>03</ans:codigoDespesa><ans:servicosExecutados><ans:dataExecucao>2026-10-21</ans:dataExecucao><ans:codigoTabela>19</ans:codigoTabela><ans:codigoProcedimento>00000001</ans:codigoProcedimento><ans:quantidadeExecutada>2.0000</ans:quantidadeExecutada><ans:unidadeMedida>001</ans:unidadeMedida><ans:reducaoAcrescimo>1.00</ans:reducaoAcrescimo><ans:valorUnitario>3.25</ans:valorUnitario><ans:valorTotal>6.50</ans:valorTotal><ans:descricaoProcedimento>MATERIAL SINTETICO</ans:descricaoProcedimento></ans:servicosExecutados></ans:despesa>
+          </ans:outrasDespesas>
+          <ans:valorTotal><ans:valorProcedimentos>100.50</ans:valorProcedimentos><ans:valorMateriais>6.50</ans:valorMateriais><ans:valorTotalGeral>107.00</ans:valorTotalGeral></ans:valorTotal>
+        </ans:guiaSP-SADT>
+      </ans:guiasTISS>
+    </ans:loteGuias>
+  </ans:prestadorParaOperadora>
+  <ans:epilogo><ans:hash>00000000000000000000000000000000</ans:hash></ans:epilogo>
+</ans:mensagemTISS>

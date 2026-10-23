@@ -15,6 +15,17 @@ const COMPONENTS = ['server', 'web', 'satellite', 'iaMaster', 'windowsIntegratio
 const CHECKS = ['ciPassed', 'humanReviewApproved', 'protectedDeploySucceeded', 'smokePassed'];
 const WINDOWS_FILES = ['client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
   'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py'];
+const TISS_FILES = ['tiss-tool.cjs', 'tiss-browser.cjs', 'tiss-local.js', 'client-agent/aurora_tiss.py', 'tiss-fixtures/sadt-valid.xml'];
+const TISS_XSD_FILES = [
+  "client-agent/tiss-schemas/4.03.00/tissAssinaturaDigital_v1.01.xsd",
+  "client-agent/tiss-schemas/4.03.00/tissComplexTypesV4_03_00.xsd",
+  "client-agent/tiss-schemas/4.03.00/tissGuiasV4_03_00.xsd",
+  "client-agent/tiss-schemas/4.03.00/tissSimpleTypesV4_03_00.xsd",
+  "client-agent/tiss-schemas/4.03.00/tissV4_03_00.xsd",
+  "client-agent/tiss-schemas/4.03.00/xmldsig-core-schema.xsd"
+];
+const TISS_TOOL = Object.freeze({ id: 'AURORA-TISS-SADT-001', version: '1.0.0', configured: false,
+  processing: 'LOCAL_EPHEMERAL', realPortalEnabled: false, submissionEnabled: false });
 const CHECKPOINT_FIELDS = ['schemaVersion', 'componentVersion', 'targetBinding', 'sampleKey', 'attempt', 'updatedAt',
   'status', 'nextAction', 'connectionVerified', 'receiptVerifiedThisRun', 'processingVerifiedThisRun', 'processingProof',
   'previousReceiptCached', 'receipt', 'fullSynchronizationVerified', 'productionReleased', 'code', 'installationAcceptance'];
@@ -186,7 +197,15 @@ function inspectPackage(candidate, component, directory, manifestBytes) {
     'PACKAGE_IDENTITY_CONFLICT');
   const files = packageFiles(directory), names = Object.keys(manifest.files);
   const physicalNames = Object.keys(files).filter(name => name !== 'manifest.json');
-  demand(names.length === (component === 'iaMaster' ? 34 : 7)
+  // Preserve signed 34/39 predecessors and require the six official schemas
+  // for the 45-file XSD candidate. Counts never replace byte/signature checks.
+  const legacyMaster = names.length === 34 && !Object.hasOwn(manifest, 'tissTool')
+    && !names.some(name => TISS_FILES.some(required => required.toLowerCase() === name.toLowerCase()));
+  const tissMaster = ((names.length === 39 && manifest.tissTool?.version === '1.0.0')
+    || (names.length === 45 && manifest.tissTool?.version === '1.0.1' && TISS_XSD_FILES.every(name => Object.hasOwn(manifest.files, name)))) && TISS_FILES.every(name => Object.hasOwn(manifest.files, name))
+    && exact(manifest.tissTool, Object.keys(TISS_TOOL))
+    && Object.entries(TISS_TOOL).every(([key, value]) => manifest.tissTool[key] === (key === 'version' ? (names.length === 45 ? '1.0.1' : '1.0.0') : value));
+  demand((component === 'iaMaster' ? legacyMaster || tissMaster : names.length === 7)
     && (component !== 'windowsIntegration' || canonical([...names].sort()) === canonical([...WINDOWS_FILES].sort()))
     && names.every(name => safeName(name) && name !== 'manifest.json' && hex(manifest.files[name], 64))
     && canonical([...physicalNames].sort()) === canonical([...names].sort()), 'PACKAGE_CLOSURE_CONFLICT');
