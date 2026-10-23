@@ -44,7 +44,7 @@
 | R026 | Admin Master concentra privilégios | 3 | 5 | 15 | HIGH | MFA/audit required | break-glass, dual review, scoped admin operations | Governance | MEDIUM |
 | R027 | key rotation deixa versão antiga desativada cedo | 2 | 5 | 10 | HIGH | policy | verificar activeKeyVersion antes de disable | KMS Owner | LOW |
 | R028 | dado clínico enviado a IA externa | 2 | 5 | 10 | HIGH | clinical gate | DLP/schema block + provider contract/retention review | AI/Privacy | LOW |
-| R029 | advisories residuais nas ferramentas de teste de Security Rules | 3 | 4 | 12 | HIGH | dependências de desenvolvimento separadas, fixtures sintéticas, CI de validação sem credenciais ou deploy | exceção temporária SEC-EXC-TEST-20261007 renovada expressamente pelo titular somente para ferramentas de teste HML; corrigir upstream e revisar até 23/10/2026 conforme renovação registrada abaixo | AppSec / Security Governance | LOW |
+| R029 | advisories residuais nas ferramentas de teste de Security Rules | 3 | 4 | 12 | HIGH | dependências de desenvolvimento separadas, fixtures sintéticas, CI de validação sem credenciais ou deploy | exceção temporária SEC-EXC-TEST-20261007 renovada expressamente pelo titular somente para ferramentas de teste HML; corrigir upstream e revisar até 25/10/2026 conforme renovação registrada abaixo | AppSec / Security Governance | LOW |
 
 ## 3. Regras de tratamento
 
@@ -128,3 +128,11 @@ de regularização da fonte inativa conservam seus próprios prazos. IAM, produ�
 dados clínicos e ativação da fonte real não são autorizados por esta renovação.
 CI exato, revisão e demais gates de publicação, assinatura, smokes e CAS continuam
 necessários. Registro de decisão não comprova publicação ou instalação.
+
+Observação separada de 22/10/2026: a API GitHub informou o
+[Dependabot #67](https://github.com/GESTAOWMGJ/AURORA-NEXUS-MASTER-GITHUB-OPS/security/dependabot/67)
+aberto como CRITICAL para `certifi`, runtime em `firebase-migration/api/uv.lock`,
+advisory `GHSA-6q48-6c7w-9gw2` e primeira versão corrigida `2026.10.19`. Esse novo
+alerta não integra os 11 riscos históricos de R029 e não recebe aceite por esta
+renovação. A regra de bloqueio CRITICAL da seção 3 continua aplicável; correção,
+revisão e validação do lockfile são gates separados antes de promover a beta.
