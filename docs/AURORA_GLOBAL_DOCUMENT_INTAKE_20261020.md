@@ -11,8 +11,10 @@ autoridade de versão, banco, rotina agendada ou executor publicado.
 → candidatos estritos revisáveis → observação documental fechada → endpoint existente
 → sourceDocuments/entityVersions/idempotência/auditoria existentes`.
 
-`createDocumentIntakeEngine` é a única implementação de extração. O navegador
-recebe o mesmo factory compilado; Node o chama localmente. O adapter Python e os
+`createDocumentIntakeEngine` é o orquestrador compartilhado de extração. O navegador
+recebe o mesmo factory compilado; Node o chama localmente. PDF textual usa o mesmo
+backend fixado em worker descartável, conforme o incremento candidato em
+[PDF textual de 23/10](AURORA_PDF_TEXT_BACKEND_20261023.md). O adapter Python e os
 pacotes correspondentes devem carregar os assets gerados dessa mesma fonte,
 verificados pelo gerador/comparador do build. Nenhum conteúdo recuperado pode
 fornecer código, comando, URL de backend, modelo ou worker.
@@ -35,7 +37,8 @@ reextração pelo servidor ou prova de autenticidade/veracidade do conteúdo.
 | DOCX | Partes textuais vinculadas pelo pacote OPC | Namespace/manifesto/relações; imagem, hyperlink externo e objetos mantêm parcial |
 | XLSX | Abas efetivamente vinculadas por workbook/rels | Fórmulas não são executadas; resultados não viram fatos por presunção |
 | ODT/ODS | Conteúdo ODF com manifesto/tipo explícitos | Repetições além do suporte bloqueiam; fórmulas/scripts/objetos/imagens/referências e styles.xml não interpretado mantêm parcial |
-| PDF e imagens/OCR | Backend ainda pendente | Nenhum placeholder ou metadado é tratado como texto |
+| PDF textual | Backend local PDF.js fixado em worker navegador/Node | Sempre parcial; imagem/página digitalizada sem texto continua pendente de OCR |
+| Imagens/OCR | Backend ainda pendente | Nenhum placeholder ou metadado é tratado como texto |
 | DOC/XLS/RTF legados | Adapter ainda pendente | Escopo integral preservado, sem alegação de cobertura |
 
 Limites iniciais: aquisição de 1 MiB, texto normalizado de 256 KiB, 128 partes ZIP,

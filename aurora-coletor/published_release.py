@@ -229,13 +229,14 @@ def assess_manifest(candidate, component, manifest_bytes, file_bytes):
     names = manifest['files']
     demand(all(isinstance(name, str) for name in names) and all(isinstance(name, str) for name in file_bytes), 'PACKAGE_CLOSURE_CONFLICT')
     agent_profile = manifest.get('clientAgent') if isinstance(manifest.get('clientAgent'), dict) else {}
-    profile_ok = (set(names) == set(WINDOWS_FILES) if manifest.get('version') == '1.0.8'
+    profile_ok = (set(names) == set(WINDOWS_FILES) if manifest.get('version') == '1.0.9'
+                  else set(names)==set(INTAKE_WINDOWS_FILES) if manifest.get('version')=='1.0.8'
                   else re.fullmatch(r'1\.0\.[0-7]', str(manifest.get('version'))) is not None and set(names) == set(LEGACY_WINDOWS_FILES)) if component == 'windowsIntegration' else (
-        set(names) == set(IA_MASTER_FILES) and manifest.get('version') == '1.1.0' and agent_profile.get('version') == '1.0.5'
+        set(names) == set(IA_MASTER_FILES if len(names)==47 else INTAKE_IA_MASTER_FILES) and manifest.get('version') == '1.1.0'
+        and agent_profile.get('version') == ('1.0.6' if len(names)==47 else '1.0.5')
         and agent_profile.get('component') == 'AURORA_CLIENT_AGENT' and agent_profile.get('configured') is False
         and agent_profile.get('sourceAuthorizationRequired') is True and agent_profile.get('providerConnectionsVerified') is False
-        if len(names) == 39 else len(names) == 34 and agent_profile.get('version') in (None,'1.0.4')
-        and not any('client-agent/' + name in names for name in INTAKE_FILES))
+        if len(names) in (39,47) else _legacy_ia_profile(manifest))
     demand(set(file_bytes) == set(names) and len({name.casefold() for name in names}) == len(names)
            and profile_ok
            and sum(len(value) for value in file_bytes.values()) <= 32 * 1024 * 1024, 'PACKAGE_CLOSURE_CONFLICT')
@@ -244,13 +245,20 @@ def assess_manifest(candidate, component, manifest_bytes, file_bytes):
                and not any(not part or part in ('.', '..') or part.startswith('.') or re.match(r'^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)', part, re.I) for part in name.split('/'))
                and name != 'manifest.json' and _hex(expected_hash, 64)
                and isinstance(file_bytes[name], bytes) and digest(file_bytes[name]) == expected_hash, 'PACKAGE_FILE_BYTES_CONFLICT')
+        demand(len(file_bytes[name])<=trusted_asset_limit(name,expected_hash), 'PACKAGE_FILE_LIMIT')
+        fixed={prefix+file:pin for file,pin in PDF_LARGE_PINS.items() for prefix in ('','client-agent/')}
+        demand(name not in fixed or fixed[name]==expected_hash,'PDF_TRUSTED_PROFILE_PIN_CONFLICT')
     return {'status': 'SIGNED_COMPONENT_BYTES_VERIFIED', 'sourceSha': source, 'manifestSha256': expected['manifestSha256'],
             'version': expected['version'], 'currentPointerVerified': False, 'installed': False, 'allClientsSynchronized': False}
 
 
 LEGACY_WINDOWS_FILES = ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
                        'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py')
-INTAKE_FILES = ('document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json')
+LEGACY_INTAKE_FILES = ('document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json')
+PDF_FILES=('document_pdf_runtime.mjs','document_pdf_node.cjs','document_pdf_pins.cjs','document_pdf_api.mjs',
+           'document_pdf_worker.mjs','document_pdf_data.bin','document_pdf_LICENSE.txt','document_pdf_vendor.json')
+INTAKE_FILES=(*LEGACY_INTAKE_FILES,*PDF_FILES)
+INTAKE_WINDOWS_FILES=(*LEGACY_WINDOWS_FILES,*LEGACY_INTAKE_FILES)
 WINDOWS_FILES = (*LEGACY_WINDOWS_FILES,*INTAKE_FILES)
 IA_MASTER_FILES = ('README.md','app.css','app.js','index.html','knowledge-registry.cjs','manage.cjs','modus-operandi.md','published-update.cjs',
                   'publisher.cjs','safe-read.cjs','server.cjs','studio-local.css','studio-local.js','studio.cjs','update.cjs',
@@ -258,6 +266,29 @@ IA_MASTER_FILES = ('README.md','app.css','app.js','index.html','knowledge-regist
                   *('assets/fonts/'+name for name in ('source-serif-4-regular.woff2','source-serif-4-semibold.woff2',
                      'atkinson-hyperlegible-next.woff2','Source-Serif-OFL.txt','Atkinson-Hyperlegible-Next-OFL.txt','provenance.json')),
                   *('kernel/'+name+'.js' for name in ('auroraMasterEngine','auroraNativeIntelligence','auroraNativeRoutines','auroraIaMaster','auroraProductionOrchestrator','auroraDataGovernance')))
+INTAKE_IA_MASTER_FILES=tuple(name for name in IA_MASTER_FILES if name not in {'client-agent/'+value for value in PDF_FILES})
+# Official shared 34-file pre-intake closure: signed A27/1.0.2, 0b/1.0.4,
+# and the older manifest without an embedded agent profile. Count alone is never evidence.
+LEGACY_IA_MASTER_FILES=tuple(name for name in IA_MASTER_FILES if name not in {'client-agent/'+value for value in INTAKE_FILES})
+def _legacy_ia_profile(manifest):
+    if manifest.get('version') != '1.1.0' or set(manifest['files']) != set(LEGACY_IA_MASTER_FILES):
+        return False
+    if 'clientAgent' not in manifest:
+        return True
+    agent=manifest.get('clientAgent')
+    return (isinstance(agent,dict) and agent.get('version') in ('1.0.2','1.0.4')
+            and agent.get('component') == 'AURORA_CLIENT_AGENT' and agent.get('configured') is False
+            and agent.get('sourceAuthorizationRequired') is True and agent.get('providerConnectionsVerified') is False)
+PDF_LARGE_PINS={'document_pdf_worker.mjs':'145d2dd3ab0c86151011dba95acfa2d5336e2accd59388ea43dbee0efddaaec6',
+                'document_pdf_data.bin':'e345cc3e6465356b3a48c2da62561b3ea99277b7b79be31c5dc80b9e779b1eac'}
+def trusted_asset_limit(name,pin):
+    """Finite engineering exception for exact fixed PDF bytes, never documents.
+
+    The caller must still verify the signed expected profile and full hash.
+    Prefix/name alone grants nothing. New version/hash needs a new review.
+    """
+    names={prefix+name:expected for name,expected in PDF_LARGE_PINS.items() for prefix in ('','client-agent/','aurora-coletor/')}
+    return 3*1024*1024 if names.get(name)==pin else 1024*1024
 
 
 def validate_control(control):
@@ -317,7 +348,10 @@ def release_status(control, org, bearer=None, read_active=False):
             return result
         require_active(pin, expected_org=org)
         manifest = _public_bytes(control['manifestPath'], 65536)
-        files = {name: _public_bytes(Path(__file__).parent / name, 32 * 1024 * 1024) for name in WINDOWS_FILES}
+        version=candidate.certificate['components']['windowsIntegration']['version']
+        names=WINDOWS_FILES if version=='1.0.9' else INTAKE_WINDOWS_FILES if version=='1.0.8' else LEGACY_WINDOWS_FILES if re.fullmatch(r'1\.0\.[0-7]',str(version)) else ()
+        demand(names,'PACKAGE_CLOSURE_CONFLICT')
+        files = {name: _public_bytes(Path(__file__).parent / name, 32 * 1024 * 1024) for name in names}
         proof = assess_manifest(candidate, 'windowsIntegration', manifest, files)
         require_active(pin, expected_org=org)  # Expiry after all bounded file reads.
         result.update(status='PUBLISHED_COMPONENT_CURRENT_BYTES_VERIFIED', currentPointerVerified=True,

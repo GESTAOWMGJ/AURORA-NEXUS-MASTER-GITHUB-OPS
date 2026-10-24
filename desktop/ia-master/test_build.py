@@ -20,7 +20,7 @@ class BuildContract(unittest.TestCase):
             builder.build(output)
             manifest = json.loads((output / 'manifest.json').read_text())
             self.assertEqual(manifest['version'], '1.1.0')
-            self.assertEqual(manifest['clientAgent']['version'], '1.0.5')
+            self.assertEqual(manifest['clientAgent']['version'], '1.0.6')
             self.assertFalse(manifest['clientAgent']['configured'])
             self.assertFalse(manifest['clientAgent']['providerConnectionsVerified'])
             self.assertFalse(manifest['externalAiEnabled'])
@@ -37,13 +37,15 @@ class BuildContract(unittest.TestCase):
             actual = {str(file.relative_to(output)).replace('\\', '/')
                       for file in output.rglob('*') if file.is_file()}
             self.assertEqual(actual, set(manifest['files']) | {'manifest.json'})
-            self.assertEqual(len(manifest['files']), 39)
+            self.assertEqual(len(manifest['files']), 47)
             self.assertIn('published-update.cjs', manifest['files'])
             self.assertEqual({name for name in manifest['files'] if name.startswith('client-agent/')},
                              {'client-agent/' + name for name in ('client_agent.py', 'provider_connectors.py',
                               'client_secret_store.py', 'install_client_agent.py', 'aurora_cloud_sync.py',
                               'aurora_deployment.py', 'published_release.py','document_intake.py','document_intake.cjs',
-                              'document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json')})
+                              'document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json',
+                              'document_pdf_runtime.mjs','document_pdf_node.cjs','document_pdf_pins.cjs','document_pdf_api.mjs',
+                              'document_pdf_worker.mjs','document_pdf_data.bin','document_pdf_LICENSE.txt','document_pdf_vendor.json')})
             for name, expected in manifest['files'].items():
                 self.assertEqual(hashlib.sha256((output / name).read_bytes()).hexdigest(), expected)
             for name in required - {'modus-operandi.md', 'kernel/auroraMasterEngine.js', 'kernel/auroraIaMaster.js'}:

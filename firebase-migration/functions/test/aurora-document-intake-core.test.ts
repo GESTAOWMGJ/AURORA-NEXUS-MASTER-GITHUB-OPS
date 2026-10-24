@@ -152,7 +152,7 @@ test('ZIP traversal, duplicate case and CRC alteration fail closed',async()=>{
 });
 test('PDF, image OCR and legacy Office remain pending without a distributed backend',async()=>{
   for(const mime of ['application/pdf','image/png','application/msword']){
-    const result=await engine.extract(encode('not a substitute for document extraction'),mime);assert.equal(result.extraction.status,'PENDING');assert.equal(result.text,'');assert.equal(result.extraction.textSha256,null);
+    const result=await engine.extract(encode(mime==='application/pdf'?'%PDF-1.7 pending':'not a substitute for document extraction'),mime);assert.equal(result.extraction.status,'PENDING');assert.equal(result.text,'');assert.equal(result.extraction.textSha256,null);
   }
 });
 test('empty, invalid UTF8 and oversized text never become complete',async()=>{

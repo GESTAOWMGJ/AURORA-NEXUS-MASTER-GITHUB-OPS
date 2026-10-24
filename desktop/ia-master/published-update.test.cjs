@@ -9,6 +9,13 @@ const crypto = require('node:crypto'), vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 const real = require('./published-update.cjs');
 const WINDOWS = ['client_agent.py','provider_connectors.py','client_secret_store.py','install_client_agent.py','aurora_cloud_sync.py','aurora_deployment.py','published_release.py'];
+const IA_LEGACY=['README.md','app.css','app.js','index.html','knowledge-registry.cjs','manage.cjs','modus-operandi.md','published-update.cjs',
+  'publisher.cjs','safe-read.cjs','server.cjs','studio-local.css','studio-local.js','studio.cjs','update.cjs',
+  ...WINDOWS.map(name=>'client-agent/'+name),
+  ...['source-serif-4-regular.woff2','source-serif-4-semibold.woff2','atkinson-hyperlegible-next.woff2','Source-Serif-OFL.txt','Atkinson-Hyperlegible-Next-OFL.txt','provenance.json'].map(name=>'assets/fonts/'+name),
+  ...['auroraMasterEngine','auroraNativeIntelligence','auroraNativeRoutines','auroraIaMaster','auroraProductionOrchestrator','auroraDataGovernance'].map(name=>'kernel/'+name+'.js')];
+const IA_INTAKE=[...IA_LEGACY,...['document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json'].map(name=>'client-agent/'+name)];
+const clientAgent=version=>({component:'AURORA_CLIENT_AGENT',version,platforms:['windows','macos'],configured:false,sourceAuthorizationRequired:true,providerConnectionsVerified:false});
 const OLD = '56a813aac38390d928122cb774a16b3503977d72', NEXT = 'a'.repeat(40);
 const h = real.digest, encode = value => Buffer.from(JSON.stringify(value));
 function keyPair() {
@@ -40,9 +47,9 @@ function emitResponse(callback, body, status=200, headers={'content-type':'appli
   });
   return req;
 }
-function load(overrides = {}, bootstrapHash, bootstrapHelper, runtimeRoot, windowsRoot) {
+function load(overrides = {}, bootstrapHash, bootstrapHelper, runtimeRoot, windowsRoot, sourceOverride) {
   const module={exports:{}};
-  let source=fs.readFileSync(path.join(__dirname,'published-update.cjs'),'utf8');
+  let source=sourceOverride??fs.readFileSync(path.join(__dirname,'published-update.cjs'),'utf8');
   if(bootstrapHash) source=source.replace("'d48d98e6ab94d5e08bcb82732eca6b78e84bd93fc2db9e6022b550ea1e9c63c8'","'"+bootstrapHash+"'");
   if(bootstrapHelper) source=source.replace("'5c9a54d9d2c5fb980f88f4d73998ead5ae7d06dc877a1446c4f35249cb9d3eed'","'"+bootstrapHelper+"'");
   if(runtimeRoot) source=source.replace("'D:\\\\AuroraNexus'",JSON.stringify(runtimeRoot));
@@ -72,12 +79,12 @@ function packageFixture(directory, names, source=NEXT, component='iaMaster', win
   const bytes=encode(manifest);writeFiles(directory,{...files,'manifest.json':bytes});
   return {files,manifest,bytes};
 }
-function transactionFixture(t) {
+function transactionFixture(t, sourceOverride) {
   const base=fs.mkdtempSync(path.join(os.tmpdir(),'aurora-published-synthetic-'));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
   const local=path.join(base,'C-user-local'),root=path.join(base,'D-runtime'),state=path.join(local,'AuroraNexus','integration','state','ia-master'),pkg=path.join(root,'components','ia-master','1.0.1');
   const names=['manage.cjs','knowledge-registry.cjs','server.cjs',...Array.from({length:23},(_,i)=>'public-'+i+'.txt')];
   const baseline=packageFixture(pkg,names,OLD);
-  const candidateDir=path.join(base,'candidate'),candidate=packageFixture(candidateDir,[...names,...Array.from({length:8},(_,i)=>'new-'+i+'.txt')]);
+  const candidateDir=path.join(base,'candidate'),candidate=packageFixture(candidateDir,IA_LEGACY);
   const identity={'control.key':Buffer.from('synthetic control identity'), 'organization.txt':Buffer.from('fixture-org')};
   writeFiles(state,identity);fs.writeFileSync(path.join(state,'git-task-marker.txt'),'synthetic Git backlink retained C');
   fs.writeFileSync(path.join(path.dirname(state),'integration-setup.json'),'synthetic HML sample checkpoint');
@@ -147,19 +154,20 @@ function transactionFixture(t) {
     kill:()=>{const e=Error('synthetic stopped process');e.code='ESRCH';throw e;}};
   const reader=nativeReader(env,b=>{b.observedAtUtc=new Date(controls.now).toISOString();controls.alterResponse?.(b);},
     options=>controls.canonicalReads.push({at:controls.now,nonce:options.headers['X-Aurora-Release-Nonce']}),()=>controls.canonicalStatus);
-  const api=load({'node:fs':fsProxy,'node:child_process':child,'node:http':loopback,Date:FixtureDate,
+  const loadApi=(override=sourceOverride)=>load({'node:fs':fsProxy,'node:child_process':child,'node:http':loopback,Date:FixtureDate,
     'node:https':{request:(options,callback)=>{
       if(!options.path.startsWith('/api/integration/ping?documentId='))return reader.request(options,callback);
       controls.authorityReads.push(options);const body=structuredClone(controls.transitionAuthority);
       if(body?.installation?.acceptance)body.installation.acceptance.verifiedAt=new Date(controls.now).toISOString();
       controls.authorityEvent?.(body,options);return emitResponse(callback,body,controls.authorityStatus);
-    }},process:fakeProcess},h(baseline.bytes),layout.expectedHelperSha256,root,windowsRoot);
+    }},process:fakeProcess},h(baseline.bytes),layout.expectedHelperSha256,root,windowsRoot,override);
+  const api=loadApi();
   const before={control:h(identity['control.key']),org:h(identity['organization.txt']),checkpoint:layout.expectedCheckpointSha256,git:h(fs.readFileSync(path.join(state,'git-task-marker.txt')))};
   const assertIdentity=()=>{assert.equal(h(fs.readFileSync(path.join(state,'control.key'))),before.control);assert.equal(h(fs.readFileSync(path.join(state,'organization.txt'))),before.org);
     assert.equal(h(fs.readFileSync(path.join(path.dirname(state),'integration-setup.json'))),before.checkpoint);assert.equal(h(fs.readFileSync(path.join(state,'git-task-marker.txt'))),before.git);};
   const options=async()=>({mode:'activate',pin:await api.readActivePin('synthetic-process-bearer',pair.trust,env.certificate.sourceSha,'fixture-org'),bearer:'synthetic-process-bearer',trust:pair.trust,
     expectedSourceSha:env.certificate.sourceSha,expectedOrg:'fixture-org',layout:{...layout},packageDirectory:candidateDir,manifestBytes:candidate.bytes,stageDirectory:path.join(root,'reviewed-stage')});
-  return {base,root,state,pkg,layout,pair,env,candidate,candidateDir,baseline,commands,controls,api,options,metadata,assertIdentity,fakeProcess,powershell,systemDirectory};
+  return {base,root,state,pkg,layout,pair,env,candidate,candidateDir,baseline,commands,controls,api,options,metadata,assertIdentity,fakeProcess,powershell,systemDirectory,loadApi};
 }
 test('isolated verified V2 remains candidate, V1 partial and no activation authority',async()=>{
   const pair=keyPair(),v2=real.verifyCandidate(envelope(pair),pair.trust,NEXT),v1=real.verifyCandidate(envelope(pair,{},1),pair.trust,NEXT);
@@ -196,7 +204,7 @@ test('CLI existing published plan has zero authentication, requests or writes',a
 });
 test('34-file signed IA and 7-file Windows closures reject extras and changed bytes',t=>{
   const base=fs.mkdtempSync(path.join(os.tmpdir(),'aurora-package-proof-'));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
-  const ia=packageFixture(path.join(base,'ia'),Array.from({length:34},(_,i)=>'public-'+i+'.txt'));
+  const ia=packageFixture(path.join(base,'ia'),IA_LEGACY);
   const win=packageFixture(path.join(base,'win'),WINDOWS,NEXT,'windowsIntegration'),pair=keyPair();
   const candidate=real.verifyCandidate(envelope(pair,{iaMaster:h(ia.bytes),windowsIntegration:h(win.bytes)}),pair.trust,NEXT);
   assert.equal(Object.keys(real.inspectPackage(candidate,'iaMaster',path.join(base,'ia'),ia.bytes).files).length,35);
@@ -579,6 +587,60 @@ for(const futureMs of [80,31000])test('checkpoint authority future skew is bound
   if(futureMs<=30000)assert.equal((await f.api.activatePublished(options)).status,'SIGNED_LOCAL_COMPONENT_APPLIED');
   else {await assert.rejects(f.api.activatePublished(options),/CURRENT_CHECKPOINT_AUTHORITY_REQUIRED/);assert.deepEqual(f.commands,commands);}
   assert.deepEqual(fs.readFileSync(checkpoint),transition.nextBytes);
+});
+function historicalCandidate(f,source,names,agentVersion){
+  const files=Object.fromEntries(names.map(name=>[name,Buffer.from('synthetic public '+name)]));
+  const manifest={component:'AURORA_IA_MASTER',version:'1.1.0',sourceRevision:source,dirty:false,nodeMinimumMajor:22,externalAiEnabled:false,
+    ...(agentVersion?{clientAgent:clientAgent(agentVersion)}:{}),files:Object.fromEntries(Object.entries(files).map(([name,bytes])=>[name,h(bytes)]))};
+  const bytes=encode(manifest);writeFiles(f.candidateDir,{...files,'manifest.json':bytes});
+  Object.assign(f.candidate,{files,manifest,bytes});Object.assign(f.env,envelope(f.pair,{iaMaster:h(bytes)},2,source));
+  f.layout.expectedInstallationSha256=h(fs.readFileSync(path.join(f.state,'installation.json')));
+  return f.options().then(options=>({...options,stageDirectory:path.join(f.root,'stage-'+source.slice(0,8))}));
+}
+test('signed A27 1.0.2 ancestor and 0b 1.0.4 baseline upgrade to 1eb intake; original 1eb reader rejects ancestry before journal',async t=>{
+  // Real public source IDs identify compatibility, while every key, byte, path,
+  // manager, endpoint and journal is synthetic and belongs to this fixture.
+  const f=transactionFixture(t),a27='a27d60628672df2acfffe182df751532e575c3ab',ob='0b6471b7fc83752fd29575342bcfd6b5091a251a',one='1eb89666b7c9d468958c7c6f226b69c901588be2';
+  const a=await f.api.activatePublished(await historicalCandidate(f,a27,IA_LEGACY,'1.0.2'));
+  const b=await f.api.activatePublished(await historicalCandidate(f,ob,IA_LEGACY,'1.0.4'));
+  const options=await historicalCandidate(f,one,IA_INTAKE,'1.0.5');
+  const metadata=fs.readFileSync(path.join(f.state,'installation.json')),baseline=fs.readFileSync(path.join(f.pkg,'manifest.json'));
+  const rollbackRoot=path.join(f.root,'installation-rollbacks'),attempts=fs.readdirSync(rollbackRoot).sort(),commands=[...f.commands];
+  const originalSource=fs.readFileSync(path.join(__dirname,'fixtures','published-update-1eb89666.cjs.txt'),'utf8');
+  assert.equal(h(originalSource),'8a06ac140bdc33b254ab5ad8ee52dc298f1fed28256c49fd49e895d3b288da84');
+  const old=f.loadApi(originalSource),pin=await old.readActivePin('synthetic-process-bearer',f.pair.trust,one,'fixture-org');
+  await assert.rejects(old.activatePublished({...options,pin}),/PACKAGE_CLOSURE_CONFLICT/);
+  assert.deepEqual(fs.readdirSync(rollbackRoot).sort(),attempts);assert.deepEqual(f.commands,commands);
+  assert.deepEqual(fs.readFileSync(path.join(f.state,'installation.json')),metadata);
+  assert.deepEqual(fs.readFileSync(path.join(f.pkg,'manifest.json')),baseline);f.assertIdentity();
+  const aJournal=fs.readFileSync(path.join(a.attempt,'journal.json')),bJournal=fs.readFileSync(path.join(b.attempt,'journal.json'));
+  const result=await f.api.activatePublished(await historicalCandidate(f,one,IA_INTAKE,'1.0.5'));
+  assert.equal(result.status,'SIGNED_LOCAL_COMPONENT_APPLIED');f.assertIdentity();
+  assert.deepEqual(fs.readFileSync(path.join(a.attempt,'journal.json')),aJournal);
+  assert.deepEqual(fs.readFileSync(path.join(b.attempt,'journal.json')),bJournal);
+  assert.equal((await f.api.activatePublished(await historicalCandidate(f,one,IA_INTAKE,'1.0.5'))).status,'SIGNED_LOCAL_COMPONENT_ALREADY_APPLIED');
+});
+test('legacy IA profiles require exact inventory and explicit supported metadata even when freshly signed',t=>{
+  const f=transactionFixture(t);
+  function inspect(names,version,change){
+    const directory=path.join(f.base,'legacy-'+crypto.randomUUID()),pack=packageFixture(directory,names);
+    if(version!==undefined)pack.manifest.clientAgent=clientAgent(version);
+    change?.(pack.manifest);pack.bytes=encode(pack.manifest);writeFiles(directory,{'manifest.json':pack.bytes});
+    const candidate=f.api.verifyCandidate(envelope(f.pair,{iaMaster:h(pack.bytes)}),f.pair.trust,NEXT);
+    return ()=>f.api.inspectPackage(candidate,'iaMaster',directory,pack.bytes);
+  }
+  for(const version of [undefined,'1.0.2','1.0.4'])assert.equal(inspect(IA_LEGACY,version)().version,'1.1.0');
+  for(const version of ['1.0.1','1.0.3','1.0.5','1.0.6'])assert.throws(inspect(IA_LEGACY,version),/PACKAGE_CLOSURE_CONFLICT/);
+  assert.throws(inspect([...IA_LEGACY.slice(1),'unrelated.txt'],'1.0.2'),/PACKAGE_CLOSURE_CONFLICT/);
+  for(const change of [m=>m.clientAgent.configured=true,m=>m.clientAgent.sourceAuthorizationRequired=false,m=>m.clientAgent.providerConnectionsVerified=true,m=>m.clientAgent.component='OTHER',m=>m.clientAgent={},m=>m.clientAgent=null])
+    assert.throws(inspect(IA_LEGACY,'1.0.2',change),/PACKAGE_CLOSURE_CONFLICT/);
+  const valid=inspect(IA_LEGACY,'1.0.2');valid();
+  // The authenticated candidate owns a different manifest than another caller supplies.
+  const directory=path.join(f.base,'auth-a'),a=packageFixture(directory,IA_LEGACY);
+  a.manifest.clientAgent=clientAgent('1.0.2');a.bytes=encode(a.manifest);writeFiles(directory,{'manifest.json':a.bytes});
+  const candidate=f.api.verifyCandidate(envelope(f.pair,{iaMaster:h(a.bytes)}),f.pair.trust,NEXT);
+  const altered=encode({...a.manifest,sourceRevision:'d'.repeat(40)});
+  assert.throws(()=>f.api.inspectPackage(candidate,'iaMaster',directory,altered),/SIGNED_MANIFEST_BYTES_CONFLICT/);
 });
 test('signed A to B to C preserves verified envelopes, completed lineage, current metadata CAS and identity',async t=>{
   const f=transactionFixture(t),a=await f.api.activatePublished(await f.options());

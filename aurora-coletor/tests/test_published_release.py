@@ -193,10 +193,10 @@ class PublishedReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / 'windowsIntegration-manifest.json'
             files = {name: (Path(release.__file__).parent / name).read_bytes() for name in release.WINDOWS_FILES}
-            raw = json.dumps({'component': 'AURORA_WINDOWS_INTEGRATION', 'version': '1.0.8', 'sourceSha': NEXT,
+            raw = json.dumps({'component': 'AURORA_WINDOWS_INTEGRATION', 'version': '1.0.9', 'sourceSha': NEXT,
                               'files': {name: release.digest(value) for name, value in files.items()}}).encode()
             path.write_bytes(raw)
-            env = envelope(self.key, {'windowsIntegration': release.digest(raw)},windows_version='1.0.8')
+            env = envelope(self.key, {'windowsIntegration': release.digest(raw)},windows_version='1.0.9')
             pin, _ = self.read(env=env)
             control = {'trust': self.trust, 'expectedSourceSha': NEXT, 'manifestPath': str(path)}
             with patch.object(release, 'read_active_pin', return_value=pin), patch.object(release.time, 'time', return_value=NOW):
@@ -212,6 +212,53 @@ class PublishedReleaseTests(unittest.TestCase):
             raw=b'A\r\nB\x1aC';path.write_bytes(raw)
             self.assertEqual(release._public_bytes(path,64),raw)
 
+
+    def test_pdf_profile_authenticates_versions_and_rejects_resigned_wrong_fixed_hash(self):
+        for version,names in (('1.0.7',release.LEGACY_WINDOWS_FILES),('1.0.8',release.INTAKE_WINDOWS_FILES),('1.0.9',release.WINDOWS_FILES)):
+            files={name:(Path(release.__file__).parent/name).read_bytes() if name in release.PDF_LARGE_PINS else b'synthetic closed profile' for name in names}
+            raw=json.dumps({'component':'AURORA_WINDOWS_INTEGRATION','version':version,'sourceSha':NEXT,
+                'files':{name:release.digest(data) for name,data in files.items()}}).encode()
+            candidate=release.verify_candidate(envelope(self.key,{'windowsIntegration':release.digest(raw)},windows_version=version),self.trust,NEXT)
+            self.assertEqual(release.assess_manifest(candidate,'windowsIntegration',raw,files)['status'],'SIGNED_COMPONENT_BYTES_VERIFIED')
+        wrong={**files,'document_pdf_worker.mjs':b'short wrong worker, deliberately re-signed by fixture'}
+        raw=json.dumps({'component':'AURORA_WINDOWS_INTEGRATION','version':'1.0.9','sourceSha':NEXT,
+            'files':{name:release.digest(data) for name,data in wrong.items()}}).encode()
+        candidate=release.verify_candidate(envelope(self.key,{'windowsIntegration':release.digest(raw)},windows_version='1.0.9'),self.trust,NEXT)
+        with self.assertRaisesRegex(release.ReleaseError,'PDF_TRUSTED_PROFILE_PIN_CONFLICT'):
+            release.assess_manifest(candidate,'windowsIntegration',raw,wrong)
+
+    def test_legacy_ia_34_requires_closed_supported_profile_and_its_own_signed_manifest(self):
+        def assess(version=None, names=None, change=None):
+            files={name:b'synthetic public legacy asset' for name in (names or release.LEGACY_IA_MASTER_FILES)}
+            manifest={'component':'AURORA_IA_MASTER','version':'1.1.0','sourceRevision':NEXT,'dirty':False,
+                      'externalAiEnabled':False,'nodeMinimumMajor':22,'files':{name:release.digest(data) for name,data in files.items()}}
+            if version is not None:
+                manifest['clientAgent']={'component':'AURORA_CLIENT_AGENT','version':version,'platforms':['windows','macos'],
+                                         'configured':False,'sourceAuthorizationRequired':True,'providerConnectionsVerified':False}
+            if change:
+                change(manifest)
+            raw=json.dumps(manifest).encode()
+            candidate=release.verify_candidate(envelope(self.key,{'iaMaster':release.digest(raw)}),self.trust,NEXT)
+            return lambda:release.assess_manifest(candidate,'iaMaster',raw,files),candidate,raw,files
+        for version in (None,'1.0.2','1.0.4'):
+            self.assertEqual(assess(version)[0]()['status'],'SIGNED_COMPONENT_BYTES_VERIFIED')
+        for version in ('1.0.1','1.0.3','1.0.5','1.0.6'):
+            with self.assertRaisesRegex(release.ReleaseError,'PACKAGE_CLOSURE_CONFLICT'):
+                assess(version)[0]()
+        with self.assertRaisesRegex(release.ReleaseError,'PACKAGE_CLOSURE_CONFLICT'):
+            assess('1.0.2',(*release.LEGACY_IA_MASTER_FILES[1:],'renamed-asset.cjs'))[0]()
+        for key,value in (('component','OTHER'),('configured',True),('sourceAuthorizationRequired',False),('providerConnectionsVerified',True)):
+            with self.assertRaisesRegex(release.ReleaseError,'PACKAGE_CLOSURE_CONFLICT'):
+                assess('1.0.2',change=lambda m:m['clientAgent'].__setitem__(key,value))[0]()
+        for value in ({},None):
+            with self.assertRaisesRegex(release.ReleaseError,'PACKAGE_CLOSURE_CONFLICT'):
+                assess('1.0.2',change=lambda m:m.__setitem__('clientAgent',value))[0]()
+        _,candidate,raw,files=assess('1.0.2')
+        with self.assertRaisesRegex(release.ReleaseError,'SIGNED_MANIFEST_BYTES_CONFLICT'):
+            release.assess_manifest(candidate,'iaMaster',raw+b' ',files)
+        other=release.verify_candidate(envelope(self.key,{'iaMaster':'c'*64}),self.trust,NEXT)
+        with self.assertRaisesRegex(release.ReleaseError,'SIGNED_MANIFEST_BYTES_CONFLICT'):
+            release.assess_manifest(other,'iaMaster',raw,files)
 
 class ExistingEntryPointTests(unittest.TestCase):
     def config(self, base):

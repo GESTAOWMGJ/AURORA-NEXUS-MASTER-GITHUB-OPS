@@ -26,11 +26,22 @@ try{
     else if(!bytes.equals(await readFile(destination)))throw Error('DOCUMENT_INTAKE_GENERATED_DRIFT');
   }
   for(const name of ['document_intake.cjs','document_intake.py'])files[name]=digest(await readFile(resolve(output,name)));
+  const pdfPinBytes=await readFile(resolve(output,'document_pdf_pins.cjs'),'utf8');
+  const pdfPins=JSON.parse(pdfPinBytes.replace(/^'use strict';\nmodule\.exports=/,'').replace(/;\n$/,''));
+  if(pdfPins.profile!=='PDFJS_6_4_299_TEXT_V1'||Object.keys(pdfPins.files).length!==6)throw Error('PDF_PROFILE_REQUIRED');
+  for(const [name,pin]of Object.entries(pdfPins.files)){
+    if(!/^document_pdf_[A-Za-z_.]+$/.test(name))throw Error('PDF_PROFILE_NAME_REJECTED');
+    const raw=await readFile(resolve(output,name));
+    if(raw.length!==pin.size||digest(raw)!==pin.sha256
+      ||!raw.equals(await readFile(resolve(root,'firebase-migration/hosting/aurora-nexus/assets/document-intake',name))))throw Error('PDF_PROFILE_ASSET_DRIFT');
+    files[name]=digest(raw);
+  }
+  for(const name of ['document_pdf_node.cjs','document_pdf_pins.cjs'])files[name]=digest(await readFile(resolve(output,name)));
   const manifest=Buffer.from(JSON.stringify({schemaVersion:'aurora.document.intake.assets.v1',generatorVersion:'1.0.0',compilerVersion:compiler.version,sources,files},null,2)+'\n');
   const target=resolve(output,'document-intake-manifest.json');
   if(write)await atomicGeneratedFile(output,'document-intake-manifest.json',manifest);
   else if(!manifest.equals(await readFile(target)))throw Error('DOCUMENT_INTAKE_MANIFEST_DRIFT');
-  process.stdout.write(JSON.stringify({status:write?'GENERATED':'GENERATED_BYTES_VERIFIED',sourceCount:2,fileCount:4,manifestSha256:digest(manifest),runtimeDownloads:false})+'\n');
+  process.stdout.write(JSON.stringify({status:write?'GENERATED':'GENERATED_BYTES_VERIFIED',sourceCount:2,fileCount:Object.keys(files).length,manifestSha256:digest(manifest),runtimeDownloads:false})+'\n');
 }finally{
   if(dirname(temporary)!==resolve(tmpdir())||!basename(temporary).startsWith('aurora-intake-generated-'))throw Error('GENERATOR_TEMP_PATH_REJECTED');
   await rm(temporary,{recursive:true,force:true});

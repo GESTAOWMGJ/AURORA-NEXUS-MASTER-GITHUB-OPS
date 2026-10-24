@@ -2,7 +2,7 @@
  * The function is self-contained so the SAME compiled implementation runs in the
  * browser and Node. Raw text/trees are ephemeral and must never enter generic ingest.
  */
-export type IntakeMethod = 'TEXT_UTF8'|'CSV_UTF8'|'JSON_UTF8'|'XML_TEXT'|'DOCX_XML'|'XLSX_XML'|'ODT_XML'|'ODS_XML';
+export type IntakeMethod = 'TEXT_UTF8'|'CSV_UTF8'|'JSON_UTF8'|'XML_TEXT'|'DOCX_XML'|'XLSX_XML'|'ODT_XML'|'ODS_XML'|'PDF_TEXT';
 export type IntakeExtraction = {
   status:'COMPLETE'|'PARTIAL'|'PENDING'|'FAILED';method:IntakeMethod|null;methodVersion:'1.0.0';
   textSha256:string|null;textByteLength:number;
@@ -13,7 +13,8 @@ export type IntakeXmlLeaf = {path:string[];namespaceURI:string;namespacePath:str
 export type IntakeTable = {columns:string[];rows:string[][];rowLocators:string[]};
 export type IntakeResult = {byteSha256:string;byteLength:number;text:string;segments:Array<{locator:string;text:string}>;
   xmlLeaves:IntakeXmlLeaf[];tables:IntakeTable[];extraction:IntakeExtraction};
-export type IntakeOptions = {inflateRaw?:(bytes:Uint8Array,expected:number)=>Promise<Uint8Array>};
+export type IntakeOptions = {inflateRaw?:(bytes:Uint8Array,expected:number)=>Promise<Uint8Array>;
+  extractPdfText?:(bytes:Uint8Array)=>Promise<{schemaVersion:string;pages:number;segments:Array<{locator:string;text:string}>}>};
 
 export function createDocumentIntakeEngine() {
   const VERSION='1.0.0', MAX_BYTES=1048576, MAX_TEXT=262144, MAX_PARTS=128, MAX_EXPANDED=8388608;
@@ -221,6 +222,22 @@ export function createDocumentIntakeEngine() {
         else if(mime==='application/json'){method='JSON_UTF8';const value=JSON.parse(text);need(value!==null&&typeof value==='object');segments=[{locator:'json/root',text}];}
         else if(mime==='application/xml'||mime==='text/xml'){method='XML_TEXT';const result=xml(text);segments=result.segments;xmlLeaves=result.leaves;}
         else{method='TEXT_UTF8';segments=[{locator:'text/body',text}];}
+      }else if(mime==='application/pdf'){
+        need(bytes.length>=8&&decoder.decode(bytes.subarray(0,5))==='%PDF-');
+        need(options.extractPdfText,'BACKEND_REQUIRED');
+        const result=await options.extractPdfText!(bytes);
+        need(result?.schemaVersion==='aurora.pdf.text.result.v1'&&Number.isSafeInteger(result.pages)&&result.pages>0&&result.pages<=32);
+        need(Array.isArray(result.segments)&&result.segments.length<=20000,'LIMIT_EXCEEDED');
+        let expanded=0;
+        for(const segment of result.segments){
+          need(segment&&typeof segment.text==='string'&&segment.text.length<=MAX_TEXT
+            &&/^pdf\/page\[[1-9][0-9]?\]\/item\[[1-9][0-9]{0,4}\]$/.test(segment.locator));
+          expanded+=encoder.encode(segment.text).length+(segments.length?1:0);need(expanded<=MAX_TEXT,'LIMIT_EXCEEDED');
+          segments.push({locator:segment.locator,text:segment.text});
+        }
+        // Page text is real; image/annotation/form/layout coverage is not OCR.
+        // Never infer that text extraction covers every representation in PDF.
+        method='PDF_TEXT';totalUnits=processedUnits=result.pages;partial=true;
       }else if(['application/vnd.openxmlformats-officedocument.wordprocessingml.document','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.oasis.opendocument.text','application/vnd.oasis.opendocument.spreadsheet'].includes(mime)){
         const files=await zip(bytes,options);
         need(!Array.from(files.keys()).some(name=>/vbaProject\.bin$|\/embeddings\//i.test(name)),'BACKEND_REQUIRED');
