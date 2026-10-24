@@ -1,5 +1,5 @@
 import { generateNativeInsight, type NativeInsightFinding } from "./auroraNativeIntelligence.js";
-import { nativeRoutineSummary } from "./auroraNativeRoutines.js";
+import { nativeRoutineSummary, buildClientAdoptionPlan, type AdoptionContext } from "./auroraNativeRoutines.js";
 import { iaMasterCapability } from "./auroraIaMaster.js";
 import { buildBetaProductionOrchestrator } from "./auroraProductionOrchestrator.js";
 import { assessNativeData, DATA_GOVERNANCE_POLICY, knownCount, masterCommandSurface } from "./auroraDataGovernance.js";
@@ -9,6 +9,7 @@ type MasterContext = {
   actionSummary?: Record<string, unknown>;
   financialStatus?: Record<string, unknown> | null;
   release?: Record<string, unknown>;
+  adoption?: AdoptionContext;
 };
 const SEVERITY_RANK: Record<NativeInsightFinding["severity"], number> = { CRITICAL: 5, HIGH: 4, MEDIUM: 3, LOW: 2, INFO: 1 };
 function record(value: unknown): Record<string, unknown> {
@@ -104,6 +105,7 @@ export function buildMasterOperationalState(
       criticalFindings: denied ? null : critical, highFindings: denied ? null : high
     },
     routines: nativeRoutineSummary(),
+    clientAdoption: buildClientAdoptionPlan(projection.orgId, context.adoption),
     iaMaster: iaMasterCapability(),
     betaProductionOrchestrator: buildBetaProductionOrchestrator(projection, { ...context, release }, now),
     financialGate: {
