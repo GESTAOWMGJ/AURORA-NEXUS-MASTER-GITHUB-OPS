@@ -23,7 +23,7 @@ from provider_connectors import pull, exports, EXPORT_SUFFIXES, MAX_PROVIDER_BYT
 from client_secret_store import load as load_secret
 import published_release as release
 
-VERSION='1.0.5'
+VERSION='1.0.6'
 SCHEMA='aurora.client-agent.v1'
 MAX_ENTRIES=200
 SOURCE_PROOF_TTL_SECONDS=300

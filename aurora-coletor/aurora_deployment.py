@@ -20,14 +20,13 @@ import secrets
 import time
 
 import aurora_cloud_sync as sync
+import published_release as release_profile
 
-VERSION = '1.0.8'
-CHECKPOINT_VERSIONS = ('1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7', VERSION)
+VERSION = '1.0.9'
+CHECKPOINT_VERSIONS = ('1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4', '1.0.5', '1.0.6', '1.0.7','1.0.8', VERSION)
 SCHEMA = 'aurora.install.integration.v1'
 STATE_NAME = 'integration-setup.json'
-ASSETS = ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
-          'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py',
-          'document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json')
+ASSETS = release_profile.WINDOWS_FILES
 CHECKPOINT_FIELDS = {'schemaVersion', 'componentVersion', 'targetBinding', 'sampleKey', 'attempt', 'updatedAt',
                      'status', 'nextAction', 'connectionVerified', 'receiptVerifiedThisRun',
                      'processingVerifiedThisRun', 'processingProof', 'previousReceiptCached', 'receipt',
@@ -443,9 +442,11 @@ def _transition_authority(plan, token):
 
 def _transition_windows_files(package, release, signed_version):
     # Only a verified certificate selects a fixed public-file allowlist. Historical
-    # seven-file evidence must not be reinterpreted as the new twelve-file package.
-    if signed_version == '1.0.8':
+    # Seven/twelve-file evidence must never be reinterpreted as the PDF closure.
+    if signed_version == '1.0.9':
         names = release.WINDOWS_FILES
+    elif signed_version=='1.0.8':
+        names=release.INTAKE_WINDOWS_FILES
     elif isinstance(signed_version, str) and re.fullmatch(r'1\.0\.[0-7]', signed_version):
         names = release.LEGACY_WINDOWS_FILES
     else:

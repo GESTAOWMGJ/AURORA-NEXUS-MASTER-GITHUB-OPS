@@ -489,7 +489,7 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         self.old_source, self.new_source = 'a' * 40, 'b' * 40
         self.create_release(self.old_source, b'# exact synthetic signed predecessor installer\n', version='1.0.7')
         # Materialize the historical checkpoint under its own version guard.
-        # All later validation and execution use the current 1.0.8 guard.
+        # All later validation and execution use the current 1.0.9 guard.
         with patch.object(self.deployment, 'VERSION', '1.0.7'):
             old_result = f.execute()
         self.old_reference = old_result['checkpointTransition']
@@ -546,12 +546,12 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         receipt['artifacts']['manifest']['afterSha256'] = installer.fingerprint(self.snapshots['manifest'])
         self.receipt_path.write_bytes(self.encode(receipt))
 
-    def create_release(self, source, script, bridge=None, version='1.0.8'):
+    def create_release(self, source, script, bridge=None, version='1.0.9'):
         f, release = self.f, self.release
         self.bundle = f.base / ('bundle-' + source[0])
         f.package = self.bundle / 'aurora-coletor'
         f.package.mkdir(parents=True)
-        names = release.LEGACY_WINDOWS_FILES if version == '1.0.7' else release.WINDOWS_FILES
+        names = release.LEGACY_WINDOWS_FILES if version == '1.0.7' else release.INTAKE_WINDOWS_FILES if version=='1.0.8' else release.WINDOWS_FILES
         assets = {name: self.asset_bytes[name] for name in names}
         payloads = {**{'aurora-coletor/' + name: value for name, value in assets.items()},
                     'desktop/install_windows_beta.py': script, 'INSTALAR-AURORA-NEXUS.cmd': b'@echo off\n',
@@ -655,11 +655,11 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         self.assertEqual(len(self.f.transport.posts), 2)
         self.assert_original()
 
-    def test_signed_predecessor_and_current_release_keep_separate_seven_and_twelve_file_profiles(self):
-        self.assertEqual(len(self.asset_bytes), 12)
+    def test_signed_predecessor_and_current_release_keep_separate_seven_and_twenty_file_profiles(self):
+        self.assertEqual(len(self.asset_bytes), 20)
         self.assertEqual(set(self.asset_bytes), set(self.release.WINDOWS_FILES))
         for plan, version, names in ((self.old_plan, '1.0.7', self.release.LEGACY_WINDOWS_FILES),
-                                     (self.f.plan, '1.0.8', self.release.WINDOWS_FILES)):
+                                     (self.f.plan, '1.0.9', self.release.WINDOWS_FILES)):
             self.assertEqual(plan['envelope']['certificate']['components']['windowsIntegration']['version'], version)
             manifest = json.loads(Path(plan['publicReleaseControl']['manifestPath']).read_bytes())
             self.assertEqual(manifest['version'], version)
@@ -708,12 +708,22 @@ class SignedPublishedContinuityTests(unittest.TestCase):
 
     def test_signed_zip_rejects_unknown_component_version(self):
         envelope = copy.deepcopy(self.f.env)
-        envelope['certificate']['components']['windowsIntegration']['version'] = '1.0.9'
+        envelope['certificate']['components']['windowsIntegration']['version'] = '1.0.10'
         self.f.resign(envelope)
         candidate = self.release.verify_candidate(envelope, self.f.trust, self.new_source)
         with self.assertRaisesRegex(ValueError, 'SIGNED_CLIENT_COMPONENT_VERSION_CONFLICT'):
             installer._signed_client_bundle({'files': {}, 'absent': set(), 'release': self.release}, self.f.plan, candidate)
         self.assert_original()
+
+    def test_new_consumer_reads_the_preserved_signed_108_twelve_file_zip_without_pdf(self):
+        before=self.f.active.read_bytes()
+        self.create_release('c'*40,b'# preserved 1.0.8 public fixture\n',version='1.0.8')
+        candidate=self.release.verify_candidate(self.f.env,self.f.trust,'c'*40)
+        manifest=json.loads(self.f.manifest_path.read_bytes())
+        self.assertEqual(set(manifest['files']),set(self.release.INTAKE_WINDOWS_FILES))
+        self.assertEqual(len(manifest['files']),12)
+        installer._signed_client_bundle({'files':{},'absent':set(),'release':self.release},self.f.plan,candidate)
+        self.assertEqual(self.f.active.read_bytes(),before)
 
     def test_generic_metadata_and_unregistered_proof_cannot_authorize(self):
         for proof in (None, {'verified': True}, installer._ClientPredecessor()):
@@ -937,7 +947,7 @@ class SignedPublishedContinuityTests(unittest.TestCase):
         self.assertEqual(len(self.f.transport.posts), 2)
         metadata = json.loads(self.manifest.read_bytes())
         self.assertEqual(metadata['reviewedMainSha'], self.new_source)
-        self.assertEqual(metadata['integrationComponent']['version'], '1.0.8')
+        self.assertEqual(metadata['integrationComponent']['version'], '1.0.9')
         self.assertEqual(json.loads(self.f.active.read_bytes())['receipt']['status'], 'DUPLICATE')
         self.assertEqual((Path(result['rollbackBackup']) / 'before-manifest.json').read_bytes(), self.snapshots['manifest'])
         self.assertNotIn('SYNTHETIC_PROCESS_ONLY', output.getvalue())

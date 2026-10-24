@@ -64,9 +64,12 @@ def package_source():
     for name,digest in manifest['files'].items():
         path=deployment_safe_path(root/name)
         if (not isinstance(digest,str) or not re.fullmatch(r'[a-f0-9]{64}',digest)
-                or not path.is_file() or path.stat().st_nlink!=1 or path.stat().st_size>1024*1024
+                or not path.is_file() or path.stat().st_nlink!=1 or path.stat().st_size>integration_deployment.release_profile.trusted_asset_limit(name,digest)
                 or hashlib.sha256(path.read_bytes()).hexdigest()!=digest):
             raise ValueError('PACKAGE_BYTES_CHANGED')
+        fixed=integration_deployment.release_profile.PDF_LARGE_PINS
+        if name.startswith('aurora-coletor/') and name.removeprefix('aurora-coletor/') in fixed and fixed[name.removeprefix('aurora-coletor/')]!=digest:
+            raise ValueError('PDF_TRUSTED_PROFILE_PIN_CONFLICT')
     return source
 
 
@@ -333,15 +336,18 @@ def _signed_client_bundle(data, plan, candidate):
         signed_version = candidate.certificate['components']['windowsIntegration']['version']
         if signed_version == integration_deployment.VERSION:
             sources = PACKAGE_SOURCES
+        elif signed_version=='1.0.8':
+            sources=('desktop/install_windows_beta.py',*('aurora-coletor/'+name for name in data['release'].INTAKE_WINDOWS_FILES))
         elif isinstance(signed_version, str) and re.fullmatch(r'1\.0\.[0-7]', signed_version):
             sources = ('desktop/install_windows_beta.py', *('aurora-coletor/' + name for name in data['release'].LEGACY_WINDOWS_FILES))
         else:
             raise ValueError('SIGNED_CLIENT_COMPONENT_VERSION_CONFLICT')
         expected_names = set(sources) | {'INSTALAR-AURORA-NEXUS.cmd', 'LEIA-PRIMEIRO.txt'}
         names = [entry.filename for entry in infos]
+        pdf_admission={ 'aurora-coletor/'+name for name in integration_deployment.release_profile.PDF_LARGE_PINS } if signed_version=='1.0.9' else set()
         if (len(names) != len(set(name.casefold() for name in names)) or set(names) != expected_names | {'manifest.json'}
                 or sum(entry.file_size for entry in infos) > 16 * 1024 * 1024
-                or any(entry.is_dir() or entry.flag_bits & 1 or entry.file_size > 1024 * 1024
+                or any(entry.is_dir() or entry.flag_bits & 1 or entry.file_size > (3 if entry.filename in pdf_admission else 1) * 1024 * 1024
                        or stat.S_IFMT(entry.external_attr >> 16) not in (0, stat.S_IFREG) for entry in infos)):
             raise ValueError('SIGNED_CLIENT_ZIP_CLOSURE_CONFLICT')
         files = {entry.filename: archive.read(entry) for entry in infos}
@@ -351,9 +357,18 @@ def _signed_client_bundle(data, plan, candidate):
             or any(not re.fullmatch('[a-f0-9]{64}', value or '') or fingerprint(files[name]) != value
                    for name, value in manifest['files'].items())):
         raise ValueError('SIGNED_CLIENT_BUNDLE_CONFLICT')
+    for name,value in files.items():
+        # Zip parsing uses a finite3 MiB admission cap; acceptance of either
+        # larger PDF asset requires its EXACT upstream/profile hash, after
+        # authenticated component/version/closure and bundle hashes above.
+        maximum=integration_deployment.release_profile.trusted_asset_limit(name,fingerprint(value))
+        if len(value)>maximum:raise ValueError('SIGNED_CLIENT_FILE_LIMIT')
+        fixed=integration_deployment.release_profile.PDF_LARGE_PINS
+        if name.startswith('aurora-coletor/') and name.removeprefix('aurora-coletor/') in fixed and fixed[name.removeprefix('aurora-coletor/')]!=fingerprint(value):
+            raise ValueError('PDF_TRUSTED_PROFILE_PIN_CONFLICT')
     bundle = safe_path(Path(plan['packageDirectory']).parent)
     for name, value in files.items():
-        if _client_read(data, bundle / name, 1024 * 1024) != value:
+        if _client_read(data, bundle / name, integration_deployment.release_profile.trusted_asset_limit(name,fingerprint(value))) != value:
             raise ValueError('SIGNED_CLIENT_BUNDLE_BYTES_CHANGED')
     return fingerprint(files['desktop/install_windows_beta.py'])
 

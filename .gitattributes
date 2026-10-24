@@ -9,3 +9,17 @@ aurora-coletor/document_intake*.cjs text eol=lf
 aurora-coletor/document_fact_mapping.cjs text eol=lf
 aurora-coletor/document_intake.py text eol=lf
 aurora-coletor/document-intake-manifest.json text eol=lf
+aurora-coletor/document_pdf*.cjs text eol=lf
+aurora-coletor/document_pdf*.mjs text eol=lf
+aurora-coletor/document_pdf*.json text eol=lf
+aurora-coletor/document_pdf*.bin binary
+aurora-coletor/document_pdf_LICENSE.txt -text -whitespace
+firebase-migration/hosting/aurora-nexus/assets/document-intake/*.mjs text eol=lf
+firebase-migration/hosting/aurora-nexus/assets/document-intake/*.json text eol=lf
+firebase-migration/hosting/aurora-nexus/assets/document-intake/*.bin binary
+firebase-migration/hosting/aurora-nexus/assets/document-intake/*LICENSE.txt -text -whitespace
+firebase-migration/scripts/pdf-text-vendor/*.LICENSE -text -whitespace
+firebase-migration/functions/test/fixtures/document-intake/*.pdf binary
+
+# Immutable public historical reader used only by a synthetic regression.
+desktop/ia-master/fixtures/published-update-1eb89666.cjs.txt -text

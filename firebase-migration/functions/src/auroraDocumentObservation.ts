@@ -6,7 +6,7 @@ import { canImportNativeDocuments, type DocumentPrincipal } from './auroraNative
 export const DOCUMENT_OBSERVATION_SCHEMA = 'aurora.document.observation.v1';
 export const DOCUMENT_OBSERVATION_OPERATION = 'OBSERVE_DOCUMENT_EXTRACTION';
 export const DOCUMENT_OBSERVATION_RECEIPT_SCHEMA = 'aurora.document.observation.receipt.v1';
-export const DOCUMENT_EXTRACTION_METHODS = ['TEXT_UTF8','CSV_UTF8','JSON_UTF8','XML_TEXT','DOCX_XML','XLSX_XML','ODT_XML','ODS_XML'] as const;
+export const DOCUMENT_EXTRACTION_METHODS = ['TEXT_UTF8','CSV_UTF8','JSON_UTF8','XML_TEXT','DOCX_XML','XLSX_XML','ODT_XML','ODS_XML','PDF_TEXT'] as const;
 export type DocumentExtractionMethod = typeof DOCUMENT_EXTRACTION_METHODS[number];
 export const DOCUMENT_OBSERVATION_PROVIDERS = ['GOOGLE_DRIVE','GMAIL','MICROSOFT_MAIL','IMAP','LOCAL_AGENT','API_TOKEN','MANUAL'] as const;
 export const DOCUMENT_EXTRACTION_CODES = ['CONTENT_EXTRACTED','BOUNDED_EXTRACTION_PARTIAL','EXTRACTION_REQUIRED','UNSUPPORTED_FORMAT','BACKEND_REQUIRED','MALFORMED_DOCUMENT','LIMIT_EXCEEDED','ENCRYPTED_DOCUMENT','EMPTY_CONTENT','SOURCE_CHANGED'] as const;
@@ -42,7 +42,7 @@ const METHOD_MIMES:Record<DocumentExtractionMethod,readonly string[]> = {
   TEXT_UTF8:['text/plain','text/markdown'],CSV_UTF8:['text/csv'],JSON_UTF8:['application/json'],XML_TEXT:['application/xml','text/xml'],
   DOCX_XML:['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
   XLSX_XML:['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],
-  ODT_XML:['application/vnd.oasis.opendocument.text'],ODS_XML:['application/vnd.oasis.opendocument.spreadsheet']
+  ODT_XML:['application/vnd.oasis.opendocument.text'],ODS_XML:['application/vnd.oasis.opendocument.spreadsheet'],PDF_TEXT:['application/pdf']
 };
 function validExternalId(value:unknown):value is string {
   return typeof value==='string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{1,159}$/.test(value) && /[A-Za-z]/.test(value)
@@ -72,6 +72,7 @@ function parseExtraction(value:unknown,acquisition:ObservationAcquisition):Obser
     || !['EXPECTED_PARTS','BOUNDED_REPRESENTATION'].includes(value.coverage.basis)
     || !integer(value.coverage.totalUnits,10000) || !integer(value.coverage.processedUnits,value.coverage.totalUnits)) return null;
   if (value.method!==null && !METHOD_MIMES[value.method as DocumentExtractionMethod].includes(acquisition.acquiredMimeType)) return null;
+  if (value.method==='PDF_TEXT' && (value.status!=='PARTIAL'||value.coverage.basis!=='BOUNDED_REPRESENTATION'||value.coverage.totalUnits>32)) return null;
   if (['COMPLETE','PARTIAL'].includes(value.status)) {
     if (value.method===null || !hash(value.textSha256) || value.textByteLength<1
       || value.coverage.totalUnits<1 || value.coverage.processedUnits<1) return null;

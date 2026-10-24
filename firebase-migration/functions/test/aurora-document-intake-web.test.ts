@@ -75,7 +75,7 @@ test('late file read after pagehide cannot send raw bytes or an observation',asy
 test('consent/size gates run before reading bytes and the UI preserves the canonical JSON path',async()=>{
   let reads=0;const h=harness({name:'oversized.txt',size:1048577,arrayBuffer:()=>{reads++;return Promise.resolve(new ArrayBuffer(1));}});
   await h.submit();assert.equal(reads,0);assert.equal(h.requests.length,0);
-  const html=nativeIngestionSection(member);assert.match(html,/native-ingestion-form/);assert.match(html,/document-intake-form/);assert.match(html,/\.docx/);assert.match(html,/PDF, imagens/);
+  const html=nativeIngestionSection(member);assert.match(html,/native-ingestion-form/);assert.match(html,/document-intake-form/);assert.match(html,/\.docx/);assert.match(html,/aguardam OCR/);
   assert.doesNotMatch(nativeIngestionSection({...member,mfaVerified:false}),/id="document-intake-form"/);
 });
 test('session end after first HTTP response aborts its controller and prevents replay/success',async()=>{

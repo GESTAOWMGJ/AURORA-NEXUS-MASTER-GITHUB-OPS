@@ -15,13 +15,35 @@ const COMPONENTS = ['server', 'web', 'satellite', 'iaMaster', 'windowsIntegratio
 const CHECKS = ['ciPassed', 'humanReviewApproved', 'protectedDeploySucceeded', 'smokePassed'];
 const LEGACY_WINDOWS_FILES = ['client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py',
   'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py'];
-const INTAKE_FILES=['document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json'];
+const LEGACY_INTAKE_FILES=['document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json'];
+const PDF_FILES=['document_pdf_runtime.mjs','document_pdf_node.cjs','document_pdf_pins.cjs','document_pdf_api.mjs',
+  'document_pdf_worker.mjs','document_pdf_data.bin','document_pdf_LICENSE.txt','document_pdf_vendor.json'];
+const INTAKE_FILES=[...LEGACY_INTAKE_FILES,...PDF_FILES];
+const INTAKE_WINDOWS_FILES=[...LEGACY_WINDOWS_FILES,...LEGACY_INTAKE_FILES];
 const WINDOWS_FILES=[...LEGACY_WINDOWS_FILES,...INTAKE_FILES];
 const IA_MASTER_FILES=['README.md','app.css','app.js','index.html','knowledge-registry.cjs','manage.cjs','modus-operandi.md','published-update.cjs',
   'publisher.cjs','safe-read.cjs','server.cjs','studio-local.css','studio-local.js','studio.cjs','update.cjs',
   ...WINDOWS_FILES.map(name=>'client-agent/'+name),
   ...['source-serif-4-regular.woff2','source-serif-4-semibold.woff2','atkinson-hyperlegible-next.woff2','Source-Serif-OFL.txt','Atkinson-Hyperlegible-Next-OFL.txt','provenance.json'].map(name=>'assets/fonts/'+name),
   ...['auroraMasterEngine','auroraNativeIntelligence','auroraNativeRoutines','auroraIaMaster','auroraProductionOrchestrator','auroraDataGovernance'].map(name=>'kernel/'+name+'.js')];
+const INTAKE_IA_MASTER_FILES=IA_MASTER_FILES.filter(name=>!PDF_FILES.some(file=>name==='client-agent/'+file));
+// Official pre-intake inventory shared by the signed A27/1.0.2 and 0b/1.0.4
+// ancestors. A file count, absent intake names or caller-selected version is not a profile.
+const LEGACY_IA_MASTER_FILES=IA_MASTER_FILES.filter(name=>!INTAKE_FILES.some(file=>name==='client-agent/'+file));
+const LEGACY_CLIENT_AGENT_VERSIONS=new Set(['1.0.2','1.0.4']);
+function legacyIaProfile(manifest,sameNames){
+  if(manifest.version!=='1.1.0'||!sameNames(LEGACY_IA_MASTER_FILES))return false;
+  if(!Object.hasOwn(manifest,'clientAgent'))return true;
+  const agent=manifest.clientAgent;
+  return row(agent)&&LEGACY_CLIENT_AGENT_VERSIONS.has(agent.version)&&agent.component==='AURORA_CLIENT_AGENT'
+    &&agent.configured===false&&agent.sourceAuthorizationRequired===true&&agent.providerConnectionsVerified===false;
+}
+const PDF_LARGE_PINS={'document_pdf_worker.mjs':'145d2dd3ab0c86151011dba95acfa2d5336e2accd59388ea43dbee0efddaaec6',
+  'document_pdf_data.bin':'e345cc3e6465356b3a48c2da62561b3ea99277b7b79be31c5dc80b9e779b1eac'};
+function trustedAssetLimit(name,pin){
+  const exact=Object.entries(PDF_LARGE_PINS).some(([file,hash])=>pin===hash&&(name===file||name==='client-agent/'+file));
+  return (exact?3:1)*1024*1024;
+}
 const CHECKPOINT_FIELDS = ['schemaVersion', 'componentVersion', 'targetBinding', 'sampleKey', 'attempt', 'updatedAt',
   'status', 'nextAction', 'connectionVerified', 'receiptVerifiedThisRun', 'processingVerifiedThisRun', 'processingProof',
   'previousReceiptCached', 'receipt', 'fullSynchronizationVerified', 'productionReleased', 'code', 'installationAcceptance'];
@@ -195,16 +217,20 @@ function inspectPackage(candidate, component, directory, manifestBytes) {
   const physicalNames = Object.keys(files).filter(name => name !== 'manifest.json');
   const sameNames=expected=>canonical([...names].sort())===canonical([...expected].sort());
   const profile=component==='windowsIntegration'
-    ? manifest.version==='1.0.8'?sameNames(WINDOWS_FILES):/^1\.0\.[0-7]$/.test(manifest.version)&&sameNames(LEGACY_WINDOWS_FILES)
-    : names.length===39?sameNames(IA_MASTER_FILES)&&manifest.version==='1.1.0'&&manifest.clientAgent?.version==='1.0.5'
+    ? manifest.version==='1.0.9'?sameNames(WINDOWS_FILES):manifest.version==='1.0.8'?sameNames(INTAKE_WINDOWS_FILES):/^1\.0\.[0-7]$/.test(manifest.version)&&sameNames(LEGACY_WINDOWS_FILES)
+    : [39,47].includes(names.length)?sameNames(names.length===47?IA_MASTER_FILES:INTAKE_IA_MASTER_FILES)&&manifest.version==='1.1.0'&&manifest.clientAgent?.version===(names.length===47?'1.0.6':'1.0.5')
       &&manifest.clientAgent.component==='AURORA_CLIENT_AGENT'&&manifest.clientAgent.configured===false
       &&manifest.clientAgent.sourceAuthorizationRequired===true&&manifest.clientAgent.providerConnectionsVerified===false
-      : names.length===34&&[undefined,'1.0.4'].includes(manifest.clientAgent?.version)&&!INTAKE_FILES.some(name=>names.includes('client-agent/'+name));
+      : legacyIaProfile(manifest,sameNames);
   demand(profile
     && names.every(name => safeName(name) && name !== 'manifest.json' && hex(manifest.files[name], 64))
     && canonical([...physicalNames].sort()) === canonical([...names].sort()), 'PACKAGE_CLOSURE_CONFLICT');
   if (Object.hasOwn(files, 'manifest.json')) demand(digest(files['manifest.json']) === expected.manifestSha256, 'PACKAGE_MANIFEST_CONFLICT');
-  for (const name of names) demand(digest(files[name]) === manifest.files[name], 'PACKAGE_FILE_BYTES_CONFLICT');
+  for (const name of names) {
+    demand(digest(files[name]) === manifest.files[name]&&files[name].length<=trustedAssetLimit(name,manifest.files[name]), 'PACKAGE_FILE_BYTES_CONFLICT');
+    for(const [file,pin]of Object.entries(PDF_LARGE_PINS))if(name===file||name==='client-agent/'+file)
+      demand(manifest.files[name]===pin,'PDF_TRUSTED_PROFILE_PIN_CONFLICT');
+  }
   files['manifest.json'] = manifestBytes;
   return { component, sourceSha: source, version: manifest.version, manifestSha256: expected.manifestSha256,
     files, manifestBytes, treeSha256: digest(canonical(Object.fromEntries(Object.keys(files).sort().map(name => [name, digest(files[name])])))) };

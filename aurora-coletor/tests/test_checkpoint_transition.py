@@ -81,16 +81,18 @@ class CheckpointTransitionTests(unittest.TestCase):
         self.attempt = self.runtime / 'installation-rollbacks' / 'published-11111111-2222-3333-4444-555555555555'
         self.attempt.mkdir(parents=True)
         self.key, self.trust = pair()
-        win_files = {name: ('# synthetic signed fixture ' + name + '\n').encode() for name in deployment.ASSETS}
+        win_files = {name: (Path(release.__file__).parent/name).read_bytes() if name in release.PDF_LARGE_PINS else ('# synthetic signed fixture ' + name + '\n').encode() for name in deployment.ASSETS}
         for name, data in win_files.items():
             (self.package / name).write_bytes(data)
-        self.win_manifest = {'component': 'AURORA_WINDOWS_INTEGRATION', 'version': '1.0.8', 'sourceSha': NEXT,
+        self.win_manifest = {'component': 'AURORA_WINDOWS_INTEGRATION', 'version': deployment.VERSION, 'sourceSha': NEXT,
                              'files': {name: release.digest(data) for name, data in win_files.items()}}
         self.manifest_path = self.base / 'windowsIntegration-manifest.json'
         self.manifest_path.write_bytes(deployment._transition_encoded(self.win_manifest))
-        ia_files = {f'fixture{index}.cjs': f'// synthetic signed file {index}\n'.encode() for index in range(34)}
+        ia_files = {name: ('// synthetic signed file ' + name + '\n').encode() for name in release.LEGACY_IA_MASTER_FILES}
         for name, data in ia_files.items():
-            (self.ia_package / name).write_bytes(data)
+            target = self.ia_package / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
         self.ia_manifest = {'component': 'AURORA_IA_MASTER', 'version': '1.1.0', 'sourceRevision': NEXT,
                             'dirty': False, 'externalAiEnabled': False, 'nodeMinimumMajor': 22,
                             'files': {name: release.digest(data) for name, data in ia_files.items()}}
@@ -98,7 +100,7 @@ class CheckpointTransitionTests(unittest.TestCase):
         (self.ia_package / 'manifest.json').write_bytes(ia_bytes)
         self.env = envelope(self.key, {'windowsIntegration': release.digest(self.manifest_path.read_bytes()),
                                        'iaMaster': release.digest(ia_bytes)})
-        self.env['certificate']['components']['windowsIntegration']['version'] = '1.0.8'
+        self.env['certificate']['components']['windowsIntegration']['version'] = deployment.VERSION
         self.resign(self.env)
         self.cert_sha = release.digest(release.signing_bytes(self.env['certificate']))
         metadata = {'version': '1.1.0', 'sourceRevision': NEXT, 'organization': ORG,
@@ -220,7 +222,7 @@ class CheckpointTransitionTests(unittest.TestCase):
         self.assertEqual(commit['proofSha256'], release.digest((directory / 'proof.json').read_bytes()))
         self.assertEqual(result['checkpointTransition']['commitSha256'], release.digest((directory / 'commit.json').read_bytes()))
         saved = json.loads(self.active.read_bytes())
-        self.assertEqual(saved['componentVersion'], '1.0.8')
+        self.assertEqual(saved['componentVersion'], '1.0.9')
         self.assertEqual(saved['receipt']['status'], 'DUPLICATE')
         self.assertTrue(saved['installationAcceptance']['eligible'])
         self.assertNotIn('orgId', saved['installationAcceptance'])
@@ -290,7 +292,7 @@ class CheckpointTransitionTests(unittest.TestCase):
         previous['componentVersion'] = version
         self.set_previous(previous)
         self.assertEqual(self.execute()['status'], 'CHECKPOINT_TRANSITION_COMMITTED')
-        self.assertEqual(json.loads(self.active.read_bytes())['componentVersion'], '1.0.8')
+        self.assertEqual(json.loads(self.active.read_bytes())['componentVersion'], '1.0.9')
         self.assertEqual((self.directory() / 'checkpoint.previous').read_bytes(), self.previous)
 
     def test_historical_100_checkpoint_transitions_to_current_component(self):
@@ -317,6 +319,9 @@ class CheckpointTransitionTests(unittest.TestCase):
     def test_historical_107_checkpoint_transitions_to_current_component(self):
         self.assert_historical_checkpoint_transition('1.0.7')
 
+    def test_historical_108_checkpoint_transitions_to_current_component(self):
+        self.assert_historical_checkpoint_transition('1.0.8')
+
     def test_historical_seven_file_package_read_uses_its_signed_version(self):
         legacy = self.base / 'legacy-seven-files'
         legacy.mkdir()
@@ -337,7 +342,7 @@ class CheckpointTransitionTests(unittest.TestCase):
         self.package = self.base / 'successor-package'
         self.package.mkdir(mode=0o700)
         for name in deployment.ASSETS:
-            (self.package / name).write_bytes(('# successor public fixture ' + name + '\n').encode())
+            (self.package / name).write_bytes((Path(release.__file__).parent/name).read_bytes() if name in release.PDF_LARGE_PINS else ('# successor public fixture ' + name + '\n').encode())
         self.win_manifest = {'component': 'AURORA_WINDOWS_INTEGRATION', 'version': deployment.VERSION,
                              'sourceSha': source, 'files': {name: release.digest((self.package / name).read_bytes())
                                                           for name in deployment.ASSETS}}
@@ -384,7 +389,7 @@ class CheckpointTransitionTests(unittest.TestCase):
 
     def test_historical_ia_bytes_changed_cannot_be_rebound_by_new_pin(self):
         self.successor_release_on_same_installed_ia()
-        (self.ia_package / 'fixture0.cjs').write_bytes(b'// changed historical bytes\n')
+        (self.ia_package / 'server.cjs').write_bytes(b'// changed historical bytes\n')
         with self.assertRaisesRegex(sync.SyncError, 'PACKAGE_FILE_BYTES_CONFLICT'):
             self.execute()
         self.assertEqual(self.transport.posts, [])
@@ -406,7 +411,7 @@ class CheckpointTransitionTests(unittest.TestCase):
         self.assertFalse((self.directory() / 'commit.json').exists())
 
     def test_current_transition_rejects_prior_signed_component_before_posts_or_writes(self):
-        for version in ('1.0.1','1.0.2','1.0.3','1.0.4','1.0.5','1.0.6','1.0.7'):
+        for version in ('1.0.1','1.0.2','1.0.3','1.0.4','1.0.5','1.0.6','1.0.7','1.0.8'):
             with self.subTest(version=version):
                 self.win_manifest['version'] = version
                 self.manifest_path.write_bytes(deployment._transition_encoded(self.win_manifest))

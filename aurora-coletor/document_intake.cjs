@@ -4,6 +4,7 @@
 const {inflateRawSync}=require('node:zlib');
 const {createDocumentIntakeEngine}=require('./document_intake_core.cjs');
 const {mapDocumentFactCandidates}=require('./document_fact_mapping.cjs');
+const {extractPdfText}=require('./document_pdf_node.cjs');
 const MAX_BYTES=1048576,MAX_REQUEST=4*Math.ceil(MAX_BYTES/3)+512,MAX_OUTPUT=16*1048576;
 const fail=code=>{const error=new Error(code);error.safeCode=code;throw error;};
 async function main(){
@@ -17,7 +18,7 @@ async function main(){
     ||typeof request.bytesBase64!=='string'||!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(request.bytesBase64))fail('MALFORMED_REQUEST');
   const bytes=Buffer.from(request.bytesBase64,'base64');
   if(bytes.length<1||bytes.length>MAX_BYTES||bytes.toString('base64')!==request.bytesBase64)fail('LIMIT_EXCEEDED');
-  const core=await createDocumentIntakeEngine().extract(bytes,request.mime,{inflateRaw:async(data,expected)=>{
+  const core=await createDocumentIntakeEngine().extract(bytes,request.mime,{extractPdfText,inflateRaw:async(data,expected)=>{
     if(!Number.isSafeInteger(expected)||expected<0||expected>8388608)fail('LIMIT_EXCEEDED');
     return inflateRawSync(data,{maxOutputLength:Math.max(1,expected)});
   }});

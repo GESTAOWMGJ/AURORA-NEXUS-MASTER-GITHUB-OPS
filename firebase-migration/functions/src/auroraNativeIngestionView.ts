@@ -4,6 +4,7 @@ import { canImportNativeDocuments } from './auroraNativeIngestion.js';
 import { installationAcceptanceClientGuard } from './auroraInstallationAcceptance.js';
 import { documentIntakeClientEngine } from './auroraDocumentIntakeCore.js';
 import { documentFactMapperClientSource } from './auroraDocumentFactMapping.js';
+import { pdfTextBrowserClientSource } from './auroraDocumentPdfBrowser.js';
 
 export function nativeIngestionSection(member: AuroraMember): string {
   return `<article class="card" id="native-ingestion"><h2>Documentos da empresa</h2>
@@ -19,7 +20,7 @@ export function nativeIngestionSection(member: AuroraMember): string {
   <label>Origem administrativa<select id="document-intake-system"><option value="ERP">Sistema administrativo da empresa</option><option value="MV">MV</option><option value="TASY">TASY</option></select></label>
   <label><input id="document-intake-consent" type="checkbox" required> Confirmo que selecionei um documento administrativo autorizado, sem prontuário ou dados de pacientes.</label>
   <button type="submit" class="btn">Ler documento e registrar a pendência</button></form>
-  <p id="document-intake-status" role="status" aria-live="polite">Texto, CSV, XML, DOCX e planilhas são lidos neste navegador. PDF, imagens e formatos antigos aguardam o módulo de extração correspondente. Limite atual: 1 MB.</p>
+  <p id="document-intake-status" role="status" aria-live="polite">Texto, CSV, XML, DOCX, planilhas e texto de PDF são lidos neste navegador. PDF conserva revisão parcial; páginas digitalizadas e imagens aguardam OCR. Formatos antigos permanecem pendentes. Limite atual: 1 MB.</p>
   <pre id="document-intake-preview" class="native-output" hidden></pre>
   <p class="sub">O conteúdo fica somente na memória desta aba. O comprovante registra o resumo da leitura; valores encontrados continuam sujeitos a revisão. Isso não conclui a instalação nem valida finanças. Cada conteúdo enviado manualmente recebe um comprovante próprio; uma alteração não substitui o envio anterior.</p>`:''}
   <p class="sub">Pastas e provedores de e-mail usam o agente e os conectores autorizados da empresa. Login sozinho não concede acesso ao computador ou aos provedores.</p></article>`;
@@ -36,6 +37,7 @@ export function nativeIngestionClient(member: AuroraMember, tokens:{ingest:strin
   if(!status)return;
   ${documentIntakeClientEngine()}
   ${documentFactMapperClientSource()}
+  ${pdfTextBrowserClientSource()}
   const documentForm=context.canImport?document.getElementById('document-intake-form'):null;
   const documentStatus=document.getElementById('document-intake-status'),documentPreview=document.getElementById('document-intake-preview');
   let documentBytes=null;
@@ -77,7 +79,10 @@ export function nativeIngestionClient(member: AuroraMember, tokens:{ingest:strin
       const mime=mimes[extension];if(!mime)throw Error('UNSUPPORTED_FORMAT');
       documentStatus.textContent='Lendo os bytes e conferindo a cobertura neste navegador…';
       documentBytes=new Uint8Array(await file.arrayBuffer());if(blocked)throw Error('AUTH_REQUIRED');
-      extracted=await documentIntakeEngine.extract(documentBytes,mime);if(blocked)throw Error('AUTH_REQUIRED');
+      const pdfController=new AbortController();controllers.add(pdfController);
+      try{extracted=await documentIntakeEngine.extract(documentBytes,mime,{extractPdfText:bytes=>extractPdfText(bytes,pdfController.signal)});}
+      finally{controllers.delete(pdfController);}
+      if(blocked)throw Error('AUTH_REQUIRED');
       mapped=documentFactMapper.mapDocumentFactCandidates(extracted);
       // Text is local-only and rendered as textContent, never HTML or a request field.
       documentPreview.textContent=extracted.text?extracted.text.slice(0,4000)+'\\n\\nPrévia limitada a 4.000 caracteres; fatos encontrados: '+mapped.candidates.length+'. Revisão humana pendente.':'Texto ainda indisponível; extração pendente.';
