@@ -161,3 +161,14 @@ integrado. A pontuação de engenharia, os gates de ingestão/aceitação físic
 estados `nativeReady`/`sourceIndependent` não são promovidos por esse teste.
 O incremento mantém a linha `1.1.0-beta.2` e permanece candidato até CI e HML
 do próprio SHA, sem reaproveitar o sucesso de uma publicação anterior.
+
+### Dependência de parsing HTTP — correção candidata
+
+O CI do PR313 identificou `GHSA-27r3-jxmh-p828` na dependência transitiva
+`body-parser` 2.3.0 de Express/Firebase Functions. O lockfile passa a resolver
+`body-parser` 2.4.0 e seu requisito `qs` 6.16.1, dentro das faixas já permitidas.
+O advisory descreve término do processo após bytes adicionais em corpo comprimido;
+a versão corrigida consta em https://github.com/advisories/GHSA-27r3-jxmh-p828.
+O gate `npm audit --omit=dev --audit-level=high` permanece obrigatório, sem exceção
+ou supressão. Instalações publicadas não são corrigidas pela alteração do lockfile;
+CI, publicação protegida e comprovação de runtime exigem o novo SHA.
