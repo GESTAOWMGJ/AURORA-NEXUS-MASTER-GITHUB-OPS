@@ -120,6 +120,9 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}, p
       providerConsentRequired: true,
       allConfiguredSourcesRequireCurrentProof: true,
       fullSynchronizationVerified: false,
+      clientAdoptionProtocol: 'aurora.client.adoption.v1',
+      clientAdoptionState: 'CANDIDATE_PENDING_CI_HML_AND_DEVICE_ACCEPTANCE',
+      tenantPendingBlocksPlatformPublication: false,
       detail: "Reutilizar fontes autorizadas e retomar pelo recibo existente. Conexão, processamento e replay atuais são exigidos por fonte; metadados ou EOF em cache não concluem a instalação."
     },
     engineeringReadinessPercent: Math.round((doneWeight / totalWeight) * 100),

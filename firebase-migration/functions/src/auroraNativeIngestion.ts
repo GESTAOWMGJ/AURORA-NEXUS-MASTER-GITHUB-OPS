@@ -1,12 +1,9 @@
 import { createHash } from 'node:crypto';
-import { can, type AuroraMember } from './auroraAccess.js';
+import type { AuroraMember } from './auroraAccess.js';
+import { canImportNativeDocuments, NATIVE_INGESTION_ORIGIN } from './auroraNativeRoutines.js';
+export { canImportNativeDocuments, NATIVE_INGESTION_ORIGIN } from './auroraNativeRoutines.js';
 
 export const NATIVE_INGESTION_MAX_BYTES = 131072;
-export const NATIVE_INGESTION_ORIGIN = 'https://auroranexus.com.br';
-export function canImportNativeDocuments(member: AuroraMember): boolean {
-  return member.allFacilities && member.mfaVerified
-    && can(member, 'integrations.manage', ['platform_admin', 'org_admin', 'director']);
-}
 export type DocumentPrincipal = {orgId:string; keyId:string; name:string; member?:AuroraMember};
 type Dependencies = {
   bearer: (authorization:unknown) => Promise<DocumentPrincipal|null>;

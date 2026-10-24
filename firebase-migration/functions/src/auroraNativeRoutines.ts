@@ -1,3 +1,193 @@
+/** Structural server-readback contracts only; keep the local IA kernel cloud-free. */
+export type AdoptionMember = { orgId: string; uid: string; role: string;
+  permissions: readonly string[]; allFacilities: boolean; mfaVerified: boolean };
+type AdoptionDocumentIdentity = { documentId: string | null; versionId: string | null;
+  sourceVersion: number | null; canonicalSnapshotHash: string | null };
+type AdoptionAcceptance = AdoptionDocumentIdentity & { schemaVersion: string; orgId: string;
+  canonicalOrigin: string; method: string; state: string; processingVerified: boolean;
+  receiptPersisted: boolean; receiptId: string | null; replayVerified: boolean;
+  automationConfigured: boolean; automationVerified: boolean; automationScope: string;
+  configurationHash: string | null; eligible: boolean; verifiedAt: string | null };
+type AdoptionReadback = AdoptionDocumentIdentity & { state: string; sourceSystem: string | null;
+  revision: number | null; verifiedAt: string | null; firstIngestionVerified: boolean;
+  operationalComplete: boolean; acceptance?: AdoptionAcceptance };
+
+export const NATIVE_INGESTION_ORIGIN = 'https://auroranexus.com.br';
+/** Same existing role/permission/all-facilities/MFA gate; no cloud module import. */
+export function canImportNativeDocuments(member: Pick<AdoptionMember, 'role' | 'permissions' | 'allFacilities' | 'mfaVerified'>): boolean {
+  return member.allFacilities && member.mfaVerified
+    && (['platform_admin', 'org_admin', 'director'].includes(member.role)
+      || member.permissions.includes('integrations.manage'));
+}
+
+export const CLIENT_ADOPTION_PROTOCOL = 'aurora.client.adoption.v1';
+const METHODS = ['CLOUD_OAUTH', 'API_TOKEN', 'LOCAL_AGENT', 'MANUAL'] as const;
+const TARGETS = ['CANONICAL_PIPELINE', 'WINDOWS', 'MACOS', 'IOS_NATIVE'] as const;
+const IDENTITY_FIELDS = ['documentId', 'versionId', 'sourceVersion', 'canonicalSnapshotHash'] as const;
+type Method = typeof METHODS[number];
+type Target = typeof TARGETS[number];
+export type AdoptionSelection = { method: Method; sourceSystem: string; targets: readonly Target[] };
+export type AdoptionContext = {
+  /** Supplied only by the authenticated server, never deserialized from request JSON. */
+  member?: AdoptionMember;
+  installation?: AdoptionReadback;
+  selection?: AdoptionSelection;
+  generatedWindowsPaths?: readonly string[];
+  availability?: 'UNAVAILABLE';
+  previousOperation?: 'UNKNOWN';
+};
+const hex = (value: unknown, size: number) => typeof value === 'string' && new RegExp(`^[a-f0-9]{${size}}$`).test(value);
+const source = (value: unknown): value is string => typeof value === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(value);
+const time = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value));
+
+/** Windows paths are measured in UTF-16 units; this function performs no I/O. */
+export function generatedWindowsPathsFit(paths: readonly string[]): boolean {
+  return Array.isArray(paths) && paths.length > 0 && paths.length <= 256 && paths.every(path => typeof path === 'string'
+    && /^[A-Za-z]:[\\/]/.test(path) && !path.includes('\0') && path.length <= 240);
+}
+
+export function clientAdoptionPolicy() {
+  return {
+    schemaVersion: CLIENT_ADOPTION_PROTOCOL, routineId: 'AURORA-INSTALL-INTEGRATION-001',
+    tenantScope: 'PER_ORG_SELECTED_SOURCES_AND_TARGETS', mode: 'SERVER_READBACK_PLANNER',
+    authority: 'EXISTING_LIVE_MEMBERSHIP_ROLE_MFA_AND_TRANSACTION_GATES',
+    methods: METHODS, targets: TARGETS,
+    credentialDelivery: 'EXISTING_PROTECTED_CHANNEL_MINIMUM_SCOPES',
+    credentialScopes: ['integration.read', 'documents.ingest'],
+    ownProviderConsentRequired: true, inheritedCustomerGrantsAllowed: false,
+    manualMode: 'EXPLICIT_EVENT_THROUGH_CANONICAL_PIPELINE_NOT_CLOUD_POLLING',
+    sourceAcquisition: { actualBytesOrCellsRequired: true, stableSourceVersionRequired: true,
+      spreadsheetRead: 'BOUNDED_PAGES_THROUGH_SELECTED_RANGE_NOT_FIRST_PAGE_ONLY' },
+    sourceProgress: { ingestionCompletionAdvancesOnlyAfter: 'CONFIRMED_CANONICAL_RECEIPT',
+      discoveryCursorIsCompletionProof: false,
+      lostResponseRecovery: 'DURABLE_READBACK_BY_SELECTED_ADAPTER_CONTRACT',
+      driveQueueReadback: 'ALL_PAGES_FROM_OFFSET_ZERO_WITH_ALIASES_PENDING_AND_CLOSED_TOTALS',
+      apiOrManualReadback: 'EXACT_RECEIPT_AND_IMMUTABLE_REVISION_BY_KNOWN_IDENTITY' },
+    sourceAliases: { identity: 'BYTE_SHA256_WITHIN_TENANT_AND_AUTHORIZED_SCOPE',
+      preserveOriginIdentity: true, nameOnlyDeduplicationAllowed: false },
+    sourceExecution: { boundedExecutionRequired: true,
+      driveQueueModes: { readOnly: ['PREVIEW', 'READBACK'], effects: ['EXECUTE', 'PROCESS_EXISTING'] },
+      finiteAttemptTimeBatchBudgetsRequired: true, stopAfterNoProgress: true,
+      processExistingMayEnumerateOrAdoptLegacyInflight: false,
+      busyRetryRequiresAuthenticatedSharedLockResponseAndProvenNoEffect: true,
+      unknownOutcomeRetryAllowed: false },
+    financialInterpretation: { typedFieldProvenanceAndImmutableIdentityRequired: true,
+      absenceIsZero: false, issuedReceivedReconciledAreInterchangeable: false,
+      extractionAuthorizesApprovalClosingOrPayment: false },
+    postCommitProjection: { preserveCanonicalReceiptOnFailure: true,
+      failureState: 'PENDING', receiptAttestsFactAcceptance: false,
+      queryTimeIsDataTime: false },
+    scopedQueueDrainedOrReadbackEndProvesFullSynchronization: false,
+    releaseAuthority: 'SINGLE_CANONICAL_SIGNED_PIN_FRESH_NONCE_AND_SOURCE_BOUND_BYTES',
+    closureAuthority: 'AUTHENTICATED_COMPONENT_MANIFEST_AND_REVIEWED_PROFILE',
+    ancestryProfiles: 'EACH_HISTORICAL_PACKAGE_USED_REQUIRES_ITS_OWN_EXACT_REGISTERED_PROFILE',
+    historicalByteAudit: 'CURRENT_AND_IMMEDIATE_BACKUP_BYTES_WITH_AUTHENTICATED_ANCESTRY_LINKS_NOT_ALL_DEEP_BACKUP_COPIES',
+    currentProfileAppliedToHistory: false, countOnlyProfileAcceptance: false,
+    credentialChange: 'NEW_CURRENT_RECEIPT_AND_REPLAY_WITH_IMMUTABLE_ANCESTRY_AND_CHECKPOINT_CAS',
+    unknownOutcome: 'PRESERVE_LOCKS_AND_PROOFS_RECONCILE_BEFORE_EXPLICIT_RESUME',
+    automaticRetryAfterUnknownOutcome: false, generatedWindowsPathLimitUtf16: 240,
+    evidenceStages: ['ACQUISITION', 'EXTRACTION', 'OBSERVATION', 'CANONICAL_PROCESSING', 'ACCEPTED_CANONICAL_FACTS', 'RECEIPT', 'REPLAY', 'AUTOMATION', 'DEVICE_ACCEPTANCE'],
+    legacyConsumerBootstrap: 'REVIEWED_COMPATIBLE_SIGNED_BOOTSTRAP_BEFORE_UNRECOGNIZED_PROFILE',
+    automaticLegacyBootstrapImplemented: false, offlineState: 'PENDING',
+    tenantPendingBlocksPlatformPublication: false,
+    permissionsGranted: false, schedulerCreated: false, executorCreated: false,
+    documentation: 'docs/AURORA_CLIENT_ADOPTION_PROTOCOL.md'
+  };
+}
+
+/** Explain server-validated evidence only. This result is never an execution capability,
+ * a replacement for readInstallationAcceptance, a provider grant, or a device receipt. */
+export function buildClientAdoptionPlan(orgId: unknown, context: AdoptionContext = {}) {
+  const proof = context.installation;
+  const acceptance = proof?.acceptance;
+  const member = context.member;
+  const validOrg = typeof orgId === 'string' && /^[a-z0-9][a-z0-9-]{1,62}$/.test(orgId);
+  const authorized = validOrg && member?.orgId === orgId && typeof member.uid === 'string'
+    && /^[A-Za-z0-9_-]{1,128}$/.test(member.uid) && canImportNativeDocuments(member);
+  // A configured method is selected only from the current authenticated readback.
+  // A separate selection can narrow requested targets; it cannot supply proof flags.
+  const selection = context.selection ?? (acceptance && ['API_TOKEN', 'MANUAL'].includes(acceptance.method)
+    && source(proof?.sourceSystem) ? { method: acceptance.method as Method, sourceSystem: proof.sourceSystem,
+      targets: ['CANONICAL_PIPELINE'] as readonly Target[] } : undefined);
+  const selectionValid = selection && METHODS.includes(selection.method) && source(selection.sourceSystem)
+    && Array.isArray(selection.targets) && selection.targets.length > 0 && selection.targets.length <= TARGETS.length
+    && new Set(selection.targets).size === selection.targets.length && selection.targets.every(target => TARGETS.includes(target));
+  const bound = authorized && !!acceptance && acceptance.orgId === orgId && acceptance.schemaVersion === 'aurora.installation.acceptance.v1'
+    && acceptance.canonicalOrigin === NATIVE_INGESTION_ORIGIN && selectionValid
+    && acceptance.method === selection?.method && proof?.sourceSystem === selection?.sourceSystem
+    && hex(proof.documentId, 48) && hex(proof.versionId, 48) && hex(proof.canonicalSnapshotHash, 64)
+    && Number.isSafeInteger(proof.sourceVersion) && proof.sourceVersion! > 0
+    && Number.isSafeInteger(proof.revision) && proof.revision! > 0 && time(proof.verifiedAt)
+    && IDENTITY_FIELDS.every(key => acceptance[key] === proof[key]);
+  const processing = bound && proof.firstIngestionVerified === true && proof.state === 'FIRST_INGESTION_VERIFIED'
+    && acceptance.processingVerified === true;
+  const receipt = processing && acceptance.receiptPersisted === true && hex(acceptance.receiptId, 64);
+  const replay = receipt && acceptance.replayVerified === true;
+  const automation = replay && acceptance?.automationConfigured === true && acceptance.automationVerified === true
+    && acceptance.automationScope === 'AURORA_CANONICAL_PIPELINE' && hex(acceptance.configurationHash, 64)
+    && acceptance.eligible === true && acceptance.state === 'INSTALLATION_INTEGRATION_VERIFIED' && time(acceptance.verifiedAt);
+  const pipelineCommitted = automation && proof.operationalComplete === true;
+  const pathState = context.generatedWindowsPaths === undefined ? 'NOT_EVALUATED'
+    : generatedWindowsPathsFit(context.generatedWindowsPaths) ? 'WITHIN_LIMIT' : 'BLOCKED';
+  let state = !authorized ? 'PENDING_AUTHORIZATION'
+    : !selection ? 'PENDING_SOURCE_SELECTION' : !selectionValid ? 'UNSUPPORTED_SELECTION'
+    : context.availability === 'UNAVAILABLE' ? 'PENDING_AVAILABILITY'
+    : context.previousOperation === 'UNKNOWN' ? 'PENDING_RECOVERY'
+    : pathState === 'BLOCKED' ? 'BLOCKED_PATH_CAPACITY'
+    : acceptance && (acceptance.orgId !== orgId || (proof?.sourceSystem && proof.sourceSystem !== selection.sourceSystem)
+      || (acceptance.method !== 'UNCONFIGURED' && acceptance.method !== selection.method)) ? 'BLOCKED_SCOPE_CONFLICT'
+    : ['CLOUD_OAUTH', 'LOCAL_AGENT'].includes(selection.method) ? 'PENDING_ADAPTER_EVIDENCE'
+    : !processing ? 'PENDING_CANONICAL_PROCESSING' : !receipt ? 'PENDING_RECEIPT'
+    : !replay ? 'PENDING_REPLAY' : !automation ? 'PENDING_AUTOMATION'
+    : !pipelineCommitted ? 'PENDING_COMPLETION_COMMIT' : 'SCOPED_PIPELINE_VERIFIED';
+  if (state === 'SCOPED_PIPELINE_VERIFIED' && selection?.targets.some(target => target !== 'CANONICAL_PIPELINE')) {
+    state = 'PENDING_DEVICE_ACCEPTANCE';
+  }
+  const pending: Record<string, string> = {
+    PENDING_AUTHORIZATION: 'Confirmar sessão individual, vínculo, permissão e MFA no fluxo existente.',
+    PENDING_SOURCE_SELECTION: 'Escolher a fonte e os alvos deste cliente no fluxo de configuração autorizado.',
+    UNSUPPORTED_SELECTION: 'Revisar o método, a fonte e os alvos; não ampliar acesso por inferência.',
+    PENDING_AVAILABILITY: 'Manter pendente até obter leitura atual do serviço autorizado.',
+    PENDING_RECOVERY: 'Preservar locks e provas; reconciliar a tentativa antes de qualquer retomada explícita.',
+    BLOCKED_PATH_CAPACITY: 'Preparar raiz curta e conferir todos os caminhos gerados, incluindo o recibo futuro.',
+    BLOCKED_SCOPE_CONFLICT: 'Reconciliar o vínculo da fonte, identidade e organização sem alterar evidências.',
+    PENDING_ADAPTER_EVIDENCE: 'Obter driver, consentimento próprio e prova atual da fonte selecionada.',
+    PENDING_CANONICAL_PROCESSING: 'Processar uma amostra autorizada no pipeline canônico existente.',
+    PENDING_RECEIPT: 'Conferir o recibo persistido do mesmo documento, versão e conteúdo.',
+    PENDING_REPLAY: 'Comprovar replay idempotente real do mesmo envio.',
+    PENDING_AUTOMATION: 'Revalidar a automação, credencial, emissor e escopos no servidor.',
+    PENDING_COMPLETION_COMMIT: 'Concluir o registro pelo endpoint existente e reler sua confirmação.',
+    PENDING_DEVICE_ACCEPTANCE: 'Conferir assinatura, baseline, backup, CAS e aceite nativo de cada alvo selecionado.',
+    SCOPED_PIPELINE_VERIFIED: 'Manter revalidação atual apenas do escopo comprovado; outras fontes exigem provas próprias.'
+  };
+  const exposeProof = authorized && bound && !['PENDING_AVAILABILITY', 'PENDING_RECOVERY', 'BLOCKED_SCOPE_CONFLICT'].includes(state);
+  return {
+    schemaVersion: CLIENT_ADOPTION_PROTOCOL, routineId: 'AURORA-INSTALL-INTEGRATION-001', state,
+    mode: 'SERVER_READBACK_PLANNER', orgId: validOrg ? orgId : null,
+    selectedMethod: selectionValid && authorized ? selection.method : null,
+    selectedTargets: selectionValid && authorized ? selection.targets : [],
+    nextAction: pending[state], humanGate: true, executionAllowed: false,
+    proofStages: {
+      acquisition: 'DISTINCT_PROVIDER_OR_LOCAL_PROOF_REQUIRED', extraction: 'DISTINCT_EXTRACTION_PROOF_REQUIRED',
+      observation: 'DISTINCT_OBSERVATION_RECEIPT_REQUIRED',
+      canonicalProcessing: exposeProof && processing ? 'VERIFIED_FOR_SELECTED_DOCUMENT' : 'PENDING',
+      // Pipeline processing authenticates persistence/projection, not factual or human approval.
+      acceptedCanonicalFacts: 'NOT_ATTESTED_BY_PIPELINE_READBACK',
+      persistedReceipt: exposeProof && receipt ? 'VERIFIED' : 'PENDING',
+      replay: exposeProof && replay ? 'VERIFIED' : 'PENDING',
+      canonicalAutomation: exposeProof && automation ? 'VERIFIED' : 'PENDING',
+      completionCommit: exposeProof && pipelineCommitted ? 'VERIFIED' : 'PENDING',
+      deviceAcceptance: 'NOT_ATTESTED_BY_PIPELINE_READBACK'
+    },
+    pathCapacity: pathState, automaticRetryPermitted: false,
+    preserveLocksAndProofs: context.previousOperation === 'UNKNOWN',
+    sourcePollingEnabled: false, sourceMutationAllowed: false, permissionsGranted: false,
+    globalDocumentIngestionVerified: false, allClientsSynchronized: false,
+    platformPublicationBlockedByThisTenant: false, installationAuthorized: false,
+    proofAuthority: 'EXISTING_SERVER_TRANSACTION_READBACK_NOT_BROWSER_FLAGS'
+  };
+}
+
 export type NativeRoutineState =
   | "NATIVE_ACTIVE"
   | "NATIVE_EVENT"
@@ -162,6 +352,7 @@ export function nativeRoutineSummary(): Record<string, unknown> {
     },
     cloudIntakePolicy: {
       id: "AURORA-INSTALL-INTEGRATION-001",
+      adoptionProtocol: clientAdoptionPolicy(),
       version: "1.0.6",
       source: "AURORA-MO-001",
       trigger: "FIRST_AUTHENTICATED_INSTALLATION_AND_EXISTING_CLIENT_WATCH",

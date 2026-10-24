@@ -1,5 +1,14 @@
 # AURORA-MO-001 — Modus Operandi Mestre WMGJ → AURORA NEXUS
 
+Incremento candidato — instalação e credenciamento reutilizáveis: a rotina
+`AURORA-INSTALL-INTEGRATION-001` passa a expor o protocolo
+`aurora.client.adoption.v1` ao Motor Mestre, com readback do servidor e seleção
+por tenant/fonte/alvo. O método sanitizado serve a novos clientes com vínculo
+próprio, sem herdar dados ou autorizações do piloto. Código/testes não promovem
+adoção instalada. Contrato, limitações, bootstrap legado e pré-requisitos Mac/iOS
+em [AURORA_CLIENT_ADOPTION_PROTOCOL.md](AURORA_CLIENT_ADOPTION_PROTOCOL.md) e
+[habilidade de adoção](../skills/aurora-nexus-client-adoption/SKILL.md).
+
 Incremento de 04/10/2026: `AURORA-USER-PROFILES-001` incorpora criação/retomada/revogação de perfis por administrador com MFA, por organização e sem banco paralelo. `AURORA-DAILY-UPDATES-001` representa a manutenção diária autorizada de cliente, web e mobile, ainda executada pela rotina hospedada existente e marcada LEGACY_MIRRORED. Contrato, evidências, gates e rollback em [AURORA_USER_PROFILES_1_0_0.md](AURORA_USER_PROFILES_1_0_0.md). A autorização antecipada de futuras versões evita repetir consentimento no mesmo escopo; não equivale a validação técnica ou implantação comprovada.
 
 ## Adendo permanente de autonomia resolutiva — robô e IA de desenvolvimento

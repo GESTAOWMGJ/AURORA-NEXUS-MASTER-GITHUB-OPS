@@ -311,9 +311,10 @@ export const auroraNexusBootstrap = onRequest(
       riskLevel: item.riskLevel,
       at: item.updatedAt ?? item.createdAt ?? null
     }));
+    const installation = await loadInstallationReadiness(member.orgId);
     res.status(200).json({
       ok: true,
-      installation: await loadInstallationReadiness(member.orgId),
+      installation,
       environment: authenticatedOrganizationEnvironment(org.exists ? org.data() : undefined),
       mode: "SHADOW",
       organization: { id: member.orgId, name: String(org.data()?.name ?? "WMGJ") },
@@ -322,6 +323,7 @@ export const auroraNexusBootstrap = onRequest(
       masterEngine: buildMasterOperationalState(visibleProjection(rawProjection, member), {
         actionSummary,
         financialStatus,
+        adoption: { member, installation },
         release: buildReleaseStatus(org.data() ?? {}, canonicalVersion.unifiedBeta)
       }),
       financialStatus,
@@ -437,7 +439,8 @@ export const auroraNexusMasterEngine = onRequest(
       sourceAccessDuringInference: false,
       externalAiUsed: false,
       canonicalVersion,
-      master: buildMasterOperationalState(projection, { financialStatus, release })
+      master: buildMasterOperationalState(projection, { financialStatus, release,
+        adoption: { member, installation: member.allFacilities ? await loadInstallationReadiness(member.orgId) : undefined } })
     });
   }
 );
