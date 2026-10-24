@@ -286,6 +286,66 @@ test('READBACK coverage keeps receipts without replay proof pending',()=>{
   assert.equal(page.coverage.pagePending,1);assert.equal(page.privateReadbackPlan.length,0);
   assert.equal(page.fullSynchronizationVerified,false);
 });
+test('READBACK rejects a proven document or alias attached to a different queue source identifier',()=>{
+  for(const rowIndex of [1,2]){
+    const f=fixture();f.addFile('fileexplicit1',null,'same');f.addFile('fileexplicit2',null,'same');
+    f.options.fileIds=['fileexplicit1','fileexplicit2'];f.options.maxScan=10;f.options.processLimit=2;
+    f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+    f.rows[rowIndex][2]='unrelated-source-0001';
+    assert.throws(()=>f.context.auroraLerPlanoReadbackDriveAutorizado_({...f.options,readbackOffset:0}),
+      /AURORA_DRIVE_QUEUE_SCOPE_INVALID/);
+  }
+});
+test('READBACK diagnoses only scoped queue metadata without processing, changing attempts, or exposing free-form fields',()=>{
+  const f=fixture(),call=addAuthenticatedWrapper(f),rootId='diagnostic-root-00001';
+  const folder=f.addFolder(rootId,null,[]);
+  folder.getFiles=()=>{throw Error('ENUMERATION_FORBIDDEN');};folder.getFolders=()=>{throw Error('ENUMERATION_FORBIDDEN');};
+  f.context.auroraExecutarCicloDriveAutorizado_=()=>{throw Error('SCANNER_FORBIDDEN');};
+  f.context.auroraProcessarFilaDriveAutorizada_=()=>{throw Error('PROCESSOR_FORBIDDEN');};
+  f.context.extrairConteudoArquivoWMGJ_V1_=()=>{throw Error('EXTRACTION_FORBIDDEN');};
+  const request={mode:'PREVIEW',orgId:ORG,sources:[{sourceId:'drive-primary',system:'DRIVE',folderId:rootId,active:true,slaMinutes:1440}],
+    fileIds:[],excludedFolderIds:[],maxScan:300,limit:2,expectedScopeSha256:null};
+  const preview=call(request);assert.equal(preview.ok,true);const scopeHash=preview.scopeSha256;
+  for(let n=0;n<3;n++){
+    const fileId='diagnostic-file-'+n,scope={schemaVersion:1,orgId:ORG,scopeSha256:scopeHash,fileId,
+      sourceVersion:'10000',coverage:'PENDING_EXTRACTION'};
+    if(n===0)scope.lastCode='AURORA_SHEETS_TEXT_LIMIT';
+    if(n===1)scope.lastCode='SECRET_CUSTOMER_TOKEN';
+    f.rows.push(['2026-10-23','DRIVE',fileId,'PRIVATE_NAME',n===0?'application/vnd.google-apps.spreadsheet':n===1?'application/zip':'PRIVATE_MIME',
+      n===2?'PRIVATE_STATUS':'ERRO_REPROCESSAR',n===2?'':3,'PRIVATE_ACTION','PRIVATE_FREE_FORM_ERROR',f.context.auroraDriveScopeWrite_(scope)]);
+  }
+  f.rows.push(['2026-10-23','DRIVE','other-org-file-001','PRIVATE_OTHER','text/plain','PENDENTE',0,'','',
+    f.context.auroraDriveScopeWrite_({orgId:'other',scopeSha256:scopeHash})]);
+  f.rows.push(['2026-09-01','DRIVE','legacy-file-001','PRIVATE_LEGACY','text/plain','EXTRAINDO',2,'','','legacy observation']);
+  const beforeRows=JSON.stringify(f.rows),beforeProperties=JSON.stringify([...f.props]);
+  const first=call({...request,mode:'READBACK',expectedScopeSha256:scopeHash,readbackOffset:0});
+  assert.equal(first.ok,true);assert.equal(first.coverage.pending,3);assert.equal(first.privatePendingRows.length,2);
+  assert.equal(first.privatePendingRows[0].code,'AURORA_SHEETS_TEXT_LIMIT');
+  assert.equal(first.privatePendingRows[0].mediaType,'GOOGLE_SHEETS');assert.equal(first.privatePendingRows[0].attempts,3);
+  assert.equal(first.privatePendingRows[1].code,'UNKNOWN');assert.equal(first.privatePendingRows[1].mediaType,'ZIP');
+  const last=call({...request,mode:'READBACK',expectedScopeSha256:scopeHash,readbackOffset:2});
+  assert.equal(last.ok,true);assert.equal(last.coverage.complete,true);assert.equal(last.coverage.pagePending,1);
+  assert.equal(last.privatePendingRows[0].code,'NOT_RECORDED');assert.equal(last.privatePendingRows[0].queueStatus,'UNKNOWN');
+  assert.equal(last.privatePendingRows[0].attempts,null);assert.equal(last.privatePendingRows[0].mediaType,'OTHER');
+  assert.ok(!JSON.stringify([first,last]).includes('PRIVATE'));assert.ok(!JSON.stringify([first,last]).includes('SECRET'));
+  assert.equal(JSON.stringify(f.rows),beforeRows);assert.equal(JSON.stringify([...f.props]),beforeProperties);
+  assert.equal(f.sent.length,0);assert.equal(f.entities.size,0);assert.equal(last.fullSynchronizationVerified,false);
+  f.rows[1][2]='mismatched-file-0001';
+  const invalid=call({...request,mode:'READBACK',expectedScopeSha256:scopeHash,readbackOffset:0});
+  assert.equal(invalid.ok,false);assert.equal(invalid.code,'AURORA_DRIVE_QUEUE_SCOPE_INVALID');
+});
+test('pending diagnostic transport codes are normalized only for closed forms and versions remain unknown when invalid',()=>{
+  const f=fixture(),idx={ID_ORIGEM:0,STATUS:1,TENTATIVAS:2,MIME_TYPE:3};
+  const scope={fileId:'diagnostic-file-0001',sourceVersion:'not-a-version'},row=[scope.fileId,'PROCESSADO',0,'application/pdf'];
+  for(const lastCode of ['FIRESTORE_INGEST_FAILED:INVALID_SUCCESS_RESPONSE',
+    'FIRESTORE_INGEST_FAILED:HTTP_409:IDEMPOTENCY_CONFLICT','FIRESTORE_INGEST_FAILED:HTTP_OTHER:UNRECOGNIZED_RESPONSE']){
+    const value=f.context.auroraDrivePendingDiagnostic_({...scope,lastCode},row,idx);
+    assert.equal(value.code,'FIRESTORE_INGEST_FAILED');assert.equal(value.sourceVersion,null);assert.equal(value.attempts,0);
+  }
+  for(const lastCode of ['FIRESTORE_INGEST_FAILED:HTTP_409:SECRET_CUSTOMER_TOKEN',
+    'FIRESTORE_INGEST_FAILED:HTTP_999:IDEMPOTENCY_CONFLICT','SECRET_CUSTOMER_TOKEN'])
+    assert.equal(f.context.auroraDrivePendingDiagnostic_({...scope,lastCode},row,idx).code,'UNKNOWN');
+});
 test('twenty-item process cap uses the requested bounded throughput',()=>{
   const f=fixture();for(let i=0;i<8;i++){const id='explicitfile'+String(i).padStart(2,'0');f.addFile(id,null,'content '+i);f.options.fileIds.push(id);}
   f.options.maxScan=20;f.options.processLimit=20;

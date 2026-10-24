@@ -34,7 +34,7 @@ function makeRequest(scope, mode, scopeSha256, readbackOffset=0) {
 }
 function parseDriveMode(value) {
   const mode=value===undefined || value===''?'EXECUTE':value;
-  if(!['EXECUTE','PROCESS_EXISTING'].includes(mode))fail('DRIVE_MODE_REJECTED');
+  if(!['EXECUTE','PROCESS_EXISTING','READBACK'].includes(mode))fail('DRIVE_MODE_REJECTED');
   return mode;
 }
 function rejectRuntimeFailure(envelope) {
@@ -124,7 +124,9 @@ async function verifyReadback(plan,orgId,token,fetcher=fetch) {
 }
 async function verifyCoverage(getPage,verifyPlan) {
   let offset=0,expectedTotals=null,pages=0,returned=0;
-  const verified=new Map(),aliases=new Map(),sourceIds=new Set();
+  const verified=new Map(),aliases=new Map(),sourceIds=new Set(),pendingIds=new Set();
+  const pendingDiagnostics={schemaVersion:'aurora.drive-pending-diagnostics.v1',queueMetadataOnly:true,
+    count:0,byCode:{},byStatus:{},byMediaType:{},unknownSourceVersion:0,unknownAttempts:0,totalRecordedAttempts:0};
   for(;;){
     const value=await getPage(offset),c=value?.coverage;
     if(value?.ok!==true||value.code!=='AURORA_DRIVE_READBACK_PLAN'||!c
@@ -135,6 +137,8 @@ async function verifyCoverage(getPage,verifyPlan) {
       ||c.returned>20||value.privateReadbackPlan.length!==c.pageDocuments+c.pageAliases||value.privateAliasRows.length!==c.pageAliases
       ||typeof c.complete!=='boolean'||c.complete!==(c.nextOffset===null)
       ||(!c.complete&&(!Number.isSafeInteger(c.nextOffset)||c.nextOffset!==offset+c.returned||c.returned===0)))fail('DRIVE_COVERAGE_PAGINATION_REJECTED');
+    const pending=value.privatePendingRows===undefined && c.pagePending===0?[]:value.privatePendingRows;
+    if(!Array.isArray(pending)||pending.length!==c.pagePending)fail('DRIVE_PENDING_COVERAGE_REJECTED');
     const totals={total:c.total,documents:c.documents,aliases:c.aliases,pending:c.pending};
     if(expectedTotals&&stable(expectedTotals)!==stable(totals))fail('DRIVE_COVERAGE_CHANGED');expectedTotals=totals;
     const pageReceipts=new Map();
@@ -151,18 +155,83 @@ async function verifyCoverage(getPage,verifyPlan) {
         ||!primary||primary.sourceId!==alias.primaryFileId||primary.contentHash!==alias.contentHash||aliases.has(alias.fileId))fail('DRIVE_ALIAS_PROOF_REJECTED');
       aliases.set(alias.fileId,alias.entityId);
     }
+    for(const row of pending){
+      const item=sanitizePendingRow(row);
+      if(pendingIds.has(row.fileId))fail('DRIVE_PENDING_IDENTITY_REJECTED');pendingIds.add(row.fileId);
+      pendingDiagnostics.count++;
+      for(const [group,key] of [['byCode','code'],['byStatus','queueStatus'],['byMediaType','mediaType']])
+        pendingDiagnostics[group][item[key]]=(pendingDiagnostics[group][item[key]]||0)+1;
+      if(item.sourceVersion===null)pendingDiagnostics.unknownSourceVersion++;
+      if(item.attempts===null)pendingDiagnostics.unknownAttempts++;
+      else pendingDiagnostics.totalRecordedAttempts+=item.attempts;
+      if(!Number.isSafeInteger(pendingDiagnostics.totalRecordedAttempts))fail('DRIVE_PENDING_COUNTER_REJECTED');
+    }
     pages++;returned+=c.returned;
     if(c.complete)break;
     if(pages>10000)fail('DRIVE_COVERAGE_PAGE_LIMIT');offset=c.nextOffset;
   }
   if(returned!==expectedTotals.total||verified.size!==expectedTotals.documents||aliases.size!==expectedTotals.aliases
-    ||[...aliases.keys()].some(id=>sourceIds.has(id)))fail('DRIVE_COVERAGE_INCOMPLETE');
-  return{...expectedTotals,pages,canonicalDocumentsVerified:verified.size,aliasReferencesVerified:aliases.size,allReceiptsVerified:true};
+    ||[...aliases.keys()].some(id=>sourceIds.has(id))||pendingIds.size!==expectedTotals.pending
+    ||[...pendingIds].some(id=>sourceIds.has(id)||aliases.has(id)))fail('DRIVE_COVERAGE_INCOMPLETE');
+  return{...expectedTotals,pages,canonicalDocumentsVerified:verified.size,aliasReferencesVerified:aliases.size,
+    allReceiptsVerified:true,pendingDiagnostics};
+}
+// Only these fixed values can enter the shared summary. Neither arbitrary upper-
+// case strings nor free-form queue errors become diagnostic labels.
+const pendingCodes=new Set(['NOT_RECORDED','UNKNOWN','FIRESTORE_INGEST_FAILED','PENDING_EXTRACTION',
+  'AURORA_DRIVE_EXTRACTION_AUTH_FAILED','AURORA_DRIVE_EXTRACTION_QUOTA','AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE',
+  'AURORA_DRIVE_CONVERSION_UNSUPPORTED','AURORA_DRIVE_CONVERSION_FAILED','AURORA_DRIVE_CONVERSION_NOT_READY',
+  'AURORA_DRIVE_CONVERSION_DEFERRED','AURORA_DRIVE_FILE_SIZE_LIMIT','AURORA_DRIVE_TEXT_LIMIT',
+  'AURORA_DRIVE_EXTRACTION_EMPTY','AURORA_DRIVE_FORMAT_UNSUPPORTED','AURORA_DRIVE_CONTENT_READ_FAILED',
+  'AURORA_DRIVE_OFX_SIGNATURE_INVALID','AURORA_DRIVE_OFX_ENCODING_UNSUPPORTED','AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED',
+  'AURORA_DRIVE_SOURCE_CHANGED_DURING_EXTRACTION','AURORA_DRIVE_EXTRACTION_FAILED',
+  'AURORA_DRIVE_AUTHORITY_RECHECK_FAILED','AURORA_DRIVE_BYTES_REQUIRED','AURORA_DRIVE_EVENT_SOURCE_CONFLICT',
+  'AURORA_DRIVE_QUEUE_ID_CONFLICT','AURORA_DRIVE_RECEIPT_REQUIRED','AURORA_DRIVE_REPLAY_NOT_IDEMPOTENT',
+  'AURORA_DRIVE_SOURCE_MOVED','AURORA_DRIVE_SOURCE_REVOKED','AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT',
+  'AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING',
+  'AURORA_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_DEADLINE_EXCEEDED',
+  'CONFIG_FIRESTORE_INCOMPLETA','EVENTO_FIRESTORE_INVALIDO','HMAC_SECRET_HEX_INVALIDO','HMAC_SECRET_BYTES_INVALIDO']);
+function sanitizePendingRow(row){
+  if(!row||!id(row.fileId)||!(row.sourceVersion===null||Number.isSafeInteger(row.sourceVersion)&&row.sourceVersion>0)
+    ||!(row.attempts===null||Number.isSafeInteger(row.attempts)&&row.attempts>=0)
+    ||!['PENDENTE','PROCESSANDO','EXTRAINDO','CLASSIFICANDO','PROCESSADO','ERRO_REPROCESSAR','DUPLICADO','REVISAR_HUMANO','UNKNOWN'].includes(row.queueStatus)
+    ||!['PDF','GOOGLE_SHEETS','GOOGLE_DOCS','ZIP','TEXT','OFFICE','IMAGE','OTHER'].includes(row.mediaType))fail('DRIVE_PENDING_IDENTITY_REJECTED');
+  return {sourceVersion:row.sourceVersion,attempts:row.attempts,queueStatus:row.queueStatus,
+    mediaType:row.mediaType,code:pendingCodes.has(row.code)?row.code:'UNKNOWN'};
+}
+
+function readOnlyResponse(envelope,code){
+  rejectRuntimeFailure(envelope);
+  const value=envelope?.response;
+  if(envelope?.error||value?.ok!==true||value.code!==code||!hex(value.scopeSha256)
+    ||value.sourceMutation!==false||value.triggersChanged!==false||value.globalSettingsChanged!==false
+    ||value.scan?.complete!==false||!['examined','queued','aliases'].every(key=>value.scan?.[key]===0)
+    ||!['attempted','accepted','duplicates','pending','failed','review','extractionErrors','aliases','replayVerified'].every(key=>value.processing?.[key]===0))
+    fail('DRIVE_READ_ONLY_RESPONSE_REJECTED');
+  return value;
+}
+async function readDriveCoverage({scope,scopeSha256=null,beforeRead,call,verifyPlan}){
+  if(scopeSha256===null){
+    await beforeRead();
+    scopeSha256=readOnlyResponse(await call(makeRequest(scope,'PREVIEW'),'readback-preview'),
+      'AURORA_DRIVE_PREVIEW_VERIFIED').scopeSha256;
+  }
+  if(!hex(scopeSha256))fail('DRIVE_COVERAGE_SCOPE_MISMATCH');
+  let pageNumber=0;
+  const coverage=await verifyCoverage(async offset=>{
+    await beforeRead();
+    const value=readOnlyResponse(await call(makeRequest(scope,'READBACK',scopeSha256,offset),
+      'coverage-'+(++pageNumber)),'AURORA_DRIVE_READBACK_PLAN');
+    if(value.scopeSha256!==scopeSha256)fail('DRIVE_COVERAGE_SCOPE_MISMATCH');
+    return value;
+  },verifyPlan);
+  return {scopeSha256,coverage};
 }
 // The same bounded loop serves both modes; only the published entrypoint decides
 // whether to enumerate. All source/recovery/authorization gates remain in run().
 async function runDriveBatches({scope,mode,maxBatches,beforeBatch,call,verifyPlan,onBatch}) {
   mode=parseDriveMode(mode);
+  if(mode==='READBACK')fail('DRIVE_MUTATING_MODE_REQUIRED');
   if(!Number.isSafeInteger(maxBatches)||maxBatches<1||maxBatches>300)fail('DRIVE_BATCH_LIMIT_INVALID');
   let scopeSha256=null,stalledAttempts=0,lastBatch=null,stopReason='BATCH_LIMIT';
   for(let n=0;n<maxBatches;n++) {
@@ -243,7 +312,7 @@ async function run() {
   const temporary=process.env.RUNNER_TEMP;if(!temporary||!path.isAbsolute(temporary))fail('DRIVE_PRIVATE_DIRECTORY_REQUIRED');
   const workspace=path.join(temporary,'aurora-drive-private');fs.mkdirSync(workspace,{mode:0o700});
   const reportFile=path.join(temporary,'aurora-drive-intake-summary.json');
-  const summary={schemaVersion:'aurora.real-drive-intake-evidence.v1',startedAtUtc:new Date().toISOString(),checkedSourceSha:sourceSha,sourceScopeSha256:process.env.EXPECTED_SCOPE_SHA256,projectId:PROJECT,driveMode:mode,status:'RUNNING',batches:[],canonicalReadbacksVerified:0,sourceMutation:false,newSchedulerCreated:false,complete:false};
+  const summary={schemaVersion:'aurora.real-drive-intake-evidence.v1',startedAtUtc:new Date().toISOString(),checkedSourceSha:sourceSha,sourceScopeSha256:process.env.EXPECTED_SCOPE_SHA256,projectId:PROJECT,driveMode:mode,readOnly:mode==='READBACK',status:'RUNNING',batches:[],canonicalReadbacksVerified:0,sourceMutation:false,newSchedulerCreated:false,complete:false};
   const save=()=>fs.writeFileSync(reportFile,JSON.stringify(summary,null,2)+'\n',{mode:0o600});save();
   const gate=()=>{if(Date.now()>=deadline)fail('DRIVE_HML_WINDOW_EXPIRED');};
   const workflow=fs.readFileSync(path.join(repo,'.github/workflows/deploy-appscript.yml'),'utf8');
@@ -272,7 +341,7 @@ async function run() {
   };
   try{
     summary.recovery=await verifyRecovery(repo,command('gcloud',['auth','print-access-token'],repo).trim());save();
-    const execution=await runDriveBatches({scope,mode,maxBatches,call,
+    const execution=mode==='READBACK'?{scopeSha256:null,lastBatch:null,stopReason:'READBACK_ONLY'}:await runDriveBatches({scope,mode,maxBatches,call,
       beforeBatch:()=>{gate();if(stable(deployment())!==stable(before))fail('DRIVE_PUBLISHED_SOURCE_CHANGED');},
       verifyPlan:plan=>verifyReadback(plan,scope.orgId,command('gcloud',['auth','print-access-token'],repo).trim()),
       onBatch:(batch,n)=>{
@@ -282,18 +351,21 @@ async function run() {
     summary.stopReason=execution.stopReason;
     if(execution.pendingExtractionRequiresFollowup)summary.pendingExtractionRequiresFollowup=true;
     save();
-    let pageNumber=0;
     const token=command('gcloud',['auth','print-access-token'],repo).trim();
-    summary.coverage=await verifyCoverage(async offset=>{
-      const envelope=await call(makeRequest(scope,'READBACK',execution.scopeSha256,offset),'coverage-'+(++pageNumber));
-      if(envelope?.error||envelope?.response?.scopeSha256!==execution.scopeSha256)fail('DRIVE_COVERAGE_SCOPE_MISMATCH');return envelope.response;
-    },plan=>verifyReadback(plan,scope.orgId,token));
+    const readback=await readDriveCoverage({scope,scopeSha256:execution.scopeSha256,call,
+      beforeRead:()=>{gate();if(stable(deployment())!==stable(before))fail('DRIVE_PUBLISHED_SOURCE_CHANGED');},
+      verifyPlan:plan=>verifyReadback(plan,scope.orgId,token)});
+    summary.coverage=readback.coverage;
+    if(mode==='READBACK'){
+      summary.canonicalReadbacksVerified=summary.coverage.canonicalDocumentsVerified;
+      summary.pendingExtractionRequiresFollowup=summary.coverage.pending>0;
+    }
     Object.assign(summary,completionFromCoverage(mode,execution.lastBatch,summary.coverage));save();
     if(stable(deployment())!==stable(before))fail('DRIVE_PUBLISHED_SOURCE_CHANGED');
-    summary.status=summary.complete?'VERIFIED':'RESUMABLE';
+    summary.status=mode==='READBACK'?'READBACK_VERIFIED':summary.complete?'VERIFIED':'RESUMABLE';
   }catch(error){summary.status='INCOMPLETE';summary.code=/^[A-Z_0-9]{1,100}$/.test(error.message)?error.message:'DRIVE_EXECUTION_UNCONFIRMED';if(error.failureStage)summary.failureStage=error.failureStage;throw error;}
   finally{summary.finishedAtUtc=new Date().toISOString();save();}
   return summary;
 }
-module.exports={parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage};
+module.exports={parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sanitizePendingRow,readDriveCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage};
 if(require.main===module)run().then(result=>console.log(JSON.stringify({status:result.status,complete:result.complete,batches:result.batches.length,canonicalReadbacksVerified:result.canonicalReadbacksVerified}))).catch(error=>{console.error(/^[A-Z_0-9]{1,100}$/.test(error.message)?error.message:'DRIVE_INTAKE_UNCONFIRMED');process.exitCode=1;});

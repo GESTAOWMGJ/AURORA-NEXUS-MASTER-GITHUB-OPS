@@ -63,3 +63,38 @@ Esse modo conserva o fingerprint, os gates de proprietário, tenant, configuraç
 O coordenador verifica os recibos canônicos e versões imutáveis de cada lote. As paradas são fila drenada, ausência de tentativas, orçamento limitado sem progresso ou limite de lotes. complete permanece false; scopedQueueDrained descreve somente a fila do escopo. EXECUTE continua como padrão e não faz fallback automático.
 
 Validação: 74 testes direcionados; cenário integrado sintético com 245 documentos scoped, 43 linhas legadas, uma linha de outro tenant e retomada após resposta perdida. Os módulos de scanner, extração e idempotência não foram alterados por esta mudança. A execução sobre dados reais exige os gates e a evidência normal do workflow.
+
+## Releitura isolada e saneamento de vínculos — candidato de 23/10/2026
+
+O mesmo workflow passa a aceitar `drive_mode=READBACK` em `operation=DRIVE_TOTAL`.
+O coordenador executa PREVIEW e as páginas READBACK, conferindo a publicação
+Apps Script e o fingerprint antes de cada página. Conserva os gates de identidade,
+escopo, configuração, autorização e recuperação. Não chama o ciclo mutável, não
+enumera, não extrai novamente e não altera tentativas, fontes ou checkpoints.
+
+Cada linha do escopo precisa vincular `ID_ORIGEM` ao mesmo `fileId` da evidência,
+inclusive quando já representa documento ou alias comprovado. Uma divergência
+interrompe a leitura com código fixo; não corrige nem promove a linha por inferência.
+O coordenador exige uma entrada privada para cada pendência e rejeita identidades
+repetidas ou compartilhadas com documentos e aliases, inclusive entre páginas.
+
+O resumo público `pendingDiagnostics`, versão `aurora.drive-pending-diagnostics.v1`,
+agrega quantidade por código, estado da fila e classe de mídia, além de tentativas
+registradas e contagens de versão/tentativas desconhecidas. Os valores usam listas
+fechadas. `NOT_RECORDED` distingue ausência de código de `UNKNOWN`; metadados
+inválidos permanecem desconhecidos. IDs, nomes, URLs, texto, hashes legados e
+mensagens livres de erro não entram nesse resumo. A origem continua privada e
+a leitura de metadados da fila não determina a causa de uma falha de conversão.
+
+O contador superior `canonicalReadbacksVerified` reflete a cobertura canônica
+verificada mesmo sem novos envios. O término usa `READBACK_VERIFIED` e
+`READBACK_ONLY`; `complete` e `fullSynchronizationVerified` permanecem `false`,
+mesmo com fila vazia. A prova de enumeração e a aceitação documental continuam
+exigindo suas evidências próprias.
+
+Este incremento parte de `d77fe7169442e5bac57b06ba2100416b1cc3d687` e precisa
+de publicação Apps Script e execução autorizada correspondentes antes de ser
+considerado comportamento observado. Os testes sintéticos verificam recibos
+existentes, paginação, conflitos de identidade, privacidade, ausência de efeitos
+e rejeição de mudança de publicação/escopo. Rollback usa código e publicação
+anteriores, preservando a fila e os recibos; não requer reprocessar os dados.

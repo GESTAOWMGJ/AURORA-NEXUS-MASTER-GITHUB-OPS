@@ -125,3 +125,50 @@ imediato. Persistência da leitura antiga também bloqueia ao esgotar o limite.
 O CI passa a executar os testes desse preview antes de qualquer deploy Firebase.
 Alterações de coordenadores `.cjs` também acionam a publicação Apps Script existente,
 para que sua referência de código acompanhe o SHA integrado.
+
+## Prova posterior à promoção — candidato de 23/10/2026
+
+O smoke anterior à promoção confere o runtime novo e a referência ativa anterior.
+O job `publish-active-release` acrescenta uma segunda consulta autenticada ao
+portal canônico, depois da troca CAS, da finalização e da retenção do ZIP. A fase
+`POST_PROMOTION` exige a fonte e a versão esperadas no certificado ativo, nos
+manifestos e nos bytes locais de servidor/web, além de `RUNTIME_BYTES_MATCH`.
+O verificador rejeita referência ausente, anterior ou divergente.
+
+O certificado esperado vem da saída pública validada de
+`export-public-unified-release.mjs`, usada para finalizar o mesmo candidato,
+e segue pelo output `certificate_sha256`. Não é derivado da resposta bootstrap
+sob verificação. A fase anterior continua aceitando o predecessor nos limites
+do contrato existente; a fase posterior rejeita esse argumento.
+
+A consulta reutiliza WIF, a conta de deploy, a conta de smoke HML e a sessão no
+domínio canônico. Confere organização `wmgj`, ambiente, modo e membro esperados.
+Tokens, cookies e respostas ficam em diretório temporário restrito, removido
+também em falha. O log de sucesso registra somente códigos e hashes públicos.
+
+Falha no smoke posterior torna o job falho e conserva o ZIP já retido e o pin
+promovido para diagnóstico. Não introduz rollback automático. A recuperação
+continua exigindo o procedimento existente e um predecessor confirmado.
+
+Os testes exercitam a chamada CLI do próprio workflow, referências/certificados
+divergentes, manifestos e bytes incompatíveis, ordem de retenção e limpeza privada
+em falhas sintéticas dos provedores. Essa validação local não comprova o smoke
+remoto. Mesmo o smoke remoto aprovado não comprova instalação no Mac/Windows,
+aceitação física, saneamento das pendências ou sincronização plena dos dados.
+
+Impacto no Release Cockpit: a prova de publicação ganha o smoke final do SHA
+integrado. A pontuação de engenharia, os gates de ingestão/aceitação física e os
+estados `nativeReady`/`sourceIndependent` não são promovidos por esse teste.
+O incremento mantém a linha `1.1.0-beta.2` e permanece candidato até CI e HML
+do próprio SHA, sem reaproveitar o sucesso de uma publicação anterior.
+
+### Dependência de parsing HTTP — correção candidata
+
+O CI do PR313 identificou `GHSA-27r3-jxmh-p828` na dependência transitiva
+`body-parser` 2.3.0 de Express/Firebase Functions. O lockfile passa a resolver
+`body-parser` 2.4.0 e seu requisito `qs` 6.16.1, dentro das faixas já permitidas.
+O advisory descreve término do processo após bytes adicionais em corpo comprimido;
+a versão corrigida consta em https://github.com/advisories/GHSA-27r3-jxmh-p828.
+O gate `npm audit --omit=dev --audit-level=high` permanece obrigatório, sem exceção
+ou supressão. Instalações publicadas não são corrigidas pela alteração do lockfile;
+CI, publicação protegida e comprovação de runtime exigem o novo SHA.

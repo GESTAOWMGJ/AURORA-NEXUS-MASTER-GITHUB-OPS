@@ -873,6 +873,8 @@ function auroraDriveReadbackResult_(value, result, expectedOffset, limit) {
   if(!value || !value.coverage || !Array.isArray(value.privateReadbackPlan) || !Array.isArray(value.privateAliasRows))
     throw new Error('AURORA_DRIVE_RESULT_INVALID');
   var c=value.coverage;
+  var pending=value.privatePendingRows===undefined && c.pagePending===0?[]:value.privatePendingRows;
+  if(!Array.isArray(pending) || pending.length!==c.pagePending) throw new Error('AURORA_DRIVE_RECEIPT_COVERAGE_INVALID');
   ['offset','total','documents','aliases','pending','returned','pageDocuments','pageAliases','pagePending'].forEach(function(key) {
     if(!Number.isSafeInteger(c[key]) || c[key]<0) throw new Error('AURORA_DRIVE_RESULT_INVALID');
   });
@@ -892,6 +894,17 @@ function auroraDriveReadbackResult_(value, result, expectedOffset, limit) {
         return receipt.sourceId===alias.primaryFileId && receipt.entityId===alias.entityId && receipt.contentHash===alias.contentHash;
       })) throw new Error('AURORA_DRIVE_RECEIPT_COVERAGE_INVALID');
     return {fileId:alias.fileId,primaryFileId:alias.primaryFileId,contentHash:alias.contentHash,entityId:alias.entityId};
+  });
+  result.privatePendingRows=pending.map(function(row) {
+    if(!row || !/^[A-Za-z0-9_-]{10,200}$/.test(row.fileId||'')
+      || !(row.sourceVersion===null || Number.isSafeInteger(row.sourceVersion) && row.sourceVersion>0)
+      || !(row.attempts===null || Number.isSafeInteger(row.attempts) && row.attempts>=0)
+      || !/^[A-Z_0-9]{1,100}$/.test(row.code||'')
+      || ['PENDENTE','PROCESSANDO','EXTRAINDO','CLASSIFICANDO','PROCESSADO','ERRO_REPROCESSAR','DUPLICADO','REVISAR_HUMANO','UNKNOWN'].indexOf(row.queueStatus)<0
+      || ['PDF','GOOGLE_SHEETS','GOOGLE_DOCS','ZIP','TEXT','OFFICE','IMAGE','OTHER'].indexOf(row.mediaType)<0)
+      throw new Error('AURORA_DRIVE_RESULT_INVALID');
+    return {fileId:row.fileId,sourceVersion:row.sourceVersion,queueStatus:row.queueStatus,
+      attempts:row.attempts,code:row.code,mediaType:row.mediaType};
   });
   result.coverage={offset:c.offset,nextOffset:c.nextOffset,total:c.total,documents:c.documents,aliases:c.aliases,
     pending:c.pending,complete:c.complete,returned:c.returned,pageDocuments:c.pageDocuments,pageAliases:c.pageAliases,pagePending:c.pagePending};

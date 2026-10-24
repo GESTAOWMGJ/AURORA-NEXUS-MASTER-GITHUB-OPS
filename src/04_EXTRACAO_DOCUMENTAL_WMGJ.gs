@@ -1494,26 +1494,69 @@ function auroraExtrairTextoSheetsCompleto_(spreadsheetId) {
 
 /* Read-only receipt recovery for the authenticated wrapper. The coordinator must
  * actually verify each returned canonical record; replayVerified is not readback. */
+function auroraDrivePendingDiagnostic_(scope, row, idx) {
+  if(typeof scope.fileId!=='string' || !/^[A-Za-z0-9_-]{10,200}$/.test(scope.fileId)
+    || row[idx.ID_ORIGEM]!==scope.fileId) throw new Error('AURORA_DRIVE_QUEUE_SCOPE_INVALID');
+  var codes=['PENDING_EXTRACTION','AURORA_DRIVE_EXTRACTION_AUTH_FAILED','AURORA_DRIVE_EXTRACTION_QUOTA',
+    'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE','AURORA_DRIVE_CONVERSION_UNSUPPORTED',
+    'AURORA_DRIVE_CONVERSION_FAILED','AURORA_DRIVE_CONVERSION_NOT_READY','AURORA_DRIVE_CONVERSION_DEFERRED',
+    'AURORA_DRIVE_FILE_SIZE_LIMIT','AURORA_DRIVE_TEXT_LIMIT','AURORA_DRIVE_EXTRACTION_EMPTY',
+    'AURORA_DRIVE_FORMAT_UNSUPPORTED','AURORA_DRIVE_CONTENT_READ_FAILED','AURORA_DRIVE_OFX_SIGNATURE_INVALID',
+    'AURORA_DRIVE_OFX_ENCODING_UNSUPPORTED','AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED',
+    'AURORA_DRIVE_SOURCE_CHANGED_DURING_EXTRACTION','AURORA_DRIVE_EXTRACTION_FAILED',
+    'AURORA_DRIVE_AUTHORITY_RECHECK_FAILED','AURORA_DRIVE_BYTES_REQUIRED','AURORA_DRIVE_EVENT_SOURCE_CONFLICT',
+    'AURORA_DRIVE_QUEUE_ID_CONFLICT','AURORA_DRIVE_RECEIPT_REQUIRED','AURORA_DRIVE_REPLAY_NOT_IDEMPOTENT',
+    'AURORA_DRIVE_SOURCE_MOVED','AURORA_DRIVE_SOURCE_REVOKED','AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT',
+    'AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING',
+    'AURORA_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_DEADLINE_EXCEEDED',
+    'CONFIG_FIRESTORE_INCOMPLETA','EVENTO_FIRESTORE_INVALIDO','HMAC_SECRET_HEX_INVALIDO','HMAC_SECRET_BYTES_INVALIDO'];
+  var raw=scope.lastCode,code=raw===undefined || raw===null || raw===''?'NOT_RECORDED'
+    : codes.indexOf(raw)>=0?raw:'UNKNOWN';
+  if(typeof raw==='string' && /^FIRESTORE_INGEST_FAILED:(?:INVALID_SUCCESS_RESPONSE|HTTP_(?:[1-5][0-9]{2}|OTHER):(?:METHOD_NOT_ALLOWED|UNSUPPORTED_MEDIA_TYPE|SECURITY_CONFIGURATION_ERROR|INVALID_SIGNATURE|INVALID_JSON|VALIDATION_ERROR|SIGNED_HEADER_BODY_MISMATCH|KEY_SCOPE_VIOLATION|REPLAY_DETECTED|IDEMPOTENCY_CONFLICT|NO_STRUCTURED_RESPONSE|UNRECOGNIZED_RESPONSE))$/.test(raw))
+    code='FIRESTORE_INGEST_FAILED';
+  var status=row[idx.STATUS],statuses=['PENDENTE','PROCESSANDO','EXTRAINDO','CLASSIFICANDO',
+    'PROCESSADO','ERRO_REPROCESSAR','DUPLICADO','REVISAR_HUMANO'];
+  var mime=row[idx.MIME_TYPE],mediaType='OTHER';
+  if(mime==='application/pdf') mediaType='PDF';
+  else if(mime==='application/vnd.google-apps.spreadsheet') mediaType='GOOGLE_SHEETS';
+  else if(mime==='application/vnd.google-apps.document') mediaType='GOOGLE_DOCS';
+  else if(mime==='application/zip' || mime==='application/x-zip-compressed') mediaType='ZIP';
+  else if(['text/plain','text/csv','text/tab-separated-values','application/json','application/xml','text/xml'].indexOf(mime)>=0) mediaType='TEXT';
+  else if(['application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.oasis.opendocument.text','application/vnd.oasis.opendocument.spreadsheet'].indexOf(mime)>=0) mediaType='OFFICE';
+  else if(['image/png','image/jpeg','image/tiff','image/webp'].indexOf(mime)>=0) mediaType='IMAGE';
+  var attempts=row[idx.TENTATIVAS],version=Number(scope.sourceVersion);
+  var versionType=typeof scope.sourceVersion==='number'
+    || typeof scope.sourceVersion==='string' && /^[1-9][0-9]{0,15}$/.test(scope.sourceVersion);
+  // Queue metadata only. No file content, free-form errors, names or legacy hashes.
+  return {fileId:scope.fileId,sourceVersion:versionType && Number.isSafeInteger(version) && version>0?version:null,
+    queueStatus:statuses.indexOf(status)>=0?status:'UNKNOWN',
+    attempts:Number.isSafeInteger(attempts) && attempts>=0?attempts:null,code:code,mediaType:mediaType};
+}
+
 function auroraLerPlanoReadbackDriveAutorizado_(options) {
   var ss=getPlanilhaWMGJ_Compat_(),fila=ss.getSheetByName(getConfigWMGJ_Compat_().SHEETS.FILA);
   var rows=fila.getDataRange().getValues(),idx=mapearCabecalhoWMGJ_Compat_(rows[0]),scoped=[];
   var offset=Number(options.readbackOffset),limit=Math.min(40,Number(options.readbackLimit || 20));
   if(!Number.isSafeInteger(offset) || offset<0 || !Number.isSafeInteger(limit) || limit<1)
     throw new Error('AURORA_DRIVE_READBACK_CURSOR_INVALID');
-  var result={privateReadbackPlan:[],privateAliasRows:[],coverage:{offset:offset,nextOffset:null,
+  var result={privateReadbackPlan:[],privateAliasRows:[],privatePendingRows:[],coverage:{offset:offset,nextOffset:null,
     total:0,documents:0,aliases:0,pending:0,complete:false,returned:0,pageDocuments:0,pageAliases:0,pagePending:0},
     fullSynchronizationVerified:false};
   var coverage=result.coverage;
   for(var r=1;r<rows.length;r++) {
     var scope=auroraDriveScopeRead_(rows[r][idx.OBSERVACAO]);
     if(!scope || scope.orgId!==options.orgId || scope.scopeSha256!==options.scopeSha256) continue;
+    if(typeof scope.fileId!=='string' || !/^[A-Za-z0-9_-]{10,200}$/.test(scope.fileId)
+      || rows[r][idx.ID_ORIGEM]!==scope.fileId) throw new Error('AURORA_DRIVE_QUEUE_SCOPE_INVALID');
     var receipt=scope.receipt,kind='pending';
     var proven=receipt && receipt.replayVerified===true && scope.contentSha256===receipt.contentHash
       && receipt.contentHash===receipt.contentSha256;
     if(proven && scope.coverage==='EXTRACTED_REVIEW_PENDING' && receipt.sourceId===scope.fileId
       && receipt.sourceVersion===Number(scope.sourceVersion)) kind='documents';
     else if(proven && scope.coverage==='DUPLICATE_CONTENT' && scope.aliasFileId && scope.aliasFileId===receipt.sourceId) kind='aliases';
-    coverage[kind]++;scoped.push({scope:scope,kind:kind});
+    coverage[kind]++;scoped.push({scope:scope,kind:kind,row:rows[r]});
   }
   coverage.total=scoped.length;
   if(offset>coverage.total) throw new Error('AURORA_DRIVE_READBACK_CURSOR_INVALID');
@@ -1521,7 +1564,10 @@ function auroraLerPlanoReadbackDriveAutorizado_(options) {
   coverage.returned=end-offset;coverage.nextOffset=end<coverage.total?end:null;coverage.complete=coverage.nextOffset===null;
   for(var i=offset;i<end;i++) {
     var item=scoped[i],value=item.scope;
-    if(item.kind==='pending') {coverage.pagePending++;continue;}
+    if(item.kind==='pending') {
+      result.privatePendingRows.push(auroraDrivePendingDiagnostic_(value,item.row,idx));
+      coverage.pagePending++;continue;
+    }
     result.privateReadbackPlan.push(value.receipt);
     if(item.kind==='documents') coverage.pageDocuments++;
     else {

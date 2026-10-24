@@ -9,11 +9,11 @@ on:
         default: RC11_SAMPLE
         options: [RC11_SAMPLE, DRIVE_TOTAL]
       drive_mode:
-        description: Enumerate and process Drive, or process the existing scoped queue only
+        description: Enumerate/process, process existing queue, or read receipts and pending diagnostics only
         type: choice
         required: false
         default: EXECUTE
-        options: [EXECUTE, PROCESS_EXISTING]
+        options: [EXECUTE, PROCESS_EXISTING, READBACK]
       expected_sha:
         description: Exact published main SHA for Drive intake
         type: string
