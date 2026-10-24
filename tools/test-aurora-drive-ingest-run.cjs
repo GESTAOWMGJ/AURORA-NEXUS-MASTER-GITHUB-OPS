@@ -3,7 +3,7 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
-const {parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage}=require('./aurora-drive-ingest-run.cjs');
+const {parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sanitizePendingRow,readDriveCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage}=require('./aurora-drive-ingest-run.cjs');
 const scope=()=>({schemaVersion:'aurora.authorized-drive-source-scope.v1',orgId:'wmgj',projectId:'wmgj-hml-jfn-20260927',authorization:{realDataAuthorized:true,sourceMutationAllowed:false},sources:[{sourceId:'fixture-root',system:'DRIVE',folderId:'synthetic-folder-only',active:true,slaMinutes:1440}],fileIds:['synthetic-file-only'],excludedFolderIds:[]});
 function encoded(v){if(v===null)return{nullValue:null};if(typeof v==='string')return{stringValue:v};if(typeof v==='boolean')return{booleanValue:v};if(typeof v==='number')return{integerValue:String(v)};return{mapValue:{fields:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encoded(x)]))}};}
 function readbackFixture(){
@@ -91,7 +91,8 @@ function batchHarness(responses,mode='PROCESS_EXISTING',maxBatches=20,verifyPlan
 test('Drive mode is closed, defaults to EXECUTE, and invalid mode fails before any request',async()=>{
   assert.equal(parseDriveMode(undefined),'EXECUTE');assert.equal(parseDriveMode(''),'EXECUTE');
   assert.equal(parseDriveMode('PROCESS_EXISTING'),'PROCESS_EXISTING');
-  for(const mode of ['READBACK','PROCESS_EXISTING private',null,{}]) {
+  assert.equal(parseDriveMode('READBACK'),'READBACK');
+  for(const mode of ['PROCESS_EXISTING private',null,{}]) {
     const f=batchHarness([batchResponse()],mode);
     await assert.rejects(f.execute,/DRIVE_MODE_REJECTED/);assert.equal(f.guards,0);assert.deepEqual(f.requests,[]);
   }
@@ -161,7 +162,7 @@ test('default EXECUTE keeps enumeration completion and does not silently fall ba
 test('drive_mode stays inside DRIVE_TOTAL and preserves workflow execution, source, environment and cleanup gates',()=>{
   const workflow=fs.readFileSync(path.join(__dirname,'../.github/workflows/aurora-rc11-recovery-real-ingest.yml'),'utf8');
   assert.match(workflow,/options: \[RC11_SAMPLE, DRIVE_TOTAL\]/);
-  assert.match(workflow,/drive_mode:\n(?:[^\n]*\n){0,5}\s+default: EXECUTE\n\s+options: \[EXECUTE, PROCESS_EXISTING\]/);
+  assert.match(workflow,/drive_mode:\n(?:[^\n]*\n){0,5}\s+default: EXECUTE\n\s+options: \[EXECUTE, PROCESS_EXISTING, READBACK\]/);
   assert.match(workflow,/if: github\.event_name != 'workflow_dispatch' \|\| inputs\.operation != 'DRIVE_TOTAL'/);
   const drive=workflow.split('\n  drive_total:\n')[1];assert.ok(drive);
   assert.match(drive,/if: github\.event_name == 'workflow_dispatch' && inputs\.operation == 'DRIVE_TOTAL' && github\.ref == 'refs\/heads\/main' && inputs\.expected_sha == github\.sha && inputs\.confirmation == 'RUN_AUTHORIZED_REAL_DRIVE_INTAKE'/);
@@ -170,4 +171,103 @@ test('drive_mode stays inside DRIVE_TOTAL and preserves workflow execution, sour
   assert.match(drive,/run: node tools\/aurora-drive-ingest-run\.cjs/);
   assert.match(drive,/Remove runner OAuth and private execution responses\n\s+if: always\(\)/);
   assert.match(workflow,/group: aurora-rc11-hml\n\s+cancel-in-progress: false/);
+});
+
+function pendingRow(fileId='synthetic-pending-0001',extra={}){
+  return {fileId,sourceVersion:10000,attempts:3,queueStatus:'ERRO_REPROCESSAR',
+    code:'AURORA_DRIVE_CONVERSION_UNSUPPORTED',mediaType:'PDF',...extra};
+}
+function pendingPage(offset,total=2){
+  return {ok:true,code:'AURORA_DRIVE_READBACK_PLAN',triggersChanged:false,globalSettingsChanged:false,
+    privateReadbackPlan:[],privateAliasRows:[],privatePendingRows:[pendingRow('synthetic-pending-'+offset)],
+    coverage:{offset,nextOffset:offset+1===total?null:offset+1,total,documents:0,aliases:0,pending:total,
+      complete:offset+1===total,returned:1,pageDocuments:0,pageAliases:0,pagePending:1}};
+}
+function readOnlyEnvelope(value){
+  return {response:{scopeSha256:'a'.repeat(64),sourceMutation:false,triggersChanged:false,globalSettingsChanged:false,
+    scan:{examined:0,queued:0,aliases:0,complete:false},
+    processing:{attempted:0,accepted:0,duplicates:0,pending:0,failed:0,review:0,extractionErrors:0,aliases:0,replayVerified:0},...value}};
+}
+test('pending diagnostics retain only fixed labels and distinguish unknown counters from zero',()=>{
+  const result=sanitizePendingRow(pendingRow('PRIVATE_FILE_IDENTIFIER',{code:'SECRET_CUSTOMER_TOKEN',
+    sourceVersion:null,attempts:null,text:'PRIVATE_DOCUMENT_TEXT',lastError:'PRIVATE_URL'}));
+  assert.equal(result.code,'UNKNOWN');assert.equal(result.attempts,null);assert.equal(result.sourceVersion,null);
+  assert.ok(!JSON.stringify(result).includes('PRIVATE'));assert.ok(!JSON.stringify(result).includes('SECRET'));
+  for(const extra of [{fileId:'bad'},{sourceVersion:0},{sourceVersion:'10000'},{attempts:-1},
+    {queueStatus:'SECRET_CUSTOMER_TOKEN'},{mediaType:'PRIVATE_DOCUMENT_NAME'}])
+    assert.throws(()=>sanitizePendingRow(pendingRow(undefined,extra)),/DRIVE_PENDING_IDENTITY_REJECTED/);
+});
+test('all pending pages are counted once without publishing identifiers or free-form errors',async()=>{
+  const coverage=await verifyCoverage(async offset=>{
+    const page=pendingPage(offset);
+    if(offset)Object.assign(page.privatePendingRows[0],{code:'SECRET_CUSTOMER_TOKEN',attempts:null,sourceVersion:null,extra:'PRIVATE'});
+    return page;
+  },()=>{throw Error('UNEXPECTED_CANONICAL_READ');});
+  assert.equal(coverage.allReceiptsVerified,true);assert.equal(coverage.pending,2);
+  assert.deepEqual(coverage.pendingDiagnostics,{schemaVersion:'aurora.drive-pending-diagnostics.v1',queueMetadataOnly:true,
+    count:2,byCode:{AURORA_DRIVE_CONVERSION_UNSUPPORTED:1,UNKNOWN:1},byStatus:{ERRO_REPROCESSAR:2},
+    byMediaType:{PDF:2},unknownSourceVersion:1,unknownAttempts:1,totalRecordedAttempts:3});
+  assert.ok(!JSON.stringify(coverage).includes('synthetic-pending'));assert.ok(!JSON.stringify(coverage).includes('SECRET'));
+});
+test('pending coverage rejects omitted rows, repeated identities, and overlap with a later primary or alias',async()=>{
+  for(const mutate of [p=>{delete p.privatePendingRows;},p=>{p.privatePendingRows=[];},
+    p=>{p.privatePendingRows[0].fileId='same-pending-file';}]){
+    await assert.rejects(()=>verifyCoverage(async offset=>{const p=pendingPage(offset);mutate(p);return p;},async()=>({verified:1})),
+      /DRIVE_PENDING_(COVERAGE|IDENTITY)_REJECTED/);
+  }
+  const f=readbackFixture();
+  for(const collision of [f.row.sourceId,'synthetic-alias-only']){
+    await assert.rejects(()=>verifyCoverage(async offset=>{
+      if(offset===0){const p=pendingPage(0,3);p.coverage.documents=1;p.coverage.aliases=1;p.coverage.pending=1;
+        p.privatePendingRows[0].fileId=collision;return p;}
+      const p=coveragePage(f.row,offset-1);Object.assign(p.coverage,{offset,total:3,pending:1,
+        nextOffset:offset===1?2:null,complete:offset===2});return p;
+    },plan=>verifyReadback(plan,'wmgj','synthetic-token',f.fetcher)),/DRIVE_COVERAGE_INCOMPLETE/);
+  }
+});
+test('READBACK-only verifies guards and all pages without entering the mutating batch loop',async()=>{
+  const requests=[];let checks=0;
+  const result=await readDriveCoverage({scope:scope(),beforeRead:()=>{checks++;},
+    call:async request=>{requests.push(request);return readOnlyEnvelope(request.mode==='PREVIEW'
+      ?{ok:true,code:'AURORA_DRIVE_PREVIEW_VERIFIED'}:pendingPage(request.readbackOffset));},
+    verifyPlan:()=>{throw Error('UNEXPECTED_CANONICAL_READ');}});
+  assert.deepEqual(requests.map(x=>x.mode),['PREVIEW','READBACK','READBACK']);assert.equal(checks,3);
+  assert.ok(requests.slice(1).every(x=>x.expectedScopeSha256==='a'.repeat(64)));
+  assert.equal(result.coverage.pendingDiagnostics.count,2);
+  const f=batchHarness([batchResponse()],'READBACK');
+  await assert.rejects(f.execute,/DRIVE_MUTATING_MODE_REQUIRED/);assert.equal(f.guards,0);assert.deepEqual(f.requests,[]);
+  assert.deepEqual(completionFromCoverage('READBACK',{scan:{complete:true}},{allReceiptsVerified:true,pending:0}),
+    {complete:false,scopedQueueDrained:true,fullSynchronizationVerified:false,documentReviewRequired:true});
+});
+test('read-only proof rejects scope/source drift and any claimed operational write',async()=>{
+  for(const mutate of [v=>{v.scopeSha256='b'.repeat(64);},v=>{v.processing.attempted=1;},
+    v=>{v.scan.complete=true;},v=>{v.sourceMutation=true;}]){
+    let calls=0;
+    await assert.rejects(()=>readDriveCoverage({scope:scope(),scopeSha256:'a'.repeat(64),beforeRead:()=>{},
+      call:async()=>{calls++;const e=readOnlyEnvelope(pendingPage(0,1));mutate(e.response);return e;},verifyPlan:async()=>({verified:0})}),
+      /DRIVE_(COVERAGE_SCOPE_MISMATCH|READ_ONLY_RESPONSE_REJECTED)/);
+    assert.equal(calls,1);
+  }
+  let calls=0,guards=0;
+  await assert.rejects(()=>readDriveCoverage({scope:scope(),scopeSha256:'a'.repeat(64),
+    beforeRead:()=>{if(++guards===2)throw Error('DRIVE_PUBLISHED_SOURCE_CHANGED');},
+    call:async request=>{calls++;return readOnlyEnvelope(pendingPage(request.readbackOffset));},verifyPlan:async()=>({verified:0})}),
+    /DRIVE_PUBLISHED_SOURCE_CHANGED/);assert.equal(calls,1);
+});
+test('READBACK verifies an empty queue without asserting enumeration or full synchronization',async()=>{
+  const page={...pendingPage(0),privatePendingRows:[],coverage:{offset:0,nextOffset:null,total:0,documents:0,aliases:0,
+    pending:0,complete:true,returned:0,pageDocuments:0,pageAliases:0,pagePending:0}};
+  const result=await readDriveCoverage({scope:scope(),scopeSha256:'a'.repeat(64),beforeRead:()=>{},
+    call:async()=>readOnlyEnvelope(page),verifyPlan:async()=>({verified:0})});
+  assert.equal(result.coverage.pendingDiagnostics.count,0);assert.equal(result.coverage.pages,1);
+  assert.equal(completionFromCoverage('READBACK',null,result.coverage).complete,false);
+});
+test('READBACK-only recovers the existing canonical document and every alias with zero ingestion batches',async()=>{
+  const f=readbackFixture(),requests=[];let canonicalReads=0;
+  const result=await readDriveCoverage({scope:scope(),scopeSha256:'a'.repeat(64),beforeRead:()=>{},
+    call:async request=>{requests.push(request);return readOnlyEnvelope(coveragePage(f.row,request.readbackOffset));},
+    verifyPlan:plan=>{canonicalReads++;return verifyReadback(plan,'wmgj','synthetic-token',f.fetcher);}});
+  assert.deepEqual(requests.map(x=>x.mode),['READBACK','READBACK']);assert.equal(canonicalReads,1);
+  assert.equal(result.coverage.canonicalDocumentsVerified,1);assert.equal(result.coverage.aliasReferencesVerified,1);
+  assert.equal(result.coverage.pendingDiagnostics.count,0);assert.equal(result.coverage.allReceiptsVerified,true);
 });

@@ -1011,6 +1011,10 @@ jobs:
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2 pinned 2026-10-01
+        with:
+          version: "548.0.0"
+          project_id: ${{ inputs.project_id }}
       - name: Publish exact reviewed release with compare-and-swap
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1033,6 +1037,7 @@ jobs:
           export AURORA_ACTIVE_RELEASE_PRODUCT_VERSION="$(node -p "require('./firebase-migration/functions/lib/auroraReleaseStatus.js').AURORA_PRODUCT_VERSION")"
           node firebase-migration/scripts/publish-active-release.mjs
       - name: Attach public certificate to the same verified beta candidate
+        id: finalized-beta
         env:
           GCLOUD_PROJECT: ${{ inputs.project_id }}
           AURORA_ACTIVE_RELEASE_PUBLIC_KEY: ${{ vars.AURORA_ACTIVE_RELEASE_PUBLIC_KEY }}
@@ -1040,7 +1045,11 @@ jobs:
           TRUSTED_PUBLIC_KEY_SHA256: ${{ steps.unified-candidate.outputs.public_key_sha256 }}
         run: |
           set -euo pipefail
-          node firebase-migration/scripts/export-public-unified-release.mjs "$RUNNER_TEMP/unified-release-public"
+          public_release="$(node firebase-migration/scripts/export-public-unified-release.mjs "$RUNNER_TEMP/unified-release-public")"
+          certificate_sha256="$(jq -er --arg source "$GITHUB_SHA" '
+            select(.status == "PUBLIC_RELEASE_CERTIFICATE_EXPORTED" and .sourceSha == $source and .privateMaterialExported == false)
+            | .certificateSha256 | select(type == "string" and test("^[a-f0-9]{64}$"))
+          ' <<<"$public_release")"
           node firebase-migration/scripts/finalize-unified-beta.mjs \
             --candidate firebase-migration/functions/runtime-release/unified-beta-candidate.zip \
             --public-envelope "$RUNNER_TEMP/unified-release-public/release-envelope-signed.json" \
@@ -1049,6 +1058,7 @@ jobs:
             --expected-candidate-sha256 "$EXPECTED_CANDIDATE_SHA256" \
             --trusted-public-key-sha256 "$TRUSTED_PUBLIC_KEY_SHA256" \
             --output "$RUNNER_TEMP/aurora-unified-beta-$GITHUB_SHA.zip"
+          printf 'certificate_sha256=%s\n' "$certificate_sha256" >> "$GITHUB_OUTPUT"
       - name: Retain beta with signed certificate and verified payloads; device acceptance pending
         uses: actions/upload-artifact@v4
         with:
@@ -1056,3 +1066,126 @@ jobs:
           path: ${{ runner.temp }}/aurora-unified-beta-${{ github.sha }}.zip
           if-no-files-found: error
           retention-days: 14
+      - name: Verify promoted release through the authenticated canonical portal
+        env:
+          PROJECT_ID: ${{ inputs.project_id }}
+          APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
+          DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_FIREBASE_DEPLOY_SERVICE_ACCOUNT }}
+          SMOKE_UID: ${{ vars.FIREBASE_HML_SMOKE_UID }}
+          SMOKE_EMAIL: ${{ vars.FIREBASE_HML_SMOKE_EMAIL }}
+          EXPECTED_FINAL_CERTIFICATE_SHA256: ${{ steps.finalized-beta.outputs.certificate_sha256 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          smoke_dir="$(mktemp -d "${RUNNER_TEMP}/aurora-post-promotion-smoke.XXXXXX")"
+          cleanup() {
+            status=$?
+            trap - EXIT
+            rm -rf -- "$smoke_dir"
+            if [ "$status" -ne 0 ]; then
+              echo "::error::POST_PROMOTION_CANONICAL_SMOKE_FAILED"
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          # Preserve the finalized artifact and the promoted pin on failure.
+          # Private service errors and responses are removed, never emitted to CI.
+          {
+            test "$PROJECT_ID" = "$APPROVED_PROJECT"
+            case "$PROJECT_ID" in wmgj-hml-jfn-*) ;; *) exit 41 ;; esac
+            test "$(gcloud auth list --filter='status:ACTIVE' --format='value(account)')" = "$DEPLOY_SERVICE_ACCOUNT"
+            [[ "$SMOKE_UID" =~ ^[A-Za-z0-9_-]{6,128}$ ]]
+            [[ "$SMOKE_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]
+            [[ "$EXPECTED_FINAL_CERTIFICATE_SHA256" =~ ^[a-f0-9]{64}$ ]]
+            claims_file="$smoke_dir/custom-token-claims.json"
+            custom_token_file="$smoke_dir/custom-token.jwt"
+            auth_payload="$smoke_dir/auth-payload.json"
+            auth_response="$smoke_dir/auth-response.json"
+            session_payload="$smoke_dir/session-payload.json"
+            cookie_jar="$smoke_dir/cookies.txt"
+            bootstrap_response="$smoke_dir/bootstrap.json"
+            access_token="$(gcloud auth print-access-token)"
+            apps_json="$(curl --fail --silent --show-error --max-time 30 \
+              -H "Authorization: Bearer ${access_token}" \
+              "https://firebase.googleapis.com/v1beta1/projects/${PROJECT_ID}/webApps?pageSize=100")"
+            app_name="$(jq -r '[.apps[]? | select(.state == "ACTIVE")] | first | .name // empty' <<<"$apps_json")"
+            test -n "$app_name"
+            web_config="$(curl --fail --silent --show-error --max-time 30 \
+              -H "Authorization: Bearer ${access_token}" \
+              "https://firebase.googleapis.com/v1beta1/${app_name}/config")"
+            api_key="$(jq -r '.apiKey // empty' <<<"$web_config")"
+            [[ "$api_key" =~ ^[A-Za-z0-9_-]{20,200}$ ]]
+
+            now="$(date +%s)"
+            exp="$((now + 3000))"
+            jq -nc \
+              --arg iss "$DEPLOY_SERVICE_ACCOUNT" \
+              --arg sub "$DEPLOY_SERVICE_ACCOUNT" \
+              --arg uid "$SMOKE_UID" \
+              --arg aud "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit" \
+              --arg org "wmgj" \
+              --argjson iat "$now" \
+              --argjson exp "$exp" \
+              '{iss:$iss,sub:$sub,aud:$aud,iat:$iat,exp:$exp,uid:$uid,auroraOrgId:$org}' > "$claims_file"
+            gcloud iam service-accounts sign-jwt "$claims_file" "$custom_token_file" \
+              --iam-account "$DEPLOY_SERVICE_ACCOUNT" \
+              --project "$PROJECT_ID" >/dev/null
+            custom_token="$(cat "$custom_token_file")"
+            test -n "$custom_token"
+            jq -nc --arg token "$custom_token" '{token:$token,returnSecureToken:true}' > "$auth_payload"
+            curl --fail --silent --show-error --max-time 30 \
+              -H 'Content-Type: application/json' \
+              --data-binary @"$auth_payload" \
+              --output "$auth_response" \
+              "https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${api_key}"
+            if ! id_token="$(jq -er '.idToken | select(type == "string" and length > 0)' "$auth_response")"; then
+              echo "::error::AUTH_ID_TOKEN_MISSING_OR_INVALID"
+              exit 72
+            fi
+            printf '::add-mask::%s\n' "$id_token"
+            printf '%s' "$id_token" | jq -Rs '{idToken:.}' > "$smoke_dir/account-lookup-in.json"
+            if ! lookup_code="$(curl --silent --show-error --max-time 30 \
+              -H 'Content-Type: application/json' \
+              --data-binary @"$smoke_dir/account-lookup-in.json" \
+              -o "$smoke_dir/account-lookup-out.json" -w '%{http_code}' \
+              "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${api_key}")"; then
+              echo "::error::AUTH_ACCOUNT_LOOKUP_TRANSPORT_FAILED"
+              exit 73
+            fi
+            if [ "$lookup_code" != "200" ]; then
+              echo "::error::AUTH_ACCOUNT_LOOKUP_HTTP=$lookup_code"
+              exit 74
+            fi
+            if ! jq -e --arg uid "$SMOKE_UID" '
+              (.users | type == "array" and length == 1) and
+              (.users[0].localId == $uid) and
+              (.users[0].disabled != true)
+            ' "$smoke_dir/account-lookup-out.json" >/dev/null; then
+              echo "::error::AUTH_SMOKE_ACCOUNT_INVALID"
+              exit 75
+            fi
+            echo "AUTH_SMOKE_UID_VERIFIED"
+
+            canonical_origin="https://auroranexus.com.br"
+            jq -nc --arg idToken "$id_token" '{idToken:$idToken}' > "$session_payload"
+            curl --fail --silent --show-error --max-time 30 -X POST \
+              -H 'Content-Type: application/json' -H "Origin: ${canonical_origin}" \
+              -H 'Sec-Fetch-Site: same-origin' --cookie-jar "$cookie_jar" \
+              --data-binary @"$session_payload" --output /dev/null \
+              "${canonical_origin}/__sessionLogin"
+            curl --fail --silent --show-error --max-time 30 \
+              --cookie "$cookie_jar" -H 'Accept: application/json' \
+              --output "$bootstrap_response" "${canonical_origin}/api/bootstrap"
+            jq -e --arg email "$SMOKE_EMAIL" '
+              .ok == true and .environment == "HOMOLOGATION" and .mode == "SHADOW" and
+              .organization.id == "wmgj" and .member.email == $email
+            ' "$bootstrap_response" >/dev/null
+            expected_product_version="$(node -p "require('./firebase-migration/functions/lib/auroraReleaseStatus.js').AURORA_PRODUCT_VERSION")"
+            node firebase-migration/scripts/verify-deployment-bootstrap.mjs \
+              --bootstrap "$bootstrap_response" --source-sha "$GITHUB_SHA" \
+              --engineering-version "$expected_product_version" \
+              --publish-active-release true --phase POST_PROMOTION \
+              --expected-certificate-sha256 "$EXPECTED_FINAL_CERTIFICATE_SHA256"
+            jq -nc --arg source "$GITHUB_SHA" --arg certificate "$EXPECTED_FINAL_CERTIFICATE_SHA256" \
+              '{code:"POST_PROMOTION_CANONICAL_SMOKE_VERIFIED",sourceSha:$source,certificateSha256:$certificate}'
+          } 2>"$smoke_dir/private-errors.log"
