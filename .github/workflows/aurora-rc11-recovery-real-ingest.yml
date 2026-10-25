@@ -15,7 +15,7 @@ on:
         default: EXECUTE
         options: [EXECUTE, PROCESS_EXISTING, READBACK]
       expected_sha:
-        description: Exact published main SHA for Drive intake
+        description: Exact authorized main SHA; published Apps Script bytes are verified separately
         type: string
       scope_sha256:
         description: SHA-256 of the private authorized Drive source scope
@@ -615,7 +615,7 @@ jobs:
       actions: read
       id-token: write
     steps:
-      - name: Checkout the exact published source
+      - name: Checkout the exact authorized main source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned 2026-10-01
         with:
           ref: ${{ inputs.expected_sha }}
