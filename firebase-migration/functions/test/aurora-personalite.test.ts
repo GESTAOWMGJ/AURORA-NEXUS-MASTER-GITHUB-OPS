@@ -9,7 +9,7 @@ test('Personalité is represented once, governed and inactive', () => {
   assert.equal(entries[0]?.tenantScope, 'PER_ORG');
   assert.equal(entries[0]?.humanGate, true);
   const p = nativeRoutineSummary().personalitePolicy as Record<string, unknown>;
-  assert.equal(p.version, '0.1.0');
+  assert.equal(p.version, '0.1.1');
   for (const key of ['permissionsGranted', 'schedulerCreated', 'executorCreated', 'runtimeAdoptionVerified', 'tenantRawDataTransferAllowed']) assert.equal(p[key], false);
 });
 test('NPS includes passives and reports response rate independently', () => {
@@ -38,4 +38,31 @@ test('malformed, negative, fractional, missing and nonfinite counts fail closed'
 test('invalid denominators and unsafe totals fail closed', () => {
   for (const invited of [0, -1, 1.5, '2', Infinity]) assert.equal(nps({promoters: 2, passives: 0, detractors: 0, invited}).state, 'INVALID_INPUT');
   assert.equal(nps({promoters: Number.MAX_SAFE_INTEGER, passives: 1, detractors: 0}).state, 'INVALID_INPUT');
+});
+
+test('practice and media capability reach the same registry without credentials or effects', () => {
+  const p = nativeRoutineSummary().personalitePolicy as ReturnType<typeof import('../src/auroraNativeRoutines.ts').personalitePolicy>;
+  assert.equal(p.psychologyPractice.identityEngine, 'AURORA-USER-PROFILES-001');
+  assert.equal(p.psychologyPractice.credentialsCreated, false);
+  assert.equal(p.psychologyPractice.tenantCreated, false);
+  assert.equal(p.psychologyPractice.clinicalStorageEnabled, false);
+  assert.equal(p.psychologyPractice.patientDataInMarketingAllowed, false);
+  assert.equal(p.mediaManager.externalProviderConnected, false);
+  assert.equal(p.mediaManager.publishingEnabled, false);
+  assert.equal(p.mediaManager.adsExecutionEnabled, false);
+  assert.equal(p.mediaManager.messagingEnabled, false);
+  assert.equal(p.mediaManager.schedulerCreated, false);
+  assert.equal(p.mediaManager.patientAudienceUploadAllowed, false);
+  assert.equal(p.mediaManager.clinicalDataToPixelOrConversionsApiAllowed, false);
+  assert.equal(p.mediaManager.retryUnknownOutcomeAllowed, false);
+});
+
+test('workspace organization preserves source and does not inherit tenant or messaging grants', () => {
+  const p = nativeRoutineSummary().personalitePolicy as ReturnType<typeof import('../src/auroraNativeRoutines.ts').personalitePolicy>;
+  const w = p.professionalWorkspace;
+  assert.equal(w.originalBytesPreserved, true);
+  assert.equal(w.sourceHistoryPreserved, true);
+  for (const key of ['legacyTenantConfigurationInherited', 'irreversibleDeletionAllowed', 'trashAllowed', 'outboundMessagesAllowed', 'sharingChangesAllowed', 'markReadAutomaticallyAllowed', 'archiveAutomaticallyAllowed', 'providerWriteEnabled', 'accountsConnected', 'schedulerCreated'] as const) assert.equal(w[key], false);
+  assert.equal(w.sla.silenceClosesFinding, false);
+  assert.equal(w.sla.deduplicationRequired, true);
 });
