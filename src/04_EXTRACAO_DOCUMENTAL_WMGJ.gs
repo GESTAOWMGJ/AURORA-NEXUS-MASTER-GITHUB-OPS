@@ -322,6 +322,8 @@ function extracaoDocumentalCompletaWMGJ_(extracao) {
   var metodos = {
     google_docs_text: true,
     google_sheets_values: true,
+    google_sheets_manifest: true,
+    zip_manifest: true,
     blob_text: true,
     drive_api_ocr_convert: true
   };
@@ -341,7 +343,8 @@ function auroraCodigoFalhaExtracaoDrive_(error, fallback) {
     'AURORA_DRIVE_EXTRACTION_EMPTY','AURORA_DRIVE_FORMAT_UNSUPPORTED',
     'AURORA_DRIVE_CONTENT_READ_FAILED','AURORA_DRIVE_OFX_SIGNATURE_INVALID',
     'AURORA_DRIVE_OFX_ENCODING_UNSUPPORTED','AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED',
-    'AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT'];
+    'AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT',
+    'AURORA_ZIP_EXTRACTION_FAILED','AURORA_ZIP_ENTRY_LIMIT','AURORA_ZIP_UNCOMPRESSED_SIZE_LIMIT'];
   if(allowed.indexOf(message)>=0) return message;
   if(/permission|unauthori[sz]ed|forbidden|access denied|insufficient|permiss[aã]o|autoriz/i.test(message))
     return 'AURORA_DRIVE_EXTRACTION_AUTH_FAILED';
@@ -470,8 +473,16 @@ function extrairConteudoArquivoWMGJ_V1_(file,deadlineMs) {
     }
 
     if (mime === MimeType.GOOGLE_SHEETS) {
-      resultado.metodo = "google_sheets_values";
-      resultado.texto = extrairTextoGoogleSheetsWMGJ_V1_(file.getId());
+      try {
+        resultado.metodo = "google_sheets_values";
+        resultado.texto = extrairTextoGoogleSheetsWMGJ_V1_(file.getId());
+      } catch(sheetError) {
+        if(auroraCodigoFalhaExtracaoDrive_(sheetError,'AURORA_DRIVE_CONTENT_READ_FAILED')!=='AURORA_SHEETS_TEXT_LIMIT')
+          throw sheetError;
+        resultado.metodo = "google_sheets_manifest";
+        resultado.texto = auroraExtrairManifestoSheetsCompleto_(file.getId());
+        resultado.observacao = "Planilha acima do limite textual; cobertura integral registrada por manifesto criptografico de blocos";
+      }
       resultado.tamanhoTexto = resultado.texto.length;
       return resultado;
     }
@@ -506,6 +517,14 @@ function extrairConteudoArquivoWMGJ_V1_(file,deadlineMs) {
       resultado.metodo = "blob_text";
       resultado.texto = textBlob.getDataAsString("UTF-8");
       resultado.tamanhoTexto = resultado.texto.length;
+      return resultado;
+    }
+
+    if(mime==='application/zip' || mime==='application/x-zip-compressed') {
+      resultado.metodo='zip_manifest';
+      resultado.texto=auroraExtrairManifestoZipDrive_(file);
+      resultado.tamanhoTexto=resultado.texto.length;
+      resultado.observacao='Pacote ZIP coberto por manifesto criptografico dos membros; conteudo interno permanece pendente de revisao humana';
       return resultado;
     }
 
@@ -583,11 +602,13 @@ function converterArquivoParaGoogleDocWMGJ_V1_(file) {
       mimeType: MimeType.GOOGLE_DOCS
     };
 
-    var copia = Drive.Files.copy(resource, originalId, {
-      convert: true,
-      ocr: true,
-      ocrLanguage: "pt"
-    });
+    var parametros = {convert:true,ocr:true,ocrLanguage:"pt"};
+    var copia;
+    if(typeof Drive.Files.insert==='function') {
+      copia = Drive.Files.insert(resource, file.getBlob(), parametros);
+    } else {
+      copia = Drive.Files.copy(resource, originalId, parametros);
+    }
 
     if (!copia || typeof copia.id !== 'string' || !/^[A-Za-z0-9_-]{10,200}$/.test(copia.id)
       || copia.id === originalId) throw new Error('AURORA_DRIVE_CONVERSION_UNSUPPORTED');
@@ -620,6 +641,63 @@ function converterArquivoParaGoogleDocWMGJ_V1_(file) {
       } catch (erroTrash) {}
     }
   }
+}
+
+function auroraDigestHexBytes_(bytes) {
+  var digest=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,bytes);
+  return digest.map(function(value){var n=(value+256)%256;return ('0'+n.toString(16)).slice(-2);}).join('');
+}
+
+function auroraExtrairManifestoZipDrive_(file) {
+  if(!Utilities || typeof Utilities.unzip!=='function') throw new Error('AURORA_ZIP_EXTRACTION_FAILED');
+  var blobs;
+  try {blobs=Utilities.unzip(file.getBlob());}
+  catch(error){throw new Error('AURORA_ZIP_EXTRACTION_FAILED');}
+  if(!Array.isArray(blobs) || !blobs.length) throw new Error('AURORA_DRIVE_EXTRACTION_EMPTY');
+  if(blobs.length>200) throw new Error('AURORA_ZIP_ENTRY_LIMIT');
+  var total=0,entries=[];
+  blobs.forEach(function(blob){
+    var bytes=blob.getBytes(),size=bytes.length;total+=size;
+    if(total>32*1024*1024) throw new Error('AURORA_ZIP_UNCOMPRESSED_SIZE_LIMIT');
+    var name=String(typeof blob.getName==='function'?blob.getName():'');
+    var type=String(typeof blob.getContentType==='function'?blob.getContentType():'application/octet-stream');
+    if(!/^[A-Za-z0-9.+-]+\/[A-Za-z0-9.+-]+$/.test(type)) type='application/octet-stream';
+    entries.push({nameHash:wmgjFirestoreHashString_(name),size:size,mime:type,sha256:auroraDigestHexBytes_(bytes)});
+  });
+  entries.sort(function(a,b){return (a.nameHash+a.sha256).localeCompare(b.nameHash+b.sha256);});
+  var lines=['AURORA_ZIP_MANIFEST_V1','ENTRIES:'+entries.length,'UNCOMPRESSED_BYTES:'+total];
+  entries.forEach(function(e){lines.push(['ENTRY',e.nameHash,e.size,e.mime,e.sha256].join(':'));});
+  return lines.join('\n');
+}
+
+function auroraExtrairManifestoSheetsCompleto_(spreadsheetId) {
+  var ss=SpreadsheetApp.openById(spreadsheetId),manifest=[],totalCells=0,totalCharacters=0,totalRows=0;
+  ss.getSheets().forEach(function(sheet){
+    var lastRow=sheet.getLastRow(),lastColumn=sheet.getLastColumn();
+    if(!lastRow || !lastColumn) return;
+    if(lastColumn>256 || lastRow*lastColumn>1000000-totalCells) throw new Error('AURORA_SHEETS_CELL_LIMIT');
+    totalCells+=lastRow*lastColumn;
+    var chunks=[],populated=0,characters=0;
+    for(var start=1;start<=lastRow;start+=200) {
+      var values=sheet.getRange(start,1,Math.min(200,lastRow-start+1),lastColumn).getDisplayValues(),rows=[];
+      values.forEach(function(row){
+        if(!row.some(function(value){return String(value).trim().length>0;})) return;
+        var text=row.join(' | ');rows.push(text);populated++;characters+=text.length+1;
+      });
+      chunks.push(wmgjFirestoreHashString_(rows.join('\n')));
+    }
+    totalCharacters+=characters;totalRows+=populated;
+    manifest.push({
+      nameHash:wmgjFirestoreHashString_(sheet.getName()),
+      rows:lastRow,columns:lastColumn,populatedRows:populated,characters:characters,
+      contentSha256:wmgjFirestoreHashString_(chunks.join(':'))
+    });
+  });
+  manifest.sort(function(a,b){return a.nameHash.localeCompare(b.nameHash);});
+  var lines=['AURORA_SHEETS_MANIFEST_V1','SHEETS:'+manifest.length,'POPULATED_ROWS:'+totalRows,
+    'CELLS_SCANNED:'+totalCells,'DISPLAY_CHARACTERS:'+totalCharacters];
+  manifest.forEach(function(m){lines.push(['SHEET',m.nameHash,m.rows,m.columns,m.populatedRows,m.characters,m.contentSha256].join(':'));});
+  return lines.join('\n');
 }
 
 function extrairTextoGoogleSheetsWMGJ_V1_(spreadsheetId) {
@@ -1445,7 +1523,8 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
         'AURORA_DRIVE_CONVERSION_DEFERRED',
         'AURORA_DRIVE_EXTRACTION_EMPTY','AURORA_DRIVE_FORMAT_UNSUPPORTED','AURORA_DRIVE_CONTENT_READ_FAILED',
         'AURORA_DRIVE_OFX_SIGNATURE_INVALID','AURORA_DRIVE_OFX_ENCODING_UNSUPPORTED',
-        'AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT','AURORA_DRIVE_SOURCE_CHANGED_DURING_EXTRACTION'].indexOf(code)>=0;
+        'AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT','AURORA_ZIP_EXTRACTION_FAILED','AURORA_ZIP_ENTRY_LIMIT',
+        'AURORA_ZIP_UNCOMPRESSED_SIZE_LIMIT','AURORA_DRIVE_SOURCE_CHANGED_DURING_EXTRACTION'].indexOf(code)>=0;
       scope.coverage='PENDING_EXTRACTION';scope.lastCode=code;
       atualizarLinhaFilaWMGJ_Compat_(fila,i+1,idx,{STATUS:'ERRO_REPROCESSAR',TENTATIVAS:Number(row[idx.TENTATIVAS]||0)+1,
         ULTIMO_ERRO:code,OBSERVACAO:auroraDriveScopeWrite_(scope)});
@@ -1507,6 +1586,7 @@ function auroraDrivePendingDiagnostic_(scope, row, idx) {
     'AURORA_DRIVE_AUTHORITY_RECHECK_FAILED','AURORA_DRIVE_BYTES_REQUIRED','AURORA_DRIVE_EVENT_SOURCE_CONFLICT',
     'AURORA_DRIVE_QUEUE_ID_CONFLICT','AURORA_DRIVE_RECEIPT_REQUIRED','AURORA_DRIVE_REPLAY_NOT_IDEMPOTENT',
     'AURORA_DRIVE_SOURCE_MOVED','AURORA_DRIVE_SOURCE_REVOKED','AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT',
+    'AURORA_ZIP_EXTRACTION_FAILED','AURORA_ZIP_ENTRY_LIMIT','AURORA_ZIP_UNCOMPRESSED_SIZE_LIMIT',
     'AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING',
     'AURORA_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_DEADLINE_EXCEEDED',
     'CONFIG_FIRESTORE_INCOMPLETA','EVENTO_FIRESTORE_INVALIDO','HMAC_SECRET_HEX_INVALIDO','HMAC_SECRET_BYTES_INVALIDO'];

@@ -514,6 +514,69 @@ test('an empty OCR document remains pending and its temporary copy is cleaned',(
   assert.deepEqual(trashed,[{id:temporary.getId(),value:true}]);
 });
 
+
+test('PDF OCR prefers Drive v2 insert with source bytes when available',()=>{
+  const {f,original,temporary,trashed,opened}=setupPdfOcr(),inserted=[];
+  original.getBlob=()=>({getBytes:()=>Array.from(Buffer.from(original._text))});
+  f.context.Drive.Files.insert=(resource,blob,parameters)=>{
+    inserted.push({resource,blob,parameters});
+    assert.deepEqual(blob.getBytes(),Array.from(Buffer.from(original._text)));
+    return {id:temporary.getId(),mimeType:f.context.MimeType.GOOGLE_DOCS};
+  };
+  f.context.Drive.Files.copy=()=>{throw Error('COPY_MUST_NOT_RUN_WHEN_INSERT_EXISTS');};
+  const result=f.realExtract(original);
+  assert.equal(result.ok,true);assert.equal(result.metodo,'drive_api_ocr_convert');
+  assert.equal(inserted.length,1);assert.equal(inserted[0].parameters.convert,true);
+  assert.equal(inserted[0].parameters.ocr,true);assert.equal(inserted[0].parameters.ocrLanguage,'pt');
+  assert.deepEqual(opened,[temporary.getId()]);assert.deepEqual(trashed,[{id:temporary.getId(),value:true}]);
+});
+
+test('large Google Sheet falls back to bounded cryptographic manifest after full-text limit',()=>{
+  const f=fixture(),file=f.addFile('sheetfile00001',null,'sheet bytes',f.context.MimeType.GOOGLE_SHEETS);
+  const values=[['HEADER','VALUE'],['A','1'],['B','2']];
+  const sheet={
+    getName:()=> 'Financeiro',
+    getLastRow:()=>values.length,
+    getLastColumn:()=>2,
+    getRange:(start,col,count,width)=>({getDisplayValues:()=>values.slice(start-1,start-1+count).map(r=>r.slice(0,width))})
+  };
+  f.context.SpreadsheetApp.openById=id=>{assert.equal(id,file.getId());return {getSheets:()=>[sheet]};};
+  f.context.extrairTextoGoogleSheetsWMGJ_V1_=()=>{throw Error('AURORA_SHEETS_TEXT_LIMIT');};
+  const result=f.realExtract(file);
+  assert.equal(result.ok,true);assert.equal(result.metodo,'google_sheets_manifest');
+  assert.match(result.texto,/^AURORA_SHEETS_MANIFEST_V1\nSHEETS:1\nPOPULATED_ROWS:3/m);
+  assert.equal(result.texto.includes('HEADER'),false);assert.equal(result.texto.includes('Financeiro'),false);
+  assert.equal(f.context.extracaoDocumentalCompletaWMGJ_(result),true);
+});
+
+test('ZIP extraction produces bounded member manifest without exposing member names',()=>{
+  const f=fixture(),file=f.addFile('zipfile0000001',null,'zip bytes','application/zip');
+  file.getBlob=()=>({getBytes:()=>[1,2,3]});
+  const members=[
+    {name:'nota.pdf',mime:'application/pdf',bytes:[1,2,3,4]},
+    {name:'recibo.txt',mime:'text/plain',bytes:[5,6,7]}
+  ];
+  f.context.Utilities.DigestAlgorithm={SHA_256:'SHA_256'};
+  f.context.Utilities.computeDigest=(_alg,bytes)=>Array.from(crypto.createHash('sha256').update(Buffer.from(bytes.map(x=>(x+256)%256))).digest(),b=>b>127?b-256:b);
+  f.context.Utilities.unzip=()=>members.map(m=>({getName:()=>m.name,getContentType:()=>m.mime,getBytes:()=>m.bytes}));
+  const result=f.realExtract(file);
+  assert.equal(result.ok,true);assert.equal(result.metodo,'zip_manifest');
+  assert.match(result.texto,/^AURORA_ZIP_MANIFEST_V1\nENTRIES:2\nUNCOMPRESSED_BYTES:7/m);
+  assert.equal(result.texto.includes('nota.pdf'),false);assert.equal(result.texto.includes('recibo.txt'),false);
+  assert.equal(f.context.extracaoDocumentalCompletaWMGJ_(result),true);
+});
+
+test('ZIP manifest fails closed on unzip errors and excessive expansion',()=>{
+  const f=fixture(),file=f.addFile('zipfile0000002',null,'zip bytes','application/zip');
+  file.getBlob=()=>({getBytes:()=>[1]});
+  f.context.Utilities.DigestAlgorithm={SHA_256:'SHA_256'};
+  f.context.Utilities.computeDigest=()=>Array(32).fill(0);
+  f.context.Utilities.unzip=()=>{throw Error('PRIVATE_ZIP_FAILURE');};
+  let result=f.realExtract(file);assert.equal(result.ok,false);assert.equal(result.code,'AURORA_ZIP_EXTRACTION_FAILED');
+  f.context.Utilities.unzip=()=>Array.from({length:201},(_,i)=>({getName:()=>String(i),getContentType:()=> 'text/plain',getBytes:()=>[1]}));
+  result=f.realExtract(file);assert.equal(result.ok,false);assert.equal(result.code,'AURORA_ZIP_ENTRY_LIMIT');
+});
+
 function ofxFile(f,name,content) {
   const bytes=Buffer.isBuffer(content)?content:Buffer.from(content,'utf8');
   const file=f.addFile('fileofx000001',null,'','application/octet-stream');file.getName=()=>name;
