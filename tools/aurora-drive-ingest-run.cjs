@@ -11,6 +11,53 @@ const fail = code => { throw new Error(code); };
 const id = value => typeof value === 'string' && /^[A-Za-z0-9_-]{10,256}$/.test(value);
 const hex = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const stable = value => JSON.stringify(value,(_,item)=>item && !Array.isArray(item) && typeof item==='object' ? Object.fromEntries(Object.entries(item).sort(([a],[b])=>a.localeCompare(b))) : item);
+const normalize = value => value.replace(/\r\n/g, '\n');
+const CANONICAL_DEPLOYMENT_PREFIX = 'AURORA_EXECUTION_API_CANONICAL ';
+
+function selectDriveDeployment(rows) {
+  if (!Array.isArray(rows)) fail('DRIVE_PUBLISHED_VERSION_UNAVAILABLE');
+  const canonical = rows.filter(row => {
+    if (!row || typeof row.description !== 'string' || !row.description.startsWith(CANONICAL_DEPLOYMENT_PREFIX)) return false;
+    const publishedSourceSha = row.description.slice(CANONICAL_DEPLOYMENT_PREFIX.length);
+    return /^[a-f0-9]{40}$/.test(publishedSourceSha)
+      && Number.isSafeInteger(row.versionNumber) && row.versionNumber >= 1
+      && typeof row.deploymentId === 'string' && /^[A-Za-z0-9_-]{10,256}$/.test(row.deploymentId);
+  }).map(row => ({...row,publishedSourceSha:row.description.slice(CANONICAL_DEPLOYMENT_PREFIX.length)}))
+    .sort((a,b)=>a.versionNumber-b.versionNumber || a.deploymentId.localeCompare(b.deploymentId));
+  if (!canonical.length) fail('DRIVE_PUBLISHED_VERSION_MISMATCH');
+  const latest=canonical[canonical.length-1],previous=canonical[canonical.length-2];
+  if (previous && previous.versionNumber===latest.versionNumber && previous.deploymentId!==latest.deploymentId) {
+    fail('DRIVE_PUBLISHED_VERSION_MISMATCH');
+  }
+  return latest;
+}
+
+function verifyPublishedDriveProject(repo,published) {
+  const src=path.join(repo,'src');
+  const expected=fs.readdirSync(src,{withFileTypes:true})
+    .filter(entry=>entry.isFile() && entry.name.endsWith('.gs'))
+    .map(entry=>entry.name.slice(0,-3)).sort();
+  const remote=fs.readdirSync(published,{withFileTypes:true})
+    .filter(entry=>entry.isFile() && /\.(?:gs|js)$/.test(entry.name));
+  const remoteByModule=new Map();
+  for(const entry of remote){
+    const module=entry.name.replace(/\.(?:gs|js)$/,'');
+    if(remoteByModule.has(module))fail('DRIVE_PUBLISHED_SOURCE_MISMATCH');
+    remoteByModule.set(module,path.join(published,entry.name));
+  }
+  if(expected.length!==remoteByModule.size || expected.some(module=>!remoteByModule.has(module))) {
+    fail('DRIVE_PUBLISHED_SOURCE_MISMATCH');
+  }
+  for(const module of expected){
+    const local=fs.readFileSync(path.join(src,module+'.gs'),'utf8');
+    const deployed=fs.readFileSync(remoteByModule.get(module),'utf8');
+    if(normalize(local)!==normalize(deployed))fail('DRIVE_PUBLISHED_SOURCE_MISMATCH');
+  }
+  const localManifest=JSON.parse(fs.readFileSync(path.join(repo,'appsscript.json'),'utf8'));
+  const remoteManifest=JSON.parse(fs.readFileSync(path.join(published,'appsscript.json'),'utf8'));
+  if(stable(localManifest)!==stable(remoteManifest))fail('DRIVE_PUBLISHED_MANIFEST_MISMATCH');
+  return {modulesVerified:expected.length,manifestSha256:sha(stable(remoteManifest))};
+}
 function parseScope(raw, expectedHash) {
   if (typeof raw !== 'string' || raw.length > 131072 || !hex(expectedHash) || sha(raw) !== expectedHash) fail('DRIVE_PRIVATE_SCOPE_HASH_MISMATCH');
   const scope=JSON.parse(raw);
@@ -320,16 +367,17 @@ async function run() {
   const workflow=fs.readFileSync(path.join(repo,'.github/workflows/deploy-appscript.yml'),'utf8');
   const scriptId=workflow.match(/^\s+APPS_SCRIPT_ID:\s*([A-Za-z0-9_-]+)\s*$/m)?.[1];if(!scriptId)fail('DRIVE_SCRIPT_BINDING_MISSING');
   const writeProject=directory=>fs.writeFileSync(path.join(directory,'.clasp.json'),JSON.stringify({scriptId,projectId:PROJECT,rootDir:'.'}),{mode:0o600,flag:'wx'});writeProject(workspace);
-  const {selectDeployment}=require('./aurora-cloud-synthetic-probe.cjs');
-  const deployment=()=>selectDeployment(JSON.parse(command('clasp',['deployments','--json'],workspace)),sourceSha);
+  const deployment=()=>selectDriveDeployment(JSON.parse(command('clasp',['deployments','--json'],workspace)));
   const before=deployment();
   const published=path.join(workspace,'published');fs.mkdirSync(published,{mode:0o700});writeProject(published);
   command('clasp',['pull','--versionNumber',String(before.versionNumber),'--json'],published);
-  for(const module of ['00_CORE_WMGJ','01_PIPELINE_CONFIABILIDADE_WMGJ','04_EXTRACAO_DOCUMENTAL_WMGJ','09D_REPLAY_MENSAGEM_GMAIL_WMGJ','35_AURORA_FIRESTORE_BRIDGE_WMGJ','36_AURORA_FIRESTORE_MIGRATION_WMGJ','37_AURORA_CONECTORES_PLUG_AND_PLAY']){
-    const candidates=['.gs','.js'].map(ext=>path.join(published,module+ext)).filter(fs.existsSync);
-    if(candidates.length!==1||fs.readFileSync(candidates[0],'utf8').replace(/\r\n/g,'\n')!==fs.readFileSync(path.join(repo,'src',module+'.gs'),'utf8').replace(/\r\n/g,'\n'))fail('DRIVE_PUBLISHED_SOURCE_MISMATCH');
-  }
-  summary.publishedVersionNumber=before.versionNumber;save();
+  const publishedProject=verifyPublishedDriveProject(repo,published);
+  summary.publishedVersionNumber=before.versionNumber;
+  summary.publishedDeploymentSourceSha=before.publishedSourceSha;
+  summary.publishedSourceFilesVerified=publishedProject.modulesVerified;
+  summary.publishedManifestSha256=publishedProject.manifestSha256;
+  summary.publishedSourceMatchesCheckedCommit=true;
+  save();
   const call=async(request,n)=>{
     const envelope=await withSharedLockRetry(attempt=>{
       gate();const output=path.join(workspace,'result-'+n+'-'+attempt+'.json');
@@ -369,5 +417,5 @@ async function run() {
   finally{summary.finishedAtUtc=new Date().toISOString();save();}
   return summary;
 }
-module.exports={parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sanitizePendingRow,readDriveCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage};
+module.exports={parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sanitizePendingRow,readDriveCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage,selectDriveDeployment,verifyPublishedDriveProject};
 if(require.main===module)run().then(result=>console.log(JSON.stringify({status:result.status,complete:result.complete,batches:result.batches.length,canonicalReadbacksVerified:result.canonicalReadbacksVerified}))).catch(error=>{console.error(/^[A-Z_0-9]{1,100}$/.test(error.message)?error.message:'DRIVE_INTAKE_UNCONFIRMED');process.exitCode=1;});
