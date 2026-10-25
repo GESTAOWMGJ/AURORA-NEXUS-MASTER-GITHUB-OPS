@@ -1,5 +1,12 @@
 # AURORA NEXUS — progresso até a versão vendável
 
+## Entrega vigente HML — 25/10/2026
+
+Registro canônico operacional: [AURORA-HML-DELIVERY-20261025-R1](AURORA_HML_DELIVERY_20261025_R1.md), com manifesto legível por máquina em [JSON](AURORA_HML_DELIVERY_20261025_R1.json).
+
+Produto `1.1.0-beta.2`; referência ativa assinada `aurora-1.1.0-beta.2-cd4737ed0421df7ec53fc17d6e16c56443085013` permanece vigente para o produto. A revisão operacional `602528812bffc443a48a4d52fc115c6ab2af6081` publicou Apps Script canônico v46 e concluiu READBACK real no escopo autorizado: 51 documentos canônicos, 192 aliases e 12 pendências, sem mutação de fonte. Estado: `CURRENT_HML_CONTROLLED`, sem produção e sem alegação de sincronização global completa.
+
+
 ## Candidata de revinculação documental de credencial — 19/10/2026
 
 Produto `1.1.0-beta.2`, WindowsIntegration `1.0.7`, módulos M08/M09/M10,
