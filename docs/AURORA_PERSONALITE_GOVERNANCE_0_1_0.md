@@ -91,3 +91,7 @@ Testes sintéticos: registro único/governado, política exposta na projeção, 
 Rollback: reverter exclusivamente o commit deste incremento; sem migração, exclusão de dados ou efeito financeiro a desfazer. Não reverter mudanças concorrentes. A versão instalada permanece intocada.
 
 Pendências: revisão do patch; CI no SHA final; integração de schemas/controles com identidade real; testes de isolamento por organização/profissional, autorização expirada/alterada, parcela parcial, crédito agrupado, duplicidade, estorno, transferência interna e cobrança já paga; HML sintético; piloto autorizado com readback. Só então considerar ativação progressiva e atualizar evidências do Cockpit. Registro documental e teste local não comprovam operação nem instalação.
+
+## Sucessor candidato
+
+O incremento [Personalité 0.1.1](AURORA_PERSONALITE_PSYCHOLOGY_MEDIA_0_1_1.md) acrescenta consultório de Psicologia, capacidade gestora Meta/Instagram e organização de Drive/e-mail com saneamento e SLA. Preserva este contrato 0.1.0 e não ativa execução externa.
