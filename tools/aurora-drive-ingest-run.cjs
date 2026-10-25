@@ -105,7 +105,7 @@ async function verifyReadback(plan,orgId,token,fetcher=fetch) {
       ||data.source?.contentHash!==row.contentHash||data.sourceVersion!==row.sourceVersion
       ||data.revision!==row.revision||!['DRIVE','SHEETS'].includes(data.source?.system))fail('DRIVE_CANONICAL_IDENTITY_MISMATCH');
     const proof=data.extractionEvidence;
-    const manifestMethod=proof?.method==='google_sheets_manifest'||proof?.method==='zip_manifest';
+    const manifestMethod=['google_sheets_manifest','zip_manifest','pdf_encrypted_manifest'].includes(proof?.method);
     const expectedCoverage=manifestMethod?'SOURCE_MANIFESTED_REVIEW_PENDING':'TEXT_EXTRACTED_REVIEW_PENDING';
     if(data.extractionComplete!==true||data.nativeReady!==false||data.sourceIndependent!==false||data.externalFetchRequired!==true
       ||data.workflowState!=='PENDING_HUMAN_REVIEW'||data.reviewState!=='PENDING'||data.canonicalSnapshotHash!==row.canonicalSnapshotHash

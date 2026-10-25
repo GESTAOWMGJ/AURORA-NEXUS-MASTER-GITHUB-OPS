@@ -418,10 +418,10 @@ function extractionEvidenceValid(event: WmgjIngestionEvent): boolean {
     && evidence.schemaVersion === 1 && hexHash(evidence.contentSha256) && hexHash(evidence.textSha256)
     && evidence.contentSha256 === event.source.contentHash && event.source.hashMethod === "content_sha256"
     && Number.isSafeInteger(evidence.textLength) && Number(evidence.textLength) > 0 && Number(evidence.textLength) <= 1048576
-    && typeof evidence.method === "string" && ["google_docs_text", "google_sheets_values", "google_sheets_manifest", "zip_manifest", "blob_text", "drive_api_ocr_convert"].includes(evidence.method)
+    && typeof evidence.method === "string" && ["google_docs_text", "google_sheets_values", "google_sheets_manifest", "zip_manifest", "pdf_encrypted_manifest", "blob_text", "drive_api_ocr_convert"].includes(evidence.method)
     && evidence.method === event.record.extractionMethod
-    && ((["google_sheets_manifest", "zip_manifest"].includes(evidence.method) && evidence.coverage === "SOURCE_MANIFESTED_REVIEW_PENDING")
-      || (!["google_sheets_manifest", "zip_manifest"].includes(evidence.method) && evidence.coverage === "TEXT_EXTRACTED_REVIEW_PENDING"))
+    && ((["google_sheets_manifest", "zip_manifest", "pdf_encrypted_manifest"].includes(evidence.method) && evidence.coverage === "SOURCE_MANIFESTED_REVIEW_PENDING")
+      || (!["google_sheets_manifest", "zip_manifest", "pdf_encrypted_manifest"].includes(evidence.method) && evidence.coverage === "TEXT_EXTRACTED_REVIEW_PENDING"))
     && evidence.sourceVersion === event.sourceVersion && evidence.financialFactsApproved === false;
 }
 

@@ -99,7 +99,7 @@ test('document extraction evidence passes only as exact structured hashes with m
     const e=documentary();change(e);assert.equal(validate(e).ok,false);}
 });
 test('bounded source manifests are accepted only with manifest coverage and no financial approval',()=>{
-  for(const method of ['google_sheets_manifest','zip_manifest']) {
+  for(const method of ['google_sheets_manifest','zip_manifest','pdf_encrypted_manifest']) {
     const e=documentary();
     e.record.extractionMethod=method;
     e.record.extractionEvidence.method=method;
