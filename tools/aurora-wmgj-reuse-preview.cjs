@@ -181,14 +181,19 @@ function run({repo = path.resolve(__dirname,'..'), temporary = process.env.RUNNE
           if (selected && (!expected || (selected.versionNumber === expected.versionNumber
             && sha(selected.deploymentId) === expected.deploymentIdentitySha256))) return selected;
 
-          // Only an older observation of the same unique canonical deployment may
-          // converge. Never pull that version, repeat PREVIEW, or retry a new identity.
+          // A freshly redeployed canonical identity can be briefly observed with
+          // its prior SHA/version. Wait only for the same unique canonical shape;
+          // never pull stale bytes or repeat PREVIEW while convergence is pending.
+          const rowsSafe = Array.isArray(rows) && rows.every(row => row && typeof row === 'object' && !Array.isArray(row));
+          const canonicalShaObserved = Array.isArray(rows) && rows.some(row => typeof row.description === 'string'
+            && /^AURORA_EXECUTION_API_CANONICAL [a-f0-9]{40}$/.test(row.description));
+          const initialConvergence = !expected && observed.canonicalCount === 1 && observed.versionNumberValid
+            && observed.deploymentIdValid && observed.expectedDescriptionCount === 0
+            && rowsSafe && canonicalShaObserved;
           const historical = expected && observed.canonicalCount === 1 && observed.versionNumberValid
             && observed.deploymentIdValid && observed.deploymentIdentitySha256 === expected.deploymentIdentitySha256
-            && observed.versionNumber < expected.versionNumber
-            && rows.every(row => row && typeof row === 'object' && !Array.isArray(row))
-            && rows.some(row => /^AURORA_EXECUTION_API_CANONICAL [a-f0-9]{40}$/.test(row.description));
-          if (!historical || attempt >= MAX_AFTER_DEPLOYMENT_READS) {
+            && observed.versionNumber < expected.versionNumber && rowsSafe && canonicalShaObserved;
+          if (!(initialConvergence || historical) || attempt >= MAX_AFTER_DEPLOYMENT_READS) {
             throw rejection({reason:'DEPLOYMENT_SELECTION_INVALID',deploymentSelection:observed});
           }
           gate(); wait(DEPLOYMENT_RETRY_DELAY_MS); gate();
