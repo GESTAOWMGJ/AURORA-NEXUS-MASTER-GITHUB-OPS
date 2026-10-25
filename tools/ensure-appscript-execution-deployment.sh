@@ -21,12 +21,27 @@ deployment_id="$(jq -r --arg prefix "$prefix" '
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
+# Always bind the canonical deployment to an immutable Apps Script version for
+# the exact Git source SHA, even when the pushed .gs bytes are unchanged.
+version_output="$(clasp version "$description")"
+version_number="$(sed -nE 's/.*Created version ([0-9]+)\..*/\1/p' <<<"$version_output" | tail -n 1)"
+if [[ ! "$version_number" =~ ^[1-9][0-9]*$ ]]; then
+  versions="$(clasp versions --json)"
+  version_number="$(jq -r --arg description "$description" '
+    [.[] | select((.description // "") == $description) | (.versionNumber|tonumber)]
+    | max // empty
+  ' <<<"$versions")"
+fi
+[[ "$version_number" =~ ^[1-9][0-9]*$ ]]
+
 if [ -n "$deployment_id" ]; then
-  clasp redeploy "$deployment_id" --description "$description" --json >"$tmp"
+  clasp redeploy "$deployment_id" --versionNumber "$version_number" --description "$description" --json >"$tmp"
 else
-  clasp deploy --description "$description" --json >"$tmp"
+  clasp deploy --versionNumber "$version_number" --description "$description" --json >"$tmp"
 fi
 
-jq -e '.deploymentId and (.versionNumber|tonumber) >= 1' "$tmp" >/dev/null
+jq -e --argjson expected "$version_number" '
+  .deploymentId and (.versionNumber|tonumber) == $expected
+' "$tmp" >/dev/null
 umask 077
 cp "$tmp" "$output_json"

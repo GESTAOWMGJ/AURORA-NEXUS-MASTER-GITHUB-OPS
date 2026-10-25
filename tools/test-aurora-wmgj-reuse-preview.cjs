@@ -251,6 +251,33 @@ test('predeployment command, JSON and selection failures have bounded diagnostic
   }
 });
 
+test('initial stale canonical description converges before any source pull or preview',()=> {
+  withDiagnosticFixture(fixture=>{
+    const known=fixture.deployment;
+    const stale={...known,versionNumber:known.versionNumber-1,
+      description:'AURORA_EXECUTION_API_CANONICAL '+'d'.repeat(40)};
+    let reads=0; const waits=[];
+    const exec=(bin,args,cwd)=>{
+      if(bin==='clasp'&&args[0]==='deployments'){
+        reads++;
+        return JSON.stringify([reads===1?stale:known]);
+      }
+      return fixture.fallback(bin,args,cwd);
+    };
+    const proof=run({...fixture.options(exec),wait:milliseconds=>{
+      waits.push(milliseconds);
+      assert.equal(reads,1);
+      assert.equal(fixture.calls.filter(call=>call.command==='pull').length,0);
+      assert.equal(fixture.calls.filter(call=>call.bin==='bash').length,0);
+    }});
+    assert.equal(reads,3);
+    assert.equal(waits.length,1);
+    assert.equal(fixture.calls.filter(call=>call.bin==='bash').length,1);
+    assert.deepEqual(fixture.calls.filter(call=>call.command==='pull').map(call=>call.args[2]),['23','23']);
+    assert.equal(proof.published.versionNumber,23);
+  });
+});
+
 test('post-preview selection failures identify bounded predicates and retain rejection without exporting deployment metadata',()=>{
   const secret='synthetic-private-deployment-metadata';
   const hash=value=>createHash('sha256').update(value).digest('hex');
@@ -378,7 +405,7 @@ test('post-preview changed identity, newer version, ambiguity or same-version wr
   }
 });
 
-test('an older observation before the preview is rejected immediately and never retried',()=>{
+test('a persistently stale canonical observation before preview exhausts bounded convergence without reading stale source',()=>{
   withDiagnosticFixture(fixture=>{
     let reads=0,waits=0,caught;
     assert.throws(()=>run({...fixture.options((bin,args,cwd)=>{
@@ -391,7 +418,7 @@ test('an older observation before the preview is rejected immediately and never 
     }),wait:()=>waits++}),error=>{
       caught=error; return error.message==='CONNECTOR_REUSE_PREVIEW_REJECTED';
     });
-    assert.equal(reads,1); assert.equal(waits,0);
+    assert.equal(reads,5); assert.equal(waits,4);
     assert.equal(failureEvidence(caught).phase,'DEPLOYMENT_BEFORE');
     assert.equal(fixture.calls.some(call=>call.bin==='bash'||call.command==='pull'),false);
   });
