@@ -46,6 +46,24 @@ permissões, não cria scheduler e não transforma representação em execução
 
 ## Diretriz permanente do titular — desafios alimentam o motor
 
+### Extração documental e fechamento institucional mensal — 21/10/2026
+
+Consolidar o método de localização, extração, validação e conciliação documental
+no mesmo ciclo mensal. Aplicar
+[AURORA_DOCUMENTARY_MONTHLY_CLOSING_20261021.md](AURORA_DOCUMENTARY_MONTHLY_CLOSING_20261021.md):
+recebimento informado não comprova documento localizado; busca vazia não prova
+ausência; produção, faturamento, recebimento, caixa e resultado mantêm provas e
+cortes próprios. Relatar glosas e receita a recuperar desde D0 documental com
+separação entre diferença potencial, valor reconhecido e recuperação bancária;
+resposta parcial não encerra pendência nem reinicia seu aging.
+
+`documentaryMonthlyClosingPolicy` integra o contexto da projeção e do Motor
+Mestre, vinculado a `AURORA-DOCUMENT-WATCHDOG`, `AURORA-REV-SAN-001` e
+`AURORA-FIN-SOC-001`. Preservar fontes, identidade, idempotência, alçadas e
+snapshots fechados. Esta representação é declarativa (`SPECIFIED`); não cria
+parser, executor ou agendamento e não comprova adoção instalada. Somente método
+abstrato entra nesta fonte; casos e valores permanecem privados por empresa.
+
 Reiteração expressa em 13/10/2026: cada prompt operacional disponível e autorizado,
 resolução, fluxo e algoritmo pertinente deve alimentar o mesmo AURORA MASTER,
 reduzindo dependência do chat por regras nativas, memória recuperável e regressões.

@@ -4,6 +4,7 @@ import test from "node:test";
 import { AURORA_NATIVE_ROUTINES, nativeRoutineSummary } from "../src/auroraNativeRoutines.ts";
 import { buildProjection, type ProjectionSource } from "../src/auroraEngine.ts";
 import { generateNativeInsight } from "../src/auroraNativeIntelligence.ts";
+import { buildMasterOperationalState } from "../src/auroraMasterEngine.ts";
 
 test("modus operandi WMGJ está representado como registro nativo multi-tenant", () => {
   const ids = new Set(AURORA_NATIVE_ROUTINES.map((item) => item.id));
@@ -56,6 +57,58 @@ test("aprendizado orgânico promove capacidade, não dados entre clientes", () =
   assert.equal(summary.ingestionRecoveryPolicy.executor, "replayMensagemGmailWMGJ");
   assert.equal(summary.ingestionRecoveryPolicy.automaticBroadReplayAllowed, false);
   assert.equal(summary.ingestionRecoveryPolicy.observedFindingIsValidatedOutcome, false);
+});
+
+test("política documental declarativa chega à projeção e ao Motor Mestre preservando registro e gates", () => {
+  const now = new Date("2026-10-21T12:00:00Z");
+  const source: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
+  const originalSource = JSON.stringify(source);
+  const originalRegistry = JSON.stringify(AURORA_NATIVE_ROUTINES);
+  const summary = nativeRoutineSummary() as any;
+  const projections = ["synthetic-org-a", "synthetic-org-b"].map(orgId =>
+    buildProjection(source, now, { orgId, competence: "2026-10" }) as any);
+  const expected = summary.documentaryMonthlyClosingPolicy;
+  assert.deepEqual(expected.routineIds, ["AURORA-DOCUMENT-WATCHDOG", "AURORA-REV-SAN-001", "AURORA-FIN-SOC-001"]);
+  for (const id of expected.routineIds) assert.equal(AURORA_NATIVE_ROUTINES.filter(item => item.id === id).length, 1);
+  const closingRoutine = AURORA_NATIVE_ROUTINES.find(item => item.id === "AURORA-FIN-SOC-001");
+  assert.equal(closingRoutine?.trigger, "MONTHLY_CLOSING_CLOSED");
+  assert.equal(closingRoutine?.state, "NATIVE_EVENT");
+  for (const projection of projections) {
+    const before = JSON.stringify(projection);
+    assert.deepEqual(projection.nativeRoutines.documentaryMonthlyClosingPolicy, expected);
+    assert.deepEqual(projection.nativeRoutines.counts, summary.counts);
+    const master = buildMasterOperationalState(projection, {}, now) as any;
+    assert.deepEqual(master.routines.documentaryMonthlyClosingPolicy, expected);
+    assert.deepEqual(master.routines.counts, summary.counts);
+    assert.equal(master.financialGate.canApproveDistribution, false);
+    assert.equal(master.governance.autonomousFinancialMovement, false);
+    assert.equal(JSON.stringify(projection), before);
+  }
+  assert.equal(JSON.stringify(source), originalSource);
+  assert.equal(JSON.stringify(AURORA_NATIVE_ROUTINES), originalRegistry);
+  // These assertions validate the declared contract, not financial algorithms.
+  assert.equal(expected.registrationOnly, true);
+  assert.equal(expected.state, "SPECIFIED");
+  assert.equal(expected.runtimeAdoptionVerified, false);
+  assert.equal(expected.extractionOrReconciliationAlgorithmAdded, false);
+  assert.equal(expected.receiptReportedIsLocated, false);
+  assert.equal(expected.emptySearchProvesDocumentAbsence, false);
+  assert.equal(expected.moneyRepresentation, "INTEGER_CENTS");
+  assert.equal(expected.unknownAmountsAreZero, false);
+  assert.deepEqual(expected.reportSections, [
+    "EXECUTIVE_SUMMARY", "COVERAGE_AND_CUTOFF", "PRODUCTION", "BILLING", "RECEIPTS",
+    "BANK_RECONCILIATION", "TRANSFERS", "TAXES", "COSTS", "GLOSSES_AND_RECOVERY_FROM_D0",
+    "UNRESOLVED_FINANCIAL_ITEMS", "EVIDENCE_REFERENCES"
+  ]);
+  assert.equal(expected.bankReconciliation.automaticSweepBalanceIsAdditionalCash, false);
+  assert.equal(expected.bankReconciliation.investmentMovementProvesCounterpartyReceipt, false);
+  assert.equal(expected.revenueRecovery.partialResponseClosesCase, false);
+  assert.equal(expected.revenueRecovery.invoiceReceiptIsAdditionalGlossRecovery, false);
+  assert.equal(expected.revenueRecovery.documentedD0ProvesOperationalStart, false);
+  assert.equal(expected.revenueRecovery.reminderResetsCaseAging, false);
+  assert.equal(expected.closedSnapshotMutationAllowed, false);
+  for (const flag of ["sourceMutationAllowed", "automaticExternalCommunicationAllowed", "financialExecutionAllowed", "rawTenantDataTransferAllowed", "permissionsGranted", "schedulerCreated", "executorCreated", "modelWeightsTrained"]) assert.equal(expected[flag], false, flag);
+  assert.doesNotMatch(JSON.stringify(expected), /synthetic-org-[ab]/);
 });
 
 test("instalação canônica é governada e está presente na projeção, sem novo scheduler", () => {
