@@ -22,6 +22,28 @@ test('public evidence drops private receipts, content and unexpected fields',()=
 test('canonical readback rejects a cross-tenant result',async()=>{const f=readbackFixture();f.data.orgId='other';await assert.rejects(()=>verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher),/CANONICAL_IDENTITY_MISMATCH/);});
 test('readback proves exact content, text, revision and immutable version',async()=>{const f=readbackFixture();const result=await verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher);assert.equal(result.verified,1);assert.equal(result.evidence[0].immutableVersionVerified,true);assert.equal(result.evidence[0].nativeReady,false);f.data.source.contentHash='f'.repeat(64);await assert.rejects(()=>verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher),/CANONICAL_IDENTITY_MISMATCH/);});
 test('review intake rejects unproved extraction and financial readiness claims',async()=>{for(const mutate of [f=>{f.data.extractionComplete=false;},f=>{f.data.nativeReady=true;},f=>{f.data.extractionEvidence.textSha256='f'.repeat(64);},f=>{f.data.extractionEvidence.financialFactsApproved=true;},f=>{f.data.canonicalSnapshotHash='f'.repeat(64);}]){const f=readbackFixture();mutate(f);await assert.rejects(()=>verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher),/EXTRACTION_READBACK_MISMATCH/);}});
+test('canonical readback accepts only governed manifest method and coverage pairs',async()=>{
+  for(const method of ['google_sheets_manifest','zip_manifest']){
+    const f=readbackFixture();
+    f.data.extractionEvidence.method=method;
+    f.data.extractionEvidence.coverage='SOURCE_MANIFESTED_REVIEW_PENDING';
+    f.version.snapshot=JSON.parse(JSON.stringify(f.data));
+    const result=await verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher);
+    assert.equal(result.verified,1);
+  }
+  for(const pair of [
+    ['google_sheets_manifest','TEXT_EXTRACTED_REVIEW_PENDING'],
+    ['zip_manifest','TEXT_EXTRACTED_REVIEW_PENDING'],
+    ['blob_text','SOURCE_MANIFESTED_REVIEW_PENDING'],
+    ['arbitrary_manifest','SOURCE_MANIFESTED_REVIEW_PENDING']
+  ]){
+    const f=readbackFixture();
+    f.data.extractionEvidence.method=pair[0];
+    f.data.extractionEvidence.coverage=pair[1];
+    f.version.snapshot=JSON.parse(JSON.stringify(f.data));
+    await assert.rejects(()=>verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher),/EXTRACTION_READBACK_MISMATCH/);
+  }
+});
 test('an unrelated immutable version cannot prove the receipt',async()=>{const f=readbackFixture();f.version.entityId='f'.repeat(48);await assert.rejects(()=>verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher),/IMMUTABLE_READBACK_MISMATCH/);});
 test('a revision mismatch and absent replay evidence cannot verify',async()=>{const f=readbackFixture();f.data.revision=3;await assert.rejects(()=>verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher),/CANONICAL_IDENTITY_MISMATCH/);f.row.replayVerified=false;await assert.rejects(()=>verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher),/READBACK_IDENTITY_REJECTED/);});
 
@@ -160,7 +182,7 @@ test('default EXECUTE keeps enumeration completion and does not silently fall ba
   assert.deepEqual(blocked.requests.map(x=>x.mode),['PREVIEW','EXECUTE']);assert.equal(blocked.saved.length,0);
 });
 test('drive_mode stays inside DRIVE_TOTAL and preserves workflow execution, source, environment and cleanup gates',()=>{
-  const workflow=fs.readFileSync(path.join(__dirname,'../.github/workflows/aurora-rc11-recovery-real-ingest.yml'),'utf8');
+  const workflow=fs.readFileSync(path.join(__dirname,'../.github/workflows/aurora-rc11-recovery-real-ingest.yml'),'utf8').replace(/\r\n/g,'\n');
   assert.match(workflow,/options: \[RC11_SAMPLE, DRIVE_TOTAL\]/);
   assert.match(workflow,/drive_mode:\n(?:[^\n]*\n){0,5}\s+default: EXECUTE\n\s+options: \[EXECUTE, PROCESS_EXISTING, READBACK\]/);
   assert.match(workflow,/if: github\.event_name != 'workflow_dispatch' \|\| inputs\.operation != 'DRIVE_TOTAL'/);
