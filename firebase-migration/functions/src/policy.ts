@@ -414,12 +414,14 @@ function structuredFinancialRecordValid(record: Record<string, unknown>, entityT
 function extractionEvidenceValid(event: WmgjIngestionEvent): boolean {
   const evidence = event.record.extractionEvidence;
   if (!exactFields(evidence, ["schemaVersion", "contentSha256", "textSha256", "textLength", "method", "coverage", "sourceVersion", "financialFactsApproved"])) return false;
-  return event.entityType === "sourceDocument" && event.source.system === "DRIVE"
+  return event.entityType === "sourceDocument" && event.source.system === "DRIVE" && event.record.nativeReady === false
     && evidence.schemaVersion === 1 && hexHash(evidence.contentSha256) && hexHash(evidence.textSha256)
     && evidence.contentSha256 === event.source.contentHash && event.source.hashMethod === "content_sha256"
     && Number.isSafeInteger(evidence.textLength) && Number(evidence.textLength) > 0 && Number(evidence.textLength) <= 1048576
-    && typeof evidence.method === "string" && ["google_docs_text", "google_sheets_values", "blob_text", "drive_api_ocr_convert"].includes(evidence.method)
-    && evidence.method === event.record.extractionMethod && evidence.coverage === "TEXT_EXTRACTED_REVIEW_PENDING"
+    && typeof evidence.method === "string" && ["google_docs_text", "google_sheets_values", "google_sheets_manifest", "zip_manifest", "blob_text", "drive_api_ocr_convert"].includes(evidence.method)
+    && evidence.method === event.record.extractionMethod
+    && ((["google_sheets_manifest", "zip_manifest"].includes(evidence.method) && evidence.coverage === "SOURCE_MANIFESTED_REVIEW_PENDING")
+      || (!["google_sheets_manifest", "zip_manifest"].includes(evidence.method) && evidence.coverage === "TEXT_EXTRACTED_REVIEW_PENDING"))
     && evidence.sourceVersion === event.sourceVersion && evidence.financialFactsApproved === false;
 }
 

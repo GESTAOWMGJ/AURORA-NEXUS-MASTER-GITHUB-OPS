@@ -98,6 +98,26 @@ test('document extraction evidence passes only as exact structured hashes with m
     e=>e.record.extractionEvidence.textSha256='not-a-hash',e=>e.record.extraction_evidence=e.record.extractionEvidence]){
     const e=documentary();change(e);assert.equal(validate(e).ok,false);}
 });
+test('bounded source manifests are accepted only with manifest coverage and no financial approval',()=>{
+  for(const method of ['google_sheets_manifest','zip_manifest']) {
+    const e=documentary();
+    e.record.extractionMethod=method;
+    e.record.extractionEvidence.method=method;
+    e.record.extractionEvidence.coverage='SOURCE_MANIFESTED_REVIEW_PENDING';
+    assert.equal(validate(e).ok,true,JSON.stringify(validate(e).errors));
+    for(const mutate of [
+      x=>x.record.extractionEvidence.coverage='TEXT_EXTRACTED_REVIEW_PENDING',
+      x=>x.record.extractionEvidence.financialFactsApproved=true,
+      x=>x.record.nativeReady=true
+    ]) {
+      const bad=structuredClone(e);mutate(bad);assert.equal(validate(bad).ok,false);
+    }
+  }
+});
+test('text extraction methods cannot claim manifest-only coverage',()=>{
+  const e=documentary();e.record.extractionEvidence.coverage='SOURCE_MANIFESTED_REVIEW_PENDING';
+  assert.equal(validate(e).ok,false);
+});
 test('the real Drive bridge event with scoped extraction evidence passes validateEvent without schema shortcuts',()=>{
   const f=invoice(),c=f.context;
   c.wmgjFirestoreConfig_=()=>({orgId:'synthetic',dryRun:true});

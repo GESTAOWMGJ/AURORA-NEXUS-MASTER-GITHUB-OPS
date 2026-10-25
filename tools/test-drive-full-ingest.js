@@ -566,6 +566,22 @@ test('ZIP extraction produces bounded member manifest without exposing member na
   assert.equal(f.context.extracaoDocumentalCompletaWMGJ_(result),true);
 });
 
+test('manifest methods persist manifest-only review coverage instead of text-extracted coverage',()=>{
+  for(const method of ['google_sheets_manifest','zip_manifest']) {
+    const f=fixture(),rootId='manifest-root-0001',fileId=method==='zip_manifest'?'zipmanifest00001':'sheetmanifest001';
+    f.addFolder(rootId,null,[fileId]);const file=f.addFile(fileId,rootId,'manifest source bytes',method==='zip_manifest'?'application/zip':f.context.MimeType.GOOGLE_SHEETS);
+    f.options.sources=[{sourceId:'manifest-source',folderId:rootId}];f.options.maxScan=10;f.options.processLimit=1;
+    f.context.extrairConteudoArquivoWMGJ_V1_=()=>{
+      const texto='AURORA_MANIFEST_V1\nHASH:'+H;
+      return {ok:true,metodo:method,texto,tamanhoTexto:texto.length};
+    };
+    const result=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+    assert.equal(result.process.accepted,1);assert.equal(f.sent[0].record.extractionEvidence.coverage,'SOURCE_MANIFESTED_REVIEW_PENDING');
+    const row=f.rows.find(r=>r[2]===fileId),scope=f.context.auroraDriveScopeRead_(row[9]);
+    assert.equal(scope.coverage,'SOURCE_MANIFESTED_REVIEW_PENDING');
+  }
+});
+
 test('ZIP manifest fails closed on unzip errors and excessive expansion',()=>{
   const f=fixture(),file=f.addFile('zipfile0000002',null,'zip bytes','application/zip');
   file.getBlob=()=>({getBytes:()=>[1]});
