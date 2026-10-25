@@ -86,6 +86,104 @@ test('diagnostic rejects a query, thread selector or missing ID before any read'
   }
 });
 
+test('canonical layout still blocks multiple destinations without choosing or modifying a file', () => {
+  const ctx = runtime(), first = row(), second = row('COPIADO_BRUTO_A_CLASSIFICAR_V2', 'other-file');
+  const data = [Array.from(ctx.cabecalhoCanonicoIndiceGmailWMGJ_()), first, first.slice(), second];
+  const before = JSON.stringify(data);
+  const result = ctx.inspecionarIndiceGmailWMGJ_(data);
+  assert.equal(result.schemaCompativel, true);
+  assert.equal(result.chavesDistintas, 1);
+  assert.equal(result.repeticoesAlemPrimeira, 2);
+  assert.equal(result.conflitosDestino.length, 1);
+  assert.deepEqual(Array.from(result.conflitosDestino[0].linhas), [2, 3, 4]);
+  assert.deepEqual(Array.from(result.conflitosDestino[0].arquivos), ['synthetic-file', 'other-file']);
+  assert.throws(() => ctx.carregarChavesGmailJaIndexadasWMGJ_(sheet(data)), /DESTINATION_CONFLICT/);
+  assert.equal(JSON.stringify(data), before);
+});
+test('both indexers block conflicting destinations before Drive or Gmail access', () => {
+  let externalCalls = 0;
+  const ctx = runtime({
+    DriveApp: { getFolderById() { externalCalls++; throw Error('unexpected Drive read'); } },
+    GmailApp: { search() { externalCalls++; throw Error('unexpected Gmail read'); } }
+  });
+  const data = [ctx.cabecalhoCanonicoIndiceGmailWMGJ_(), row(), row('COPIADO_BRUTO_A_CLASSIFICAR', 'other-file')];
+  ctx.getPlanilha = () => ({ getSheetByName: () => sheet(data) });
+  for (const fn of [ctx.indexarGmailFaturamentoWMGJ, ctx.indexarGmailFaturamentoWMGJ_V2]) {
+    assert.throws(() => fn({}), /DESTINATION_CONFLICT/);
+  }
+  assert.equal(externalCalls, 0);
+});
+test('repeated same destination stays idempotent and distinct messages or versions are not collapsed', () => {
+  const ctx = runtime(), first = row(), otherMessage = row(), otherVersion = row();
+  otherMessage[5] = 'fedcba0987654321';
+  otherVersion[12] = 'different-content-hash';
+  const data = [ctx.cabecalhoCanonicoIndiceGmailWMGJ_(), first, first.slice(), otherMessage, otherVersion];
+  const result = ctx.exigirContratoIndiceGmailWMGJ_(sheet(data));
+  assert.equal(result.conflitosDestino.length, 0);
+  assert.equal(result.chavesDistintas, 3);
+  assert.equal(result.repeticoesAlemPrimeira, 1);
+  assert.equal(Object.keys(ctx.carregarChavesGmailJaIndexadasWMGJ_(sheet(data))).length, 3);
+});
+test('diagnostic reports conflicts even when historical overlays independently block the schema', () => {
+  const ctx = runtime(), overlay = row(); overlay[1] = 'legacy-layout';
+  const data = [['legacy-header'], overlay, row(), row('ERRO', 'other-file')];
+  const result = ctx.inspecionarIndiceGmailWMGJ_(data);
+  assert.equal(result.schemaCompativel, false);
+  assert.deepEqual(Array.from(result.linhasNaoReconhecidas), [2]);
+  assert.equal(result.conflitosDestino.length, 1);
+  assert.deepEqual(Array.from(result.conflitosDestino[0].linhas), [3, 4]);
+  assert.throws(() => ctx.exigirContratoIndiceGmailWMGJ_(sheet(data)), /SCHEMA_MISMATCH/);
+});
+
+test('conflicting completed classifications block even with one destination and preserve every row', () => {
+  const ctx = runtime(), first = row(), later = row();
+  first[13] = 'REVIEW_MARKER'; first[14] = false; first[15] = 'SCOPE_PENDING';
+  later[13] = 'HEURISTIC'; later[14] = true; later[15] = 'REVENUE';
+  const data = [ctx.cabecalhoCanonicoIndiceGmailWMGJ_(), first, later], before = JSON.stringify(data);
+  const result = ctx.inspecionarIndiceGmailWMGJ_(data);
+  assert.equal(result.conflitosDestino.length, 0);
+  assert.equal(result.conflitosClassificacao.length, 1);
+  assert.deepEqual(Array.from(result.conflitosClassificacao[0].campos), ['CLASSIFICADOR', 'PERTINENTE', 'CATEGORIA']);
+  assert.deepEqual(Array.from(result.conflitosClassificacao[0].linhas), [2, 3]);
+  assert.throws(() => ctx.exigirContratoIndiceGmailWMGJ_(sheet(data)), /CLASSIFICATION_CONFLICT/);
+  assert.equal(JSON.stringify(data), before);
+});
+test('both indexers reject classification conflicts before Gmail or Drive access', () => {
+  let externalCalls = 0;
+  const ctx = runtime({
+    DriveApp: { getFolderById() { externalCalls++; throw Error('unexpected Drive read'); } },
+    GmailApp: { search() { externalCalls++; throw Error('unexpected Gmail read'); } }
+  });
+  const first = row(), second = row(); first[14] = false; second[14] = true;
+  ctx.getPlanilha = () => ({ getSheetByName: () => sheet([ctx.cabecalhoCanonicoIndiceGmailWMGJ_(), first, second]) });
+  for (const fn of [ctx.indexarGmailFaturamentoWMGJ, ctx.indexarGmailFaturamentoWMGJ_V2]) {
+    assert.throws(() => fn({}), /CLASSIFICATION_CONFLICT/);
+  }
+  assert.equal(externalCalls, 0);
+});
+test('unfinished classifications do not obstruct recovery but ignored decisions remain terminal', () => {
+  const ctx = runtime(), complete = row(), error = row('ERRO', ''), partial = row('COPIADO_BRUTO_A_CLASSIFICAR', '');
+  complete[14] = true; error[14] = false; partial[14] = false;
+  const data = [ctx.cabecalhoCanonicoIndiceGmailWMGJ_(), error, partial, complete];
+  assert.equal(ctx.exigirContratoIndiceGmailWMGJ_(sheet(data)).conflitosClassificacao.length, 0);
+  const ignored = row('IGNORADO_NAO_PERTINENTE', ''); ignored[14] = false;
+  data.push(ignored);
+  assert.throws(() => ctx.exigirContratoIndiceGmailWMGJ_(sheet(data)), /CLASSIFICATION_CONFLICT/);
+});
+test('classification comparison normalizes blanks and dates without collapsing false, zero or provenance', () => {
+  const ctx = runtime(), first = row(), second = row();
+  first[17] = new Date('2026-09-01T00:00:00Z'); second[17] = new Date(first[17]);
+  first[18] = null; second[18] = undefined;
+  const data = [ctx.cabecalhoCanonicoIndiceGmailWMGJ_(), first, second];
+  assert.equal(ctx.exigirContratoIndiceGmailWMGJ_(sheet(data)).conflitosClassificacao.length, 0);
+  first[14] = false; second[14] = 0;
+  assert.throws(() => ctx.exigirContratoIndiceGmailWMGJ_(sheet(data)), /CLASSIFICATION_CONFLICT/);
+  second[5] = 'fedcba0987654321';
+  assert.equal(ctx.exigirContratoIndiceGmailWMGJ_(sheet(data)).conflitosClassificacao.length, 0);
+  second[5] = first[5]; second[12] = 'different-content-hash';
+  assert.equal(ctx.exigirContratoIndiceGmailWMGJ_(sheet(data)).conflitosClassificacao.length, 0);
+});
+
 // Register the Drive first-cycle regressions in the existing ingestion CI gate.
 require('./test-gmail-drive-onboarding.cjs');
 require('./test-gmail-connector-status.cjs');
