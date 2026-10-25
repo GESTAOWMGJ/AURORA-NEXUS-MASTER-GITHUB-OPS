@@ -1486,8 +1486,10 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
         sourceSystem:'DRIVE',originConnector:'DRIVE_FOLDER',mirrorRequired:true,sourceRegistryVersion:'1',pipelineVersion:'drive-continuation-v1'});
       if(event.orgId!==options.orgId || event.source.contentHash!==byteHash.value || event.sourceVersion!==Number(version))
         throw new Error('AURORA_DRIVE_EVENT_SOURCE_CONFLICT');
+      var manifested=['google_sheets_manifest','zip_manifest'].indexOf(extraction.metodo)>=0;
       event.record.extractionEvidence={schemaVersion:1,contentSha256:byteHash.value,textSha256:textHash,
-        textLength:extraction.texto.length,method:extraction.metodo,coverage:'TEXT_EXTRACTED_REVIEW_PENDING',
+        textLength:extraction.texto.length,method:extraction.metodo,
+        coverage:manifested?'SOURCE_MANIFESTED_REVIEW_PENDING':'TEXT_EXTRACTED_REVIEW_PENDING',
         sourceVersion:Number(version),financialFactsApproved:false};
       // A later source version is a distinct semantic event even when its bytes
       // are unchanged. Keep this contract local to the authorized Drive route;
@@ -1505,7 +1507,8 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
       var receipt={entityId:response.entityId,eventId:response.eventId||event.eventId,sourceId:scope.fileId,
         sourceVersion:event.sourceVersion,revision:response.revision,versionId:response.versionId,replayVerified:true,
         canonicalSnapshotHash:event.record.canonicalSnapshotHash,contentHash:byteHash.value,contentSha256:byteHash.value,textSha256:textHash};
-      scope.contentSha256=byteHash.value;scope.textSha256=textHash;scope.coverage='EXTRACTED_REVIEW_PENDING';scope.receipt=receipt;
+      scope.contentSha256=byteHash.value;scope.textSha256=textHash;
+      scope.coverage=manifested?'SOURCE_MANIFESTED_REVIEW_PENDING':'EXTRACTED_REVIEW_PENDING';scope.receipt=receipt;
       delete scope.lastCode;
       registrarExtracaoDocumentalWMGJ_V1_(file,byteHash.value,extraction);
       registrarFirestoreMirrorWMGJ_(file,byteHash.value,{ok:true,required:true,status:response.duplicate?'DUPLICATE_CONFIRMED':'ACCEPTED',entityId:response.entityId,eventId:receipt.eventId});
