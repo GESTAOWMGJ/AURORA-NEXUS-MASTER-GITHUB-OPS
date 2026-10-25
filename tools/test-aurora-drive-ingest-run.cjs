@@ -35,7 +35,8 @@ test('canonical readback accepts only governed manifest method and coverage pair
     ['google_sheets_manifest','TEXT_EXTRACTED_REVIEW_PENDING'],
     ['zip_manifest','TEXT_EXTRACTED_REVIEW_PENDING'],
     ['blob_text','SOURCE_MANIFESTED_REVIEW_PENDING'],
-    ['arbitrary_manifest','SOURCE_MANIFESTED_REVIEW_PENDING']
+    ['arbitrary_manifest','SOURCE_MANIFESTED_REVIEW_PENDING'],
+    ['arbitrary_manifest','TEXT_EXTRACTED_REVIEW_PENDING']
   ]){
     const f=readbackFixture();
     f.data.extractionEvidence.method=pair[0];

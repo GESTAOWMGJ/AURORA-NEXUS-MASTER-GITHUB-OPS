@@ -582,6 +582,22 @@ test('manifest methods persist manifest-only review coverage instead of text-ext
   }
 });
 
+test('manifested source remains a verified document in queue totals and READBACK',()=>{
+  const f=fixture(),rootId='manifest-readback-root',fileId='manifest-readback-file';
+  f.addFolder(rootId,null,[fileId]);f.addFile(fileId,rootId,'manifest bytes',f.context.MimeType.GOOGLE_SHEETS);
+  const options={orgId:ORG,sources:[{sourceId:'manifest-root',system:'DRIVE',folderId:rootId,active:true,slaMinutes:1440}],
+    fileIds:[],excludedFolderIds:[],maxScan:10,limit:1};
+  const scopeHash=H;
+  const scope={schemaVersion:1,orgId:ORG,scopeSha256:scopeHash,sourceId:'manifest-root',rootId,folderId:rootId,fileId,explicit:false,
+    sourceVersion:'10000',coverage:'SOURCE_MANIFESTED_REVIEW_PENDING',contentSha256:H,textSha256:'b'.repeat(64),
+    receipt:{entityId:'c'.repeat(48),eventId:'event-manifest',sourceId:fileId,sourceVersion:10000,revision:1,versionId:'d'.repeat(64),
+      replayVerified:true,canonicalSnapshotHash:'e'.repeat(64),contentHash:H,contentSha256:H,textSha256:'b'.repeat(64)}};
+  f.rows.push(['2026-10-25','DRIVE',fileId,'private','application/vnd.google-apps.spreadsheet','REVISAR_HUMANO',0,'','',f.context.auroraDriveScopeWrite_(scope)]);
+  const read=f.context.auroraLerPlanoReadbackDriveAutorizado_({orgId:ORG,scopeSha256:scopeHash,readbackOffset:0,readbackLimit:20});
+  assert.equal(read.coverage.documents,1);assert.equal(read.coverage.pending,0);
+  assert.equal(read.privateReadbackPlan.length,1);assert.equal(read.privateReadbackPlan[0].sourceId,fileId);
+});
+
 test('ZIP manifest fails closed on unzip errors and excessive expansion',()=>{
   const f=fixture(),file=f.addFile('zipfile0000002',null,'zip bytes','application/zip');
   file.getBlob=()=>({getBytes:()=>[1]});

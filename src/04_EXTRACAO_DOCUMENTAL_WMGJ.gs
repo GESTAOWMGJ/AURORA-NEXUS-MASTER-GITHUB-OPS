@@ -1375,7 +1375,9 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
     var previous=auroraDriveScopeRead_(rows[k][idx.OBSERVACAO]);
     if (previous && previous.orgId===options.orgId && previous.scopeSha256===options.scopeSha256
       && previous.contentSha256 && previous.receipt
-      && previous.receipt.replayVerified===true && previous.coverage==='EXTRACTED_REVIEW_PENDING') knownHashes[previous.contentSha256]=previous;
+      && previous.receipt.replayVerified===true
+      && ['EXTRACTED_REVIEW_PENDING','SOURCE_MANIFESTED_REVIEW_PENDING'].indexOf(previous.coverage)>=0)
+      knownHashes[previous.contentSha256]=previous;
   }
   var processKey='AURORA_DRIVE_PROCESS_'+options.orgId+'_'+options.scopeSha256.slice(0,24);
   var processProps=PropertiesService.getScriptProperties(),priorityKey=processKey+'_PRIORITY_V1';
@@ -1542,7 +1544,8 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
   for(var a=1;a<after.length;a++) {
     var finalScope=auroraDriveScopeRead_(after[a][idx.OBSERVACAO]);
     if(!finalScope || finalScope.orgId!==options.orgId || finalScope.scopeSha256!==options.scopeSha256) continue;
-    if(finalScope.coverage==='EXTRACTED_REVIEW_PENDING' && finalScope.receipt && finalScope.receipt.replayVerified===true) result.review++;
+    if(['EXTRACTED_REVIEW_PENDING','SOURCE_MANIFESTED_REVIEW_PENDING'].indexOf(finalScope.coverage)>=0
+      && finalScope.receipt && finalScope.receipt.replayVerified===true) result.review++;
     else if(finalScope.coverage!=='DUPLICATE_CONTENT') result.pending++;
   }
   return result;
@@ -1636,8 +1639,8 @@ function auroraLerPlanoReadbackDriveAutorizado_(options) {
     var receipt=scope.receipt,kind='pending';
     var proven=receipt && receipt.replayVerified===true && scope.contentSha256===receipt.contentHash
       && receipt.contentHash===receipt.contentSha256;
-    if(proven && scope.coverage==='EXTRACTED_REVIEW_PENDING' && receipt.sourceId===scope.fileId
-      && receipt.sourceVersion===Number(scope.sourceVersion)) kind='documents';
+    if(proven && ['EXTRACTED_REVIEW_PENDING','SOURCE_MANIFESTED_REVIEW_PENDING'].indexOf(scope.coverage)>=0
+      && receipt.sourceId===scope.fileId && receipt.sourceVersion===Number(scope.sourceVersion)) kind='documents';
     else if(proven && scope.coverage==='DUPLICATE_CONTENT' && scope.aliasFileId && scope.aliasFileId===receipt.sourceId) kind='aliases';
     coverage[kind]++;scoped.push({scope:scope,kind:kind,row:rows[r]});
   }

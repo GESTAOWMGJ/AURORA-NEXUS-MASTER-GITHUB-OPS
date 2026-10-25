@@ -105,12 +105,13 @@ async function verifyReadback(plan,orgId,token,fetcher=fetch) {
       ||data.source?.contentHash!==row.contentHash||data.sourceVersion!==row.sourceVersion
       ||data.revision!==row.revision||!['DRIVE','SHEETS'].includes(data.source?.system))fail('DRIVE_CANONICAL_IDENTITY_MISMATCH');
     const proof=data.extractionEvidence;
+    const methods=['google_docs_text','google_sheets_values','google_sheets_manifest','zip_manifest','blob_text','drive_api_ocr_convert'];
     const manifestMethod=proof?.method==='google_sheets_manifest'||proof?.method==='zip_manifest';
     const expectedCoverage=manifestMethod?'SOURCE_MANIFESTED_REVIEW_PENDING':'TEXT_EXTRACTED_REVIEW_PENDING';
     if(data.extractionComplete!==true||data.nativeReady!==false||data.sourceIndependent!==false||data.externalFetchRequired!==true
       ||data.workflowState!=='PENDING_HUMAN_REVIEW'||data.reviewState!=='PENDING'||data.canonicalSnapshotHash!==row.canonicalSnapshotHash
       ||proof?.schemaVersion!==1||proof.contentSha256!==row.contentSha256||proof.textSha256!==row.textSha256
-      ||proof.sourceVersion!==row.sourceVersion||proof.coverage!==expectedCoverage||proof.financialFactsApproved!==false
+      ||!methods.includes(proof.method)||proof.sourceVersion!==row.sourceVersion||proof.coverage!==expectedCoverage||proof.financialFactsApproved!==false
       ||!Number.isSafeInteger(proof.textLength)||proof.textLength<1)fail('DRIVE_EXTRACTION_READBACK_MISMATCH');
     const versionUrl=new URL('https://firestore.googleapis.com/v1/projects/'+PROJECT+'/databases/(default)/documents/organizations/'+orgId+'/entityVersions/'+row.versionId);
     for(const field of ['orgId','entityId','entityType','revision','sourceVersion','snapshot'])versionUrl.searchParams.append('mask.fieldPaths',field);
