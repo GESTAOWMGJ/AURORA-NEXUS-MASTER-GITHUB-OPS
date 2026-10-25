@@ -207,6 +207,7 @@ export type NativeRoutine = {
 };
 
 export const AURORA_NATIVE_ROUTINES: readonly NativeRoutine[] = Object.freeze([
+  { id: "AURORA-PERSONALITE-001", module: "M06", name: "Personalité — imagem, reputação e empreendimento profissional", cadence: "ON_DEMAND", trigger: "HUMAN_REVIEW_OF_CANONICAL_SNAPSHOT", state: "NATIVE_GOVERNED", tenantScope: "PER_ORG", humanGate: true, sourceMutation: false },
   { id: "WMGJ-LEGACY-GMAIL-SINGLE-REPLAY", module: "M01", name: "Recuperação documental de mensagem única", cadence: "ON_DEMAND", trigger: "MANUAL_EXACT_MESSAGE_WITH_REVIEWED_MANIFEST", state: "LEGACY_MIRRORED", tenantScope: "PER_ORG", humanGate: true, sourceMutation: false },
   { id: "AURORA-RUNTIME-WATCHDOG", module: "M08", name: "Watchdog de runtime", cadence: "EVERY_15_MINUTES", trigger: "SCHEDULE", state: "NATIVE_ACTIVE", tenantScope: "PLATFORM", humanGate: false, sourceMutation: false },
   { id: "AURORA-PROJECTION-ENGINE", module: "M07", name: "Projeção financeira/operacional", cadence: "ON_ACCEPTED_INGEST_AND_EVERY_15_MINUTES", trigger: "AUTHENTICATED_INGEST_OR_SCHEDULE", state: "NATIVE_ACTIVE", tenantScope: "PER_ORG", humanGate: false, sourceMutation: false },
@@ -240,6 +241,7 @@ export function nativeRoutineSummary(): Record<string, unknown> {
   }, { NATIVE_ACTIVE: 0, NATIVE_EVENT: 0, NATIVE_GOVERNED: 0, LEGACY_MIRRORED: 0 });
   return {
     registryVersion: 3,
+    personalitePolicy: personalitePolicy(),
     source: "AURORA-MO-001",
     referenceTenant: "WMGJ",
     organism: {
@@ -513,5 +515,71 @@ export function nativeRoutineSummary(): Record<string, unknown> {
       humanReviewRequired: true,
       tenantAgnosticAbstractionRequired: true
     }
+  };
+}
+
+/** Abstract capability only. Registration grants no access and starts no executor. */
+export function personalitePolicy() {
+  return {
+    routineId: "AURORA-PERSONALITE-001", version: "0.1.0",
+    product: "AURORA NEXUS", profile: "PERSONALITE",
+    state: "PROPOSED", executorState: "SPECIFIED_NOT_ACTIVATED",
+    implementationScope: "NATIVE_POLICY_REGISTRATION_AND_PURE_NPS_ARITHMETIC",
+    modules: ["M01", "M02", "M03", "M05", "M06", "M07", "M09", "M10"],
+    audience: "PROFESSIONALS_WITH_IMAGE_REPUTATION_NPS_AND_MASS_MEDIA_NEEDS",
+    domains: ["OPPORTUNITIES", "CONTRACTS", "IMAGE_RIGHTS", "COMMUNICATION",
+      "REPUTATION", "NPS", "MASS_MEDIA", "CASH", "RECEIVABLES"],
+    mediaChannels: ["PRESS", "RADIO", "TV", "PODCAST", "DIGITAL", "PAID_MEDIA"],
+    engagementTypes: ["UGC_PRODUCTION", "SPONSORED_PUBLICATION", "AFFILIATE", "IMAGE_LICENSE", "EDITORIAL_APPEARANCE"],
+    authority: "EXISTING_AUTHENTICATED_MEMBERSHIP_AND_SCOPED_APPROVAL",
+    storage: "EXISTING_TENANT_CANONICAL_STORAGE_AND_AUDIT_LEDGER",
+    professionalScope: "EXPLICIT_PROFESSIONAL_BINDING_WITHIN_ORGANIZATION",
+    communication: {
+      states: ["DRAFT", "APPROVED", "SENT", "RESPONDED"],
+      sentRequiresReceipt: true, silenceIsAcceptance: false,
+      approvalBoundTo: ["CONTENT_HASH", "VERSION", "RECIPIENT", "CHANNEL", "SCOPE", "EXPIRY"],
+      changedContentRequiresRevalidation: true, priorScopedAuthorizationReusable: true,
+      collectionRequiresFreshReconciliation: true,
+      imageLicenseRequiredPerAsset: true, perpetualImageRightsAssumed: false
+    },
+    reputation: { npsIsReach: false, npsIsClinicalQuality: false,
+      responseBiasMustBeDisclosed: true, suppressNegativeResponsesAllowed: false,
+      publicationNeedsSeparateApproval: true, smallGroupDisclosureRequiresReview: true },
+    finance: { currencyUnit: "INTEGER_CENTS", forecastWeeks: 13, forecastMonths: 12,
+      pipelineIncludedInContractualBase: false, invoiceProvesReceipt: false,
+      payerReceiptProvesSettlement: false, bankBalanceIsProfit: false,
+      unknownIsZero: false, sameAmountProvesMatch: false,
+      partialAndGroupedAllocationsRequired: true, duplicateSettlementAllowed: false,
+      reversalPreservesHistory: true, reserveIsExpense: false,
+      internalTransferIsRevenue: false, financialMovementAllowed: false },
+    permissionsGranted: false, schedulerCreated: false, executorCreated: false,
+    externalAiRequired: false, tenantRawDataTransferAllowed: false,
+    runtimeAdoptionVerified: false,
+    documentation: "docs/AURORA_PERSONALITE_GOVERNANCE_0_1_0.md"
+  };
+}
+
+/** Pure arithmetic over already deduplicated counts for one survey/cohort/period.
+ * Caller must validate provenance, tenant access and collection methodology.
+ * This function cannot attest those facts or authorize publication. */
+export function calculatePersonaliteNps(input: unknown) {
+  const missing = { state: "INVALID_INPUT", score: null, validResponses: null,
+    responseRatePercent: null, publicationAuthorized: false } as const;
+  if (!input || typeof input !== "object" || Array.isArray(input)) return missing;
+  const value = input as Record<string, unknown>;
+  const counts = [value.promoters, value.passives, value.detractors];
+  if (!counts.every(n => typeof n === "number" && Number.isSafeInteger(n) && n >= 0)) return missing;
+  const [promoters, passives, detractors] = counts as [number, number, number];
+  const total = promoters + passives + detractors;
+  if (!Number.isSafeInteger(total)) return missing;
+  const invited = value.invited;
+  if (invited !== undefined && invited !== null &&
+    (typeof invited !== "number" || !Number.isSafeInteger(invited) || invited < total || invited < 0)) return missing;
+  return {
+    state: total === 0 ? "NO_RESPONSES" : "CALCULATED_NOT_VALIDATED",
+    score: total === 0 ? null : ((promoters - detractors) / total) * 100,
+    validResponses: total,
+    responseRatePercent: typeof invited === "number" && invited > 0 ? (total / invited) * 100 : null,
+    publicationAuthorized: false
   };
 }
