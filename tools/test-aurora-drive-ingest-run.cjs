@@ -3,7 +3,8 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
-const {parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sanitizePendingRow,readDriveCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage}=require('./aurora-drive-ingest-run.cjs');
+const os=require('node:os');
+const {parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sanitizePendingRow,readDriveCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage,selectDriveDeployment,verifyPublishedDriveProject}=require('./aurora-drive-ingest-run.cjs');
 const scope=()=>({schemaVersion:'aurora.authorized-drive-source-scope.v1',orgId:'wmgj',projectId:'wmgj-hml-jfn-20260927',authorization:{realDataAuthorized:true,sourceMutationAllowed:false},sources:[{sourceId:'fixture-root',system:'DRIVE',folderId:'synthetic-folder-only',active:true,slaMinutes:1440}],fileIds:['synthetic-file-only'],excludedFolderIds:[]});
 function encoded(v){if(v===null)return{nullValue:null};if(typeof v==='string')return{stringValue:v};if(typeof v==='boolean')return{booleanValue:v};if(typeof v==='number')return{integerValue:String(v)};return{mapValue:{fields:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encoded(x)]))}};}
 function readbackFixture(){
@@ -14,6 +15,34 @@ function readbackFixture(){
   const fetcher=async url=>({ok:true,json:async()=>({fields:encoded(String(url).includes('/entityVersions/')?version:data).mapValue.fields})});
   return{row,data,version,fetcher};
 }
+test('Drive runtime selects the newest canonical Apps Script version independently of unrelated repository commits',()=>{
+  const older='1'.repeat(40),newer='2'.repeat(40);
+  const selected=selectDriveDeployment([
+    {description:'AURORA_EXECUTION_API_CANONICAL '+older,versionNumber:41,deploymentId:'deployment_old_41'},
+    {description:'AURORA_EXECUTION_API_CANONICAL '+newer,versionNumber:44,deploymentId:'deployment_new_44'},
+    {description:'non-canonical',versionNumber:99,deploymentId:'deployment_other'}
+  ]);
+  assert.equal(selected.versionNumber,44);assert.equal(selected.publishedSourceSha,newer);
+  assert.throws(()=>selectDriveDeployment([{description:'AURORA_EXECUTION_API_CANONICAL manual',versionNumber:45,deploymentId:'deployment_bad_45'}]),/DRIVE_PUBLISHED_VERSION_MISMATCH/);
+});
+test('Drive runtime requires the complete published Apps Script project to match the checked-out source',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'aurora-drive-published-'));
+  const src=path.join(root,'src'),published=path.join(root,'published');fs.mkdirSync(src);fs.mkdirSync(published);
+  try{
+    fs.writeFileSync(path.join(src,'00_CORE_WMGJ.gs'),'function core(){ return 1; }\n');
+    fs.writeFileSync(path.join(src,'37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'),'function connector(){ return 2; }\n');
+    fs.writeFileSync(path.join(root,'appsscript.json'),JSON.stringify({runtimeVersion:'V8',timeZone:'America/Sao_Paulo'},null,2));
+    fs.writeFileSync(path.join(published,'00_CORE_WMGJ.js'),'function core(){ return 1; }\n');
+    fs.writeFileSync(path.join(published,'37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'),'function connector(){ return 2; }\n');
+    fs.writeFileSync(path.join(published,'appsscript.json'),JSON.stringify({timeZone:'America/Sao_Paulo',runtimeVersion:'V8'}));
+    const verified=verifyPublishedDriveProject(root,published);assert.equal(verified.modulesVerified,2);assert.match(verified.manifestSha256,/^[a-f0-9]{64}$/);
+    fs.writeFileSync(path.join(published,'99_UNEXPECTED.gs'),'function unexpected(){}\n');
+    assert.throws(()=>verifyPublishedDriveProject(root,published),/DRIVE_PUBLISHED_SOURCE_MISMATCH/);
+    fs.rmSync(path.join(published,'99_UNEXPECTED.gs'));
+    fs.writeFileSync(path.join(published,'00_CORE_WMGJ.js'),'function core(){ return 9; }\n');
+    assert.throws(()=>verifyPublishedDriveProject(root,published),/DRIVE_PUBLISHED_SOURCE_MISMATCH/);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
 test('private source configuration must match the exact authorized hash',()=>{const raw=JSON.stringify(scope());assert.equal(parseScope(raw,sha(raw)).orgId,'wmgj');assert.throws(()=>parseScope(raw+' ',sha(raw)),/SCOPE_HASH_MISMATCH/);});
 test('a different tenant cannot inherit the source authorization',()=>{const value=scope();value.orgId='other';const raw=JSON.stringify(value);assert.throws(()=>parseScope(raw,sha(raw)),/PRIVATE_SCOPE_REJECTED/);});
 test('duplicate roots and exclusion of an allowed root are rejected',()=>{const value=scope();value.sources.push({...value.sources[0],sourceId:'another'});let raw=JSON.stringify(value);assert.throws(()=>parseScope(raw,sha(raw)),/SOURCE_SCOPE_REJECTED/);value.sources.pop();value.excludedFolderIds.push(value.sources[0].folderId);raw=JSON.stringify(value);assert.throws(()=>parseScope(raw,sha(raw)),/SCOPE_OVERLAP_REJECTED/);});
