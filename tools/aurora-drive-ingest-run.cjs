@@ -16,20 +16,20 @@ const CANONICAL_DEPLOYMENT_PREFIX = 'AURORA_EXECUTION_API_CANONICAL ';
 
 function selectDriveDeployment(rows) {
   if (!Array.isArray(rows)) fail('DRIVE_PUBLISHED_VERSION_UNAVAILABLE');
-  const canonical = rows.filter(row => {
-    if (!row || typeof row.description !== 'string' || !row.description.startsWith(CANONICAL_DEPLOYMENT_PREFIX)) return false;
-    const publishedSourceSha = row.description.slice(CANONICAL_DEPLOYMENT_PREFIX.length);
-    return /^[a-f0-9]{40}$/.test(publishedSourceSha)
-      && Number.isSafeInteger(row.versionNumber) && row.versionNumber >= 1
-      && typeof row.deploymentId === 'string' && /^[A-Za-z0-9_-]{10,256}$/.test(row.deploymentId);
-  }).map(row => ({...row,publishedSourceSha:row.description.slice(CANONICAL_DEPLOYMENT_PREFIX.length)}))
-    .sort((a,b)=>a.versionNumber-b.versionNumber || a.deploymentId.localeCompare(b.deploymentId));
+  const canonical = rows.filter(row => row && typeof row.description === 'string'
+    && row.description.startsWith(CANONICAL_DEPLOYMENT_PREFIX))
+    .sort((a,b)=>(Number(a.versionNumber)||0)-(Number(b.versionNumber)||0)
+      || String(a.deploymentId||'').localeCompare(String(b.deploymentId||'')));
   if (!canonical.length) fail('DRIVE_PUBLISHED_VERSION_MISMATCH');
   const latest=canonical[canonical.length-1],previous=canonical[canonical.length-2];
-  if (previous && previous.versionNumber===latest.versionNumber && previous.deploymentId!==latest.deploymentId) {
+  const publishedSourceSha=latest.description.slice(CANONICAL_DEPLOYMENT_PREFIX.length);
+  if (!/^[a-f0-9]{40}$/.test(publishedSourceSha)
+    || !Number.isSafeInteger(latest.versionNumber) || latest.versionNumber < 1
+    || typeof latest.deploymentId !== 'string' || !/^[A-Za-z0-9_-]{10,256}$/.test(latest.deploymentId)
+    || (previous && previous.versionNumber===latest.versionNumber && previous.deploymentId!==latest.deploymentId)) {
     fail('DRIVE_PUBLISHED_VERSION_MISMATCH');
   }
-  return latest;
+  return {...latest,publishedSourceSha};
 }
 
 function verifyPublishedDriveProject(repo,published) {
