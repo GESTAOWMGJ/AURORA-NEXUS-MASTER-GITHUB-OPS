@@ -68,6 +68,8 @@ test("instalação canônica é governada e está presente na projeção, sem no
   const empty: ProjectionSource = { invoices: [], bankTransactions: [], glosses: [], actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] };
   const projection = buildProjection(empty, new Date("2026-10-04T12:00:00Z"), { orgId: "synthetic-org", competence: "2026-10" }) as any;
   assert.ok(projection.nativeRoutines.routines.some((item: any) => item.id === routine?.id));
+  assert.equal(projection.nativeRoutines.personalitePolicy.routineId, "AURORA-PERSONALITE-001");
+  assert.equal(projection.nativeRoutines.personalitePolicy.executorCreated, false);
   const cloud = projection.nativeRoutines.cloudIntakePolicy;
   assert.equal(cloud.id, routine?.id);
   assert.equal(cloud.executor, "AURORA_CLIENT_AGENT");
