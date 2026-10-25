@@ -324,6 +324,7 @@ function extracaoDocumentalCompletaWMGJ_(extracao) {
     google_sheets_values: true,
     google_sheets_manifest: true,
     zip_manifest: true,
+    pdf_encrypted_manifest: true,
     blob_text: true,
     drive_api_ocr_convert: true
   };
@@ -529,6 +530,16 @@ function extrairConteudoArquivoWMGJ_V1_(file,deadlineMs) {
     }
 
     if (mime === MimeType.PDF || mime.indexOf("pdf") >= 0 || mime.indexOf("image/") === 0 || mime.indexOf("officedocument") >= 0 || mime.indexOf("ms-excel") >= 0 || mime.indexOf("msword") >= 0) {
+      if(mime === MimeType.PDF || mime.indexOf("pdf") >= 0) {
+        var encryptedManifest=auroraExtrairManifestoPdfCriptografadoDrive_(file);
+        if(encryptedManifest) {
+          resultado.metodo='pdf_encrypted_manifest';
+          resultado.texto=encryptedManifest;
+          resultado.tamanhoTexto=resultado.texto.length;
+          resultado.observacao='PDF criptografado sincronizado por manifesto estrutural; conteudo requer credencial legitima e revisao humana';
+          return resultado;
+        }
+      }
       var convertido = converterArquivoParaGoogleDocWMGJ_V1_(file);
       if (convertido.ok && convertido.texto) {
         resultado.metodo = convertido.metodo;
@@ -646,6 +657,33 @@ function converterArquivoParaGoogleDocWMGJ_V1_(file) {
 function auroraDigestHexBytes_(bytes) {
   var digest=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,bytes);
   return digest.map(function(value){var n=(value+256)%256;return ('0'+n.toString(16)).slice(-2);}).join('');
+}
+
+function auroraExtrairManifestoPdfCriptografadoDrive_(file) {
+  if(!file || typeof file.getBlob!=='function') return null;
+  var bytes=file.getBlob().getBytes();
+  if(!bytes || bytes.length<16) return null;
+  var head='',headLimit=Math.min(12,bytes.length);
+  for(var h=0;h<headLimit;h++) {
+    var ho=(bytes[h]+256)%256;
+    head+=ho>=32 && ho<=126?String.fromCharCode(ho):' ';
+  }
+  if(head.indexOf('%PDF-')!==0) return null;
+  var start=Math.max(0,bytes.length-131072),tail='';
+  for(var i=start;i<bytes.length;i++) {
+    var octet=(bytes[i]+256)%256;
+    tail+=octet<=127?String.fromCharCode(octet):' ';
+  }
+  if(tail.indexOf('/Encrypt')<0) return null;
+  if(tail.indexOf('startxref')<0 || tail.indexOf('%%EOF')<0) return null;
+  var trailerBytes=bytes.slice(start);
+  return [
+    'AURORA_PDF_ENCRYPTED_MANIFEST_V1',
+    'BYTES:'+bytes.length,
+    'ENCRYPTED:TRUE',
+    'STANDARD_FILTER:'+(/\/Filter\s*\/Standard/.test(tail)?'TRUE':'UNKNOWN'),
+    'TRAILER_SHA256:'+auroraDigestHexBytes_(trailerBytes)
+  ].join('\n');
 }
 
 function auroraExtrairManifestoZipDrive_(file) {
@@ -1486,7 +1524,7 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
         sourceSystem:'DRIVE',originConnector:'DRIVE_FOLDER',mirrorRequired:true,sourceRegistryVersion:'1',pipelineVersion:'drive-continuation-v1'});
       if(event.orgId!==options.orgId || event.source.contentHash!==byteHash.value || event.sourceVersion!==Number(version))
         throw new Error('AURORA_DRIVE_EVENT_SOURCE_CONFLICT');
-      var manifested=['google_sheets_manifest','zip_manifest'].indexOf(extraction.metodo)>=0;
+      var manifested=['google_sheets_manifest','zip_manifest','pdf_encrypted_manifest'].indexOf(extraction.metodo)>=0;
       event.record.extractionEvidence={schemaVersion:1,contentSha256:byteHash.value,textSha256:textHash,
         textLength:extraction.texto.length,method:extraction.metodo,
         coverage:manifested?'SOURCE_MANIFESTED_REVIEW_PENDING':'TEXT_EXTRACTED_REVIEW_PENDING',

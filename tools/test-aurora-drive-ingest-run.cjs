@@ -23,7 +23,7 @@ test('canonical readback rejects a cross-tenant result',async()=>{const f=readba
 test('readback proves exact content, text, revision and immutable version',async()=>{const f=readbackFixture();const result=await verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher);assert.equal(result.verified,1);assert.equal(result.evidence[0].immutableVersionVerified,true);assert.equal(result.evidence[0].nativeReady,false);f.data.source.contentHash='f'.repeat(64);await assert.rejects(()=>verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher),/CANONICAL_IDENTITY_MISMATCH/);});
 test('review intake rejects unproved extraction and financial readiness claims',async()=>{for(const mutate of [f=>{f.data.extractionComplete=false;},f=>{f.data.nativeReady=true;},f=>{f.data.extractionEvidence.textSha256='f'.repeat(64);},f=>{f.data.extractionEvidence.financialFactsApproved=true;},f=>{f.data.canonicalSnapshotHash='f'.repeat(64);}]){const f=readbackFixture();mutate(f);await assert.rejects(()=>verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher),/EXTRACTION_READBACK_MISMATCH/);}});
 test('canonical readback accepts only governed manifest method and coverage pairs',async()=>{
-  for(const method of ['google_sheets_manifest','zip_manifest']){
+  for(const method of ['google_sheets_manifest','zip_manifest','pdf_encrypted_manifest']){
     const f=readbackFixture();
     f.data.extractionEvidence.method=method;
     f.data.extractionEvidence.coverage='SOURCE_MANIFESTED_REVIEW_PENDING';
@@ -34,6 +34,7 @@ test('canonical readback accepts only governed manifest method and coverage pair
   for(const pair of [
     ['google_sheets_manifest','TEXT_EXTRACTED_REVIEW_PENDING'],
     ['zip_manifest','TEXT_EXTRACTED_REVIEW_PENDING'],
+    ['pdf_encrypted_manifest','TEXT_EXTRACTED_REVIEW_PENDING'],
     ['blob_text','SOURCE_MANIFESTED_REVIEW_PENDING'],
     ['arbitrary_manifest','SOURCE_MANIFESTED_REVIEW_PENDING']
   ]){

@@ -444,6 +444,28 @@ function setupPdfOcr(options={}) {
   return {f,original,temporary,copies,trashed,opened};
 }
 
+test('password-protected PDF is synchronized as a structural manifest without OCR or password guessing',()=>{
+  const f=fixture(),file=f.addFile('encryptedpdf001',null,'encrypted source bytes',f.context.MimeType.PDF);
+  const pdf=Buffer.from('%PDF-1.5\n1 0 obj<<>>endobj\ntrailer<< /Encrypt 9 0 R >>\nstartxref\n123\n%%EOF\n','binary');
+  file.getBlob=()=>({getBytes:()=>Array.from(pdf,b=>b>127?b-256:b)});
+  f.context.Utilities.DigestAlgorithm={SHA_256:'SHA_256'};
+  f.context.Utilities.computeDigest=(_alg,bytes)=>Array.from(crypto.createHash('sha256').update(Buffer.from(bytes.map(x=>(x+256)%256))).digest(),b=>b>127?b-256:b);
+  f.context.Drive={Files:{insert:()=>{throw Error('OCR_MUST_NOT_RUN');},copy:()=>{throw Error('OCR_MUST_NOT_RUN');}}};
+  const result=f.realExtract(file);
+  assert.equal(result.ok,true);assert.equal(result.metodo,'pdf_encrypted_manifest');
+  assert.match(result.texto,/^AURORA_PDF_ENCRYPTED_MANIFEST_V1\nBYTES:/);
+  assert.match(result.texto,/\nENCRYPTED:TRUE\n/);
+  assert.equal(result.texto.includes('password'),false);
+  assert.equal(f.context.extracaoDocumentalCompletaWMGJ_(result),true);
+});
+
+test('ordinary PDF without Encrypt marker continues through OCR path',()=>{
+  const {f,original}=setupPdfOcr();
+  original.getBlob=()=>({getBytes:()=>Array.from(Buffer.from('%PDF-1.5\nstartxref\n1\n%%EOF\n','binary'))});
+  const result=f.realExtract(original);
+  assert.equal(result.ok,true);assert.equal(result.metodo,'drive_api_ocr_convert');
+});
+
 test('PDF OCR requests Drive v2 conversion and preserves original identity and replay',()=>{
   const {f,original,temporary,copies,trashed,opened}=setupPdfOcr();
   const contentHash=crypto.createHash('sha256').update(original._text).digest('hex');
@@ -567,9 +589,10 @@ test('ZIP extraction produces bounded member manifest without exposing member na
 });
 
 test('manifest methods persist manifest-only review coverage instead of text-extracted coverage',()=>{
-  for(const method of ['google_sheets_manifest','zip_manifest']) {
-    const f=fixture(),rootId='manifest-root-0001',fileId=method==='zip_manifest'?'zipmanifest00001':'sheetmanifest001';
-    f.addFolder(rootId,null,[fileId]);const file=f.addFile(fileId,rootId,'manifest source bytes',method==='zip_manifest'?'application/zip':f.context.MimeType.GOOGLE_SHEETS);
+  for(const method of ['google_sheets_manifest','zip_manifest','pdf_encrypted_manifest']) {
+    const f=fixture(),rootId='manifest-root-0001',fileId=method==='zip_manifest'?'zipmanifest00001':method==='pdf_encrypted_manifest'?'pdfmanifest00001':'sheetmanifest001';
+    f.addFolder(rootId,null,[fileId]);const mime=method==='zip_manifest'?'application/zip':method==='pdf_encrypted_manifest'?f.context.MimeType.PDF:f.context.MimeType.GOOGLE_SHEETS;
+    const file=f.addFile(fileId,rootId,'manifest source bytes',mime);
     f.options.sources=[{sourceId:'manifest-source',folderId:rootId}];f.options.maxScan=10;f.options.processLimit=1;
     f.context.extrairConteudoArquivoWMGJ_V1_=()=>{
       const texto='AURORA_MANIFEST_V1\nHASH:'+H;
