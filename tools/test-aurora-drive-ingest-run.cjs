@@ -24,6 +24,10 @@ test('Drive runtime selects the newest canonical Apps Script version independent
   ]);
   assert.equal(selected.versionNumber,44);assert.equal(selected.publishedSourceSha,newer);
   assert.throws(()=>selectDriveDeployment([{description:'AURORA_EXECUTION_API_CANONICAL manual',versionNumber:45,deploymentId:'deployment_bad_45'}]),/DRIVE_PUBLISHED_VERSION_MISMATCH/);
+  assert.throws(()=>selectDriveDeployment([
+    {description:'AURORA_EXECUTION_API_CANONICAL '+newer,versionNumber:44,deploymentId:'deployment_new_44'},
+    {description:'AURORA_EXECUTION_API_CANONICAL manual',versionNumber:45,deploymentId:'deployment_bad_45'}
+  ]),/DRIVE_PUBLISHED_VERSION_MISMATCH/);
 });
 test('Drive runtime requires the complete published Apps Script project to match the checked-out source',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'aurora-drive-published-'));
