@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "aurora.hml.delivery.v1",
+  "deliveryId": "AURORA-HML-DELIVERY-20261025-R1",
+  "recordedOn": "2026-10-25",
+  "channel": "HML_BETA",
+  "productVersion": "1.1.0-beta.2",
+  "releaseTrain": "2026.10",
+  "activeRelease": {
+    "releaseId": "aurora-1.1.0-beta.2-cd4737ed0421df7ec53fc17d6e16c56443085013",
+    "sourceSha": "cd4737ed0421df7ec53fc17d6e16c56443085013",
+    "certificateSha256": "7ab41582c3859d5c33e04c1aa3728e7c5244dad7661774f75f0597d8424838af",
+    "deployRunId": 40176332827,
+    "ciRunId": 40176039699,
+    "reviewPr": 322,
+    "reviewMode": "OWNER_DEPLOYMENT_APPROVAL",
+    "postPromotionSmokeVerified": true,
+    "deviceInstallationVerified": false
+  },
+  "operationalRevision": {
+    "sourceSha": "602528812bffc443a48a4d52fc115c6ab2af6081",
+    "pullRequest": 324,
+    "appsScriptDeployRunId": 40193229058,
+    "appsScriptVersion": 46,
+    "appsScriptDeploymentIdentitySha256": "420af1f0444ef2d4cb7bec67ac12108bf009ce0287498e7232f2226aa702fcf4",
+    "appsScriptManifestSha256": "4469055628d16e9ba258fc9fece7b0dfd8fb42bc3c3259c9f512c8b8135f1885",
+    "appsScriptSourceFilesVerified": 30
+  },
+  "driveReadback": {
+    "runId": 40194120781,
+    "jobId": 121171196410,
+    "scopeSha256": "d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa",
+    "status": "READBACK_VERIFIED",
+    "total": 255,
+    "documents": 51,
+    "aliases": 192,
+    "pending": 12,
+    "pages": 13,
+    "allReceiptsVerified": true,
+    "sourceMutation": false,
+    "newSchedulerCreated": false,
+    "fullSynchronizationVerified": false,
+    "complete": false,
+    "documentReviewRequired": true,
+    "artifact": {
+      "id": 12598449534,
+      "name": "aurora-drive-intake-40194120781",
+      "digest": "sha256:2f464afa44e7e7bb2fb5be9fb4f41b6e88234580c231374194bccb8003cbb413"
+    },
+    "pendingDiagnostics": {
+      "byCode": {
+        "AURORA_DRIVE_CONVERSION_FAILED": 10,
+        "NOT_RECORDED": 2
+      },
+      "byStatus": {
+        "ERRO_REPROCESSAR": 10,
+        "REVISAR_HUMANO": 2
+      },
+      "byMediaType": {
+        "OTHER": 9,
+        "GOOGLE_SHEETS": 1,
+        "ZIP": 1,
+        "PDF": 1
+      }
+    }
+  },
+  "deliveryState": "CURRENT_HML_CONTROLLED",
+  "productionReleased": false,
+  "globalSynchronizationVerified": false
+}
