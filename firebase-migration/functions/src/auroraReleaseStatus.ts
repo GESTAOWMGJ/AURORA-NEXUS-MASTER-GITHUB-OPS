@@ -125,6 +125,18 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}, p
       tenantPendingBlocksPlatformPublication: false,
       detail: "Reutilizar fontes autorizadas e retomar pelo recibo existente. Conexão, processamento e replay atuais são exigidos por fonte; metadados ou EOF em cache não concluem a instalação."
     },
+    documentExtraction: {
+      status: "PDF_TEXT_IMPLEMENTED_CANDIDATE_PENDING_SECURITY_CI_HML",
+      pdfTextProfile: "PDFJS_6_4_299_TEXT_V1",
+      pdfCoverage: "PARTIAL_REVIEW_REQUIRED",
+      imageOcr: "PENDING_REAL_BACKEND",
+      rawTextPersisted: false,
+      documentInputLimitBytes: 1048576,
+      extractedTextLimitBytes: 262144,
+      browserHeapHardLimitEnforced: false,
+      completesInstallation: false,
+      globalAcquisitionVerified: false
+    },
     engineeringReadinessPercent: Math.round((doneWeight / totalWeight) * 100),
     metricNote: "Progresso dos requisitos de desenvolvimento. A validação comercial, regulatória e financeira exige evidências próprias.",
     workspaceConnectors: {state:"IMPLEMENTED_PENDING_PROVIDER_CREDENTIALS_AND_RUNTIME_RECEIPTS",providers:["NOTION","SLACK"],mode:"SCOPED_READ_ONLY",chatgptGrantInherited:false,physicalInstallationVerified:false},

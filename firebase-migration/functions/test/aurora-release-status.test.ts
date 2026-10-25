@@ -29,3 +29,11 @@ test('cockpit distinguishes signed component coverage from installed convergence
   assert.equal(status.releaseConvergence.signedCoverageIsDeviceAcceptance,false);assert.equal(status.releaseConvergence.nativeMacAcceptance,'UNVERIFIED');
   assert.equal(status.releaseConvergence.allClientsSynchronized,false);assert.equal(status.installerIntegration.fullSynchronizationVerified,false);
 });
+test('PDF text candidate keeps OCR, complete representation and global installation gates open',()=>{
+  const status=buildReleaseStatus() as any;
+  assert.equal(status.documentExtraction.pdfCoverage,'PARTIAL_REVIEW_REQUIRED');
+  assert.equal(status.documentExtraction.imageOcr,'PENDING_REAL_BACKEND');
+  assert.equal(status.documentExtraction.browserHeapHardLimitEnforced,false);
+  assert.equal(status.documentExtraction.completesInstallation,false);
+  assert.equal(status.documentExtraction.globalAcquisitionVerified,false);
+});

@@ -367,7 +367,7 @@ OBSERVATION_METHOD_MIMES={
     'TEXT_UTF8':{'text/plain','text/markdown'},'CSV_UTF8':{'text/csv'},'JSON_UTF8':{'application/json'},'XML_TEXT':{'application/xml','text/xml'},
     'DOCX_XML':{'application/vnd.openxmlformats-officedocument.wordprocessingml.document'},
     'XLSX_XML':{'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},
-    'ODT_XML':{'application/vnd.oasis.opendocument.text'},'ODS_XML':{'application/vnd.oasis.opendocument.spreadsheet'}}
+    'ODT_XML':{'application/vnd.oasis.opendocument.text'},'ODS_XML':{'application/vnd.oasis.opendocument.spreadsheet'},'PDF_TEXT':{'application/pdf'}}
 
 
 def _observation_hash(value):
@@ -415,6 +415,8 @@ def validate_observation_payload(raw):
         or not isinstance(extracted.get('coverage'),dict) or set(extracted['coverage'])!={'basis','totalUnits','processedUnits'}):
         raise SyncError('INVALID_DOCUMENT_OBSERVATION')
     coverage=extracted['coverage']
+    if extracted['method']=='PDF_TEXT' and (extracted['status']!='PARTIAL' or coverage.get('basis')!='BOUNDED_REPRESENTATION'
+        or not bounded(coverage.get('totalUnits'),32)):raise SyncError('INVALID_DOCUMENT_OBSERVATION')
     if (coverage.get('basis') not in ('EXPECTED_PARTS','BOUNDED_REPRESENTATION') or not bounded(coverage.get('totalUnits'),10000)
         or not bounded(coverage.get('processedUnits'),coverage['totalUnits'])
         or extracted['method'] is not None and acquired['acquiredMimeType'] not in OBSERVATION_METHOD_MIMES[extracted['method']]):

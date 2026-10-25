@@ -64,7 +64,7 @@ class DocumentIntakeTests(unittest.TestCase):
         result=subprocess.run([NODE,str(root/'firebase-migration/scripts/generate-document-intake-assets.mjs'),'--check'],
             cwd=root,capture_output=True,text=True,timeout=30)
         self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(json.loads(result.stdout)['status'],'GENERATED_BYTES_VERIFIED')
-        self.assertEqual(set(deployment.ASSETS),set(installer.ASSETS));self.assertEqual(len(deployment.ASSETS),12)
+        self.assertEqual(set(deployment.ASSETS),set(installer.ASSETS));self.assertEqual(len(deployment.ASSETS),20)
 
     def test_actual_utf8_bytes_have_distinct_normalized_text_hash_and_no_narrative_in_public_preview(self):
         raw='Café\r\nNever export this narrative\r\n'.encode()
@@ -92,11 +92,27 @@ class DocumentIntakeTests(unittest.TestCase):
         self.assertFalse(candidate['nativeReady']);self.assertFalse(candidate['sourceIndependent'])
 
     def test_pdf_image_and_unknown_formats_remain_pending_without_installing_or_guessing_backend(self):
-        for mime,raw,code in [('application/pdf',b'%PDF-1.4 synthetic','BACKEND_REQUIRED'),('image/png',b'\x89PNG synthetic','BACKEND_REQUIRED'),
+        for mime,raw,code in [('image/png',b'\x89PNG synthetic','BACKEND_REQUIRED'),
                               ('application/octet-stream',b'opaque synthetic','UNSUPPORTED_FORMAT')]:
             result=intake.extract_bytes(raw,mime)
             self.assertEqual(result['extraction']['status'],'PENDING');self.assertEqual(result['extraction']['code'],code)
             self.assertFalse(result['installationComplete']);self.assertIsNone(result['extraction']['textSha256'])
+
+    def test_real_password_protected_pdf_and_malformed_bytes_fail_without_text_or_financial_fact(self):
+        fixture=SOURCE.parent/'firebase-migration/functions/test/fixtures/document-intake/password-synthetic.pdf'
+        for raw,code in ((fixture.read_bytes(),'ENCRYPTED_DOCUMENT'),(b'%PDF-1.7 synthetic malformed','MALFORMED_DOCUMENT')):
+            result=intake.extract_bytes(raw,'application/pdf')
+            self.assertEqual(result['extraction']['status'],'FAILED');self.assertEqual(result['extraction']['code'],code)
+            self.assertIsNone(result['extraction']['textSha256']);self.assertFalse(result['installationComplete'])
+
+    def test_pdf_large_asset_exception_requires_exact_name_and_hash_and_keeps_document_limit(self):
+        import published_release as release
+        for name,pin in release.PDF_LARGE_PINS.items():
+            self.assertEqual(release.trusted_asset_limit(name,pin),3*1048576)
+            self.assertEqual(release.trusted_asset_limit(name,'a'*64),1048576)
+            self.assertEqual(release.trusted_asset_limit('unexpected/'+name,pin),1048576)
+            self.assertEqual(hashlib.sha256((SOURCE/name).read_bytes()).hexdigest(),pin)
+        with self.assertRaises(sync.SyncError):intake.extract_bytes(b'x'*1048577,'application/pdf')
 
     def test_missing_runtime_and_incompatible_mime_or_size_cannot_claim_readiness(self):
         with patch.object(intake,'_node',return_value=None):pending=intake.extract_bytes(b'Synthetic','text/plain')

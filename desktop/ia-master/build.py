@@ -24,7 +24,9 @@ def build(output):
     # Packaging does not authorize roots, activate providers or install another model.
     agent_output=output/'client-agent';agent_output.mkdir()
     for name in ['client_agent.py','provider_connectors.py','client_secret_store.py','install_client_agent.py','aurora_cloud_sync.py','aurora_deployment.py','published_release.py',
-                 'document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json']:
+                 'document_intake.py','document_intake.cjs','document_intake_core.cjs','document_fact_mapping.cjs','document-intake-manifest.json',
+                 'document_pdf_runtime.mjs','document_pdf_node.cjs','document_pdf_pins.cjs','document_pdf_api.mjs',
+                 'document_pdf_worker.mjs','document_pdf_data.bin','document_pdf_LICENSE.txt','document_pdf_vendor.json']:
         shutil.copyfile(ROOT/'aurora-coletor'/name,agent_output/name)
     fonts = ROOT / 'firebase-migration/hosting/aurora-nexus/assets/fonts'
     font_output = output / 'assets/fonts'
@@ -44,7 +46,7 @@ def build(output):
                  'firebase-migration/hosting/aurora-nexus/assets/fonts',
                  'docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md'], cwd=ROOT, text=True).strip())
     manifest = {'component': 'AURORA_IA_MASTER', 'version': '1.1.0', 'sourceRevision': revision,
-                'clientAgent': {'component':'AURORA_CLIENT_AGENT','version':'1.0.5','platforms':['windows','macos'],
+                'clientAgent': {'component':'AURORA_CLIENT_AGENT','version':'1.0.6','platforms':['windows','macos'],
                                 'configured':False,'sourceAuthorizationRequired':True,'providerConnectionsVerified':False},
                 'dirty': dirty, 'nodeMinimumMajor': 22, 'externalAiEnabled': False,
                 'files': {str(p.relative_to(output)).replace('\\', '/'): hashlib.sha256(p.read_bytes()).hexdigest()

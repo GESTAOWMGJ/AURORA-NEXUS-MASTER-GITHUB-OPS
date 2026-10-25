@@ -24,6 +24,17 @@ function observation():DocumentObservationPayload {
     extraction:{status:'COMPLETE',method:'TEXT_UTF8',methodVersion:'1.0.0',textSha256:sha('synthetic content'),textByteLength:17,
       coverage:{basis:'EXPECTED_PARTS',totalUnits:1,processedUnits:1},code:'CONTENT_EXTRACTED'}};
 }
+test('PDF text observation accepts partial evidence only, preserving OCR/review and MIME/page boundaries',()=>{
+  const value=observation();value.acquisition.sourceMimeType=value.acquisition.acquiredMimeType='application/pdf';
+  value.extraction={...value.extraction,status:'PARTIAL',method:'PDF_TEXT',code:'BOUNDED_EXTRACTION_PARTIAL',
+    coverage:{basis:'BOUNDED_REPRESENTATION',totalUnits:2,processedUnits:2}};
+  assert.ok(parseDocumentObservationPayload(value));
+  for(const mutate of [(v:any)=>{v.extraction.status='COMPLETE';v.extraction.code='CONTENT_EXTRACTED';},
+    (v:any)=>{v.extraction.coverage.basis='EXPECTED_PARTS';},(v:any)=>{v.extraction.coverage.totalUnits=33;},
+    (v:any)=>{v.acquisition.sourceMimeType=v.acquisition.acquiredMimeType='text/plain';}]){
+    const invalid=structuredClone(value);mutate(invalid);assert.equal(parseDocumentObservationPayload(invalid),null);
+  }
+});
 const clone=<T>(v:T):T=>JSON.parse(JSON.stringify(v));
 function fixture(manual=false) {
   const member={orgId:org,uid:'synthetic-admin',email:'synthetic@example.invalid',role:'org_admin',

@@ -21,7 +21,11 @@ import aurora_cloud_sync as sync
 MAX_BYTES=1048576
 MAX_OUTPUT=16*1048576
 ASSET_MANIFEST='document-intake-manifest.json'
-ASSET_FILES=('document_intake_core.cjs','document_fact_mapping.cjs','document_intake.cjs','document_intake.py')
+PDF_FILES=('document_pdf_runtime.mjs','document_pdf_node.cjs','document_pdf_pins.cjs','document_pdf_api.mjs',
+    'document_pdf_worker.mjs','document_pdf_data.bin','document_pdf_LICENSE.txt','document_pdf_vendor.json')
+ASSET_FILES=('document_intake_core.cjs','document_fact_mapping.cjs','document_intake.cjs','document_intake.py',*PDF_FILES)
+PDF_LARGE_PINS={'document_pdf_worker.mjs':'145d2dd3ab0c86151011dba95acfa2d5336e2accd59388ea43dbee0efddaaec6',
+    'document_pdf_data.bin':'e345cc3e6465356b3a48c2da62561b3ea99277b7b79be31c5dc80b9e779b1eac'}
 MIMES={'.txt':'text/plain','.md':'text/markdown','.csv':'text/csv','.json':'application/json','.xml':'application/xml',
        '.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
        '.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -70,7 +74,8 @@ def verify_assets(directory=None):
                    for pin in [*manifest['sources'].values(),*manifest['files'].values()])):
         raise sync.SyncError('DOCUMENT_INTAKE_ASSET_MANIFEST_INVALID')
     for name,pin in manifest['files'].items():
-        if hashlib.sha256(_regular_bytes(directory/name,MAX_BYTES)).hexdigest()!=pin:
+        maximum=3*MAX_BYTES if PDF_LARGE_PINS.get(name)==pin else MAX_BYTES
+        if hashlib.sha256(_regular_bytes(directory/name,maximum)).hexdigest()!=pin:
             raise sync.SyncError('DOCUMENT_INTAKE_ASSET_CHANGED')
     return {'manifestSha256':hashlib.sha256(_regular_bytes(directory/ASSET_MANIFEST,16384)).hexdigest(),
             'sourceSha256':dict(manifest['sources']),'assetSha256':dict(manifest['files'])}

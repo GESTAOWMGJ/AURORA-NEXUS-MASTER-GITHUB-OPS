@@ -14,7 +14,9 @@ SOURCES = ('desktop/install_windows_beta.py', 'aurora-coletor/aurora_deployment.
            'aurora-coletor/provider_connectors.py', 'aurora-coletor/client_secret_store.py',
            'aurora-coletor/install_client_agent.py', 'aurora-coletor/published_release.py',
            'aurora-coletor/document_intake.py','aurora-coletor/document_intake.cjs','aurora-coletor/document_intake_core.cjs',
-           'aurora-coletor/document_fact_mapping.cjs','aurora-coletor/document-intake-manifest.json')
+           'aurora-coletor/document_fact_mapping.cjs','aurora-coletor/document-intake-manifest.json',
+           *('aurora-coletor/'+name for name in ('document_pdf_runtime.mjs','document_pdf_node.cjs','document_pdf_pins.cjs','document_pdf_api.mjs',
+             'document_pdf_worker.mjs','document_pdf_data.bin','document_pdf_LICENSE.txt','document_pdf_vendor.json')))
 LAUNCHER = r'''@echo off
 setlocal
 cd /d "%~dp0"
@@ -74,7 +76,8 @@ def build(repo, output, source_sha=None):
         'O portal exige login individual. Nenhuma senha, dado operacional ou modelo de IA acompanha o pacote.\n'
         'O pacote nao instala servico, banco offline ou dependencia. Nao desative protecoes do Windows.\n'
         'A extracao documental local compartilha o motor do portal e requer Node.js 22+ ja instalado.\n'
-        'Sem esse runtime ou OCR/PDF homologado, a fonte permanece pendente; nao ha download automatico.\n'
+        'PDF textual usa os assets locais fixados e continua parcial; imagens aguardam OCR.\n'
+        'Sem runtime compativel a fonte permanece pendente; nao ha download automatico.\n'
         'Sem assinatura de editor. SHA-256 verifica integridade, nao identidade do editor.\n'
         'Compilacao e testes de pacote nao comprovam instalacao no seu dispositivo.\n'
     ).encode('utf-8')

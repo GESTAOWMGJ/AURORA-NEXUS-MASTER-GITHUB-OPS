@@ -399,6 +399,26 @@ function createDocumentIntakeEngine() {
                     segments = [{ locator: 'text/body', text }];
                 }
             }
+            else if (mime === 'application/pdf') {
+                need(bytes.length >= 8 && decoder.decode(bytes.subarray(0, 5)) === '%PDF-');
+                need(options.extractPdfText, 'BACKEND_REQUIRED');
+                const result = await options.extractPdfText(bytes);
+                need(result?.schemaVersion === 'aurora.pdf.text.result.v1' && Number.isSafeInteger(result.pages) && result.pages > 0 && result.pages <= 32);
+                need(Array.isArray(result.segments) && result.segments.length <= 20000, 'LIMIT_EXCEEDED');
+                let expanded = 0;
+                for (const segment of result.segments) {
+                    need(segment && typeof segment.text === 'string' && segment.text.length <= MAX_TEXT
+                        && /^pdf\/page\[[1-9][0-9]?\]\/item\[[1-9][0-9]{0,4}\]$/.test(segment.locator));
+                    expanded += encoder.encode(segment.text).length + (segments.length ? 1 : 0);
+                    need(expanded <= MAX_TEXT, 'LIMIT_EXCEEDED');
+                    segments.push({ locator: segment.locator, text: segment.text });
+                }
+                // Page text is real; image/annotation/form/layout coverage is not OCR.
+                // Never infer that text extraction covers every representation in PDF.
+                method = 'PDF_TEXT';
+                totalUnits = processedUnits = result.pages;
+                partial = true;
+            }
             else if (['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.oasis.opendocument.text', 'application/vnd.oasis.opendocument.spreadsheet'].includes(mime)) {
                 const files = await zip(bytes, options);
                 need(!Array.from(files.keys()).some(name => /vbaProject\.bin$|\/embeddings\//i.test(name)), 'BACKEND_REQUIRED');
