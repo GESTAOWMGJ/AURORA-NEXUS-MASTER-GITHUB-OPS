@@ -126,7 +126,15 @@ test("the protected UI renders the shared result and all generated scripts remai
     { action: "a", refresh: "r", integrationKey: "i", distributionApproval: "d", logout: "l" });
   for (const id of ["invoiced-label", "invoiced-detail", "received-detail", "gloss-detail"]) assert.ok(html.includes('id="'+id+'"'));
   assert.match(html, /renderReliableFinancialResult\(data\)/);
-  for (const match of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script\s*>/gi)) new vm.Script(match[1]);
+  // This fixed renderer emits literal script delimiters; this is not an HTML sanitizer.
+  const scripts = html.split("<script>").slice(1);
+  assert.ok(scripts.length > 0);
+  assert.equal(html.split("<script").length - 1, scripts.length);
+  for (const fragment of scripts) {
+    const end = fragment.indexOf("</script>");
+    assert.ok(end >= 0);
+    new vm.Script(fragment.slice(0, end));
+  }
   assert.equal(RELIABLE_RESULT_POLICY.securityAndIntegrityGatesPreserved, true);
 });
 
