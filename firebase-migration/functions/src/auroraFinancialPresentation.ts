@@ -130,11 +130,13 @@ export function buildReliableMetricPresentation(input: unknown, key: string, rea
   valueCents: number | null; partial: boolean; detail: string;
 } {
   const b = presentationRecord(input), p = presentationRecord(b.projection);
-  const f = presentationRecord(p.financialCents), master = presentationRecord(b.masterEngine);
+  const master = presentationRecord(b.masterEngine);
+  const decision = presentationRecord(presentationRecord(master.governance).dataAssessment).decision;
+  if (decision === "DENY") return { valueCents: null, partial: false, detail: "Fonte sem validação para exibição" };
+  const f = presentationRecord(p.financialCents);
   if (!["invoicedCents", "receivedCents", "glossCents"].includes(key)) return { valueCents: null, partial: false, detail: "Sem fonte" };
   const canonical = f[key];
   if (typeof canonical === "number" && Number.isSafeInteger(canonical)) return { valueCents: canonical, partial: false, detail: "Valor do recorte validado" };
-  const decision = presentationRecord(presentationRecord(master.governance).dataAssessment).decision;
   const subset = ["ALLOW", "REVIEW"].includes(String(decision)) && readSubset ? readSubset(p) : null;
   const metric = subset?.metrics[key as "invoicedCents" | "receivedCents" | "glossCents"];
   if (!metric || metric.valueCents === null) return { valueCents: null, partial: false, detail: "Sem valor comprovado para este indicador" };
