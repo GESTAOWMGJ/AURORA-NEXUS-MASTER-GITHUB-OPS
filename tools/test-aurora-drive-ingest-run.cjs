@@ -357,3 +357,23 @@ test('closed remediation diagnostic codes are accepted but arbitrary values stay
     queueStatus:'REVISAR_HUMANO',code:'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED'})).code,'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED');
   assert.equal(sanitizePendingRow(pendingRow('synthetic-review-secret',{code:'PRIVATE_CUSTOM_CODE'})).code,'UNKNOWN');
 });
+
+
+test('continuous Drive workflow is exact-scope, protected, serialized, and cleans private OAuth material',()=>{
+  const workflow=fs.readFileSync(path.join(__dirname,'../.github/workflows/aurora-drive-continuous-feed.yml'),'utf8').replace(/\r\n/g,'\n');
+  assert.match(workflow,/options: \[ACTIVATE, REMEDIATE, STATUS\]/);
+  assert.match(workflow,/environment: firebase-homologation/);
+  assert.match(workflow,/group: aurora-rc11-hml\n\s+cancel-in-progress: false/);
+  assert.match(workflow,/inputs\.expected_sha == github\.sha/);
+  assert.match(workflow,/AURORA_DRIVE_SCOPE_JSON: \$\{\{ secrets\.AURORA_WMGJ_DRIVE_SOURCE_SCOPE \}\}/);
+  assert.match(workflow,/EXPECTED_SCOPE_SHA256: \$\{\{ inputs\.scope_sha256 \}\}/);
+  assert.match(workflow,/d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa/);
+  assert.match(workflow,/auroraAtivarAlimentacaoContinuaDriveAutorizada/);
+  assert.match(workflow,/auroraSanearPendenciasDriveAutorizadas/);
+  assert.match(workflow,/auroraLerStatusAlimentacaoContinuaDriveAutorizada/);
+  assert.match(workflow,/sourceCount==1 and \.response\.triggerCount==1/);
+  assert.match(workflow,/duplicateCollectors==0/);
+  assert.match(workflow,/newSourceEnrolled:false,sourceMutation:false,productionMutation:false/);
+  assert.match(workflow,/Remove runner OAuth and private execution responses\n\s+if: always\(\)/);
+  assert.doesNotMatch(workflow,/echo\s+"?\$AURORA_DRIVE_SCOPE_JSON/);
+});
