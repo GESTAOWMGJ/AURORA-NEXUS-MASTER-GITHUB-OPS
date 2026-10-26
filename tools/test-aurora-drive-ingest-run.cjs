@@ -262,7 +262,8 @@ test('all pending pages are counted once without publishing identifiers or free-
   assert.equal(coverage.allReceiptsVerified,true);assert.equal(coverage.pending,2);
   assert.deepEqual(coverage.pendingDiagnostics,{schemaVersion:'aurora.drive-pending-diagnostics.v1',queueMetadataOnly:true,
     count:2,byCode:{AURORA_DRIVE_CONVERSION_UNSUPPORTED:1,UNKNOWN:1},byStatus:{ERRO_REPROCESSAR:2},
-    byMediaType:{PDF:2},unknownSourceVersion:1,unknownAttempts:1,totalRecordedAttempts:3});
+    byMediaType:{PDF:2},unknownSourceVersion:1,unknownAttempts:1,totalRecordedAttempts:3,
+    justifiedHumanReview:0,unjustifiedPending:2});
   assert.ok(!JSON.stringify(coverage).includes('synthetic-pending'));assert.ok(!JSON.stringify(coverage).includes('SECRET'));
 });
 test('pending coverage rejects omitted rows, repeated identities, and overlap with a later primary or alias',async()=>{
@@ -293,7 +294,7 @@ test('READBACK-only verifies guards and all pages without entering the mutating 
   const f=batchHarness([batchResponse()],'READBACK');
   await assert.rejects(f.execute,/DRIVE_MUTATING_MODE_REQUIRED/);assert.equal(f.guards,0);assert.deepEqual(f.requests,[]);
   assert.deepEqual(completionFromCoverage('READBACK',{scan:{complete:true}},{allReceiptsVerified:true,pending:0}),
-    {complete:false,scopedQueueDrained:true,fullSynchronizationVerified:false,documentReviewRequired:true});
+    {complete:false,scopedQueueDrained:true,scopedQueueRemediated:true,fullSynchronizationVerified:false,documentReviewRequired:false});
 });
 test('read-only proof rejects scope/source drift and any claimed operational write',async()=>{
   for(const mutate of [v=>{v.scopeSha256='b'.repeat(64);},v=>{v.processing.attempted=1;},
@@ -326,4 +327,33 @@ test('READBACK-only recovers the existing canonical document and every alias wit
   assert.deepEqual(requests.map(x=>x.mode),['READBACK','READBACK']);assert.equal(canonicalReads,1);
   assert.equal(result.coverage.canonicalDocumentsVerified,1);assert.equal(result.coverage.aliasReferencesVerified,1);
   assert.equal(result.coverage.pendingDiagnostics.count,0);assert.equal(result.coverage.allReceiptsVerified,true);
+});
+
+
+test('justified human review closes scoped remediation without claiming queue drain or global synchronization',async()=>{
+  const rows=[
+    pendingRow('synthetic-review-0001',{queueStatus:'REVISAR_HUMANO',attempts:10,code:'AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED',mediaType:'OTHER'}),
+    pendingRow('synthetic-review-0002',{queueStatus:'REVISAR_HUMANO',attempts:0,code:'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED',mediaType:'PDF'})
+  ];
+  const coverage=await verifyCoverage(async offset=>({
+    ok:true,code:'AURORA_DRIVE_READBACK_PLAN',triggersChanged:false,globalSettingsChanged:false,
+    privateReadbackPlan:[],privateAliasRows:[],privatePendingRows:[rows[offset]],
+    coverage:{offset,nextOffset:offset===0?1:null,total:2,documents:0,aliases:0,pending:2,
+      complete:offset===1,returned:1,pageDocuments:0,pageAliases:0,pagePending:1}
+  }),()=>{throw Error('UNEXPECTED_CANONICAL_READ');});
+  assert.equal(coverage.pendingDiagnostics.justifiedHumanReview,2);
+  assert.equal(coverage.pendingDiagnostics.unjustifiedPending,0);
+  assert.deepEqual(coverage.pendingDiagnostics.byCode,
+    {AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED:1,AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED:1});
+  const state=completionFromCoverage('PROCESS_EXISTING',null,coverage);
+  assert.equal(state.scopedQueueDrained,false);assert.equal(state.scopedQueueRemediated,true);
+  assert.equal(state.fullSynchronizationVerified,false);assert.equal(state.documentReviewRequired,true);
+});
+
+test('closed remediation diagnostic codes are accepted but arbitrary values stay UNKNOWN',()=>{
+  assert.equal(sanitizePendingRow(pendingRow('synthetic-review-closed1',{
+    queueStatus:'REVISAR_HUMANO',code:'AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED'})).code,'AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED');
+  assert.equal(sanitizePendingRow(pendingRow('synthetic-review-closed2',{
+    queueStatus:'REVISAR_HUMANO',code:'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED'})).code,'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED');
+  assert.equal(sanitizePendingRow(pendingRow('synthetic-review-secret',{code:'PRIVATE_CUSTOM_CODE'})).code,'UNKNOWN');
 });
