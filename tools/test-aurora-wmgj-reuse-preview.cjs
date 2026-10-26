@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const cp = require('node:child_process');
 const {createHash} = require('node:crypto');
-const {sanitizePreview,readPreview,run,failureEvidence,command,main} = require('./aurora-wmgj-reuse-preview.cjs');
+const {sanitizePreview,readPreview,run,failureEvidence,command,main,previewAuthorizationDeadline} = require('./aurora-wmgj-reuse-preview.cjs');
 function sample() {
   return {ok:true,code:'AURORA_CONNECTOR_REUSE_CONFIG_ONLY_VERIFIED',state:'PENDING_TRIGGER_REVIEW',
     scope:'WMGJ_EXISTING_SOURCE_CONFIG_ONLY',sourceIdentified:true,sourceCount:1,metadataAccessVerified:true,
@@ -527,4 +527,22 @@ test('untrusted error metadata and messages cannot forge a phase or escape the f
     assert.deepEqual(JSON.parse(artifact),evidence); assert.equal(artifact.includes(secret),false);
     assert.deepEqual(stdout,[]); assert.deepEqual(stderr,['CONNECTOR_REUSE_PREVIEW_REJECTED']);
   });
+});
+
+
+test('scoped continuous Drive authorization permits metadata preview after global HML expiry without renewing global scope',()=>{
+  const policy={scope:{validUntilUtc:'2026-10-26T03:00:00.000Z',
+    continuousDriveScopeSha256:'d'.repeat(64),continuousDriveDecisionId:'AURORA-HML-CONTINUOUS-DRIVE-20261026'},
+    reaffirmations:[{decisionId:'AURORA-HML-CONTINUOUS-DRIVE-20261026',exactPrivateScopeSha256:'d'.repeat(64),
+      validUntilUtc:'2026-10-27T04:30:00.000Z',continuousDriveTriggerAuthorized:true,processExistingAuthorized:true,
+      queueMetadataRemediationAuthorized:true,realSourceActivationAuthorized:true,sourceMutationAuthorized:false,
+      newSourceEnrollmentAuthorized:false,productionAuthorized:false,clinicalSensitiveAuthorized:false}]};
+  const now=Date.parse('2026-10-26T05:00:00.000Z');
+  assert.equal(previewAuthorizationDeadline(policy,now),Date.parse('2026-10-27T04:30:00.000Z'));
+  assert.equal(policy.scope.validUntilUtc,'2026-10-26T03:00:00.000Z');
+  policy.reaffirmations[0].sourceMutationAuthorized=true;
+  assert.throws(()=>previewAuthorizationDeadline(policy,now),/CONNECTOR_REUSE_PREVIEW_REJECTED/);
+  policy.reaffirmations[0].sourceMutationAuthorized=false;
+  policy.scope.continuousDriveScopeSha256='e'.repeat(64);
+  assert.throws(()=>previewAuthorizationDeadline(policy,now),/CONNECTOR_REUSE_PREVIEW_REJECTED/);
 });
