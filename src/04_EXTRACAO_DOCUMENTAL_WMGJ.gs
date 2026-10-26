@@ -1640,6 +1640,10 @@ function auroraDrivePendingDiagnostic_(scope, row, idx) {
   var status=row[idx.STATUS],statuses=['PENDENTE','PROCESSANDO','EXTRAINDO','CLASSIFICANDO',
     'PROCESSADO','ERRO_REPROCESSAR','DUPLICADO','REVISAR_HUMANO'];
   var mime=row[idx.MIME_TYPE],mediaType='OTHER';
+  // Older queue rows stored a MIME in TIPO, before MIME_TYPE was appended.
+  // Read existing metadata only; never infer from filenames or mutate the row.
+  if((mime===undefined || mime===null || mime==='') && idx.TIPO!==undefined)
+    mime=row[idx.TIPO];
   if(mime==='application/pdf') mediaType='PDF';
   else if(mime==='application/vnd.google-apps.spreadsheet') mediaType='GOOGLE_SHEETS';
   else if(mime==='application/vnd.google-apps.document') mediaType='GOOGLE_DOCS';

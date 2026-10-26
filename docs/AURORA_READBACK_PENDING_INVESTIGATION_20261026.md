@@ -92,3 +92,63 @@ quantos foram recuperados. Nesta investigação: zero recuperações reais compr
 
 Rollback: reverter o commit candidato; nenhum dado ou fonte precisa ser revertido.
 A falha de versão publicada corrigida no PR #324 é independente destes achados.
+
+## Adendo R2 — identificação por diagnóstico somente leitura
+
+O titular renovou expressamente a autorização por 24 horas, restrita ao mesmo
+escopo HML e sem ingestão. Nenhuma autorização de processamento/deploy foi inferida.
+Foram lidas somente as 12 linhas previamente identificadas e seus metadados Drive,
+sem acionar o executor Apps Script, escrever fila ou repetir ingestão.
+
+A lacuna do artefato foi suprida por evidência privada preservada de 24/10 e pela
+consulta atual ao conector autorizado. Este adendo supera as limitações de
+identificação da primeira análise, mas não transforma o artefato agregado em prova
+individual retroativa. Identificadores, nomes e recibos completos permanecem fora
+do repositório. O escopo de aquisição do run e o marcador histórico persistido na
+fila têm hashes distintos; não são tratados como campos intercambiáveis. O vínculo
+individual foi conferido por fileId, sourceId, versão e metadados, não pela igualdade
+desses dois hashes nem pela coincidência das contagens.
+
+| Categoria atual | Qtd. | Evidência/correção | Recuperabilidade |
+|---|---:|---|---|
+| PDF criptografado, cópias idênticas | 10 | Bytes históricos: um conteúdo único, senha exigida; MIME/ID/versão/tamanho/pasta atuais correspondem aos preservados | Manifesto estrutural candidato a processamento futuro; conteúdo exige credencial legítima ou versão acessível |
+| Planilha mestre | 1 | SOURCE_MANIFESTED_REVIEW_PENDING, recibo e replayVerified registrados na fila; lastCode vazio gera NOT_RECORDED | Cobertura por manifesto já registrada; revisão de fatos/conteúdo obrigatória |
+| Pacote ZIP de reembolso | 1 | SOURCE_MANIFESTED_REVIEW_PENDING, recibo registrado; lastCode vazio gera NOT_RECORDED; arquivo histórico íntegro com 7 membros | Manifesto já registrado; conteúdo dos membros e correspondência canônica exigem revisão |
+
+Os dez PDFs são um único conteúdo criptografado em dez identidades de origem.
+Metadados atuais correspondem aos históricos; os bytes das dez fontes não foram
+baixados novamente. A igualdade de bytes está comprovada na evidência histórica,
+não por uma nova comparação byte a byte. Não há prova de corrupção ou falha
+transitória do serviço como causa desses dez casos. O erro genérico persistido
+oculta o bloqueio de conteúdo cifrado; não se pode reconstruir a exceção exata
+original do provedor. Nenhum PDF foi desbloqueado nem removido/deduplicado na origem.
+
+As duas ocorrências NOT_RECORDED não representam falha de conversão: são manifestos
+aguardando revisão. Recibos foram observados na fila, sem nova verificação direta
+do documento canônico e versão imutável no Firestore neste diagnóstico. A planilha
+é mutável e seu modifiedTime atual é posterior à versão do manifesto; portanto o
+manifesto não comprova cobertura das alterações subsequentes. A própria fila reside
+nessa planilha, exigindo cuidado adicional com essa dependência antes de reprocessar.
+
+### Correção adicional reproduzida
+
+Nove linhas antigas guardam `application/pdf` em TIPO, com MIME_TYPE vazio. O leitor
+de diagnóstico usava somente MIME_TYPE, publicando OTHER. A candidata consulta TIPO
+apenas quando MIME_TYPE está ausente. Continua aceitando exclusivamente os MIME
+conhecidos, sem inferir formato pelo nome, ler fontes adicionais ou alterar a fila.
+MIME_TYPE explícito tem precedência; valor desconhecido permanece OTHER.
+
+100 testes determinísticos aprovados nas três suítes; auditoria Apps Script aprovada.
+Teste offline da cópia privada de PDF preservada confirmou que o leitor atual gera
+pdf_encrypted_manifest, com hash original inalterado, zero chamadas ao provedor e
+zero escritas canônicas. O arquivo real não foi incorporado às fixtures públicas.
+Esse teste prova capacidade local de manifesto, não recuperação real dos dez itens.
+
+### Resultado e próximo gate
+
+Identificação e classificação das 12 pendências: concluídas com os limites acima.
+Recuperações reais nesta sessão: zero. Escritas em fonte/fila/canônico: zero.
+Não existe autorização de replay neste adendo. Os dez PDFs podem seguir apenas para
+manifestação estrutural em execução futura autorizada e comprovada; extrair conteúdo
+exige senha legítima ou versão acessível. Os dois manifestos continuam em revisão
+humana. `fullSynchronizationVerified=false` permanece.

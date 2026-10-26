@@ -749,3 +749,22 @@ test('damaged or unconfirmed provider output remains pending and cleanup never t
   assert.equal(deferred.ok,false);assert.equal(deferred.code,'AURORA_DRIVE_CONVERSION_DEFERRED');
   assert.equal(bounded.copies.length,0);assert.equal(bounded.trashed.length,0);
 });
+
+ test('pending diagnostics read legacy TIPO MIME only when MIME_TYPE is absent',()=>{
+  const f=fixture();
+  const idx={ID_ORIGEM:0,MIME_TYPE:1,TIPO:2,STATUS:3,TENTATIVAS:4};
+  const scope={fileId:'synthetic-legacy-pdf',sourceVersion:10000,lastCode:'AURORA_DRIVE_CONVERSION_FAILED'};
+  for(const missing of [undefined,null,'']){
+    const row=[scope.fileId,missing,'application/pdf','ERRO_REPROCESSAR',9];
+    const before=JSON.stringify(row);
+    const result=f.context.auroraDrivePendingDiagnostic_(scope,row,idx);
+    assert.equal(result.mediaType,'PDF');assert.equal(result.attempts,9);
+    assert.equal(JSON.stringify(row),before);assert.equal(f.sent.length,0);
+  }
+  for(const mime of ['application/zip','PRIVATE_CUSTOM_MIME']){
+    const row=[scope.fileId,mime,'application/pdf','REVISAR_HUMANO',1];
+    assert.equal(f.context.auroraDrivePendingDiagnostic_(scope,row,idx).mediaType,mime==='application/zip'?'ZIP':'OTHER');
+  }
+  const row=[scope.fileId,'','PRIVATE_CUSTOM_MIME','PENDENTE',0];
+  assert.equal(f.context.auroraDrivePendingDiagnostic_(scope,row,idx).mediaType,'OTHER');
+});
