@@ -115,18 +115,37 @@ for(const scenario of ['admin revoked','scope altered','facility disabled']) tes
   await assert.rejects(f.engine.create(actor,request)); assert.equal(f.rows.get(memberPath).active,false); assert.equal(f.rows.get(opPath).status,'PENDING');
 });
 
-test('revocation closes membership first, survives Auth outage, and cannot be undone by CREATE replay',async()=>{
-  const f=fixture(); await f.engine.create(actor,request); f.failures.set('updateUser',1);
+for (const failure of ['getUser', 'updateUser', 'revokeTokens']) test(`revocation closes membership first, survives ${failure} outage, and cannot be undone by CREATE replay`,async()=>{
+  const f=fixture(); await f.engine.create(actor,request); f.failures.set(failure,1);
   await assert.rejects(f.engine.revoke(actor,identity.uid)); assert.equal(f.rows.get(memberPath).active,false); assert.equal(f.rows.get(opPath).status,'REVOKED');
   await assert.rejects(f.engine.create(actor,request),rejects('PROFILE_REVOKED'));
   await f.engine.revoke(actor,identity.uid); assert.equal(f.users.get(identity.uid).disabled,true);
-  assert.equal(f.calls.filter(c=>c.method==='revokeTokens').length,1);
+  assert.equal(f.calls.filter(c=>c.method==='revokeTokens').length,failure==='revokeTokens'?2:1);
   assert.equal([...f.rows.keys()].filter(k=>k.includes('/auditEvents/')).length,2);
 });
 
 test('CREATE replay never re-enables an identity disabled outside the engine',async()=>{
   const f=fixture(); await f.engine.create(actor,request); f.users.get(identity.uid).disabled=true;
   await assert.rejects(f.engine.create(actor,request),rejects('PROFILE_REQUIRES_REVIEW')); assert.equal(f.users.get(identity.uid).disabled,true);
+});
+
+test('revocation checks live local authority before provider access and cannot revoke another tenant',async()=>{
+  for (const scenario of ['revoked-admin', 'other-tenant']) {
+    const f=fixture(); await f.engine.create(actor,request); f.calls.length=0;
+    if (scenario==='revoked-admin') f.rows.get(`${base}/members/${actor.uid}`).active=false;
+    const revoker=scenario==='other-tenant'?{...actor,orgId:'other-company'}:actor;
+    await assert.rejects(f.engine.revoke(revoker,identity.uid));
+    assert.equal(f.rows.get(memberPath).active,true); assert.equal(f.calls.length,0);
+  }
+});
+
+test('identity mismatch closes local access but never disables a foreign Auth identity',async()=>{
+  const f=fixture(); await f.engine.create(actor,request);
+  f.users.get(identity.uid).customClaims.auroraOrgId='other-company'; f.calls.length=0;
+  await assert.rejects(f.engine.revoke(actor,identity.uid),rejects('PROFILE_REVOCATION_NOT_ALLOWED'));
+  assert.equal(f.rows.get(memberPath).active,false); assert.equal(f.rows.get(opPath).status,'REVOKED');
+  assert.equal(f.users.get(identity.uid).disabled,false);
+  assert.deepEqual(f.calls.map(c=>c.method),['getUser']);
 });
 
 test('suspending new enrollments still allows revocation of existing managed users',async()=>{

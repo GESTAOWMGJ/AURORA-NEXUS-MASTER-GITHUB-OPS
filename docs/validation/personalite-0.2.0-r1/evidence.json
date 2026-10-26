@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "reviewDate": "2026-10-26",
+  "revision": "personalite-0.2.0-r1",
+  "baselineSha": "e801d893ebaaad94841f9d6104ebd296ce285706",
+  "mainObserved": "8264dccededd498299d0565414e6b5ebd1aaffd6",
+  "runtime": {
+    "node": "24.22.1",
+    "java": "21.0.13",
+    "ciNode": "22"
+  },
+  "baselineFunctions": {
+    "tests": 1287,
+    "passed": 1287,
+    "failed": 0
+  },
+  "regressionBeforeFix": {
+    "tests": 3,
+    "passed": 2,
+    "failed": 1,
+    "failure": "getUser outage leaves membership.active=true"
+  },
+  "candidateFunctions": {
+    "tests": 1291,
+    "passed": 1291,
+    "failed": 0,
+    "skipped": 0
+  },
+  "securityRules": {
+    "tests": 30,
+    "passed": 30,
+    "failed": 0
+  },
+  "emulator": [
+    "PERSONALITE_OPERATIONS_EMULATOR_OK",
+    "PERSONALITE_EMULATOR_OK"
+  ],
+  "realAuthVerified": false,
+  "humanApprovalVerified": false,
+  "deploymentPerformed": false,
+  "realOrganizationCreated": false,
+  "codeSha256": {
+    "firebase-migration/functions/src/auroraUserProfiles.ts": "68b909d9dcddc948822b19d0ce2a87d80cc1f57ae07b0393760dec77596d0abb",
+    "firebase-migration/functions/test/aurora-user-profiles.test.ts": "a7fcc8dc59c39e4484e566156115b7411b29b072271574563f2ee8b898e252ca"
+  }
+}
