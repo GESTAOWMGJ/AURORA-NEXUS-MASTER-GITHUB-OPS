@@ -121,7 +121,44 @@ jobs:
         run: |
           set -euo pipefail
           node --test tools/test-aurora-wmgj-reuse-preview.cjs
-          node tools/aurora-wmgj-reuse-preview.cjs
+          policy="firebase-migration/policy/hml-owner-release-approval-v1.json"
+          if jq -e '
+            .scope.continuousDriveDecisionId=="AURORA-HML-CONTINUOUS-DRIVE-20261026"
+            and .scope.continuousDriveScopeSha256=="d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa"
+            and ((.reaffirmations // []) | any(
+              .decisionId=="AURORA-HML-CONTINUOUS-DRIVE-20261026"
+              and .exactPrivateScopeSha256=="d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa"
+              and .continuousDriveTriggerAuthorized==true
+              and .processExistingAuthorized==true
+              and .queueMetadataRemediationAuthorized==true
+              and .realSourceActivationAuthorized==true
+              and .sourceMutationAuthorized==false
+              and .newSourceEnrollmentAuthorized==false
+              and .productionAuthorized==false
+              and .clinicalSensitiveAuthorized==false
+              and ((.validUntilUtc | fromdateiso8601) > now)
+            ))
+          ' "$policy" >/dev/null; then
+            jq -n \
+              --arg decision "AURORA-HML-CONTINUOUS-DRIVE-20261026" \
+              --arg scope "d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa" \
+              '{
+                schemaVersion:"aurora.connector-reuse-preview-superseded.v1",
+                ok:true,
+                code:"AURORA_CONNECTOR_REUSE_PREVIEW_SUPERSEDED",
+                state:"SUPERSEDED_BY_EXACT_SCOPE_CONTINUOUS_DECISION",
+                decisionId:$decision,
+                privateScopeSha256:$scope,
+                historicalPreviewExecuted:false,
+                configOnly:true,
+                contentRead:false,
+                credentialsExported:false,
+                sourceMutation:false,
+                productionMutation:false
+              }' > "$RUNNER_TEMP/connector-reuse-preview.json"
+          else
+            node tools/aurora-wmgj-reuse-preview.cjs
+          fi
 
       - name: Preserve metadata-only existing-source preview
         if: ${{ always() }}
