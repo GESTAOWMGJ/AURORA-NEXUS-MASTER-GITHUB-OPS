@@ -7,7 +7,7 @@ on:
         description: Activate exact-scope feed, remediate exhausted pending rows, or read sanitized status
         type: choice
         required: true
-        options: [ACTIVATE, REMEDIATE, STATUS, DIAGNOSE_FIRST_CYCLE, QUARANTINE_FIRST_CYCLE]
+        options: [ACTIVATE, REMEDIATE, ENABLE_LIVE, STATUS, DIAGNOSE_FIRST_CYCLE, QUARANTINE_FIRST_CYCLE]
       expected_sha:
         description: Exact main SHA authorized for this operation
         type: string
@@ -70,6 +70,9 @@ jobs:
               ;;
             REMEDIATE)
               test "${{ inputs.confirmation }}" = "REMEDIATE_AUTHORIZED_WMGJ_DRIVE_PENDING"
+              ;;
+            ENABLE_LIVE)
+              test "${{ inputs.confirmation }}" = "ENABLE_LIVE_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED"
               ;;
             STATUS)
               test "${{ inputs.confirmation }}" = "CHECK_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED"
@@ -155,6 +158,13 @@ jobs:
             jq -e '.response.ok==true and .response.code=="AURORA_DRIVE_REMEDIATION_JUSTIFIED"
               and .response.unjustifiedPending==0 and .response.sourceMutation==false
               and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
+          elif [ "$action" = "ENABLE_LIVE" ]; then
+            params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" \
+              '[{confirmation:"ENABLE_LIVE_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED",expectedScopeSha256:$hash}]')"
+            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraPromoverAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/action-private.json" "$params"
+            jq -e '.response.ok==true and .response.code=="AURORA_CONTINUOUS_DRIVE_LIVE_ENABLED"
+              and .response.phase=="LIVE_ENUMERATION" and .response.unjustifiedPending==0
+              and .response.sourceMutation==false and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
           elif [ "$action" = "DIAGNOSE_FIRST_CYCLE" ]; then
             params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" '[$hash]')"
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraDiagnosticarPrimeiroCicloDriveAutorizado "$RUNNER_TEMP/action-private.json" "$params"
