@@ -7,7 +7,7 @@ on:
         description: Activate exact-scope feed, remediate exhausted pending rows, or read sanitized status
         type: choice
         required: true
-        options: [ACTIVATE, REMEDIATE, STATUS]
+        options: [ACTIVATE, REMEDIATE, STATUS, DIAGNOSE_FIRST_CYCLE, QUARANTINE_FIRST_CYCLE]
       expected_sha:
         description: Exact main SHA authorized for this operation
         type: string
@@ -20,6 +20,16 @@ on:
         description: Exact confirmation for the selected action
         type: string
         required: true
+      expected_candidate_count:
+        description: CAS count from DIAGNOSE_FIRST_CYCLE, required only for quarantine
+        type: number
+        required: false
+        default: 0
+      expected_candidate_set_sha256:
+        description: CAS candidate-set hash from DIAGNOSE_FIRST_CYCLE, required only for quarantine
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -63,6 +73,14 @@ jobs:
               ;;
             STATUS)
               test "${{ inputs.confirmation }}" = "CHECK_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED"
+              ;;
+            DIAGNOSE_FIRST_CYCLE)
+              test "${{ inputs.confirmation }}" = "DIAGNOSE_FIRST_CONTINUOUS_DRIVE_ENUMERATION"
+              ;;
+            QUARANTINE_FIRST_CYCLE)
+              test "${{ inputs.confirmation }}" = "QUARANTINE_FIRST_CONTINUOUS_DRIVE_ENUMERATION"
+              test "${{ inputs.expected_candidate_count }}" -ge 1
+              [[ "${{ inputs.expected_candidate_set_sha256 }}" =~ ^[a-f0-9]{64}$ ]]
               ;;
             *) exit 64 ;;
           esac
@@ -137,11 +155,27 @@ jobs:
             jq -e '.response.ok==true and .response.code=="AURORA_DRIVE_REMEDIATION_JUSTIFIED"
               and .response.unjustifiedPending==0 and .response.sourceMutation==false
               and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
+          elif [ "$action" = "DIAGNOSE_FIRST_CYCLE" ]; then
+            params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" '[$hash]')"
+            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraDiagnosticarPrimeiroCicloDriveAutorizado "$RUNNER_TEMP/action-private.json" "$params"
+            jq -e '.response.ok==true and .response.code=="AURORA_DRIVE_FIRST_CYCLE_DIAGNOSTIC_VERIFIED"
+              and (.response.candidateCount|type=="number") and (.response.candidateSetSha256|test("^[a-f0-9]{64}$"))
+              and .response.queueMetadataOnly==true and .response.sourceMutation==false
+              and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
+          elif [ "$action" = "QUARANTINE_FIRST_CYCLE" ]; then
+            params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" --arg setHash "${{ inputs.expected_candidate_set_sha256 }}" \
+              --argjson count "${{ inputs.expected_candidate_count }}" \
+              '[{confirmation:"QUARANTINE_FIRST_CONTINUOUS_DRIVE_ENUMERATION",expectedScopeSha256:$hash,
+                 expectedCandidateCount:$count,expectedCandidateSetSha256:$setHash}]')"
+            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraQuarentenarPrimeiroCicloDriveAutorizado "$RUNNER_TEMP/action-private.json" "$params"
+            jq -e '.response.ok==true and .response.code=="AURORA_DRIVE_FIRST_CYCLE_QUARANTINED"
+              and .response.remainingCandidates==0 and .response.sourceMutation==false
+              and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
           else
             params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" '[$hash]')"
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraLerStatusAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/action-private.json" "$params"
             jq -e '.response.ok==true and .response.code=="AURORA_CONTINUOUS_DRIVE_STATUS_VERIFIED"
-              and .response.sourceActive==true and .response.sourceCount==1 and .response.triggerCount==1
+              and .response.sourceActive==true and (.response.sourceCount>=1 and .response.sourceCount<=12) and .response.triggerCount==1
               and .response.duplicateCollectors==0 and .response.sourceMutation==false
               and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
           fi

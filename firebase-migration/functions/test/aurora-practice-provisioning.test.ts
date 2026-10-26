@@ -60,6 +60,7 @@ test('isolated organization and owner, no copied membership, no password, idempo
  const f=practiceFixture();const before=structuredClone([...f.rows].filter(([p])=>p!==grantPath));
  const result=await f.provision(actor,grantId);
  assert.equal(result.loginPath,'/portal');assert.equal(result.role,'practice_owner');
+ assert.equal(result.synchronization.engineVersion,'0.1.3');assert.equal(result.synchronization.state,'READY');
  assert.equal(f.rows.get(target).active,true);assert.equal(f.rows.get(target).clinicalStorageEnabled,false);
  assert.equal(f.rows.has(`${target}/members/${actor.uid}`),false);
  assert.deepEqual([...f.rows].filter(([p])=>p.startsWith(base)&&p!==grantPath),before);
@@ -67,6 +68,38 @@ test('isolated organization and owner, no copied membership, no password, idempo
  assert.equal(f.calls.find(c=>c.method==='createUser')!.data.password,undefined);
  assert.equal((await f.provision(actor,grantId)).uid,result.uid);
  assert.equal(f.calls.filter(c=>c.method==='createUser').length,1);
+});
+
+test('versioned readback is read-only before, during and after provisioning',async()=>{
+ const f=practiceFixture(),before=structuredClone([...f.rows]);
+ const absent=await f.provision.read(actor,grantId);
+ assert.equal(absent.state,'NOT_STARTED');assert.equal(absent.schemaVersion,'aurora.webapp-sync.v1');
+ assert.deepEqual([...f.rows],before);assert.equal(f.calls.length,0);
+ f.failures.set('claims',1);await assert.rejects(f.provision(actor,grantId));
+ const calls=f.calls.length,interrupted=structuredClone([...f.rows]);
+ assert.equal((await f.provision.read(actor,grantId)).state,'IN_PROGRESS');
+ assert.equal(f.calls.length,calls);assert.deepEqual([...f.rows],interrupted);
+ await f.provision(actor,grantId);const completed=structuredClone([...f.rows]),readyCalls=f.calls.length;
+ const ready=await f.provision.read(actor,grantId);
+ assert.equal(ready.state,'READY');assert.equal(ready.loginVerified,false);assert.equal(ready.clinicalAccess,false);
+ assert.equal(ready.profileVersion,'0.1.2');assert.equal(ready.observedAtUtc,new Date(1_800_000_000_000).toISOString());
+ assert.deepEqual([...f.rows],completed);assert.equal(f.calls.length,readyCalls);
+ assert.equal(f.calls.filter(c=>c.method==='createUser').length,1);
+});
+test('sync revalidates tenant, actor, MFA, independent reviewer and grant without provider access',async()=>{
+ for(const change of ['tenant','mfa','reviewer','grant','expiry']) {
+  const f=practiceFixture();await f.provision(actor,grantId);const calls=f.calls.length;
+  const caller={...actor};if(change==='tenant')caller.orgId='other-tenant';if(change==='mfa')caller.mfaVerified=false;
+  if(change==='reviewer')f.rows.get(`${base}/members/reviewer`).active=false;
+  if(change==='grant')f.rows.get(grantPath).status='REVOKED';
+  if(change==='expiry')f.rows.get(grantPath).expiresAt=1;
+  await assert.rejects(f.provision.read(caller,grantId));assert.equal(f.calls.length,calls);
+ }
+});
+test('sync does not report READY for a revoked or conflicting owner and preserves all rows',async()=>{
+ const f=practiceFixture(),r=await f.provision(actor,grantId);
+ f.rows.get(`${target}/members/${r.uid}`).active=false;const before=structuredClone([...f.rows]);
+ assert.equal((await f.provision.read(actor,grantId)).state,'REQUIRES_REVIEW');assert.deepEqual([...f.rows],before);
 });
 for(const patch of [{orgId:'wmgj'},{orgId:actor.orgId},{entityVerified:false},{professionalVerified:false},{ownerConsent:false},
  {verifiedBy:actor.uid},{expiresAt:1},{status:'REVOKED'},{actorUid:'other'},{orgId:'../wmgj'},{email:'invalid'}])
@@ -147,4 +180,10 @@ test('HTTP CREATE_PRACTICE wires verified session, CSRF, transaction adapter and
  await auroraNexusUserProfiles({method:'POST',body:{action:'CREATE_PRACTICE',grantId},get:(key:string)=>headers[key]} as any,res);
  assert.equal(status,200);assert.equal(result.orgId,'synthetic-practice');assert.equal(result.loginPath,'/portal');
  assert.equal(f.rows.get(target).active,true);assert.equal(result.activationState,'USER_EMAIL_AND_MFA_REQUIRED');
+ const before=structuredClone([...f.rows]),calls=f.calls.length;
+ await auroraNexusUserProfiles({method:'GET',query:{practiceGrantId:grantId},get:(key:string)=>headers[key]} as any,res);
+ assert.equal(status,200);assert.equal(result.state,'READY');assert.equal(result.engineVersion,'0.1.3');
+ assert.deepEqual([...f.rows],before);assert.equal(f.calls.length,calls);
+ await auroraNexusUserProfiles({method:'GET',query:{practiceGrantId:[grantId]},get:(key:string)=>headers[key]} as any,res);
+ assert.equal(status,400);assert.equal(result.code,'INVALID_SYNC_REQUEST');
 });
