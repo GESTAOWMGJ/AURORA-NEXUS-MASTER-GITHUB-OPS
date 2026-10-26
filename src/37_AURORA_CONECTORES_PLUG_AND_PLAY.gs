@@ -1103,7 +1103,7 @@ function auroraContinuousDriveCollectorState_() {
   triggers.forEach(function(trigger){
     var handler=String(trigger.getHandlerFunction()||'');
     if(handler===AURORA_CONTINUOUS_DRIVE_HANDLER) target++;
-    else if(handler==='executarAutomacaoOperacionalWMGJ'||handler==='jobPrepararPipelineWMGJ'||handler==='jobProcessarFilaWMGJ') duplicates++;
+    else if(handler==='jobPrepararPipelineWMGJ'||handler==='jobProcessarFilaWMGJ') duplicates++;
     else unrelated++;
   });
   return {target:target,duplicateCollectors:duplicates,unrelated:unrelated,total:triggers.length};
@@ -1158,7 +1158,7 @@ function auroraAtivarAlimentacaoContinuaDriveAutorizada(request) {
     var removed=0;
     ScriptApp.getProjectTriggers().forEach(function(trigger){
       var handler=String(trigger.getHandlerFunction()||'');
-      if(handler===AURORA_CONTINUOUS_DRIVE_HANDLER||handler==='executarAutomacaoOperacionalWMGJ'
+      if(handler===AURORA_CONTINUOUS_DRIVE_HANDLER
         ||handler==='jobPrepararPipelineWMGJ'||handler==='jobProcessarFilaWMGJ') {
         ScriptApp.deleteTrigger(trigger);removed++;
       }
