@@ -7,7 +7,7 @@ on:
         description: Activate exact-scope feed, remediate exhausted pending rows, or read sanitized status
         type: choice
         required: true
-        options: [ACTIVATE, REMEDIATE, STATUS, DIAGNOSE_FIRST_CYCLE, QUARANTINE_FIRST_CYCLE]
+        options: [ACTIVATE, REMEDIATE, PROMOTE, STATUS, DIAGNOSE_FIRST_CYCLE, QUARANTINE_FIRST_CYCLE, DIAGNOSE_CONVERSION_RETRIES, REOPEN_CONVERSION_RETRIES]
       expected_sha:
         description: Exact main SHA authorized for this operation
         type: string
@@ -71,6 +71,9 @@ jobs:
             REMEDIATE)
               test "${{ inputs.confirmation }}" = "REMEDIATE_AUTHORIZED_WMGJ_DRIVE_PENDING"
               ;;
+            PROMOTE)
+              test "${{ inputs.confirmation }}" = "PROMOTE_AUTHORIZED_WMGJ_DRIVE_LIVE_ENUMERATION"
+              ;;
             STATUS)
               test "${{ inputs.confirmation }}" = "CHECK_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED"
               ;;
@@ -80,6 +83,15 @@ jobs:
             QUARANTINE_FIRST_CYCLE)
               test "${{ inputs.confirmation }}" = "QUARANTINE_FIRST_CONTINUOUS_DRIVE_ENUMERATION"
               test "${{ inputs.expected_candidate_count }}" -ge 1
+              [[ "${{ inputs.expected_candidate_set_sha256 }}" =~ ^[a-f0-9]{64}$ ]]
+              ;;
+            DIAGNOSE_CONVERSION_RETRIES)
+              test "${{ inputs.confirmation }}" = "DIAGNOSE_ORIGINAL_DRIVE_CONVERSION_RETRIES"
+              ;;
+            REOPEN_CONVERSION_RETRIES)
+              test "${{ inputs.confirmation }}" = "REOPEN_ORIGINAL_DRIVE_CONVERSION_RETRIES"
+              test "${{ inputs.expected_candidate_count }}" -ge 1
+              test "${{ inputs.expected_candidate_count }}" -le 20
               [[ "${{ inputs.expected_candidate_set_sha256 }}" =~ ^[a-f0-9]{64}$ ]]
               ;;
             *) exit 64 ;;
@@ -155,6 +167,15 @@ jobs:
             jq -e '.response.ok==true and .response.code=="AURORA_DRIVE_REMEDIATION_JUSTIFIED"
               and .response.unjustifiedPending==0 and .response.sourceMutation==false
               and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
+          elif [ "$action" = "PROMOTE" ]; then
+            params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" \
+              '[{confirmation:"PROMOTE_AUTHORIZED_WMGJ_DRIVE_LIVE_ENUMERATION",expectedScopeSha256:$hash}]')"
+            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraPromoverAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/action-private.json" "$params"
+            jq -e '.response.ok==true and .response.code=="AURORA_CONTINUOUS_DRIVE_LIVE_VERIFIED"
+              and .response.phase=="LIVE_ENUMERATION" and .response.unjustifiedPending==0
+              and .response.triggerCount==1 and .response.duplicateCollectors==0
+              and .response.firstLiveCycle.ok==true and .response.firstLiveCycle.phase=="LIVE_ENUMERATION"
+              and .response.sourceMutation==false and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
           elif [ "$action" = "DIAGNOSE_FIRST_CYCLE" ]; then
             params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" '[$hash]')"
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraDiagnosticarPrimeiroCicloDriveAutorizado "$RUNNER_TEMP/action-private.json" "$params"
@@ -169,6 +190,22 @@ jobs:
                  expectedCandidateCount:$count,expectedCandidateSetSha256:$setHash}]')"
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraQuarentenarPrimeiroCicloDriveAutorizado "$RUNNER_TEMP/action-private.json" "$params"
             jq -e '.response.ok==true and .response.code=="AURORA_DRIVE_FIRST_CYCLE_QUARANTINED"
+              and .response.remainingCandidates==0 and .response.sourceMutation==false
+              and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
+          elif [ "$action" = "DIAGNOSE_CONVERSION_RETRIES" ]; then
+            params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" '[$hash]')"
+            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraDiagnosticarFalhasConversaoDriveAutorizadas "$RUNNER_TEMP/action-private.json" "$params"
+            jq -e '.response.ok==true and .response.code=="AURORA_DRIVE_CONVERSION_RETRY_DIAGNOSTIC_VERIFIED"
+              and (.response.candidateCount|type=="number") and (.response.candidateSetSha256|test("^[a-f0-9]{64}$"))
+              and (.response.totalRecordedAttempts|type=="number") and .response.queueMetadataOnly==true
+              and .response.sourceMutation==false and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
+          elif [ "$action" = "REOPEN_CONVERSION_RETRIES" ]; then
+            params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" --arg setHash "${{ inputs.expected_candidate_set_sha256 }}" \
+              --argjson count "${{ inputs.expected_candidate_count }}" \
+              '[{confirmation:"REOPEN_ORIGINAL_DRIVE_CONVERSION_RETRIES",expectedScopeSha256:$hash,
+                 expectedCandidateCount:$count,expectedCandidateSetSha256:$setHash}]')"
+            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraReabrirFalhasConversaoDriveAutorizadas "$RUNNER_TEMP/action-private.json" "$params"
+            jq -e '.response.ok==true and .response.code=="AURORA_DRIVE_CONVERSION_RETRIES_REOPENED"
               and .response.remainingCandidates==0 and .response.sourceMutation==false
               and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
           else
@@ -189,8 +226,13 @@ jobs:
           jq -e '.response.ok==true and .response.authorizationValid==true
             and .response.sourceActive==true and (.response.sourceCount>=1 and .response.sourceCount<=12)
             and .response.triggerCount==1 and .response.duplicateCollectors==0
+            and (.response.phase=="REMEDIATE_ONLY" or .response.phase=="LIVE_ENUMERATION")
             and .response.privateScopeSha256=="d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa"
             and .response.sourceMutation==false and .response.productionMutation==false' "$RUNNER_TEMP/status-private.json" >/dev/null
+          if [ "${{ inputs.action }}" = "PROMOTE" ]; then
+            jq -e '.response.phase=="LIVE_ENUMERATION" and .response.lastCycle.ok==true
+              and .response.lastCycle.phase=="LIVE_ENUMERATION"' "$RUNNER_TEMP/status-private.json" >/dev/null
+          fi
           jq -n --arg action "${{ inputs.action }}" --arg sha "$GITHUB_SHA" --arg scope "$EXPECTED_SCOPE_SHA256" \
             --slurpfile actionResult "$RUNNER_TEMP/action-private.json" --slurpfile status "$RUNNER_TEMP/status-private.json" \
             '{schemaVersion:"aurora.continuous-drive-evidence.v1",action:$action,checkedSourceSha:$sha,

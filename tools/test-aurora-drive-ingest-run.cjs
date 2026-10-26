@@ -380,7 +380,7 @@ test('closed remediation diagnostic codes are accepted but arbitrary values stay
 
 test('continuous Drive workflow is exact-scope, protected, serialized, and cleans private OAuth material',()=>{
   const workflow=fs.readFileSync(path.join(__dirname,'../.github/workflows/aurora-drive-continuous-feed.yml'),'utf8').replace(/\r\n/g,'\n');
-  assert.match(workflow,/options: \[ACTIVATE, REMEDIATE, STATUS, DIAGNOSE_FIRST_CYCLE, QUARANTINE_FIRST_CYCLE\]/);
+  assert.match(workflow,/options: \[ACTIVATE, REMEDIATE, PROMOTE, STATUS, DIAGNOSE_FIRST_CYCLE, QUARANTINE_FIRST_CYCLE, DIAGNOSE_CONVERSION_RETRIES, REOPEN_CONVERSION_RETRIES\]/);
   assert.match(workflow,/environment: firebase-homologation/);
   assert.match(workflow,/group: aurora-rc11-hml\n\s+cancel-in-progress: false/);
   assert.match(workflow,/inputs\.expected_sha == github\.sha/);
@@ -389,13 +389,20 @@ test('continuous Drive workflow is exact-scope, protected, serialized, and clean
   assert.match(workflow,/d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa/);
   assert.match(workflow,/auroraAtivarAlimentacaoContinuaDriveAutorizada/);
   assert.match(workflow,/auroraSanearPendenciasDriveAutorizadas/);
+  assert.match(workflow,/auroraPromoverAlimentacaoContinuaDriveAutorizada/);
+  assert.match(workflow,/PROMOTE_AUTHORIZED_WMGJ_DRIVE_LIVE_ENUMERATION/);
+  assert.match(workflow,/AURORA_CONTINUOUS_DRIVE_LIVE_VERIFIED/);
   assert.match(workflow,/auroraLerStatusAlimentacaoContinuaDriveAutorizada/);
   assert.match(workflow,/auroraDiagnosticarPrimeiroCicloDriveAutorizado/);
   assert.match(workflow,/auroraQuarentenarPrimeiroCicloDriveAutorizado/);
+  assert.match(workflow,/auroraDiagnosticarFalhasConversaoDriveAutorizadas/);
+  assert.match(workflow,/auroraReabrirFalhasConversaoDriveAutorizadas/);
+  assert.match(workflow,/REOPEN_ORIGINAL_DRIVE_CONVERSION_RETRIES/);
   assert.match(workflow,/expected_candidate_set_sha256/);
   assert.match(workflow,/QUARANTINE_FIRST_CONTINUOUS_DRIVE_ENUMERATION/);
   assert.match(workflow,/sourceCount>=1 and \.response\.sourceCount<=12/);
   assert.match(workflow,/duplicateCollectors==0/);
+  assert.match(workflow,/\.response\.phase=="LIVE_ENUMERATION"/);
   assert.match(workflow,/newSourceEnrolled:false,sourceMutation:false,productionMutation:false/);
   assert.match(workflow,/Remove runner OAuth and private execution responses\n\s+if: always\(\)/);
   assert.doesNotMatch(workflow,/echo\s+"?\$AURORA_DRIVE_SCOPE_JSON/);
@@ -412,8 +419,10 @@ test('continuous Drive collector caps per-cycle processing below the daily conve
 test('first continuous Drive cycle quarantine is bounded by a fixed activation window and CAS evidence',()=>{
   const source=fs.readFileSync(path.join(__dirname,'../src/37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'),'utf8').replace(/\r\n/g,'\n');
   assert.match(source,/AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_FROM = '2026-10-26T05:19:00\.000Z'/);
-  assert.match(source,/AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_TO = '2026-10-26T05:22:30\.000Z'/);
+  assert.match(source,/AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_TO = '2026-10-26T05:28:00\.000Z'/);
   assert.match(source,/coverage!=='PENDING_EXTRACTION'/);
+  assert.match(source,/remediated=status==='REVISAR_HUMANO'/);
+  assert.match(source,/AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED/);
   assert.match(source,/attempts<0\|\|attempts>1/);
   assert.match(source,/AURORA_DRIVE_FIRST_CYCLE_QUARANTINE_CAS_CONFLICT/);
   assert.match(source,/rollbackCandidateSetSha256=before\.candidateSetSha256/);
