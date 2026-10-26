@@ -1360,3 +1360,134 @@ function auroraLerStatusAlimentacaoContinuaDriveAutorizada(expectedScopeSha256) 
   return result;
 }
 
+
+/* First-cycle containment evidence.
+ * The exact activation run 40273578914 started at 2026-10-26T05:19:16Z and
+ * completed before 05:22Z. Candidate selection is deliberately narrower than
+ * the run window and accepts only newly-entered, unproved PENDING_EXTRACTION
+ * rows with zero/one attempt in the exact runtime scope. */
+var AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_FROM = '2026-10-26T05:19:00.000Z';
+var AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_TO = '2026-10-26T05:22:30.000Z';
+var AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_ROLLBACK_CONFIRMATION = 'QUARANTINE_FIRST_CONTINUOUS_DRIVE_ENUMERATION';
+
+function auroraDriveFirstCycleCandidates_(rows,idx,runtimeHash) {
+  var from=Date.parse(AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_FROM),to=Date.parse(AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_TO),items=[];
+  if(!Number.isFinite(from)||!Number.isFinite(to)||from>=to||!/^[a-f0-9]{64}$/.test(runtimeHash||''))
+    throw new Error('AURORA_DRIVE_FIRST_CYCLE_DIAGNOSTIC_INVALID');
+  ['DATA_ENTRADA','ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO'].forEach(function(name){
+    if(idx[name]===undefined) throw new Error('AURORA_DRIVE_QUEUE_CONTRACT');
+  });
+  for(var i=1;i<rows.length;i++) {
+    var scope=auroraDriveScopeRead_(rows[i][idx.OBSERVACAO]);
+    if(!scope||scope.orgId!=='wmgj'||scope.scopeSha256!==runtimeHash||scope.coverage!=='PENDING_EXTRACTION'
+      ||scope.receipt||scope.aliasFileId||scope.contentSha256||scope.textSha256) continue;
+    var entered=rows[i][idx.DATA_ENTRADA],when=entered instanceof Date?entered.getTime():Date.parse(String(entered||''));
+    var attempts=Number(rows[i][idx.TENTATIVAS]||0),status=String(rows[i][idx.STATUS]||'');
+    if(!Number.isFinite(when)||when<from||when>to||!Number.isSafeInteger(attempts)||attempts<0||attempts>1
+      ||['PENDENTE','ERRO_REPROCESSAR'].indexOf(status)<0) continue;
+    if(typeof scope.fileId!=='string'||!/^[A-Za-z0-9_-]{10,200}$/.test(scope.fileId)
+      ||rows[i][idx.ID_ORIGEM]!==scope.fileId||typeof scope.sourceVersion!=='string'
+      ||!/^[1-9][0-9]{0,15}$/.test(scope.sourceVersion)) throw new Error('AURORA_DRIVE_QUEUE_SCOPE_INVALID');
+    items.push({row:i+1,fileId:scope.fileId,sourceVersion:scope.sourceVersion,enteredAt:new Date(when).toISOString(),
+      attempts:attempts,status:status,scope:scope});
+  }
+  items.sort(function(a,b){return a.fileId<b.fileId?-1:a.fileId>b.fileId?1:a.row-b.row;});
+  var fingerprint=auroraConnectorReuseSha_(JSON.stringify(items.map(function(item){
+    return {fileId:item.fileId,sourceVersion:item.sourceVersion,enteredAt:item.enteredAt,attempts:item.attempts,status:item.status};
+  })));
+  var byStatus={},byAttempts={};
+  items.forEach(function(item){
+    byStatus[item.status]=(byStatus[item.status]||0)+1;
+    var key=String(item.attempts);byAttempts[key]=(byAttempts[key]||0)+1;
+  });
+  return {items:items,count:items.length,candidateSetSha256:fingerprint,byStatus:byStatus,byAttempts:byAttempts};
+}
+
+function auroraDiagnosticarPrimeiroCicloDriveAutorizado(expectedScopeSha256) {
+  var result={ok:false,code:'AURORA_DRIVE_FIRST_CYCLE_DIAGNOSTIC_PENDING',decisionId:AURORA_CONTINUOUS_DRIVE_DECISION,
+    privateScopeSha256:AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256,runtimeScopeSha256:null,candidateCount:0,
+    candidateSetSha256:null,byStatus:{},byAttempts:{},fromUtc:AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_FROM,
+    toUtc:AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_TO,queueMetadataOnly:true,sourceMutation:false,productionMutation:false};
+  try {
+    auroraConnectorReuseOwner_();
+    if(expectedScopeSha256!==AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256)
+      throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED');
+    var stored=auroraContinuousDriveScopeFromProperties_(),scope=stored.scope;
+    auroraContinuousDriveSystemGuard_(scope,stored.runtimeHash,false);
+    var ss=getPlanilhaWMGJ_Compat_(),fila=ss.getSheetByName(getConfigWMGJ_Compat_().SHEETS.FILA);
+    if(!fila) throw new Error('AURORA_DRIVE_QUEUE_CONTRACT');
+    var rows=fila.getDataRange().getValues(),idx=mapearCabecalhoWMGJ_Compat_(rows[0]);
+    var candidates=auroraDriveFirstCycleCandidates_(rows,idx,stored.runtimeHash);
+    result.runtimeScopeSha256=stored.runtimeHash;result.candidateCount=candidates.count;
+    result.candidateSetSha256=candidates.candidateSetSha256;result.byStatus=candidates.byStatus;result.byAttempts=candidates.byAttempts;
+    result.ok=true;result.code='AURORA_DRIVE_FIRST_CYCLE_DIAGNOSTIC_VERIFIED';
+  } catch(error) {
+    var code=String(error&&error.message||'');
+    var allowed=['AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED',
+      'AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_SCOPE_CHANGED',
+      'AURORA_DRIVE_QUEUE_CONTRACT','AURORA_DRIVE_QUEUE_SCOPE_INVALID','AURORA_DRIVE_FIRST_CYCLE_DIAGNOSTIC_INVALID'];
+    result.code=allowed.indexOf(code)>=0?code:'AURORA_DRIVE_FIRST_CYCLE_DIAGNOSTIC_FAILED';
+  }
+  return result;
+}
+
+function auroraQuarentenarPrimeiroCicloDriveAutorizado(request) {
+  var result={ok:false,code:'AURORA_DRIVE_FIRST_CYCLE_QUARANTINE_PENDING',decisionId:AURORA_CONTINUOUS_DRIVE_DECISION,
+    moved:0,candidateSetSha256:null,quarantineScopeSha256:null,remainingCandidates:null,sourceMutation:false,productionMutation:false};
+  try {
+    auroraConnectorReuseOwner_();auroraContinuousDriveWindow_();
+    var keys=['confirmation','expectedScopeSha256','expectedCandidateCount','expectedCandidateSetSha256'];
+    if(!request||typeof request!=='object'||Array.isArray(request)||Object.keys(request).sort().join(',')!==keys.sort().join(',')
+      ||request.confirmation!==AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_ROLLBACK_CONFIRMATION
+      ||request.expectedScopeSha256!==AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256
+      ||!Number.isSafeInteger(request.expectedCandidateCount)||request.expectedCandidateCount<1||request.expectedCandidateCount>200
+      ||typeof request.expectedCandidateSetSha256!=='string'||!/^[a-f0-9]{64}$/.test(request.expectedCandidateSetSha256))
+      throw new Error('AURORA_DRIVE_FIRST_CYCLE_QUARANTINE_REQUEST_REJECTED');
+    var stored=auroraContinuousDriveScopeFromProperties_(),scope=stored.scope;
+    auroraContinuousDriveSystemGuard_(scope,stored.runtimeHash,true);
+    if(typeof comTravaIngestaoGmailWMGJ_!=='function') throw new Error('AURORA_DRIVE_DEPENDENCY_MISSING');
+    return comTravaIngestaoGmailWMGJ_(function(){
+      var ss=getPlanilhaWMGJ_Compat_(),fila=ss.getSheetByName(getConfigWMGJ_Compat_().SHEETS.FILA);
+      if(!fila) throw new Error('AURORA_DRIVE_QUEUE_CONTRACT');
+      var rows=fila.getDataRange().getValues(),idx=mapearCabecalhoWMGJ_Compat_(rows[0]);
+      var before=auroraDriveFirstCycleCandidates_(rows,idx,stored.runtimeHash);
+      if(before.count!==request.expectedCandidateCount||before.candidateSetSha256!==request.expectedCandidateSetSha256)
+        throw new Error('AURORA_DRIVE_FIRST_CYCLE_QUARANTINE_CAS_CONFLICT');
+      var quarantineHash=auroraConnectorReuseSha_('AURORA_DRIVE_ACTIVATION_QUARANTINE_V1\n'+stored.runtimeHash+'\n'+before.candidateSetSha256);
+      var now=new Date().toISOString();
+      before.items.forEach(function(item){
+        var itemScope=item.scope;
+        itemScope.rollbackFromScopeSha256=stored.runtimeHash;
+        itemScope.rollbackCandidateSetSha256=before.candidateSetSha256;
+        itemScope.rollbackDecisionId=AURORA_CONTINUOUS_DRIVE_DECISION;
+        itemScope.rollbackAt=now;
+        itemScope.scopeSha256=quarantineHash;
+        itemScope.coverage='ACTIVATION_ENUMERATION_QUARANTINED';
+        itemScope.lastCode='AURORA_DRIVE_ACTIVATION_ENUMERATION_ROLLED_BACK';
+        atualizarLinhaFilaWMGJ_Compat_(fila,item.row,idx,{STATUS:'REVISAR_HUMANO',
+          ULTIMO_ERRO:'AURORA_DRIVE_ACTIVATION_ENUMERATION_ROLLED_BACK',OBSERVACAO:auroraDriveScopeWrite_(itemScope)});
+      });
+      var afterRows=fila.getDataRange().getValues();
+      var after=auroraDriveFirstCycleCandidates_(afterRows,idx,stored.runtimeHash);
+      if(after.count!==0) throw new Error('AURORA_DRIVE_FIRST_CYCLE_QUARANTINE_READBACK_FAILED');
+      var evidence={schemaVersion:'aurora.drive-first-cycle-quarantine.v1',decisionId:AURORA_CONTINUOUS_DRIVE_DECISION,
+        moved:before.count,candidateSetSha256:before.candidateSetSha256,quarantineScopeSha256:quarantineHash,
+        fromUtc:AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_FROM,toUtc:AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_TO,
+        completedAtUtc:now,sourceMutation:false,productionMutation:false};
+      PropertiesService.getScriptProperties().setProperty('AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_QUARANTINE',JSON.stringify(evidence));
+      result.ok=true;result.code='AURORA_DRIVE_FIRST_CYCLE_QUARANTINED';result.moved=before.count;
+      result.candidateSetSha256=before.candidateSetSha256;result.quarantineScopeSha256=quarantineHash;result.remainingCandidates=0;
+      return result;
+    });
+  } catch(error) {
+    var code=String(error&&error.message||'');
+    var allowed=['AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED',
+      'AURORA_DRIVE_FIRST_CYCLE_QUARANTINE_REQUEST_REJECTED','AURORA_DRIVE_FIRST_CYCLE_QUARANTINE_CAS_CONFLICT',
+      'AURORA_DRIVE_FIRST_CYCLE_QUARANTINE_READBACK_FAILED','AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID',
+      'AURORA_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_SOURCE_UNAVAILABLE',
+      'AURORA_DRIVE_DEPENDENCY_MISSING','AURORA_DRIVE_QUEUE_CONTRACT','AURORA_DRIVE_QUEUE_SCOPE_INVALID',
+      'AURORA_DRIVE_FIRST_CYCLE_DIAGNOSTIC_INVALID'];
+    result.code=allowed.indexOf(code)>=0?code:'AURORA_DRIVE_FIRST_CYCLE_QUARANTINE_FAILED';return result;
+  }
+}
+
