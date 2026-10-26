@@ -394,3 +394,10 @@ test('continuous Drive workflow is exact-scope, protected, serialized, and clean
   assert.match(workflow,/Remove runner OAuth and private execution responses\n\s+if: always\(\)/);
   assert.doesNotMatch(workflow,/echo\s+"?\$AURORA_DRIVE_SCOPE_JSON/);
 });
+
+
+test('continuous Drive collector caps per-cycle processing below the daily conversion quota edge',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'../src/37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'),'utf8').replace(/\r\n/g,'\n');
+  assert.match(source,/processLimit:Math\.min\(10,scope\.limit\)/);
+  assert.match(source,/\.everyMinutes\(15\)\.create\(\)/);
+});
