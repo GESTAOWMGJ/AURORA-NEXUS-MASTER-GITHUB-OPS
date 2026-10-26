@@ -58,6 +58,21 @@ function verifyPublishedDriveProject(repo,published) {
   if(stable(localManifest)!==stable(remoteManifest))fail('DRIVE_PUBLISHED_MANIFEST_MISMATCH');
   return {modulesVerified:expected.length,manifestSha256:sha(stable(remoteManifest))};
 }
+function driveAuthorizationDeadline(policy, expectedScopeSha, now=Date.now()) {
+  const legacy=Date.parse(policy?.scope?.validUntilUtc);
+  let deadline=legacy;
+  const decision=(policy?.reaffirmations||[]).find(item=>item?.decisionId==='AURORA-HML-CONTINUOUS-DRIVE-20261026');
+  if(decision && decision.exactPrivateScopeSha256===expectedScopeSha
+    && decision.continuousDriveTriggerAuthorized===true && decision.processExistingAuthorized===true
+    && decision.queueMetadataRemediationAuthorized===true && decision.realSourceActivationAuthorized===true
+    && decision.sourceMutationAuthorized===false && decision.newSourceEnrollmentAuthorized===false
+    && decision.productionAuthorized===false && decision.clinicalSensitiveAuthorized===false) {
+    const scoped=Date.parse(decision.validUntilUtc);
+    if(Number.isFinite(scoped)) deadline=scoped;
+  }
+  if(!Number.isFinite(deadline)||now>=deadline)fail('DRIVE_HML_WINDOW_INVALID');
+  return deadline;
+}
 function parseScope(raw, expectedHash) {
   if (typeof raw !== 'string' || raw.length > 131072 || !hex(expectedHash) || sha(raw) !== expectedHash) fail('DRIVE_PRIVATE_SCOPE_HASH_MISMATCH');
   const scope=JSON.parse(raw);
@@ -362,8 +377,9 @@ async function run() {
   if(!/^[a-f0-9]{40}$/.test(sourceSha||'')||sourceSha!==process.env.GITHUB_SHA||process.env.GITHUB_REF!=='refs/heads/main'
     ||process.env.APPROVED_PROJECT!==PROJECT||command('git',['rev-parse','HEAD'],repo).trim()!==sourceSha)fail('DRIVE_EXACT_SOURCE_REQUIRED');
   const policy=JSON.parse(fs.readFileSync(path.join(repo,'firebase-migration/policy/hml-owner-release-approval-v1.json')));
-  const deadline=Date.parse(policy.scope?.validUntilUtc);
-  if(policy.scope?.projectId!==PROJECT||policy.scope?.environment!=='firebase-homologation'||policy.integrationAndHmlPublicationAuthorized!==true||!Number.isFinite(deadline)||Date.now()>=deadline)fail('DRIVE_HML_WINDOW_INVALID');
+  if(policy.scope?.projectId!==PROJECT||policy.scope?.environment!=='firebase-homologation'||policy.integrationAndHmlPublicationAuthorized!==true)
+    fail('DRIVE_HML_WINDOW_INVALID');
+  const deadline=driveAuthorizationDeadline(policy,process.env.EXPECTED_SCOPE_SHA256);
   const scope=parseScope(process.env.AURORA_DRIVE_SCOPE_JSON,process.env.EXPECTED_SCOPE_SHA256);
   const maxBatches=Number(process.env.AURORA_DRIVE_MAX_BATCHES||20);
   if(!Number.isSafeInteger(maxBatches)||maxBatches<1||maxBatches>300)fail('DRIVE_BATCH_LIMIT_INVALID');
@@ -426,5 +442,5 @@ async function run() {
   finally{summary.finishedAtUtc=new Date().toISOString();save();}
   return summary;
 }
-module.exports={parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sanitizePendingRow,readDriveCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage,selectDriveDeployment,verifyPublishedDriveProject};
+module.exports={parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sanitizePendingRow,readDriveCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage,selectDriveDeployment,verifyPublishedDriveProject,driveAuthorizationDeadline};
 if(require.main===module)run().then(result=>console.log(JSON.stringify({status:result.status,complete:result.complete,batches:result.batches.length,canonicalReadbacksVerified:result.canonicalReadbacksVerified}))).catch(error=>{console.error(/^[A-Z_0-9]{1,100}$/.test(error.message)?error.message:'DRIVE_INTAKE_UNCONFIRMED');process.exitCode=1;});
