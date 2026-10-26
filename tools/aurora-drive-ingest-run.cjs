@@ -175,7 +175,8 @@ async function verifyCoverage(getPage,verifyPlan) {
   let offset=0,expectedTotals=null,pages=0,returned=0;
   const verified=new Map(),aliases=new Map(),sourceIds=new Set(),pendingIds=new Set();
   const pendingDiagnostics={schemaVersion:'aurora.drive-pending-diagnostics.v1',queueMetadataOnly:true,
-    count:0,byCode:{},byStatus:{},byMediaType:{},unknownSourceVersion:0,unknownAttempts:0,totalRecordedAttempts:0};
+    count:0,byCode:{},byStatus:{},byMediaType:{},unknownSourceVersion:0,unknownAttempts:0,totalRecordedAttempts:0,
+    justifiedHumanReview:0,unjustifiedPending:0};
   for(;;){
     const value=await getPage(offset),c=value?.coverage;
     if(value?.ok!==true||value.code!=='AURORA_DRIVE_READBACK_PLAN'||!c
@@ -213,6 +214,7 @@ async function verifyCoverage(getPage,verifyPlan) {
       if(item.sourceVersion===null)pendingDiagnostics.unknownSourceVersion++;
       if(item.attempts===null)pendingDiagnostics.unknownAttempts++;
       else pendingDiagnostics.totalRecordedAttempts+=item.attempts;
+      if(item.queueStatus==='REVISAR_HUMANO'&&justifiedReviewCodes.has(item.code))pendingDiagnostics.justifiedHumanReview++;
       if(!Number.isSafeInteger(pendingDiagnostics.totalRecordedAttempts))fail('DRIVE_PENDING_COUNTER_REJECTED');
     }
     pages++;returned+=c.returned;
@@ -222,12 +224,16 @@ async function verifyCoverage(getPage,verifyPlan) {
   if(returned!==expectedTotals.total||verified.size!==expectedTotals.documents||aliases.size!==expectedTotals.aliases
     ||[...aliases.keys()].some(id=>sourceIds.has(id))||pendingIds.size!==expectedTotals.pending
     ||[...pendingIds].some(id=>sourceIds.has(id)||aliases.has(id)))fail('DRIVE_COVERAGE_INCOMPLETE');
+  pendingDiagnostics.unjustifiedPending=pendingDiagnostics.count-pendingDiagnostics.justifiedHumanReview;
+  if(!Number.isSafeInteger(pendingDiagnostics.unjustifiedPending)||pendingDiagnostics.unjustifiedPending<0)fail('DRIVE_PENDING_COUNTER_REJECTED');
   return{...expectedTotals,pages,canonicalDocumentsVerified:verified.size,aliasReferencesVerified:aliases.size,
     allReceiptsVerified:true,pendingDiagnostics};
 }
 // Only these fixed values can enter the shared summary. Neither arbitrary upper-
 // case strings nor free-form queue errors become diagnostic labels.
+const justifiedReviewCodes=new Set(['AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED','AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED']);
 const pendingCodes=new Set(['NOT_RECORDED','UNKNOWN','FIRESTORE_INGEST_FAILED','PENDING_EXTRACTION',
+  'AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED','AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED',
   'AURORA_DRIVE_EXTRACTION_AUTH_FAILED','AURORA_DRIVE_EXTRACTION_QUOTA','AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE',
   'AURORA_DRIVE_CONVERSION_UNSUPPORTED','AURORA_DRIVE_CONVERSION_FAILED','AURORA_DRIVE_CONVERSION_NOT_READY',
   'AURORA_DRIVE_CONVERSION_DEFERRED','AURORA_DRIVE_FILE_SIZE_LIMIT','AURORA_DRIVE_TEXT_LIMIT',
@@ -320,8 +326,11 @@ function completionFromCoverage(mode,lastBatch,coverage) {
   mode=parseDriveMode(mode);
   if(!coverage||coverage.allReceiptsVerified!==true||!Number.isSafeInteger(coverage.pending)||coverage.pending<0)
     fail('DRIVE_COVERAGE_INCOMPLETE');
+  const justified=coverage.pendingDiagnostics?.justifiedHumanReview||0;
+  const remediated=coverage.pending===0||justified===coverage.pending;
   return {complete:mode==='EXECUTE'&&lastBatch?.scan.complete===true&&coverage.pending===0,
-    scopedQueueDrained:coverage.pending===0,fullSynchronizationVerified:false,documentReviewRequired:true};
+    scopedQueueDrained:coverage.pending===0,scopedQueueRemediated:remediated,
+    fullSynchronizationVerified:false,documentReviewRequired:coverage.pending>0};
 }
 function command(exe,args,cwd){const r=cp.spawnSync(exe,args,{cwd,encoding:'utf8',windowsHide:true,timeout:420000,maxBuffer:16000000,env:{...process.env,DEBUG:'',NODE_DEBUG:''},stdio:['ignore','pipe','pipe']});if(r.error||r.status!==0)fail('DRIVE_COORDINATOR_COMMAND_FAILED');return r.stdout;}
 async function verifyRecovery(repo,token) {
