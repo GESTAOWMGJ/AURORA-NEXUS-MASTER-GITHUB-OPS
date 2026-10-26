@@ -126,7 +126,7 @@ test("the protected UI renders the shared result and all generated scripts remai
     { action: "a", refresh: "r", integrationKey: "i", distributionApproval: "d", logout: "l" });
   for (const id of ["invoiced-label", "invoiced-detail", "received-detail", "gloss-detail"]) assert.ok(html.includes('id="'+id+'"'));
   assert.match(html, /renderReliableFinancialResult\(data\)/);
-  for (const match of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)) new vm.Script(match[1]);
+  for (const match of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script\s*>/gi)) new vm.Script(match[1]);
   assert.equal(RELIABLE_RESULT_POLICY.securityAndIntegrityGatesPreserved, true);
 });
 
