@@ -1,3 +1,4 @@
+import { type ReliableFinancialResult, reliableResultClient } from "./auroraReliableResult.js";
 export type FinancialFocus = {
   tone: "danger" | "warn" | "info" | "neutral";
   title: string;
@@ -124,9 +125,26 @@ export function buildFinancialFocus(input: unknown): FinancialFocus {
   return focus;
 }
 
+/** A subtotal is visibly partial; it never replaces a canonical total in storage. */
+export function buildReliableMetricPresentation(input: unknown, key: string, readSubset?: (p: Record<string, unknown>) => ReliableFinancialResult | null): {
+  valueCents: number | null; partial: boolean; detail: string;
+} {
+  const b = presentationRecord(input), p = presentationRecord(b.projection);
+  const f = presentationRecord(p.financialCents), master = presentationRecord(b.masterEngine);
+  if (!["invoicedCents", "receivedCents", "glossCents"].includes(key)) return { valueCents: null, partial: false, detail: "Sem fonte" };
+  const canonical = f[key];
+  if (typeof canonical === "number" && Number.isSafeInteger(canonical)) return { valueCents: canonical, partial: false, detail: "Valor do recorte validado" };
+  const decision = presentationRecord(presentationRecord(master.governance).dataAssessment).decision;
+  const subset = ["ALLOW", "REVIEW"].includes(String(decision)) && readSubset ? readSubset(p) : null;
+  const metric = subset?.metrics[key as "invoicedCents" | "receivedCents" | "glossCents"];
+  if (!metric || metric.valueCents === null) return { valueCents: null, partial: false, detail: "Sem valor comprovado para este indicador" };
+  return { valueCents: metric.valueCents, partial: true,
+    detail: `${metric.includedRecords} registro(s) incluído(s); ${metric.excludedRecords} com valor inválido desconsiderado(s). Subtotal, não fechamento.` };
+}
+
 /** Fixed browser functions only. Render returned text with textContent. */
 export function financialPresentationClient(): string {
-  return [formatFinancialCents, presentationRecord, presentationTag, presentationPositiveCents,
-    presentationPeriod, presentationCoverageIncomplete, presentationScenario, buildFinancialFocus]
+  return reliableResultClient() + "\n" + [formatFinancialCents, presentationRecord, presentationTag, presentationPositiveCents,
+    presentationPeriod, presentationCoverageIncomplete, presentationScenario, buildFinancialFocus, buildReliableMetricPresentation]
     .map(helper => helper.toString()).join("\n\n");
 }

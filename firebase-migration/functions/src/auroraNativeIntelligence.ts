@@ -1,3 +1,4 @@
+import { readReliableFinancialResult } from "./auroraReliableResult.js";
 export const AURORA_NATIVE_INTELLIGENCE_VERSION = "0.3.0-firebase-native-routines";
 
 export type NativeInsightIntent =
@@ -131,13 +132,14 @@ export function generateNativeInsight(
     ));
   }
 
+  const partialAvailable = readReliableFinancialResult(projection)?.status === "PARTIAL";
   if (invalidFinancialRecords > 0) {
     findings.push(finding(
       "FINANCIAL_DATA_QUALITY",
-      "CRITICAL",
-      "Qualidade financeira bloqueante",
+      partialAvailable ? "HIGH" : "CRITICAL",
+      partialAvailable ? "Resultado financeiro parcial disponível" : "Qualidade financeira bloqueante",
       `${invalidFinancialRecords} registro(s) financeiro(s) não possuem representação canônica válida em centavos.`,
-      "Corrigir os registros inválidos e regenerar a projeção antes de calcular margem, perda ou receita recuperada.",
+      partialAvailable ? "Usar os subtotais comprovados com exclusões explícitas. Revisar somente os registros excluídos; não calcular margem ou perda com bases incompletas." : "Corrigir os registros inválidos e regenerar a projeção antes de calcular margem, perda ou receita recuperada.",
       "projection.dataQuality.invalidFinancialRecords"
     ));
   }

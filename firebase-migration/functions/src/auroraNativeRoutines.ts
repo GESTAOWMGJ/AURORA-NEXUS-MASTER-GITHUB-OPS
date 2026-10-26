@@ -1,3 +1,4 @@
+import { RELIABLE_RESULT_POLICY } from "./auroraReliableResult.js";
 /** Structural server-readback contracts only; keep the local IA kernel cloud-free. */
 export type AdoptionMember = { orgId: string; uid: string; role: string;
   permissions: readonly string[]; allFacilities: boolean; mfaVerified: boolean };
@@ -256,6 +257,7 @@ export function nativeRoutineSummary(): Record<string, unknown> {
     },
     routines: AURORA_NATIVE_ROUTINES,
     counts,
+    reliableResultPolicy: RELIABLE_RESULT_POLICY,
     documentProjectionContinuityPolicy: {
       routineId: "AURORA-PROJECTION-ENGINE",
       executor: "EXISTING_REFRESH_PROJECTION",
