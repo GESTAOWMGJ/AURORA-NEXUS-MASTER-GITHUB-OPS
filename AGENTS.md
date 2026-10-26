@@ -1,5 +1,18 @@
 # AURORA NEXUS — modus operandi do repositório
 
+## Resultado confiável com exceções — AURORA-RELIABLE-RESULT-001
+
+Todo patch de ingestão, projeção, inteligência ou apresentação deve preservar
+o resultado comprovado dos registros válidos quando uma falha documental isolada
+for recuperável. Reutilizar `auroraReliableResult.ts`: mostrar subtotal e quantidade
+excluída, manter total completo desconhecido e não fabricar saldo, margem ou zero.
+Exceções não apagam fontes nem bloqueiam operações independentes. Preservar escopo,
+autenticação, proveniência, revogação, frescor, isolamento e integridade; esses
+controles não podem ser relaxados para produzir um número. Retomada usa o executor
+idempotente existente e seu orçamento de tentativas, sem outro agendamento.
+Regressão obrigatória: `aurora-reliable-result.test.ts` e os contratos de ingestão
+afetados, no SHA candidato. Não prometer ausência universal de bugs ou falhas.
+
 ## Invariante de produto
 
 Toda rotina, agendamento ou habilidade operacional WMGJ promovida ao AURORA NEXUS deve possuir representação no registro nativo do motor e na inteligência. Executor legado permanece `LEGACY_MIRRORED` até migração com paridade, teste, CI, HML e rollback. Nunca ativar dois executores equivalentes em paralelo.

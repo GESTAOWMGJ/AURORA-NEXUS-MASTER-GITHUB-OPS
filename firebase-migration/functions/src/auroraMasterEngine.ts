@@ -1,10 +1,11 @@
+import { readReliableFinancialResult, RELIABLE_RESULT_POLICY } from "./auroraReliableResult.js";
 import { generateNativeInsight, type NativeInsightFinding } from "./auroraNativeIntelligence.js";
 import { nativeRoutineSummary, buildClientAdoptionPlan, type AdoptionContext } from "./auroraNativeRoutines.js";
 import { iaMasterCapability } from "./auroraIaMaster.js";
 import { buildBetaProductionOrchestrator } from "./auroraProductionOrchestrator.js";
 import { assessNativeData, DATA_GOVERNANCE_POLICY, knownCount, masterCommandSurface } from "./auroraDataGovernance.js";
 
-export const AURORA_MASTER_ENGINE_VERSION = "0.2.0-data-governance";
+export const AURORA_MASTER_ENGINE_VERSION = "0.3.0-reliable-results";
 type MasterContext = {
   actionSummary?: Record<string, unknown>;
   financialStatus?: Record<string, unknown> | null;
@@ -28,12 +29,14 @@ function uniqueFindings(groups: NativeInsightFinding[][]): NativeInsightFinding[
   return [...byCode.values()].sort((a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || a.code.localeCompare(b.code));
 }
 function governanceReviewFinding(reasonCodes: readonly string[]): NativeInsightFinding {
+  const subsetAvailable = reasonCodes.includes("GOV_VERIFIED_SUBSET_AVAILABLE");
   const coverageUnproven = reasonCodes.includes("GOV_DOCUMENT_COVERAGE_UNPROVEN");
   return {
     code: "DATA_GOVERNANCE_REVIEW_REQUIRED", severity: "HIGH",
-    title: coverageUnproven ? "Cobertura documental não comprovada" : "Revisão documental exigida pela governança",
+    title: subsetAvailable ? "Resultado disponível com exclusões declaradas" : coverageUnproven ? "Cobertura documental não comprovada" : "Revisão documental exigida pela governança",
     detail: reasonCodes.join(", "),
     action: [
+      subsetAvailable ? "Apresentar os valores comprovados do recorte e suas exclusões; tratar os registros restantes sem bloquear a leitura independente." : "",
       coverageUnproven ? "Regenerar a projeção canônica e validar as contagens documentais ausentes ou inválidas; ausência não representa zero." : "",
       reasonCodes.includes("GOV_DOCUMENT_REVIEW_REQUIRED") ? "Revisar os documentos com fragilidade, dependência da origem ou SLA vencido no fluxo autorizado." : "",
       "Registrar evidências e submeter a revisão humana antes de decidir."
@@ -48,6 +51,7 @@ export function buildMasterOperationalState(
 ): Record<string, unknown> {
   const assessment = assessNativeData(projection, now);
   const denied = assessment.decision === "DENY";
+  const reliableResult = denied ? null : readReliableFinancialResult(projection);
   // The data gate runs BEFORE inference, including the bootstrap's empty fallback.
   const nativeFindings = denied ? [] : uniqueFindings([
     insightFindings(generateNativeInsight(projection, "EXECUTIVE", now)),
@@ -91,6 +95,7 @@ export function buildMasterOperationalState(
     sourceAccessDuringInference: false, explainable: true,
     generatedAt: Number.isFinite(now.getTime()) ? now.toISOString() : null,
     operationalState, cycleStage,
+    reliableResult, resultPolicy: RELIABLE_RESULT_POLICY,
     cycle: ["OBSERVAR", "INGESTAR", "COMPROVAR", "CONFRONTAR", "DETECTAR", "PRIORIZAR", "AGIR", "VALIDAR", "MEDIR", "APRENDER", "REUTILIZAR"],
     headline: nextFinding?.title ?? "Nenhuma exceção detectada neste recorte autorizado; isto não comprova ausência de risco.",
     nextAction: nextFinding ? { ...nextFinding, humanGate: true } : null,
