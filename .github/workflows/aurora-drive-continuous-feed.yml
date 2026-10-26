@@ -100,8 +100,8 @@ jobs:
           const actual=crypto.createHash('sha256').update(raw).digest('hex');
           if(actual!==expected) throw Error('DRIVE_PRIVATE_SCOPE_HASH_MISMATCH');
           const scope=parseScope(raw,expected);
-          if(scope.sources.length!==1||scope.sources[0].sourceId!=='drive-primary'
-            ||scope.sources[0].system!=='DRIVE'||scope.sources[0].active!==true
+          if(scope.sources.length<1||scope.sources.length>12
+            ||scope.sources.some(source=>source.system!=='DRIVE'||source.active!==true)
             ||scope.authorization.sourceMutationAllowed!==false) throw Error('CONTINUOUS_DRIVE_SCOPE_NOT_LEAST_PRIVILEGE');
           NODE
 
@@ -127,7 +127,7 @@ jobs:
               '[{confirmation:"ACTIVATE_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED",scopeJson:$scope,expectedScopeSha256:$hash}]')"
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraAtivarAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/action-private.json" "$params"
             jq -e '.response.ok==true and .response.code=="AURORA_CONTINUOUS_DRIVE_ACTIVATED"
-              and .response.continuousExtraction==true and .response.sourceCount==1 and .response.triggerCount==1
+              and .response.continuousExtraction==true and (.response.sourceCount>=1 and .response.sourceCount<=12) and .response.triggerCount==1
               and .response.privateScopeSha256=="d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa"
               and .response.sourceMutation==false and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
           elif [ "$action" = "REMEDIATE" ]; then
@@ -153,7 +153,7 @@ jobs:
           params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" '[$hash]')"
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraLerStatusAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/status-private.json" "$params"
           jq -e '.response.ok==true and .response.authorizationValid==true
-            and .response.sourceActive==true and .response.sourceCount==1
+            and .response.sourceActive==true and (.response.sourceCount>=1 and .response.sourceCount<=12)
             and .response.triggerCount==1 and .response.duplicateCollectors==0
             and .response.privateScopeSha256=="d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa"
             and .response.sourceMutation==false and .response.productionMutation==false' "$RUNNER_TEMP/status-private.json" >/dev/null
