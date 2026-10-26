@@ -1168,7 +1168,8 @@ function auroraAtivarAlimentacaoContinuaDriveAutorizada(request) {
       AURORA_CONTINUOUS_DRIVE_VALID_UNTIL:AURORA_CONTINUOUS_DRIVE_DEADLINE,
       AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256:AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256,
       AURORA_CONTINUOUS_DRIVE_RUNTIME_SCOPE_SHA256:guarded.scopeSha256,
-      AURORA_CONTINUOUS_DRIVE_SCOPE_JSON:request.scopeJson
+      AURORA_CONTINUOUS_DRIVE_SCOPE_JSON:request.scopeJson,
+      AURORA_CONTINUOUS_DRIVE_PHASE:'REMEDIATE_ONLY'
     },false);
     var removed=0;
     ScriptApp.getProjectTriggers().forEach(function(trigger){
@@ -1208,6 +1209,16 @@ function auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj() {
     if(!auroraContinuousDriveRegistryMatchesScope_(resolved,scope)
       ||props.getProperty('WMGJ_FIRESTORE_DRY_RUN')!=='false'||props.getProperty('AURORA_FIRESTORE_MIRROR_REQUIRED')!=='true'
       ||state.target!==1||state.duplicateCollectors!==0) throw new Error('AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID');
+    // Fail-safe two-phase gate: an activation created before this field existed
+    // defaults to remediation-only and therefore cannot enumerate more Drive items.
+    var phase=String(props.getProperty('AURORA_CONTINUOUS_DRIVE_PHASE')||'REMEDIATE_ONLY');
+    if(['REMEDIATE_ONLY','LIVE_ENUMERATION'].indexOf(phase)<0) throw new Error('AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID');
+    summary.phase=phase;
+    if(phase==='REMEDIATE_ONLY') {
+      summary.ok=true;summary.code='AURORA_CONTINUOUS_DRIVE_REMEDIATION_GATE';
+      try {props.setProperty('AURORA_CONTINUOUS_DRIVE_LAST_CYCLE',JSON.stringify(summary));} catch(ignoreGate){}
+      return summary;
+    }
     if(typeof comTravaIngestaoGmailWMGJ_!=='function'||typeof auroraExecutarCicloDriveAutorizado_!=='function')
       throw new Error('AURORA_DRIVE_DEPENDENCY_MISSING');
     var deadline=Math.min(Date.now()+150000,authorizationDeadline-5000);
