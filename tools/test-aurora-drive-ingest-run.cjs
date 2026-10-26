@@ -388,7 +388,7 @@ test('continuous Drive workflow is exact-scope, protected, serialized, and clean
   assert.match(workflow,/auroraAtivarAlimentacaoContinuaDriveAutorizada/);
   assert.match(workflow,/auroraSanearPendenciasDriveAutorizadas/);
   assert.match(workflow,/auroraLerStatusAlimentacaoContinuaDriveAutorizada/);
-  assert.match(workflow,/sourceCount==1 and \.response\.triggerCount==1/);
+  assert.match(workflow,/sourceCount>=1 and \.response\.sourceCount<=12/);
   assert.match(workflow,/duplicateCollectors==0/);
   assert.match(workflow,/newSourceEnrolled:false,sourceMutation:false,productionMutation:false/);
   assert.match(workflow,/Remove runner OAuth and private execution responses\n\s+if: always\(\)/);
