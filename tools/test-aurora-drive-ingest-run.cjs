@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const os=require('node:os');
-const {parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sanitizePendingRow,readDriveCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage,selectDriveDeployment,verifyPublishedDriveProject}=require('./aurora-drive-ingest-run.cjs');
+const {parseScope,makeRequest,parseDriveMode,sanitizeBatch,verifyReadback,verifyCoverage,sanitizePendingRow,readDriveCoverage,sha,rejectRuntimeFailure,withSharedLockRetry,runDriveBatches,completionFromCoverage,selectDriveDeployment,verifyPublishedDriveProject,driveAuthorizationDeadline}=require('./aurora-drive-ingest-run.cjs');
 const scope=()=>({schemaVersion:'aurora.authorized-drive-source-scope.v1',orgId:'wmgj',projectId:'wmgj-hml-jfn-20260927',authorization:{realDataAuthorized:true,sourceMutationAllowed:false},sources:[{sourceId:'fixture-root',system:'DRIVE',folderId:'synthetic-folder-only',active:true,slaMinutes:1440}],fileIds:['synthetic-file-only'],excludedFolderIds:[]});
 function encoded(v){if(v===null)return{nullValue:null};if(typeof v==='string')return{stringValue:v};if(typeof v==='boolean')return{booleanValue:v};if(typeof v==='number')return{integerValue:String(v)};return{mapValue:{fields:Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encoded(x)]))}};}
 function readbackFixture(){
@@ -29,6 +29,23 @@ test('Drive runtime selects the newest canonical Apps Script version independent
     {description:'AURORA_EXECUTION_API_CANONICAL manual',versionNumber:45,deploymentId:'deployment_bad_45'}
   ]),/DRIVE_PUBLISHED_VERSION_MISMATCH/);
 });
+test('continuous Drive renewal extends only the exact authorized source scope, never the global HML window',()=>{
+  const policy={scope:{validUntilUtc:'2026-10-26T03:00:00.000Z'},reaffirmations:[{
+    decisionId:'AURORA-HML-CONTINUOUS-DRIVE-20261026',
+    exactPrivateScopeSha256:'d'.repeat(64),validUntilUtc:'2026-10-27T04:30:00.000Z',
+    continuousDriveTriggerAuthorized:true,processExistingAuthorized:true,queueMetadataRemediationAuthorized:true,
+    realSourceActivationAuthorized:true,sourceMutationAuthorized:false,newSourceEnrollmentAuthorized:false,
+    productionAuthorized:false,clinicalSensitiveAuthorized:false
+  }]};
+  const afterLegacy=Date.parse('2026-10-26T04:00:00.000Z');
+  assert.equal(driveAuthorizationDeadline(policy,'d'.repeat(64),afterLegacy),Date.parse('2026-10-27T04:30:00.000Z'));
+  assert.throws(()=>driveAuthorizationDeadline(policy,'e'.repeat(64),afterLegacy),/DRIVE_HML_WINDOW_INVALID/);
+  const beforeLegacy=Date.parse('2026-10-26T02:00:00.000Z');
+  assert.equal(driveAuthorizationDeadline(policy,'e'.repeat(64),beforeLegacy),Date.parse('2026-10-26T03:00:00.000Z'));
+  policy.reaffirmations[0].sourceMutationAuthorized=true;
+  assert.throws(()=>driveAuthorizationDeadline(policy,'d'.repeat(64),afterLegacy),/DRIVE_HML_WINDOW_INVALID/);
+});
+
 test('Drive runtime requires the complete published Apps Script project to match the checked-out source',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'aurora-drive-published-'));
   const src=path.join(root,'src'),published=path.join(root,'published');fs.mkdirSync(src);fs.mkdirSync(published);
