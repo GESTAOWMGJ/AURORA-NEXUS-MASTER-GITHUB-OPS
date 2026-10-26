@@ -380,7 +380,7 @@ test('closed remediation diagnostic codes are accepted but arbitrary values stay
 
 test('continuous Drive workflow is exact-scope, protected, serialized, and cleans private OAuth material',()=>{
   const workflow=fs.readFileSync(path.join(__dirname,'../.github/workflows/aurora-drive-continuous-feed.yml'),'utf8').replace(/\r\n/g,'\n');
-  assert.match(workflow,/options: \[ACTIVATE, REMEDIATE, STATUS, DIAGNOSE_FIRST_CYCLE, QUARANTINE_FIRST_CYCLE\]/);
+  assert.match(workflow,/options: \[ACTIVATE, REMEDIATE, ENABLE_LIVE, STATUS, DIAGNOSE_FIRST_CYCLE, QUARANTINE_FIRST_CYCLE\]/);
   assert.match(workflow,/environment: firebase-homologation/);
   assert.match(workflow,/group: aurora-rc11-hml\n\s+cancel-in-progress: false/);
   assert.match(workflow,/inputs\.expected_sha == github\.sha/);
@@ -392,6 +392,8 @@ test('continuous Drive workflow is exact-scope, protected, serialized, and clean
   assert.match(workflow,/auroraLerStatusAlimentacaoContinuaDriveAutorizada/);
   assert.match(workflow,/auroraDiagnosticarPrimeiroCicloDriveAutorizado/);
   assert.match(workflow,/auroraQuarentenarPrimeiroCicloDriveAutorizado/);
+  assert.match(workflow,/auroraPromoverAlimentacaoContinuaDriveAutorizada/);
+  assert.match(workflow,/ENABLE_LIVE_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED/);
   assert.match(workflow,/expected_candidate_set_sha256/);
   assert.match(workflow,/QUARANTINE_FIRST_CONTINUOUS_DRIVE_ENUMERATION/);
   assert.match(workflow,/sourceCount>=1 and \.response\.sourceCount<=12/);
@@ -420,4 +422,16 @@ test('first continuous Drive cycle quarantine is bounded by a fixed activation w
   assert.match(source,/scopeSha256=quarantineHash/);
   assert.match(source,/AURORA_DRIVE_ACTIVATION_ENUMERATION_ROLLED_BACK/);
   assert.match(source,/remainingCandidates=0/);
+});
+
+
+test('live continuous Drive promotion is gated by fully justified backlog and bounded sweep size',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'../src/37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'),'utf8').replace(/\r\n/g,'\n');
+  assert.match(source,/function auroraPromoverAlimentacaoContinuaDriveAutorizada\(request\)/);
+  assert.match(source,/AURORA_CONTINUOUS_DRIVE_LIVE_BACKLOG_NOT_CLOSED/);
+  assert.match(source,/result\.unjustifiedPending!==0\|\|result\.justifiedHumanReview!==result\.pending/);
+  assert.match(source,/AURORA_CONTINUOUS_DRIVE_PHASE:'LIVE_ENUMERATION'/);
+  assert.match(source,/maxScan:Math\.min\(5,scope\.maxScan\)/);
+  assert.match(source,/processLimit:Math\.min\(10,scope\.limit\)/);
+  assert.match(source,/phase=String\(props\.getProperty\('AURORA_CONTINUOUS_DRIVE_PHASE'\)\|\|'REMEDIATE_ONLY'\)/);
 });
