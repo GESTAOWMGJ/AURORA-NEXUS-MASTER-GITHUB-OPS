@@ -151,6 +151,34 @@
         }
       },
       {
+        "source": "/api/practice",
+        "function": {
+          "functionId": "auroraNexusPractice",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/practice-confirm",
+        "function": {
+          "functionId": "auroraNexusPractice",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/practice-confirm",
+        "function": {
+          "functionId": "auroraNexusPractice",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/practice-payments/**",
+        "function": {
+          "functionId": "auroraNexusPractice",
+          "region": "southamerica-east1"
+        }
+      },
+      {
         "source": "**",
         "function": {
           "functionId": "auroraNexusAuthGate",

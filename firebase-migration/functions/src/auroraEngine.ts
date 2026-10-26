@@ -1,3 +1,4 @@
+import { buildReliableFinancialResult, type CentsAggregation } from "./auroraReliableResult.js";
 import { validEvidenceRef } from "./auroraEvidence.js";
 import { nativeRoutineSummary } from "./auroraNativeRoutines.js";
 
@@ -29,7 +30,7 @@ export type ProjectionContext = {
   competence?: string;
 };
 
-type CentsMetric = { value: number | null; valid: number; invalid: number };
+type CentsMetric = CentsAggregation;
 const VALIDATED_STATES = new Set(["VALIDATED", "CLOSED"]);
 const TEST_RECORD_MARKERS = new Set(["TEST", "TESTE"]);
 
@@ -97,6 +98,7 @@ function sumCents(
   let total = 0;
   let valid = 0;
   let invalid = 0;
+  let overflow = false;
   for (const record of records) {
     if (isTestRecord(record) || !isValidated(record) || !inCompetence(record, options.competence)) continue;
     if (options.status && !options.status.has(financialStatus(record))) continue;
@@ -107,13 +109,15 @@ function sumCents(
     }
     const next = total + cents;
     if (!Number.isSafeInteger(next)) {
+      overflow = true;
       invalid++;
       continue;
     }
     total = next;
     valid++;
   }
-  return { value: valid > 0 && invalid === 0 ? total : null, valid, invalid };
+  return { value: valid > 0 && invalid === 0 ? total : null, valid, invalid,
+    subtotal: valid > 0 && !overflow ? total : null, overflow };
 }
 
 function countWhere(records: Array<Record<string, unknown>>, predicate: (item: Record<string, unknown>) => boolean): number {
@@ -261,17 +265,20 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
     !["RESOLVED", "CLOSED"].includes(normalized(item.status || "OPEN")) && normalized(item.riskLevel) === "CRITICAL"
   );
   const invalidFinancialRecords = invoiced.invalid + received.invalid + gloss.invalid;
+  const reliableResult = buildReliableFinancialResult(context.orgId ?? "wmgj", context.competence ?? now.toISOString().slice(0, 7),
+    { invoicedCents: invoiced, receivedCents: received, glossCents: gloss });
+  const partialAvailable = reliableResult.status === "PARTIAL";
   const sampleSizes = Object.fromEntries(Object.entries(operationalSource).map(([key, value]) => [key, value.length]));
   const totalRecords = Object.values(sampleSizes).reduce((sum, count) => sum + count, 0);
-  const dataState = totalRecords === 0 ? "NO_SOURCE" : invalidFinancialRecords > 0 ? "BLOCKED_DATA_QUALITY" : "SHADOW";
+  const dataState = totalRecords === 0 ? "NO_SOURCE" : partialAvailable ? "PARTIAL_VERIFIED" : invalidFinancialRecords > 0 ? "BLOCKED_DATA_QUALITY" : "SHADOW";
   const ratio = (part: number, total: number): number | null => total === 0 ? null : Math.round((part / total) * 1000) / 10;
   const outstanding = invoiced.value === null || received.value === null ? null : invoiced.value - received.value;
-  const completeness = totalRecords === 0 ? "EMPTY" : invalidFinancialRecords > 0 ? "INVALID" : "PARTIAL";
+  const completeness = totalRecords === 0 ? "EMPTY" : invalidFinancialRecords > 0 && !partialAvailable ? "INVALID" : "PARTIAL";
   const documentOverdue = Number(documentIntelligence.overdueDocumentSla || 0);
   const documentFragile = Number(documentIntelligence.fragileDocuments || 0);
-  const severity = invalidFinancialRecords > 0 ? "BLOCKED" : (criticalFindings > 0 || overdueActions > 0 || documentOverdue > 0 || documentFragile > 0 ? "ATTENTION" : totalRecords > 0 ? "NOMINAL" : "UNKNOWN");
+  const severity = invalidFinancialRecords > 0 && !partialAvailable ? "BLOCKED" : (partialAvailable || criticalFindings > 0 || overdueActions > 0 || documentOverdue > 0 || documentFragile > 0 ? "ATTENTION" : totalRecords > 0 ? "NOMINAL" : "UNKNOWN");
   const alerts: Array<Record<string, unknown>> = [];
-  if (invalidFinancialRecords > 0) alerts.push({ alertId: "financial-data-quality", severity: "CRITICAL", title: "Dados financeiros bloqueados", detail: `${invalidFinancialRecords} registro(s) sem centavos canônicos válidos`, evidenceRefs: [], createdAt: now.toISOString() });
+  if (invalidFinancialRecords > 0) alerts.push({ alertId: "financial-data-quality", severity: partialAvailable ? "HIGH" : "CRITICAL", title: partialAvailable ? "Resultado parcial disponível" : "Dados financeiros sem valor utilizável", detail: `${invalidFinancialRecords} registro(s) desconsiderado(s); valores ausentes não representam zero`, evidenceRefs: [], createdAt: now.toISOString() });
   if (overdueActions > 0) alerts.push({ alertId: "overdue-actions", severity: "HIGH", title: "SLA vencido", detail: `${overdueActions} ação(ões) aguardam tratamento`, evidenceRefs: [], createdAt: now.toISOString() });
   if (documentOverdue > 0) alerts.push({ alertId: "document-sla-overdue", severity: "HIGH", title: "SLA documental vencido", detail: `${documentOverdue} documento(s) permanecem no fluxo após o SLA configurado`, evidenceRefs: [], createdAt: now.toISOString() });
   if (documentFragile > 0) alerts.push({ alertId: "document-fragility", severity: "MEDIUM", title: "Fragilidade documental", detail: `${documentFragile} documento(s) possuem extração degradada, baixa confiança ou campos canônicos ausentes`, evidenceRefs: [], createdAt: now.toISOString() });
@@ -300,6 +307,7 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
     sensitivity: "INTERNAL",
     state: dataState,
     financialCents: { invoicedCents: invoiced.value, receivedCents: received.value, glossCents: gloss.value, outstandingCents: outstanding },
+    reliableResult,
     operations: { openActions, overdueActions, openFindings },
     documentIntelligence,
     nativeDataPlane: {
@@ -329,7 +337,7 @@ export function buildProjection(source: ProjectionSource, now = new Date(), cont
       invalidFinancialRecords,
       validFinancialRecords: invoiced.valid + received.valid + gloss.valid
     },
-    modules: AURORA_MODULES.map(([id, name]) => ({ id, name, status: dataState === "SHADOW" ? "LEARNING" : "BLOCKED" }))
+    modules: AURORA_MODULES.map(([id, name]) => ({ id, name, status: dataState === "SHADOW" ? "LEARNING" : partialAvailable ? "ATTENTION" : "BLOCKED" }))
   };
 }
 

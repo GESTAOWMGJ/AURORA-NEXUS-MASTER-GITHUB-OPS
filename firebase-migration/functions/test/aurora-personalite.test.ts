@@ -9,7 +9,7 @@ test('Personalité is represented once, governed and inactive', () => {
   assert.equal(entries[0]?.tenantScope, 'PER_ORG');
   assert.equal(entries[0]?.humanGate, true);
   const p = nativeRoutineSummary().personalitePolicy as Record<string, unknown>;
-  assert.equal(p.version, '0.1.2');
+  assert.equal(p.version, '0.2.0');
   for (const key of ['permissionsGranted', 'schedulerCreated', 'executorCreated', 'runtimeAdoptionVerified', 'tenantRawDataTransferAllowed']) assert.equal(p[key], false);
 });
 test('NPS includes passives and reports response rate independently', () => {

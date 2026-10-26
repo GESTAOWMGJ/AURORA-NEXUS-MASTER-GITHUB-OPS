@@ -749,3 +749,39 @@ test('damaged or unconfirmed provider output remains pending and cleanup never t
   assert.equal(deferred.ok,false);assert.equal(deferred.code,'AURORA_DRIVE_CONVERSION_DEFERRED');
   assert.equal(bounded.copies.length,0);assert.equal(bounded.trashed.length,0);
 });
+
+
+test('bounded Drive remediation makes every current scoped pending row an auditable non-blocking backlog',()=>{
+  const f=fixture();addAuthenticatedWrapper(f);
+  assert.deepEqual(JSON.parse(JSON.stringify(
+    f.context.auroraDriveRemediationDecision_('ERRO_REPROCESSAR','AURORA_DRIVE_CONVERSION_FAILED',9))),
+    {code:'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED',reason:'OWNER_ACCEPTED_NON_BLOCKING_BACKLOG'});
+  assert.deepEqual(JSON.parse(JSON.stringify(
+    f.context.auroraDriveRemediationDecision_('ERRO_REPROCESSAR','AURORA_DRIVE_CONVERSION_FAILED',10))),
+    {code:'AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED',reason:'REPEATED_CONVERSION_FAILURE'});
+  assert.deepEqual(JSON.parse(JSON.stringify(
+    f.context.auroraDriveRemediationDecision_('REVISAR_HUMANO',undefined,0))),
+    {code:'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED',reason:'LEGACY_REVIEW_WITHOUT_RECORDED_CODE'});
+  assert.deepEqual(JSON.parse(JSON.stringify(
+    f.context.auroraDriveRemediationDecision_('REVISAR_HUMANO','AURORA_DRIVE_FORMAT_UNSUPPORTED',12))),
+    {code:'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED',reason:'OWNER_ACCEPTED_NON_BLOCKING_BACKLOG'});
+  assert.deepEqual(JSON.parse(JSON.stringify(
+    f.context.auroraDriveRemediationDecision_('PENDENTE','PENDING_EXTRACTION',0))),
+    {code:'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED',reason:'OWNER_ACCEPTED_NON_BLOCKING_BACKLOG'});
+  assert.equal(f.context.auroraDriveRemediationDecision_('PROCESSADO','',0),null);
+  assert.equal(f.context.auroraDriveRemediationDecision_('DUPLICADO','',0),null);
+});
+
+test('continuous Drive scan skips legacy inflight backlog without mutating that row',()=>{
+  const f=fixture(),root='rootinflight001',fileId='fileinflight001';
+  f.addFolder(root,null,[fileId]);f.addFile(fileId,root,'new bytes');
+  f.options.sources=[{sourceId:'drive-root',folderId:root,system:'DRIVE'}];
+  f.options.maxScan=10;f.options.processLimit=0;
+  const legacy=['2026-10-01','DRIVE',fileId,'legacy','text/plain','EXTRAINDO',7,'','','legacy inflight'];
+  f.rows.push(legacy.slice());
+  assert.throws(()=>f.context.auroraExecutarCicloDriveAutorizado_(f.options),/AURORA_DRIVE_INFLIGHT_RECONCILIATION_REQUIRED/);
+  f.options.nonBlockingBacklog=true;
+  const result=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
+  assert.equal(result.ok,true);assert.equal(result.scan.duplicates,1);
+  assert.deepEqual(f.rows[1],legacy);
+});

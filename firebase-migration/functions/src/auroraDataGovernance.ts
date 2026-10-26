@@ -1,9 +1,10 @@
+import { readReliableFinancialResult } from "./auroraReliableResult.js";
 import { createHash } from "node:crypto";
 
 /** Canonical native policy. Describes the master planner, not permission to call an API. */
 export const DATA_GOVERNANCE_POLICY = Object.freeze({
   id: "AURORA-DATA-GOV-AUTONOMY-001",
-  version: "1.0.0",
+  version: "1.1.0",
   effectiveLevel: "A1_RECOMMEND_ONLY",
   purpose: "OPERATIONAL_GOVERNANCE",
   maxSnapshotAgeMs: 30 * 60 * 1000,
@@ -61,15 +62,18 @@ export function assessNativeData(projection: unknown, now = new Date()): NativeD
   if (!Number.isFinite(age)) reasons.push("GOV_FRESHNESS_UNPROVEN");
   else if (age < -DATA_GOVERNANCE_POLICY.maxFutureSkewMs) reasons.push("GOV_FUTURE_SNAPSHOT");
   else if (age > DATA_GOVERNANCE_POLICY.maxSnapshotAgeMs) reasons.push("GOV_STALE_SNAPSHOT");
-  if (quality.sourcePresent !== true || quality.complete !== true || quality.invalidFinancialRecords !== 0) reasons.push("GOV_DATA_QUALITY_UNPROVEN");
+  const subset = reasons.length === 0 ? readReliableFinancialResult(p) : null;
+  const verifiedPartial = quality.sourcePresent === true && quality.complete === false && subset?.status === "PARTIAL";
+  if (verifiedPartial) reasons.push("GOV_VERIFIED_SUBSET_AVAILABLE");
+  else if (quality.sourcePresent !== true || quality.complete !== true || quality.invalidFinancialRecords !== 0) reasons.push("GOV_DATA_QUALITY_UNPROVEN");
   const docs = record(p.documentIntelligence);
-  let review = false;
+  let review = verifiedPartial;
   for (const key of ["sourceDependentDocuments", "fragileDocuments", "overdueDocumentSla"]) {
     const count = knownCount(docs[key]);
     if (count === null) { reasons.push("GOV_DOCUMENT_COVERAGE_UNPROVEN"); review = true; }
     else if (count > 0) { reasons.push("GOV_DOCUMENT_REVIEW_REQUIRED"); review = true; }
   }
-  const hardReasons = reasons.filter(code => !["GOV_DOCUMENT_COVERAGE_UNPROVEN", "GOV_DOCUMENT_REVIEW_REQUIRED"].includes(code));
+  const hardReasons = reasons.filter(code => !["GOV_DOCUMENT_COVERAGE_UNPROVEN", "GOV_DOCUMENT_REVIEW_REQUIRED", "GOV_VERIFIED_SUBSET_AVAILABLE"].includes(code));
   return {
     policyId: DATA_GOVERNANCE_POLICY.id, policyVersion: DATA_GOVERNANCE_POLICY.version,
     policyHash: DATA_GOVERNANCE_POLICY_HASH,

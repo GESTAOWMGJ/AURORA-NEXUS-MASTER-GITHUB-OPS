@@ -1,3 +1,4 @@
+import { RELIABLE_RESULT_POLICY } from "./auroraReliableResult.js";
 /** Structural server-readback contracts only; keep the local IA kernel cloud-free. */
 export type AdoptionMember = { orgId: string; uid: string; role: string;
   permissions: readonly string[]; allFacilities: boolean; mfaVerified: boolean };
@@ -258,6 +259,7 @@ export function nativeRoutineSummary(): Record<string, unknown> {
     },
     routines: AURORA_NATIVE_ROUTINES,
     counts,
+    reliableResultPolicy: RELIABLE_RESULT_POLICY,
     documentProjectionContinuityPolicy: {
       routineId: "AURORA-PROJECTION-ENGINE",
       executor: "EXISTING_REFRESH_PROJECTION",
@@ -521,8 +523,18 @@ export function nativeRoutineSummary(): Record<string, unknown> {
 /** Abstract capability only. Registration grants no access and starts no executor. */
 export function personalitePolicy() {
   return {
-    routineId: "AURORA-PERSONALITE-001", version: "0.1.2",
+    routineId: "AURORA-PERSONALITE-001", version: "0.2.0",
     product: "AURORA NEXUS", profile: "PERSONALITE",
+    practiceOperations: {
+      version: "0.2.0", engine: "auroraPracticeOperations", endpoint: "/api/practice",
+      state: "IMPLEMENTED_SYNTHETIC_ONLY", storage: "EXISTING_ORGANIZATION_RUNTIME_CHECKPOINT",
+      capabilities: ["ADMINISTRATIVE_AGENDA", "VIRTUAL_CONFIRMATION", "MANUAL_BANK_RECONCILIATION", "STRIPE_TEST_CHECKOUT_WEBHOOK", "REMINDER_DRAFT", "APPROVED_BUSINESS_MEMORY", "WEBSITE_EXPORT", "ROLE_SCOPED_TASKS"],
+      encryption: "AES_256_GCM_KMS_ORG_BOUND_AAD", freshMembershipRequired: true,
+      externalAiRequired: false, generativeLocalModelInstalled: false,
+      bankApiConnected: false, paymentProviderConnected: false, messagesSentAutomatically: false,
+      realDataAllowed: false, websitePublished: false, domainPurchased: false,
+      documentation: "docs/AURORA_PERSONALITE_OPERATIONS_0_2_0.md"
+    },
     professionalWorkspace: {
       capabilityId: "AURORA-PERSONALITE-WORKSPACE-001", version: "0.1.0",
       state: "SPECIFIED_PENDING_SCOPED_ADAPTER_VALIDATION",

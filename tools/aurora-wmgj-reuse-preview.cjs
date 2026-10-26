@@ -76,6 +76,24 @@ const stable = value => JSON.stringify(value, (_, item) => item && !Array.isArra
   ? Object.fromEntries(Object.entries(item).sort(([a],[b]) => a < b ? -1 : a > b ? 1 : 0)) : item);
 const hex = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 
+function previewAuthorizationDeadline(policy, now=Date.now()) {
+  const legacy=Date.parse(policy?.scope?.validUntilUtc);
+  if(Number.isFinite(legacy) && now < legacy) return legacy;
+  const decision=(policy?.reaffirmations||[]).find(item=>item?.decisionId==='AURORA-HML-CONTINUOUS-DRIVE-20261026');
+  const scopeHash=policy?.scope?.continuousDriveScopeSha256;
+  if(decision && policy?.scope?.continuousDriveDecisionId===decision.decisionId
+    && typeof scopeHash==='string' && /^[a-f0-9]{64}$/.test(scopeHash)
+    && decision.exactPrivateScopeSha256===scopeHash
+    && decision.continuousDriveTriggerAuthorized===true && decision.processExistingAuthorized===true
+    && decision.queueMetadataRemediationAuthorized===true && decision.realSourceActivationAuthorized===true
+    && decision.sourceMutationAuthorized===false && decision.newSourceEnrollmentAuthorized===false
+    && decision.productionAuthorized===false && decision.clinicalSensitiveAuthorized===false) {
+    const scoped=Date.parse(decision.validUntilUtc);
+    if(Number.isFinite(scoped) && now < scoped) return scoped;
+  }
+  reject('POLICY_WINDOW_INVALID');
+}
+
 function readPreview(output) {
   const limit = 65536;
   // Inspect and read one opened object. Linux runners also refuse links/FIFOs
@@ -139,7 +157,7 @@ function run({repo = path.resolve(__dirname,'..'), temporary = process.env.RUNNE
     if (policy.scope?.projectId !== PROJECT || policy.scope?.environment !== 'firebase-homologation'
       || policy.scope?.branch !== 'main'
       || policy.integrationAndHmlPublicationAuthorized !== true) reject('POLICY_SCOPE_INVALID');
-    if (!Number.isFinite(Date.parse(policy.scope.validUntilUtc)) || now() >= Date.parse(policy.scope.validUntilUtc)) reject('POLICY_WINDOW_INVALID');
+    previewAuthorizationDeadline(policy,now());
   });
   gate();
   const call = (phase,executable,args,cwd) => atPhase(phase,'COMMAND_FAILED',() => exec(executable,args,cwd));
@@ -259,5 +277,5 @@ function main({preview = run, temporary = process.env.RUNNER_TEMP,
   }
 }
 
-module.exports = {sanitizePreview,readPreview,run,failureEvidence,command,main};
+module.exports = {sanitizePreview,readPreview,run,failureEvidence,command,main,previewAuthorizationDeadline};
 if (require.main === module) process.exitCode = main();

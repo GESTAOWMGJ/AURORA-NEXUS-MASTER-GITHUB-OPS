@@ -1019,3 +1019,344 @@ function auroraExecutarIngestaoDriveAutorizada(request) {
     return result;
   }
 }
+
+
+/* AURORA-HML-CONTINUOUS-DRIVE-20261026
+ * Bounded owner authorization for one exact existing WMGJ Drive scope.
+ * The trigger never enrolls another provider, exports credentials, mutates source
+ * files, or calls the broad Gmail/dashboard automation. */
+var AURORA_CONTINUOUS_DRIVE_DECISION = 'AURORA-HML-CONTINUOUS-DRIVE-20261026';
+var AURORA_CONTINUOUS_DRIVE_CONFIRMATION = 'ACTIVATE_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED';
+var AURORA_CONTINUOUS_DRIVE_REMEDIATE_CONFIRMATION = 'REMEDIATE_AUTHORIZED_WMGJ_DRIVE_PENDING';
+var AURORA_CONTINUOUS_DRIVE_NOT_BEFORE = '2026-10-26T04:18:00.000Z';
+var AURORA_CONTINUOUS_DRIVE_DEADLINE = '2026-10-27T04:30:00.000Z';
+var AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256 = 'd3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa';
+var AURORA_CONTINUOUS_DRIVE_HANDLER = 'auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj';
+
+function auroraContinuousDriveWindow_() {
+  var start=Date.parse(AURORA_CONTINUOUS_DRIVE_NOT_BEFORE),deadline=Date.parse(AURORA_CONTINUOUS_DRIVE_DEADLINE);
+  if(!Number.isFinite(start)||!Number.isFinite(deadline)||Date.now()<start||Date.now()>=deadline)
+    throw new Error('AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED');
+  return deadline;
+}
+
+function auroraContinuousDrivePrivateScope_(scopeJson, expectedHash) {
+  if(typeof scopeJson!=='string'||scopeJson.length<2||scopeJson.length>131072
+    ||expectedHash!==AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256
+    ||auroraConnectorReuseSha_(scopeJson)!==expectedHash) throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED');
+  var value;
+  try { value=JSON.parse(scopeJson); } catch(ignore) { throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED'); }
+  var id=function(v){return typeof v==='string'&&/^[A-Za-z0-9_-]{10,256}$/.test(v);};
+  if(!value||value.schemaVersion!=='aurora.authorized-drive-source-scope.v1'||value.orgId!=='wmgj'
+    ||value.projectId!=='wmgj-hml-jfn-20260927'||!value.authorization
+    ||value.authorization.realDataAuthorized!==true||value.authorization.sourceMutationAllowed!==false
+    ||!Array.isArray(value.sources)||value.sources.length<1||value.sources.length>12
+    ||!Array.isArray(value.fileIds)||value.fileIds.length>200||!value.fileIds.every(id)
+    ||!Array.isArray(value.excludedFolderIds)||value.excludedFolderIds.length>100||!value.excludedFolderIds.every(id))
+    throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED');
+  var sourceIds={},folders={};
+  value.sources.forEach(function(source){
+    if(!source||typeof source.sourceId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(source.sourceId)
+      ||source.system!=='DRIVE'||source.active!==true||!id(source.folderId)
+      ||!Number.isSafeInteger(source.slaMinutes)||source.slaMinutes<15||source.slaMinutes>43200
+      ||sourceIds[source.sourceId]||folders[source.folderId]) throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED');
+    sourceIds[source.sourceId]=true;folders[source.folderId]=true;
+  });
+  if(value.fileIds.length!==value.fileIds.filter(function(v,i,a){return a.indexOf(v)===i;}).length
+    ||value.excludedFolderIds.length!==value.excludedFolderIds.filter(function(v,i,a){return a.indexOf(v)===i;}).length
+    ||value.fileIds.some(function(x){return !!folders[x];})
+    ||value.excludedFolderIds.some(function(x){return !!folders[x];}))
+    throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED');
+  return value;
+}
+
+function auroraContinuousDriveNormalizedScope_(privateScope, mode) {
+  return auroraDriveIntakeScope_({mode:mode||'PREVIEW',orgId:privateScope.orgId,sources:privateScope.sources,
+    fileIds:privateScope.fileIds,excludedFolderIds:privateScope.excludedFolderIds,maxScan:300,limit:20,
+    expectedScopeSha256:null});
+}
+
+function auroraContinuousDriveRegistryMatchesScope_(resolved, scope) {
+  if(!resolved||!Array.isArray(resolved.sources)||resolved.sources.length!==scope.sources.length) return false;
+  return scope.sources.every(function(source){
+    return resolved.sources.some(function(item){
+      return item&&item.sourceId===source.sourceId&&item.system==='DRIVE'&&item.mode==='DRIVE_FOLDER'
+        &&item.folderId===source.folderId&&item.slaMinutes===source.slaMinutes&&item.active!==false;
+    });
+  });
+}
+
+function auroraContinuousDriveSystemGuard_(scope, expectedHash, verifyAccess) {
+  var props=PropertiesService.getScriptProperties();
+  if(props.getProperty('WMGJ_FIRESTORE_ORG_ID')!==scope.orgId) throw new Error('AURORA_DRIVE_TENANT_MISMATCH');
+  if(typeof wmgjFirestoreConfig_!=='function') throw new Error('AURORA_DRIVE_DEPENDENCY_MISSING');
+  var existing=wmgjFirestoreConfig_();
+  if(!existing||existing.orgId!==scope.orgId||typeof existing.url!=='string'
+    ||!/^https:\/\/[^\s]+\/ingestWmgjEvent$/.test(existing.url)
+    ||!/^[A-Za-z0-9][A-Za-z0-9_.:-]{2,127}$/.test(existing.keyId||'')
+    ||!/^[a-fA-F0-9]{64}$/.test(existing.secret||'')) throw new Error('AURORA_DRIVE_CONFIGURATION_INVALID');
+  var config={url:existing.url,keyId:existing.keyId,secret:existing.secret,orgId:existing.orgId,dryRun:false,maxRows:existing.maxRows};
+  var fingerprint=auroraConnectorReuseSha_(JSON.stringify({scope:scope,endpoint:config.url,keyId:config.keyId,
+    secretSha256:auroraConnectorReuseSha_(config.secret)}));
+  if(expectedHash!==null&&expectedHash!==fingerprint) throw new Error('AURORA_DRIVE_SCOPE_CHANGED');
+  if(verifyAccess) {
+    scope.sources.forEach(function(source){
+      if(DriveApp.getFolderById(source.folderId).getId()!==source.folderId) throw new Error('AURORA_DRIVE_SOURCE_UNAVAILABLE');
+    });
+    scope.fileIds.forEach(function(fileId){
+      var file=DriveApp.getFileById(fileId);
+      if(file.getId()!==fileId||(typeof file.isTrashed==='function'&&file.isTrashed())) throw new Error('AURORA_DRIVE_SOURCE_UNAVAILABLE');
+    });
+  }
+  return {scopeSha256:fingerprint,config:config};
+}
+
+function auroraContinuousDriveCollectorState_() {
+  var triggers=ScriptApp.getProjectTriggers(),target=0,duplicates=0,unrelated=0;
+  triggers.forEach(function(trigger){
+    var handler=String(trigger.getHandlerFunction()||'');
+    if(handler===AURORA_CONTINUOUS_DRIVE_HANDLER) target++;
+    else if(handler==='jobPrepararPipelineWMGJ'||handler==='jobProcessarFilaWMGJ') duplicates++;
+    else unrelated++;
+  });
+  return {target:target,duplicateCollectors:duplicates,unrelated:unrelated,total:triggers.length};
+}
+
+function auroraContinuousDriveScopeFromProperties_() {
+  var props=PropertiesService.getScriptProperties();
+  if(props.getProperty('AURORA_CONTINUOUS_DRIVE_DECISION')!==AURORA_CONTINUOUS_DRIVE_DECISION
+    ||props.getProperty('AURORA_CONTINUOUS_DRIVE_VALID_UNTIL')!==AURORA_CONTINUOUS_DRIVE_DEADLINE
+    ||props.getProperty('AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256')!==AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256)
+    throw new Error('AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID');
+  var scopeJson=props.getProperty('AURORA_CONTINUOUS_DRIVE_SCOPE_JSON');
+  var privateScope=auroraContinuousDrivePrivateScope_(scopeJson,AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256);
+  var scope=auroraContinuousDriveNormalizedScope_(privateScope,'PREVIEW');
+  var runtimeHash=props.getProperty('AURORA_CONTINUOUS_DRIVE_RUNTIME_SCOPE_SHA256');
+  if(typeof runtimeHash!=='string'||!/^[a-f0-9]{64}$/.test(runtimeHash)) throw new Error('AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID');
+  return {privateScope:privateScope,scope:scope,runtimeHash:runtimeHash};
+}
+
+function auroraAtivarAlimentacaoContinuaDriveAutorizada(request) {
+  var result={ok:false,code:'AURORA_CONTINUOUS_DRIVE_PENDING',decisionId:AURORA_CONTINUOUS_DRIVE_DECISION,
+    continuousExtraction:false,sourceCount:0,triggerCount:0,duplicateCollectorsRemoved:0,
+    privateScopeSha256:AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256,runtimeScopeSha256:null,
+    firstCycle:null,sourceMutation:false,productionMutation:false};
+  try {
+    auroraConnectorReuseOwner_();auroraContinuousDriveWindow_();
+    if(!request||typeof request!=='object'||Array.isArray(request)
+      ||Object.keys(request).sort().join(',')!==['confirmation','scopeJson','expectedScopeSha256'].sort().join(',')
+      ||request.confirmation!==AURORA_CONTINUOUS_DRIVE_CONFIRMATION
+      ||request.expectedScopeSha256!==AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256)
+      throw new Error('AURORA_CONTINUOUS_DRIVE_REQUEST_REJECTED');
+    var privateScope=auroraContinuousDrivePrivateScope_(request.scopeJson,request.expectedScopeSha256);
+    var scope=auroraContinuousDriveNormalizedScope_(privateScope,'PREVIEW');
+    var guarded=auroraContinuousDriveSystemGuard_(scope,null,true),props=PropertiesService.getScriptProperties();
+    var authorizedFolders={};scope.sources.forEach(function(source){authorizedFolders[source.folderId]=true;});
+    var resolved=auroraResolverFontesDocumentais_(props);
+    if(resolved.candidates.some(function(item){return item&&item.folderId&&!authorizedFolders[item.folderId];}))
+      throw new Error('AURORA_CONTINUOUS_DRIVE_SOURCE_CONFLICT');
+    var legacyFolder=props.getProperty('WMGJ_PASTA_ENTRADA_ID');
+    if(legacyFolder&&!authorizedFolders[legacyFolder]) throw new Error('AURORA_CONTINUOUS_DRIVE_SOURCE_CONFLICT');
+    var registry=JSON.stringify(scope.sources.map(function(source){return {
+      sourceId:source.sourceId,system:'DRIVE',mode:'DRIVE_FOLDER',folderId:source.folderId,
+      slaMinutes:source.slaMinutes,active:true
+    };}));
+    props.setProperties({
+      WMGJ_FIRESTORE_DRY_RUN:'false',AURORA_FIRESTORE_MIRROR_REQUIRED:'true',
+      AURORA_DOCUMENT_SOURCE_REGISTRY:registry,AURORA_CONNECTOR_SETUP_VERSION:AURORA_CONNECTOR_SETUP_VERSION,
+      AURORA_CONTINUOUS_DRIVE_DECISION:AURORA_CONTINUOUS_DRIVE_DECISION,
+      AURORA_CONTINUOUS_DRIVE_VALID_UNTIL:AURORA_CONTINUOUS_DRIVE_DEADLINE,
+      AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256:AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256,
+      AURORA_CONTINUOUS_DRIVE_RUNTIME_SCOPE_SHA256:guarded.scopeSha256,
+      AURORA_CONTINUOUS_DRIVE_SCOPE_JSON:request.scopeJson,
+      AURORA_CONTINUOUS_DRIVE_PHASE:'REMEDIATE_ONLY'
+    },false);
+    var removed=0;
+    ScriptApp.getProjectTriggers().forEach(function(trigger){
+      var handler=String(trigger.getHandlerFunction()||'');
+      if(handler===AURORA_CONTINUOUS_DRIVE_HANDLER
+        ||handler==='jobPrepararPipelineWMGJ'||handler==='jobProcessarFilaWMGJ') {
+        ScriptApp.deleteTrigger(trigger);removed++;
+      }
+    });
+    ScriptApp.newTrigger(AURORA_CONTINUOUS_DRIVE_HANDLER).timeBased().everyMinutes(15).create();
+    var state=auroraContinuousDriveCollectorState_();
+    if(state.target!==1||state.duplicateCollectors!==0) throw new Error('AURORA_CONTINUOUS_DRIVE_TRIGGER_CONFLICT');
+    result.ok=true;result.code='AURORA_CONTINUOUS_DRIVE_ACTIVATED';result.continuousExtraction=true;
+    result.sourceCount=scope.sources.length;result.triggerCount=1;result.duplicateCollectorsRemoved=removed;
+    result.runtimeScopeSha256=guarded.scopeSha256;
+    result.firstCycle=auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj();
+    return result;
+  } catch(error) {
+    var code=String(error&&error.message||'');
+    var allowed=['AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED',
+      'AURORA_CONTINUOUS_DRIVE_REQUEST_REJECTED','AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED',
+      'AURORA_CONTINUOUS_DRIVE_SOURCE_CONFLICT','AURORA_CONTINUOUS_DRIVE_TRIGGER_CONFLICT',
+      'AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING','AURORA_DRIVE_CONFIGURATION_INVALID',
+      'AURORA_DRIVE_SOURCE_UNAVAILABLE'];
+    result.code=allowed.indexOf(code)>=0?code:'AURORA_CONTINUOUS_DRIVE_ACTIVATION_FAILED';return result;
+  }
+}
+
+function auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj() {
+  var summary={ok:false,code:'AURORA_CONTINUOUS_DRIVE_CYCLE_PENDING',decisionId:AURORA_CONTINUOUS_DRIVE_DECISION,
+    scanExamined:0,queued:0,aliases:0,attempted:0,accepted:0,duplicates:0,pending:0,failed:0,review:0,
+    extractionErrors:0,sourceMutation:false,productionMutation:false,checkedAt:new Date().toISOString()};
+  try {
+    var authorizationDeadline=auroraContinuousDriveWindow_(),stored=auroraContinuousDriveScopeFromProperties_();
+    var scope=stored.scope,guarded=auroraContinuousDriveSystemGuard_(scope,stored.runtimeHash,true);
+    var props=PropertiesService.getScriptProperties(),resolved=auroraResolverFontesDocumentais_(props),state=auroraContinuousDriveCollectorState_();
+    if(!auroraContinuousDriveRegistryMatchesScope_(resolved,scope)
+      ||props.getProperty('WMGJ_FIRESTORE_DRY_RUN')!=='false'||props.getProperty('AURORA_FIRESTORE_MIRROR_REQUIRED')!=='true'
+      ||state.target!==1||state.duplicateCollectors!==0) throw new Error('AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID');
+    // Fail-safe two-phase gate: an activation created before this field existed
+    // defaults to remediation-only and therefore cannot enumerate more Drive items.
+    var phase=String(props.getProperty('AURORA_CONTINUOUS_DRIVE_PHASE')||'REMEDIATE_ONLY');
+    if(['REMEDIATE_ONLY','LIVE_ENUMERATION'].indexOf(phase)<0) throw new Error('AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID');
+    summary.phase=phase;
+    if(phase==='REMEDIATE_ONLY') {
+      summary.ok=true;summary.code='AURORA_CONTINUOUS_DRIVE_REMEDIATION_GATE';
+      try {props.setProperty('AURORA_CONTINUOUS_DRIVE_LAST_CYCLE',JSON.stringify(summary));} catch(ignoreGate){}
+      return summary;
+    }
+    if(typeof comTravaIngestaoGmailWMGJ_!=='function'||typeof auroraExecutarCicloDriveAutorizado_!=='function')
+      throw new Error('AURORA_DRIVE_DEPENDENCY_MISSING');
+    var deadline=Math.min(Date.now()+150000,authorizationDeadline-5000);
+    if(deadline<=Date.now()+15000) throw new Error('AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED');
+    var value=comTravaIngestaoGmailWMGJ_(function(){
+      var current=auroraContinuousDriveSystemGuard_(scope,guarded.scopeSha256,false);
+      return auroraExecutarCicloDriveAutorizado_({orgId:scope.orgId,sources:scope.sources,
+        sourceIds:scope.sources.map(function(s){return s.sourceId;}),fileIds:scope.fileIds,
+        excludedFolderIds:scope.excludedFolderIds,maxScan:scope.maxScan,limit:scope.limit,processLimit:Math.min(10,scope.limit),
+        scopeSha256:current.scopeSha256,configurationHash:current.scopeSha256,config:current.config,deadlineMs:deadline,
+        nonBlockingBacklog:true,
+        beforeRequest:function(){
+          if(Date.now()>=deadline) throw new Error('AURORA_DRIVE_DEADLINE_EXCEEDED');
+          auroraContinuousDriveSystemGuard_(scope,current.scopeSha256,false);
+        }});
+    });
+    var p=value&&value.process||{},scan=value&&value.scan||{};
+    summary.ok=!!value&&value.ok===true;summary.code=summary.ok?'AURORA_CONTINUOUS_DRIVE_CYCLE_VERIFIED':'AURORA_CONTINUOUS_DRIVE_CYCLE_PENDING';
+    summary.scanExamined=Number(scan.visited||0);summary.queued=Number(scan.enqueued||0);summary.aliases=Number(p.aliases||0);
+    summary.attempted=Number(p.attempted||0);summary.accepted=Number(p.accepted||0);summary.duplicates=Number(p.duplicates||0);
+    summary.pending=Number(p.pending||0);summary.failed=Number(p.blockingErrors||0);summary.review=Number(p.review||0);summary.extractionErrors=Number(p.errors||0);
+  } catch(error) {
+    var code=String(error&&error.message||'');
+    var allowed=['AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED','AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID',
+      'AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING','AURORA_DRIVE_CONFIGURATION_INVALID',
+      'AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_SOURCE_UNAVAILABLE','AURORA_DRIVE_DEADLINE_EXCEEDED'];
+    summary.code=allowed.indexOf(code)>=0?code:'AURORA_CONTINUOUS_DRIVE_CYCLE_FAILED';
+  }
+  try {PropertiesService.getScriptProperties().setProperty('AURORA_CONTINUOUS_DRIVE_LAST_CYCLE',JSON.stringify(summary));} catch(ignore){}
+  if(typeof registrarLogAutomacaoWMGJ_==='function') try {registrarLogAutomacaoWMGJ_(summary.ok?'OK':'ALERTA',AURORA_CONTINUOUS_DRIVE_HANDLER,summary);} catch(ignoreLog){}
+  return summary;
+}
+
+function auroraDriveRemediationDecision_(queueStatus,lastCode,attempts) {
+  var count=Number(attempts),pendingStatuses=['PENDENTE','PROCESSANDO','EXTRAINDO','CLASSIFICANDO','ERRO_REPROCESSAR','REVISAR_HUMANO'];
+  if(pendingStatuses.indexOf(queueStatus)<0) return null;
+  if(queueStatus==='REVISAR_HUMANO'&&(!lastCode||lastCode==='NOT_RECORDED'))
+    return {code:'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED',reason:'LEGACY_REVIEW_WITHOUT_RECORDED_CODE'};
+  if(queueStatus==='ERRO_REPROCESSAR'&&lastCode==='AURORA_DRIVE_CONVERSION_FAILED'
+    &&Number.isSafeInteger(count)&&count>=10)
+    return {code:'AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED',reason:'REPEATED_CONVERSION_FAILURE'};
+  return {code:'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED',reason:'OWNER_ACCEPTED_NON_BLOCKING_BACKLOG'};
+}
+
+function auroraSanearPendenciasDriveAutorizadas(request) {
+  var result={ok:false,code:'AURORA_DRIVE_REMEDIATION_PENDING',decisionId:AURORA_CONTINUOUS_DRIVE_DECISION,
+    changed:0,conversionRetryExhausted:0,legacyReasonRecorded:0,pending:0,justifiedHumanReview:0,
+    unjustifiedPending:0,sourceMutation:false,productionMutation:false};
+  try {
+    auroraConnectorReuseOwner_();auroraContinuousDriveWindow_();
+    if(!request||typeof request!=='object'||Array.isArray(request)
+      ||Object.keys(request).sort().join(',')!==['confirmation','expectedScopeSha256'].sort().join(',')
+      ||request.confirmation!==AURORA_CONTINUOUS_DRIVE_REMEDIATE_CONFIRMATION
+      ||request.expectedScopeSha256!==AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256)
+      throw new Error('AURORA_DRIVE_REMEDIATION_REQUEST_REJECTED');
+    var stored=auroraContinuousDriveScopeFromProperties_(),scope=stored.scope;
+    auroraContinuousDriveSystemGuard_(scope,stored.runtimeHash,true);
+    if(typeof comTravaIngestaoGmailWMGJ_!=='function'||typeof getPlanilhaWMGJ_Compat_!=='function'||typeof getConfigWMGJ_Compat_!=='function')
+      throw new Error('AURORA_DRIVE_DEPENDENCY_MISSING');
+    return comTravaIngestaoGmailWMGJ_(function(){
+      var ss=getPlanilhaWMGJ_Compat_(),fila=ss.getSheetByName(getConfigWMGJ_Compat_().SHEETS.FILA);
+      if(!fila) throw new Error('AURORA_DRIVE_QUEUE_CONTRACT');
+      var rows=fila.getDataRange().getValues(),idx=mapearCabecalhoWMGJ_Compat_(rows[0]);
+      for(var i=1;i<rows.length;i++) {
+        var row=rows[i],itemScope=auroraDriveScopeRead_(row[idx.OBSERVACAO]);
+        if(!itemScope||itemScope.orgId!==scope.orgId||itemScope.scopeSha256!==stored.runtimeHash) continue;
+        var proven=itemScope.receipt&&itemScope.receipt.replayVerified===true
+          &&itemScope.contentSha256===itemScope.receipt.contentHash&&itemScope.receipt.contentHash===itemScope.receipt.contentSha256;
+        if(proven||itemScope.coverage==='DUPLICATE_CONTENT') continue;
+        var decision=auroraDriveRemediationDecision_(String(row[idx.STATUS]),itemScope.lastCode,Number(row[idx.TENTATIVAS]||0));
+        if(decision) {
+          itemScope.previousLastCode=itemScope.lastCode||'NOT_RECORDED';itemScope.lastCode=decision.code;
+          itemScope.humanReviewJustified=true;itemScope.humanReviewReason=decision.reason;
+          itemScope.humanReviewJustifiedAt=new Date().toISOString();
+          atualizarLinhaFilaWMGJ_Compat_(fila,i+1,idx,{STATUS:'REVISAR_HUMANO',TENTATIVAS:Number(row[idx.TENTATIVAS]||0),
+            ULTIMO_ERRO:decision.code,OBSERVACAO:auroraDriveScopeWrite_(itemScope)});
+          result.changed++;
+          if(decision.code==='AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED') result.conversionRetryExhausted++;
+          else if(decision.code==='AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED') result.legacyReasonRecorded++;
+        }
+      }
+      var after=fila.getDataRange().getValues();
+      for(var r=1;r<after.length;r++) {
+        var finalScope=auroraDriveScopeRead_(after[r][idx.OBSERVACAO]);
+        if(!finalScope||finalScope.orgId!==scope.orgId||finalScope.scopeSha256!==stored.runtimeHash) continue;
+        var receipt=finalScope.receipt,provenFinal=receipt&&receipt.replayVerified===true
+          &&finalScope.contentSha256===receipt.contentHash&&receipt.contentHash===receipt.contentSha256;
+        if(provenFinal||finalScope.coverage==='DUPLICATE_CONTENT') continue;
+        result.pending++;
+        if(String(after[r][idx.STATUS])==='REVISAR_HUMANO'
+          &&['AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED','AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED',
+            'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED'].indexOf(finalScope.lastCode)>=0)
+          result.justifiedHumanReview++;
+        else result.unjustifiedPending++;
+      }
+      result.ok=result.unjustifiedPending===0;
+      result.code=result.ok?'AURORA_DRIVE_REMEDIATION_JUSTIFIED':'AURORA_DRIVE_REMEDIATION_INCOMPLETE';
+      return result;
+    });
+  } catch(error) {
+    var code=String(error&&error.message||'');
+    var allowed=['AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED',
+      'AURORA_DRIVE_REMEDIATION_REQUEST_REJECTED','AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID',
+      'AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING','AURORA_DRIVE_CONFIGURATION_INVALID',
+      'AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_SOURCE_UNAVAILABLE','AURORA_DRIVE_QUEUE_CONTRACT'];
+    result.code=allowed.indexOf(code)>=0?code:'AURORA_DRIVE_REMEDIATION_FAILED';return result;
+  }
+}
+
+function auroraLerStatusAlimentacaoContinuaDriveAutorizada(expectedScopeSha256) {
+  var result={ok:false,code:'AURORA_CONTINUOUS_DRIVE_STATUS_PENDING',decisionId:AURORA_CONTINUOUS_DRIVE_DECISION,
+    authorizationValid:false,sourceActive:false,sourceCount:0,triggerCount:0,duplicateCollectors:0,
+    privateScopeSha256:AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256,runtimeScopeSha256:null,lastCycle:null,
+    sourceMutation:false,productionMutation:false};
+  try {
+    auroraConnectorReuseOwner_();
+    if(expectedScopeSha256!==AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256) throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED');
+    var deadline=auroraContinuousDriveWindow_(),stored=auroraContinuousDriveScopeFromProperties_(),props=PropertiesService.getScriptProperties();
+    var resolved=auroraResolverFontesDocumentais_(props),state=auroraContinuousDriveCollectorState_();
+    result.authorizationValid=Date.now()<deadline;result.sourceCount=resolved.sources.length;
+    result.sourceActive=auroraContinuousDriveRegistryMatchesScope_(resolved,stored.scope);
+    result.triggerCount=state.target;result.duplicateCollectors=state.duplicateCollectors;result.runtimeScopeSha256=stored.runtimeHash;
+    var rawLast=props.getProperty('AURORA_CONTINUOUS_DRIVE_LAST_CYCLE');
+    if(rawLast) try {
+      var last=JSON.parse(rawLast);
+      result.lastCycle={ok:last.ok===true,code:String(last.code||'').slice(0,80),checkedAt:String(last.checkedAt||'').slice(0,40),
+        scanExamined:Number(last.scanExamined||0),queued:Number(last.queued||0),attempted:Number(last.attempted||0),
+        accepted:Number(last.accepted||0),duplicates:Number(last.duplicates||0),pending:Number(last.pending||0),
+        failed:Number(last.failed||0),review:Number(last.review||0),extractionErrors:Number(last.extractionErrors||0)};
+    } catch(ignoreLast) {}
+    result.ok=result.authorizationValid&&result.sourceActive&&result.triggerCount===1&&result.duplicateCollectors===0;
+    result.code=result.ok?'AURORA_CONTINUOUS_DRIVE_STATUS_VERIFIED':'AURORA_CONTINUOUS_DRIVE_STATUS_INCOMPLETE';
+  } catch(error) {
+    var code=String(error&&error.message||'');
+    var allowed=['AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED',
+      'AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED','AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID'];
+    result.code=allowed.indexOf(code)>=0?code:'AURORA_CONTINUOUS_DRIVE_STATUS_FAILED';
+  }
+  return result;
+}
+
