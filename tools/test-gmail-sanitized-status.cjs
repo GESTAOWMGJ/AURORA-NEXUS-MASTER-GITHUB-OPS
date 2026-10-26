@@ -105,3 +105,20 @@ test('deploy status logs and artifact select only the sanitized output, not raw 
   assert.ok(artifact.includes('path: ${{ runner.temp }}/connector-status.json'));
   assert.ok(!artifact.includes('raw.json') && !artifact.includes('*.json') && !artifact.includes('build-appscript'));
 });
+
+
+test('deploy treats the expired historical reuse preview as superseded only under the exact active Drive decision', () => {
+  const workflow = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'deploy-appscript.yml'), 'utf8').replace(/\r\n/g, '\n');
+  const preview = workflow.match(/      - name: Preview reuse of the existing WMGJ source without configuring or activating\n([\s\S]*?)(?=      - name:)/)?.[1];
+  assert.ok(preview);
+  assert.ok(preview.includes('node --test tools/test-aurora-wmgj-reuse-preview.cjs'));
+  assert.ok(preview.includes('AURORA-HML-CONTINUOUS-DRIVE-20261026'));
+  assert.ok(preview.includes('d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa'));
+  assert.ok(preview.includes('AURORA_CONNECTOR_REUSE_PREVIEW_SUPERSEDED'));
+  assert.ok(preview.includes('SUPERSEDED_BY_EXACT_SCOPE_CONTINUOUS_DECISION'));
+  assert.ok(preview.includes('historicalPreviewExecuted:false'));
+  assert.ok(preview.includes('sourceMutation:false'));
+  assert.ok(preview.includes('productionMutation:false'));
+  assert.ok(preview.includes('node tools/aurora-wmgj-reuse-preview.cjs'));
+  assert.ok(!/auroraConfigurar|instalarGatilho|auroraAtivarAlimentacaoContinuaDriveAutorizada/.test(preview));
+});
