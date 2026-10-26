@@ -531,3 +531,22 @@ test('nega membro inativo e coleção desconhecida', async () => {
     getDoc(doc(adminDb, 'organizations/wmgj/privateData/secret'))
   );
 });
+
+test('Personalité roles cannot inherit clinical/raw permissions or cross tenants; grants are server-only',async()=>{
+ const org='synthetic-practice',operation='profile-'+'d'.repeat(64);
+ for(const role of ['practice_owner','practice_reception','practice_finance','practice_editor','org_admin']){
+  const uid='practice-'+role;
+  await env.withSecurityRulesDisabled(async ctx=>{
+   const db=ctx.firestore();
+   await setDoc(doc(db,`organizations/${org}`),{active:true,profile:'PERSONALITE'});
+   await setDoc(doc(db,`organizations/${org}/members/${uid}`),member(role,{allFacilities:true,profileVersion:1,profileState:'READY',profileOperationId:operation,authEmail:'synthetic@example.invalid',permissions:['clinical.read','sources.raw.read','financial.read']}));
+   await setDoc(doc(db,`organizations/${org}/clinicalEvidence/test`),{facilityId:'facility-alpha'});
+   await setDoc(doc(db,`organizations/${org}/sourceDocuments/test`),{facilityId:'facility-alpha'});
+  });
+  const db=env.authenticatedContext(uid,{email:'synthetic@example.invalid',email_verified:true,auroraOrgId:org,auroraProfileVersion:1,auroraProfileOperation:operation,firebase:{sign_in_second_factor:'totp'}}).firestore();
+  await assertFails(getDoc(doc(db,`organizations/${org}/clinicalEvidence/test`)));
+  if(role!=='org_admin')await assertFails(getDoc(doc(db,`organizations/${org}/sourceDocuments/test`)));
+  await assertFails(getDoc(doc(db,'organizations/wmgj/sourceDocuments/source-alpha')));
+  await assertFails(setDoc(doc(db,`organizations/${org}/runtimeCheckpoints/practice-grant-fake`),{status:'APPROVED'}));
+ }
+});

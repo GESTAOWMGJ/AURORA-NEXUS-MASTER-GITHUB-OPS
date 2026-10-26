@@ -521,7 +521,7 @@ export function nativeRoutineSummary(): Record<string, unknown> {
 /** Abstract capability only. Registration grants no access and starts no executor. */
 export function personalitePolicy() {
   return {
-    routineId: "AURORA-PERSONALITE-001", version: "0.1.1",
+    routineId: "AURORA-PERSONALITE-001", version: "0.1.2",
     product: "AURORA NEXUS", profile: "PERSONALITE",
     professionalWorkspace: {
       capabilityId: "AURORA-PERSONALITE-WORKSPACE-001", version: "0.1.0",
@@ -551,11 +551,15 @@ export function personalitePolicy() {
       documentation: "docs/AURORA_PERSONALITE_PSYCHOLOGY_MEDIA_0_1_1.md"
     },
     psychologyPractice: {
-      state: "SPECIFIED_PENDING_TENANT_PROVISIONING",
+      state: "IMPLEMENTED_PENDING_HML_PROVISIONING",
       identityEngine: "AURORA-USER-PROFILES-001",
       workspaceScope: "DEDICATED_AUTHENTICATED_ORGANIZATION",
       roleDesign: ["PRACTICE_OWNER", "RECEPTION", "FINANCE", "CONTENT_EDITOR"],
-      roleMappingState: "PENDING_LEAST_PRIVILEGE_VALIDATION",
+      roleMappingState: "IMPLEMENTED_RESTRICTED_ADMINISTRATIVE_ROLES",
+      runtimeRoles: ["practice_owner", "practice_reception", "practice_finance", "practice_editor"],
+      provisioningEngine: "auroraPracticeProvisioning",
+      activationEvidence: "NOT_DEPLOYED",
+      genericClinicalPermissionAllowed: false,
       sharedCredentialsAllowed: false, passwordReturnedByApplication: false,
       verifiedEmailRequired: true, mfaRequired: true,
       existingAccountAdoptionByEmailAllowed: false,
@@ -588,7 +592,8 @@ export function personalitePolicy() {
       documentation: "docs/AURORA_PERSONALITE_PSYCHOLOGY_MEDIA_0_1_1.md"
     },
     state: "PROPOSED", executorState: "SPECIFIED_NOT_ACTIVATED",
-    implementationScope: "NATIVE_POLICY_REGISTRATION_AND_PURE_NPS_ARITHMETIC",
+    implementationScope: "NATIVE_POLICY_NPS_AND_ISOLATED_PRACTICE_PROVISIONING",
+    accessDocumentation: "docs/AURORA_PERSONALITE_ACCESS_0_1_2.md",
     modules: ["M01", "M02", "M03", "M05", "M06", "M07", "M09", "M10"],
     audience: "PROFESSIONALS_WITH_IMAGE_REPUTATION_NPS_AND_MASS_MEDIA_NEEDS",
     domains: ["OPPORTUNITIES", "CONTRACTS", "IMAGE_RIGHTS", "COMMUNICATION",

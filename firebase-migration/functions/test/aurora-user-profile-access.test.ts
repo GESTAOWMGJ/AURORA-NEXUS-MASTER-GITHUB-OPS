@@ -148,3 +148,23 @@ test('real onboarding handler consumes the UID-bound code once and only then per
   rows.get(memberPath).active=false;
   assert.equal((await f.invoke(auroraNexusSessionLogin,'POST',sessionBody)).status,403,'live revocation still closes session issuance');
 });
+
+test('Personalité session requires managed email/MFA and strips generic privileges before every API',async context=>{
+ const f=fixture(context);f.organization({profile:'PERSONALITE'});
+ f.member({role:'practice_owner',profileVersion:1,profileOperationId:operation,profileState:'READY',authEmail:email,permissions:['clinical.read','dashboard.read','financial.read']});
+ f.decoded({auroraProfileVersion:1,auroraProfileOperation:operation});
+ assert.deepEqual((await verifyAuroraAccess(cookie,email))?.permissions,[]);
+ assert.equal((await f.invoke(auroraNexusSessionLogin,'POST',{idToken:'synthetic',orgId:org})).status,204);
+ assert.equal((await f.invoke(auroraNexusUserProfiles,'GET')).status,200);
+ f.member({role:'practice_editor'});assert.equal((await f.invoke(auroraNexusUserProfiles,'GET')).status,403);
+ f.member({role:'org_admin'});assert.equal(await verifyAuroraAccess(cookie,email),null);
+ f.member({role:'practice_owner',active:false});assert.equal(await verifyAuroraAccess(cookie,email),null);
+});
+test('Personalité creation endpoint rejects malformed requests and CSRF before provisioning',async context=>{
+ const f=fixture(context);
+ for(const body of [{action:'CREATE_PRACTICE',grantId:'synthetic-grant-01',orgId:'wmgj'}, {action:'CREATE_PRACTICE',grantId:12}]){
+  assert.equal((await f.invoke(auroraNexusUserProfiles,'POST',body)).status,400);
+ }
+ assert.equal((await f.invoke(auroraNexusUserProfiles,'POST',{action:'CREATE_PRACTICE',grantId:'synthetic-grant-01'},{'x-aurora-csrf':''})).status,403);
+ assert.deepEqual(f.mutations,[]);
+});

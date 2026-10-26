@@ -1,8 +1,9 @@
+import { PRACTICE_ROLES } from "./auroraPracticePolicy.js";
 import { createHash } from "node:crypto";
 import { isCompanySlug } from "./auroraTenantEntry.js";
 
 export const PROFILE_VERSION = 1;
-export const PROFILE_ROLES = ["viewer", "operator", "auditor", "finance", "director", "org_admin"] as const;
+export const PROFILE_ROLES = ["viewer", "operator", "auditor", "finance", "director", "org_admin", ...PRACTICE_ROLES] as const;
 export type ProfileOnboarding = { jobTitle: string; duties: string[]; managerUid: string; welcomeDueHours: number };
 export type ProfileRequest = { requestId: string; email: string; displayName: string; role: string; allFacilities: boolean; facilityIds: string[]; onboarding?: ProfileOnboarding };
 export type ProfileActor = { uid: string; orgId: string; role: string; allFacilities: boolean; mfaVerified: boolean };
@@ -12,7 +13,7 @@ export class ProfileError extends Error {
 export function profileAdmin(actor: ProfileActor): boolean {
   return typeof actor.uid === "string" && actor.uid.length > 0 && actor.uid.length <= 128
     && !/[\/\x00-\x1f]/.test(actor.uid) && isCompanySlug(actor.orgId) && actor.allFacilities && actor.mfaVerified
-    && ["org_admin", "platform_admin"].includes(actor.role);
+    && ["org_admin", "platform_admin", "practice_owner"].includes(actor.role);
 }
 export function normalizeProfileRequest(raw: unknown): ProfileRequest {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new ProfileError("INVALID_PROFILE", 400);

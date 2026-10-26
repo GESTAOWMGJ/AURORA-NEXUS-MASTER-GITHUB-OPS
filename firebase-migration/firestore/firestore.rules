@@ -65,9 +65,14 @@ service cloud.firestore {
         && profile.role in roles;
     }
 
+    function practiceRole(profile) {
+      return profile.role in ['practice_owner', 'practice_reception', 'practice_finance', 'practice_editor'];
+    }
+
     function hasPermission(orgId, permission) {
       let profile = member(orgId);
       return activeMember(orgId)
+        && !practiceRole(profile)
         && profile.keys().hasAll(['permissions'])
         && profile.permissions is list
         && permission in profile.permissions;
@@ -116,9 +121,8 @@ service cloud.firestore {
     }
 
     function canReadClinical(orgId) {
-      return roleIn(orgId, [
-        'platform_admin', 'org_admin', 'auditor', 'medical_auditor'
-      ]) || hasPermission(orgId, 'clinical.read');
+      return (!('profile' in get(organizationPath(orgId)).data) || get(organizationPath(orgId)).data.profile != 'PERSONALITE')
+        && (roleIn(orgId, ['platform_admin', 'org_admin', 'auditor', 'medical_auditor']) || hasPermission(orgId, 'clinical.read'));
     }
 
     function canReadAudit(orgId) {

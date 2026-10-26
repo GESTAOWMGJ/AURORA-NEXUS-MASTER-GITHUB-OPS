@@ -1,3 +1,4 @@
+import { createPracticeProvisioner } from "./auroraPracticeProvisioning.js";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import { CSRF_PURPOSES, validCsrf, verifyAuroraAccess } from "./auroraAccess.js";
@@ -16,6 +17,7 @@ export const profileStore: ProfileStore = {
   }))
 };
 const engine = createProfileEngine(profileStore, auroraAuth);
+const provisionPractice = createPracticeProvisioner(profileStore, auroraAuth);
 const invitations = createOnboardingInvitationEngine(profileStore);
 const onboardingOrigins = new Set(["https://auroranexus.com.br", "https://wmgj-hml-jfn-20260927.web.app"]);
 export const auroraNexusUserProfiles = onRequest(
@@ -60,6 +62,9 @@ export const auroraNexusUserProfiles = onRequest(
       if (req.get("sec-fetch-site") && req.get("sec-fetch-site") !== "same-origin") throw new ProfileError("CROSS_SITE_REJECTED", 403);
       if (String(req.get("content-type") ?? "").split(";",1)[0]?.toLowerCase() !== "application/json") throw new ProfileError("UNSUPPORTED_MEDIA_TYPE", 415);
       if (!validCsrf(req.get("cookie"), req.get("x-aurora-csrf"), csrfSecret.value(), CSRF_PURPOSES.userProfile)) throw new ProfileError("CSRF_REJECTED", 403);
+      if (req.body?.action === "CREATE_PRACTICE" && Object.keys(req.body).every(k => ["action","grantId"].includes(k)) && typeof req.body.grantId === "string") {
+        res.json(await provisionPractice(actor, req.body.grantId)); return;
+      }
       if (req.body?.action === "CREATE") {
         const result = await engine.create(actor, req.body);
         const invitation = req.body.onboarding && result.onboardingState === "INVITED" ? await invitations.issue(actor, result.uid, req.body.requestId) : null;
