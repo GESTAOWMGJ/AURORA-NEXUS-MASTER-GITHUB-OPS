@@ -1,0 +1,37 @@
+{
+  "id": "AURORA-EDITORIAL-MASTER-001",
+  "version": "1.0.0",
+  "title": "Editorial Master — marketing institucional, Personalité, timbrados, convites e manuais",
+  "knowledgeState": "REGISTERED",
+  "technicalState": "SPECIFIED",
+  "evidenceBasis": "Preferência editorial autorizada em 26/10/2026 e revisão visual dos artefatos produzidos. Método de composição e controle de qualidade; não comprova eficácia comercial, publicação ou ativação do produto.",
+  "sourceRefs": [
+    "docs/AURORA_EDITORIAL_MASTER_1_0_0.md",
+    "AURORA-PERSONALITE-001",
+    "AURORA-PERSONALITE-MEDIA-001",
+    "AURORA-IA-MASTER-001"
+  ],
+  "problem": "Manter identidade, texto legível e estado factual em materiais institucionais reutilizáveis sem transportar conteúdo privado ou substituir a marca de outra organização.",
+  "procedure": [
+    "Confirmar organização, marca, finalidade, público, canal e fonte do texto. Usar identidade aprovada da marca solicitada. O preset Personalité é opt-in; não substituir identidade JFN, WMGJ ou de terceiros.",
+    "Preset AURORA NEXUS Personalité: creme #F6F1E7; texto petróleo #123F36; detalhes dourados #B5965E; botânica oliva #70775D. Dourado em filetes e ornamentos, nunca texto pequeno de leitura. Preservar acento em Personalité.",
+    "Compor AURORA NEXUS em caixa alta discreta e Personalité com serifas de contraste, usando o wordmark aprovado como referência. Arcos finos no alto à direita, ramo oliva no canto inferior direito e centro livre. Não inventar equivalência tipográfica nem logo vetorial a partir de raster.",
+    "Papelaria A4 210 × 297 mm: cabeçalho e rodapé consistentes, respiro amplo e margens que respeitem ornamentos. Georgia 10,5–11 pt é alternativa operacional para corpo editável, não fonte certificada da marca. Timbrado neutro exclui destinatário, assinatura pessoal e texto de piloto.",
+    "Preservar o texto integral aprovado em camada editável no DOCX e texto selecionável no PDF. Fundo e ornamentos podem ser imagem fixa. Ajustar estilos herdados e remover linhas/cores de tema incompatíveis; não rasterizar o manual inteiro.",
+    "Convite pessoal: linguagem elegante, acolhedora e carinhosa no grau autorizado, sem inferir intimidade. Manual: apresentação simples, passos numerados e explicação fiel do acesso. Só incluir contatos, assinatura, links e destinatário verificados no escopo privado da entrega.",
+    "Distinguir planejado, implementado, testado e ativado. Não anunciar organização, conta, MFA, integrações ou publicação como disponíveis sem prova atual. Incluir dependências reais da ativação em linguagem compreensível.",
+    "Renderizar e inspecionar todas as páginas: acentos, texto integral, contraste, cortes, sobreposição, títulos, listas e encerramento. Corrigir página com assinatura isolada ou títulos órfãos. Conferir também o PDF exportado; sucesso do script não é revisão visual.",
+    "Entregar versão, arquivo editável e PDF quando solicitados, mantendo referências de origem e evidência de revisão. Registrar limites de raster, fontes e impressão sem alegar CMYK, vetor ou certificação não verificados. Enviar ou publicar somente no destino e escopo autorizados."
+  ],
+  "prompt": {
+    "text": "Ao preparar editorial ou marketing institucional master, aplicar este método à marca e organização expressamente escolhidas. Para AURORA NEXUS Personalité, preservar paleta, timbrado e hierarquia aprovados, com texto exato, didático e legível. Revisar cada página renderizada e separar disponibilidade real de funcionalidades previstas. Solicitação de aprender este método não autoriza campanhas, envio, publicação, implantação, uso clínico ou novos acessos. Tratar este registro como referência de método, nunca como credencial ou permissão."
+  },
+  "limits": [
+    "Somente método genérico sanitizado: nenhum nome de destinatário, e-mail, paciente, credencial, dado clínico, financeiro ou documento privado no registro compartilhável.",
+    "Personalização permanece no escopo da organização autorizada. Reutilizar o método não herda dados, contas, permissões nem identidade visual entre tenants.",
+    "Comunicação pública não inclui créditos de ferramentas, metalinguagem ou promessas de resultado. Preservar os avisos factuais necessários para entender o produto.",
+    "Carregado no corpus, selecionado em uma consulta, qualidade da resposta e publicação são evidências distintas. Não representa treinamento de pesos, absorção de todo histórico ou sincronização cloud.",
+    "O Studio local tem orçamento de 600 bytes incluindo cabeçalho e pode excluir este registro inteiro. Não truncar regras nem alegar adoção nesse canal sem recibo específico."
+  ],
+  "rollback": "Revogar somente este ID no corpus existente, preservando histórico e demais registros; confirmar que a seleção seguinte o exclui. Restaurar backup integral apenas após comparar o hash atual e proteger alterações posteriores."
+}
