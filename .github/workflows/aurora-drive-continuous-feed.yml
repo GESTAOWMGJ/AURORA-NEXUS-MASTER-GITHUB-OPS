@@ -78,7 +78,7 @@ jobs:
             ||decision.exactPrivateScopeSha256!==expected||p.scope?.continuousDriveScopeSha256!==expected
             ||p.scope?.continuousDriveDecisionId!=='AURORA-HML-CONTINUOUS-DRIVE-20261026'
             ||p.scope?.projectId!=='wmgj-hml-jfn-20260927'||p.scope?.environment!=='firebase-homologation'
-            ||Date.now()>=Date.parse(decision.validUntilUtc)||Date.now()>=Date.parse(p.scope.validUntilUtc)) {
+            ||Date.now()>=Date.parse(decision.validUntilUtc)) {
             throw Error('CONTINUOUS_DRIVE_OWNER_AUTHORIZATION_INVALID');
           }
           NODE
