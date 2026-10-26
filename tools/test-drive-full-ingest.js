@@ -411,7 +411,7 @@ test('Excel conversion failure reports fixed codes and cleans only the temporary
   f.context.Drive={Files:{copy:()=>({id:temporary.getId(),mimeType:f.context.MimeType.GOOGLE_SHEETS})}};
   f.context.SpreadsheetApp.openById=()=>{throw Error('Service unavailable: PRIVATE_FILE_NAME PRIVATE_SOURCE_ID');};
   let result=f.realExtract(original);
-  assert.equal(result.ok,false);assert.equal(result.code,'AURORA_DRIVE_CONVERSION_NOT_READY');assert.deepEqual(trashed,[true]);
+  assert.equal(result.ok,false);assert.equal(result.code,'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE');assert.deepEqual(trashed,[true]);
   assert.equal(result.observacao.includes('PRIVATE_'),false);
   f.context.Drive.Files.copy=()=>{throw Error('User quota exceeded PRIVATE_FILE_NAME');};
   result=f.realExtract(original);assert.equal(result.code,'AURORA_DRIVE_EXTRACTION_QUOTA');
@@ -501,8 +501,8 @@ test('PDF OCR validates the converted identity and MIME before reading or cleani
 
 test('PDF copy and document-read failures remain pending with sanitized stage codes',()=>{
   const cases=[
-    {options:{copyError:'Service unavailable PRIVATE_FILE_NAME PRIVATE_SOURCE_ID'},code:'AURORA_DRIVE_CONVERSION_FAILED',temporary:false},
-    {options:{readError:'Service unavailable PRIVATE_FILE_NAME PRIVATE_SOURCE_ID'},code:'AURORA_DRIVE_CONVERSION_NOT_READY',temporary:true},
+    {options:{copyError:'Service unavailable PRIVATE_FILE_NAME PRIVATE_SOURCE_ID'},code:'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE',temporary:false},
+    {options:{readError:'Service unavailable PRIVATE_FILE_NAME PRIVATE_SOURCE_ID'},code:'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE',temporary:true},
     {options:{copyError:'User quota exceeded PRIVATE_FILE_NAME'},code:'AURORA_DRIVE_EXTRACTION_QUOTA',temporary:false}
   ];
   for(const item of cases) {
@@ -748,4 +748,31 @@ test('damaged or unconfirmed provider output remains pending and cleanup never t
   const deferred=bounded.f.context.auroraConverterTextoProviderDrive_(bounded.file,Date.now()+1000);
   assert.equal(deferred.ok,false);assert.equal(deferred.code,'AURORA_DRIVE_CONVERSION_DEFERRED');
   assert.equal(bounded.copies.length,0);assert.equal(bounded.trashed.length,0);
+});
+
+
+test('Excel conversion rejects source identity and malformed identities before read or cleanup',()=>{
+  for(const response of [null,{}, {id:'bad'}, {id:42},
+    {id:'fileexcel0001',mimeType:'application/vnd.google-apps.spreadsheet'},
+    {id:'temporarysheet01',mimeType:'application/pdf'}]) {
+    const f=fixture(),trashed=[],opened=[];
+    const original=f.addFile('fileexcel0001',null,'synthetic workbook','application/vnd.ms-excel');
+    original.setTrashed=value=>trashed.push(['ORIGINAL',value]);
+    const temporary=f.addFile('temporarysheet01',null);
+    temporary.setTrashed=value=>trashed.push([temporary.getId(),value]);
+    f.context.Drive={Files:{copy:()=>response}};
+    f.context.SpreadsheetApp.openById=id=>{opened.push(id);throw Error('UNEXPECTED_READ');};
+    const result=f.realExtract(original);
+    assert.equal(result.ok,false);assert.equal(result.code,'AURORA_DRIVE_CONVERSION_UNSUPPORTED');
+    assert.deepEqual(opened,[]);
+    assert.deepEqual(trashed,response?.id===temporary.getId()?[[temporary.getId(),true]]:[]);
+  }
+});
+
+test('provider error classification preserves unknown causes and authorization priority',()=>{
+  const f=fixture(),classify=f.context.auroraCodigoFalhaExtracaoDrive_;
+  for(const message of ['Service unavailable PRIVATE','Backend Error PRIVATE','Internal server error PRIVATE'])
+    assert.equal(classify(Error(message),'AURORA_DRIVE_CONVERSION_FAILED'),'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE');
+  assert.equal(classify(Error('Permission denied; service unavailable'),'AURORA_DRIVE_CONVERSION_FAILED'),'AURORA_DRIVE_EXTRACTION_AUTH_FAILED');
+  assert.equal(classify(Error('Opaque PRIVATE failure'),'AURORA_DRIVE_CONVERSION_FAILED'),'AURORA_DRIVE_CONVERSION_FAILED');
 });

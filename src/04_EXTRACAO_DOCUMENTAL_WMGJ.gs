@@ -353,6 +353,8 @@ function auroraCodigoFalhaExtracaoDrive_(error, fallback) {
     return 'AURORA_DRIVE_EXTRACTION_QUOTA';
   if(/(?:conversion|convert).*(?:unsupported|not supported)|cannot convert/i.test(message))
     return 'AURORA_DRIVE_CONVERSION_UNSUPPORTED';
+  if(/\bservice unavailable\b|\bbackend error\b|\binternal server error\b/i.test(message))
+    return 'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE';
   return allowed.indexOf(fallback)>=0?fallback:'AURORA_DRIVE_CONTENT_READ_FAILED';
 }
 
@@ -575,13 +577,16 @@ function extrairConteudoArquivoWMGJ_V1_(file,deadlineMs) {
 function converterArquivoParaGoogleSheetsWMGJ_V1_(file) {
   if(typeof Drive==='undefined' || !Drive.Files || typeof Drive.Files.copy!=='function')
     return {ok:false,code:'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE'};
-  var copyId='',fallback='AURORA_DRIVE_CONVERSION_FAILED';
+  var copyId='',originalId='',fallback='AURORA_DRIVE_CONVERSION_FAILED';
   try {
+    originalId=file.getId();
     // Drive v2 files.copy explicitly supports conversion to the matching editor.
     var copy=Drive.Files.copy({title:'WMGJ_SHEETS_TMP_'+file.getName(),mimeType:MimeType.GOOGLE_SHEETS},
-      file.getId(),{convert:true});
-    copyId=copy && copy.id || '';
-    if(!copyId || copy.mimeType!==MimeType.GOOGLE_SHEETS) throw new Error('AURORA_DRIVE_CONVERSION_UNSUPPORTED');
+      originalId,{convert:true});
+    if(!copy || typeof copy.id!=='string' || !/^[A-Za-z0-9_-]{10,200}$/.test(copy.id) || copy.id===originalId)
+      throw new Error('AURORA_DRIVE_CONVERSION_UNSUPPORTED');
+    copyId=copy.id;
+    if(copy.mimeType!==MimeType.GOOGLE_SHEETS) throw new Error('AURORA_DRIVE_CONVERSION_UNSUPPORTED');
     fallback='AURORA_DRIVE_CONVERSION_NOT_READY';
     Utilities.sleep(1500);
     var text=extrairTextoGoogleSheetsWMGJ_V1_(copyId);
@@ -590,7 +595,7 @@ function converterArquivoParaGoogleSheetsWMGJ_V1_(file) {
   } catch(error) {
     return {ok:false,code:auroraCodigoFalhaExtracaoDrive_(error,fallback)};
   } finally {
-    if(copyId) {try {DriveApp.getFileById(copyId).setTrashed(true);} catch(ignoreCleanup) {}}
+    if(copyId && copyId!==originalId) {try {DriveApp.getFileById(copyId).setTrashed(true);} catch(ignoreCleanup) {}}
   }
 }
 
