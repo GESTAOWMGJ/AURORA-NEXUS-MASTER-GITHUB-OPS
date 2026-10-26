@@ -857,3 +857,13 @@ a instalação de um conector e não comprova cobertura integral do Drive. Clien
 offline conservam seu estado pendente. Capacidade e limites são representados na
 rotina `AURORA-PROJECTION-ENGINE`; contrato e provas da entrega constam em
 `docs/AURORA_BETA_DOCUMENT_PROJECTION_20261023.md`.
+
+## Investigação offline de pendências Drive — 26/10/2026
+
+Distribuições marginais por erro/estado/mídia não permitem classificar cada pendência.
+O diagnóstico candidato preserva cruzamento de labels fechados e códigos ZIP, sem IDs;
+erros explícitos de indisponibilidade mantêm código próprio. Conversão Excel valida
+identidade distinta antes de ler/limpar cópia. Capacidade no mesmo pipeline legado,
+sem rotina ou scheduler novo, sem promover aprendizagem como resultado real.
+Evidência, testes, limites e gates em
+[Investigação READBACK](AURORA_DRIVE_PENDING_INVESTIGATION_20261026.md).

@@ -262,7 +262,7 @@ test('all pending pages are counted once without publishing identifiers or free-
   assert.equal(coverage.allReceiptsVerified,true);assert.equal(coverage.pending,2);
   assert.deepEqual(coverage.pendingDiagnostics,{schemaVersion:'aurora.drive-pending-diagnostics.v1',queueMetadataOnly:true,
     count:2,byCode:{AURORA_DRIVE_CONVERSION_UNSUPPORTED:1,UNKNOWN:1},byStatus:{ERRO_REPROCESSAR:2},
-    byMediaType:{PDF:2},unknownSourceVersion:1,unknownAttempts:1,totalRecordedAttempts:3});
+    byMediaType:{PDF:2},byCodeStatusMediaType:{'AURORA_DRIVE_CONVERSION_UNSUPPORTED|ERRO_REPROCESSAR|PDF':1,'UNKNOWN|ERRO_REPROCESSAR|PDF':1},unknownSourceVersion:1,unknownAttempts:1,totalRecordedAttempts:3});
   assert.ok(!JSON.stringify(coverage).includes('synthetic-pending'));assert.ok(!JSON.stringify(coverage).includes('SECRET'));
 });
 test('pending coverage rejects omitted rows, repeated identities, and overlap with a later primary or alias',async()=>{
@@ -326,4 +326,21 @@ test('READBACK-only recovers the existing canonical document and every alias wit
   assert.deepEqual(requests.map(x=>x.mode),['READBACK','READBACK']);assert.equal(canonicalReads,1);
   assert.equal(result.coverage.canonicalDocumentsVerified,1);assert.equal(result.coverage.aliasReferencesVerified,1);
   assert.equal(result.coverage.pendingDiagnostics.count,0);assert.equal(result.coverage.allReceiptsVerified,true);
+});
+
+
+test('joint diagnostics retain code/status/media correlation and ZIP fixed errors',async()=>{
+  const rows=[
+    pendingRow('synthetic-pending-a',{code:'AURORA_ZIP_EXTRACTION_FAILED',mediaType:'ZIP'}),
+    pendingRow('synthetic-pending-b',{code:'NOT_RECORDED',queueStatus:'REVISAR_HUMANO',mediaType:'OTHER'}),
+    pendingRow('synthetic-pending-c',{code:'AURORA_ZIP_EXTRACTION_FAILED',mediaType:'ZIP'})];
+  const coverage=await verifyCoverage(async offset=>{
+    const page=pendingPage(offset,rows.length);page.privatePendingRows=[rows[offset]];return page;
+  },()=>{throw Error('UNEXPECTED_CANONICAL_READ');});
+  assert.deepEqual(coverage.pendingDiagnostics.byCodeStatusMediaType,{
+    'AURORA_ZIP_EXTRACTION_FAILED|ERRO_REPROCESSAR|ZIP':2,'NOT_RECORDED|REVISAR_HUMANO|OTHER':1});
+  assert.equal(Object.values(coverage.pendingDiagnostics.byCodeStatusMediaType).reduce((a,b)=>a+b,0),3);
+  for(const code of ['AURORA_ZIP_EXTRACTION_FAILED','AURORA_ZIP_ENTRY_LIMIT','AURORA_ZIP_UNCOMPRESSED_SIZE_LIMIT'])
+    assert.equal(sanitizePendingRow(pendingRow(undefined,{code,mediaType:'ZIP'})).code,code);
+  assert.equal(JSON.stringify(coverage).includes('synthetic-pending'),false);
 });

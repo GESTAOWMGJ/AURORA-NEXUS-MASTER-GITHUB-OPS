@@ -175,7 +175,7 @@ async function verifyCoverage(getPage,verifyPlan) {
   let offset=0,expectedTotals=null,pages=0,returned=0;
   const verified=new Map(),aliases=new Map(),sourceIds=new Set(),pendingIds=new Set();
   const pendingDiagnostics={schemaVersion:'aurora.drive-pending-diagnostics.v1',queueMetadataOnly:true,
-    count:0,byCode:{},byStatus:{},byMediaType:{},unknownSourceVersion:0,unknownAttempts:0,totalRecordedAttempts:0};
+    count:0,byCode:{},byStatus:{},byMediaType:{},byCodeStatusMediaType:{},unknownSourceVersion:0,unknownAttempts:0,totalRecordedAttempts:0};
   for(;;){
     const value=await getPage(offset),c=value?.coverage;
     if(value?.ok!==true||value.code!=='AURORA_DRIVE_READBACK_PLAN'||!c
@@ -210,6 +210,9 @@ async function verifyCoverage(getPage,verifyPlan) {
       pendingDiagnostics.count++;
       for(const [group,key] of [['byCode','code'],['byStatus','queueStatus'],['byMediaType','mediaType']])
         pendingDiagnostics[group][item[key]]=(pendingDiagnostics[group][item[key]]||0)+1;
+      // Closed labels only; preserve correlations without publishing row identities.
+      const jointKey=[item.code,item.queueStatus,item.mediaType].join('|');
+      pendingDiagnostics.byCodeStatusMediaType[jointKey]=(pendingDiagnostics.byCodeStatusMediaType[jointKey]||0)+1;
       if(item.sourceVersion===null)pendingDiagnostics.unknownSourceVersion++;
       if(item.attempts===null)pendingDiagnostics.unknownAttempts++;
       else pendingDiagnostics.totalRecordedAttempts+=item.attempts;
@@ -239,6 +242,7 @@ const pendingCodes=new Set(['NOT_RECORDED','UNKNOWN','FIRESTORE_INGEST_FAILED','
   'AURORA_DRIVE_SOURCE_MOVED','AURORA_DRIVE_SOURCE_REVOKED','AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT',
   'AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING',
   'AURORA_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_DEADLINE_EXCEEDED',
+  'AURORA_ZIP_EXTRACTION_FAILED','AURORA_ZIP_ENTRY_LIMIT','AURORA_ZIP_UNCOMPRESSED_SIZE_LIMIT',
   'CONFIG_FIRESTORE_INCOMPLETA','EVENTO_FIRESTORE_INVALIDO','HMAC_SECRET_HEX_INVALIDO','HMAC_SECRET_BYTES_INVALIDO']);
 function sanitizePendingRow(row){
   if(!row||!id(row.fileId)||!(row.sourceVersion===null||Number.isSafeInteger(row.sourceVersion)&&row.sourceVersion>0)
