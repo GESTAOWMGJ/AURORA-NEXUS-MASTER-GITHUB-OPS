@@ -44,3 +44,7 @@ segurança, paridade servidor/browser e sintaxe do script renderizado.
 Código e testes têm provas separadas de CI, integração, implantação e uso real.
 Não há garantia de inexistência de bugs. Rollback: reverter o patch; os campos
 canônicos completos e os documentos de origem foram preservados.
+
+Validação no Windows Xeon: compilação TypeScript aprovada e 161 testes aprovados
+no candidato `b21326effb274e9d03296b7a2eef15ebf6cf6f03`, incluindo dez regressões
+novas. A reconciliação posterior com a main preserva os arquivos do motor testados.
