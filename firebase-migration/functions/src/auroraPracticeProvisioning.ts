@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { createProfileEngine, type ProfileStore, type ProfileAuth, type ProfileTx } from './auroraUserProfiles.js';
-import { ProfileError, profileAdmin, normalizeProfileRequest, type ProfileActor } from './auroraUserProfilePolicy.js';
+import { ProfileError, profileAdmin, normalizeProfileRequest, profileIdentity, type ProfileActor } from './auroraUserProfilePolicy.js';
 import { isCompanySlug } from './auroraTenantEntry.js';
 
 /** Grants are server-only, independently reviewed records, never request-supplied assertions.
  * Stored in existing runtimeCheckpoints; no new database or email-based account adoption. */
 export function createPracticeProvisioner(store: ProfileStore, auth: ProfileAuth, clock = Date.now) {
-  return async function provision(actor: ProfileActor, grantId: string) {
+  async function context(actor: ProfileActor, grantId: string) {
     if (!profileAdmin(actor) || actor.role === 'practice_owner' || !/^[a-zA-Z0-9_-]{16,80}$/.test(grantId)) throw new ProfileError('PRACTICE_PROVISIONER_REQUIRED', 403);
     const grantPath = `organizations/${actor.orgId}/runtimeCheckpoints/practice-grant-${grantId}`;
     const readGrant = async (tx: ProfileTx) => {
@@ -42,6 +42,30 @@ export function createPracticeProvisioner(store: ProfileStore, auth: ProfileAuth
           || !['PENDING','READY'].includes(org.provisioningState) || org.active !== (org.provisioningState === 'READY'))) throw new ProfileError('PRACTICE_ORGANIZATION_CONFLICT');
       return org;
     };
+    return {grant, base, binding, authorize};
+  }
+  async function read(actor: ProfileActor, grantId: string) {
+    const {grant, base, authorize} = await context(actor, grantId);
+    const identity = profileIdentity({...actor,orgId:grant.orgId}, normalizeProfileRequest({action:'CREATE',requestId:grantId,
+      email:grant.email,displayName:grant.displayName,role:'practice_owner',allFacilities:true,facilityIds:[]}));
+    return store.transaction(async tx => {
+      const org = await authorize(tx);
+      const member = org ? await tx.read(`${base}/members/${identity.uid}`) : undefined;
+      const ready = org?.provisioningState === 'READY' && member?.active === true
+        && member.role === 'practice_owner' && member.profileState === 'READY'
+        && member.profileOperationId === identity.operationId && member.profileFingerprint === identity.fingerprint
+        && member.profileVersion === 1 && member.authEmail === grant.email.trim().toLowerCase()
+        && member.allFacilities === true && member.mfaRequired === true
+        && Array.isArray(member.permissions) && member.permissions.length === 0
+        && Array.isArray(member.facilityIds) && member.facilityIds.length === 0;
+      return {ok:true, schemaVersion:'aurora.webapp-sync.v1', engineVersion:'0.1.3', orgId:grant.orgId,
+        state:!org ? 'NOT_STARTED' : ready ? 'READY' : org.provisioningState === 'PENDING' ? 'IN_PROGRESS' : 'REQUIRES_REVIEW',
+        profileVersion:org?.profileVersion ?? null, loginPath:'/portal',
+        loginVerified:false, clinicalAccess:false, observedAtUtc:new Date(clock()).toISOString()};
+    });
+  }
+  async function provision(actor: ProfileActor, grantId: string) {
+    const {grant, base, binding, authorize} = await context(actor, grantId);
     await store.transaction(async tx => {
       const org = await authorize(tx);
       if (!org) tx.create(base, { active:false, profile:'PERSONALITE', profileVersion:'0.1.2',
@@ -63,6 +87,8 @@ export function createPracticeProvisioner(store: ProfileStore, auth: ProfileAuth
           ownerUid:result.uid, entityRef:grant.entityRef, professionalRef:grant.professionalRef, atUtc:new Date(clock()).toISOString()});
       }
     });
-    return {...result, loginPath:'/portal', profileVersion:'0.1.2', clinicalAccess:false};
-  };
+    return {...result, loginPath:'/portal', profileVersion:'0.1.2', clinicalAccess:false,
+      synchronization:await read(actor, grantId)};
+  }
+  return Object.assign(provision,{read});
 }

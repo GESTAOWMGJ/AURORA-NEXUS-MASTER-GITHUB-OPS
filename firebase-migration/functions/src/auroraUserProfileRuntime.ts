@@ -24,6 +24,8 @@ export const auroraNexusUserProfiles = onRequest(
   { cors: false, timeoutSeconds: 120, secrets: [allowedEmails, csrfSecret] },
   async (req, res) => {
     res.set("Cache-Control", "no-store");
+    res.set("Vary", "Cookie");
+    res.set("Referrer-Policy", "no-referrer");
     res.set("X-Content-Type-Options", "nosniff");
     res.set("X-Frame-Options", "DENY");
     // A new professional has no Aurora session until the UID-bound invitation is consumed.
@@ -47,9 +49,13 @@ export const auroraNexusUserProfiles = onRequest(
     if (!profileAdmin(actor)) { res.status(403).json({ ok: false, code: "PROFILE_ADMIN_MFA_REQUIRED" }); return; }
     try {
       if (req.method === "GET") {
+        if (req.query?.practiceGrantId !== undefined) {
+          if (Object.keys(req.query).length !== 1 || typeof req.query.practiceGrantId !== 'string') throw new ProfileError('INVALID_SYNC_REQUEST',400);
+          res.json(await provisionPractice.read(actor,req.query.practiceGrantId)); return;
+        }
         const org = await auroraDb.doc(`organizations/${actor.orgId}`).get();
         const rows = await auroraDb.collection(`organizations/${actor.orgId}/members`).limit(101).get();
-        res.json({ ok: true, orgId: actor.orgId, currentAdminUid: actor.uid, engineEnabled: org.data()?.userProfilesEnabled === true, truncated: rows.size > 100, profiles: rows.docs.slice(0,100).map(doc => {
+        res.json({ ok: true, schemaVersion: 'aurora.webapp-sync.v1', engineVersion: '0.1.3', orgId: actor.orgId, currentAdminUid: actor.uid, engineEnabled: org.data()?.userProfilesEnabled === true, truncated: rows.size > 100, profiles: rows.docs.slice(0,100).map(doc => {
           const data = doc.data();
           return { uid: doc.id, name: data.displayName ?? "Usuário", role: data.role, active: data.active === true,
             jobTitle: data.onboarding?.jobTitle ?? null, managerUid: data.onboarding?.managerUid ?? null,

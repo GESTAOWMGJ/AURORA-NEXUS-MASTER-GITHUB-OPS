@@ -1,5 +1,14 @@
 # AURORA NEXUS — progresso até a versão vendável
 
+## Sincronizador do web app 0.1.3 — 26/10/2026
+
+Personalité permanece no fluxo de perfis existente, agora com readback autenticado
+e versionado e consulta de cadastro após interrupção. Reconciliado com main
+`5a89a766111a2942977198fbdacccbb2c0e8432f`; sem novo tenant real ou ingestão.
+Contrato e rollback: [AURORA_WEBAPP_SYNC_0_1_3](AURORA_WEBAPP_SYNC_0_1_3.md).
+O gate de primeiro acesso, TOTP real e implantação protegida permanece separado
+do resultado de código/CI. Cadastro READY não declara sincronização documental.
+
 ## Entrega vigente HML — 25/10/2026
 
 Registro canônico operacional: [AURORA-HML-DELIVERY-20261025-R1](AURORA_HML_DELIVERY_20261025_R1.md), com manifesto legível por máquina em [JSON](AURORA_HML_DELIVERY_20261025_R1.json).

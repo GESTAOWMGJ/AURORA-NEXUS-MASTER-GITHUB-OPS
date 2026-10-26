@@ -6,9 +6,20 @@ export function userProfileSection(): string {
 }
 export function userProfileClient(): string {
   return `
+async function syncPracticeStatus() {
+ const s=document.getElementById('practice-status'),grantId=document.getElementById('practice-grant').value;
+ if(sessionBlocked||!capabilities.manageProfiles)return;
+ const r=await fetch('/api/user-profiles?practiceGrantId='+encodeURIComponent(grantId),{credentials:'same-origin',cache:'no-store'});
+ if(r.status===401){stopSessionView();return;}
+ const d=await r.json();if(sessionBlocked)return;if(!r.ok)throw Error('SYNC_UNAVAILABLE');
+ const labels={NOT_STARTED:'Cadastro ainda não iniciado.',IN_PROGRESS:'Cadastro em andamento. Repetir com a mesma referência retoma a operação.',READY:'Organização cadastrada. A titular deve definir a senha, confirmar o e-mail e configurar MFA em /portal.',REQUIRES_REVIEW:'O vínculo do cadastro precisa de revisão. Outros cadastros continuam disponíveis.'};
+ s.textContent=(labels[d.state]||'Estado não reconhecido. Atualize o portal.')+' Última consulta: '+new Date(d.observedAtUtc).toLocaleString('pt-BR');
+}
+const practiceForm=document.getElementById('practice-create');
+if(practiceForm){const check=document.createElement('button');check.type='button';check.className='btn';check.textContent='Conferir cadastro';check.onclick=async()=>{check.disabled=true;try{await syncPracticeStatus();}catch{document.getElementById('practice-status').textContent='Consulta indisponível. Nenhum novo cadastro foi enviado.';}finally{check.disabled=false;}};practiceForm.appendChild(check);}
 document.getElementById('practice-create')?.addEventListener('submit',async e=>{
  e.preventDefault();const b=e.target.querySelector('button'),s=document.getElementById('practice-status');b.disabled=true;
- try{const r=await fetch('/api/user-profiles',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Aurora-CSRF':csrf.userProfile},body:JSON.stringify({action:'CREATE_PRACTICE',grantId:document.getElementById('practice-grant').value})});const d=await r.json();if(!r.ok)throw Error();s.textContent='Organização cadastrada: '+d.orgId+'. A titular deve iniciar o acesso em /portal, definir senha por e-mail e configurar MFA.';}catch{s.textContent='Cadastro não confirmado. Confira a validação e o estado da operação antes de repetir.';}finally{b.disabled=false;}
+ try{const r=await fetch('/api/user-profiles',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Aurora-CSRF':csrf.userProfile},body:JSON.stringify({action:'CREATE_PRACTICE',grantId:document.getElementById('practice-grant').value})});if(!r.ok)throw Error();await syncPracticeStatus();}catch{try{await syncPracticeStatus();}catch{s.textContent='Cadastro não confirmado. Use Conferir cadastro para consultar antes de retomar com a mesma referência.';}}finally{b.disabled=false;}
 });
 let profileRequest = null, profileSignature = null;
 const profileStatus = document.getElementById('profile-status');
