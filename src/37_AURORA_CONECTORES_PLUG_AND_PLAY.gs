@@ -1415,6 +1415,109 @@ function auroraPromoverAlimentacaoContinuaDriveAutorizada(request) {
   }
 }
 
+var AURORA_CONTINUOUS_DRIVE_RETRY_DIAGNOSIS_CONFIRMATION = 'DIAGNOSE_ORIGINAL_DRIVE_CONVERSION_RETRIES';
+var AURORA_CONTINUOUS_DRIVE_RETRY_REOPEN_CONFIRMATION = 'REOPEN_ORIGINAL_DRIVE_CONVERSION_RETRIES';
+
+function auroraDriveConversionRetryCandidates_(rows,idx,runtimeHash) {
+  var items=[];
+  for(var i=1;i<rows.length;i++) {
+    var scope=auroraDriveScopeRead_(rows[i][idx.OBSERVACAO]),status=String(rows[i][idx.STATUS]||'');
+    if(!scope||scope.orgId!=='wmgj'||scope.scopeSha256!==runtimeHash||scope.coverage!=='PENDING_EXTRACTION'
+      ||scope.receipt||scope.aliasFileId||scope.contentSha256||scope.textSha256||status!=='REVISAR_HUMANO'
+      ||scope.humanReviewJustified!==true||scope.lastCode!=='AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED'
+      ||scope.previousLastCode!=='AURORA_DRIVE_CONVERSION_FAILED') continue;
+    var attempts=Number(rows[i][idx.TENTATIVAS]||0);
+    if(!Number.isSafeInteger(attempts)||attempts<1||attempts>1000
+      ||typeof scope.fileId!=='string'||!/^[A-Za-z0-9_-]{10,200}$/.test(scope.fileId)
+      ||rows[i][idx.ID_ORIGEM]!==scope.fileId||typeof scope.sourceVersion!=='string'
+      ||!/^[1-9][0-9]{0,15}$/.test(scope.sourceVersion)) throw new Error('AURORA_DRIVE_QUEUE_SCOPE_INVALID');
+    items.push({row:i+1,fileId:scope.fileId,sourceVersion:scope.sourceVersion,attempts:attempts,scope:scope});
+  }
+  items.sort(function(a,b){return a.fileId<b.fileId?-1:a.fileId>b.fileId?1:a.row-b.row;});
+  var fingerprint=auroraConnectorReuseSha_(JSON.stringify(items.map(function(item){
+    return {fileId:item.fileId,sourceVersion:item.sourceVersion,attempts:item.attempts};
+  })));
+  return {items:items,count:items.length,candidateSetSha256:fingerprint,
+    totalRecordedAttempts:items.reduce(function(sum,item){return sum+item.attempts;},0)};
+}
+
+function auroraDiagnosticarFalhasConversaoDriveAutorizadas(expectedScopeSha256) {
+  var result={ok:false,code:'AURORA_DRIVE_CONVERSION_RETRY_DIAGNOSTIC_PENDING',decisionId:AURORA_CONTINUOUS_DRIVE_DECISION,
+    privateScopeSha256:AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256,runtimeScopeSha256:null,candidateCount:0,
+    candidateSetSha256:null,totalRecordedAttempts:0,queueMetadataOnly:true,sourceMutation:false,productionMutation:false};
+  try {
+    auroraConnectorReuseOwner_();auroraContinuousDriveWindow_();
+    if(expectedScopeSha256!==AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256)
+      throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED');
+    var stored=auroraContinuousDriveScopeFromProperties_(),scope=stored.scope;
+    auroraContinuousDriveSystemGuard_(scope,stored.runtimeHash,true);
+    var sheet=getPlanilhaWMGJ_Compat_().getSheetByName(getConfigWMGJ_Compat_().SHEETS.FILA);
+    if(!sheet) throw new Error('AURORA_DRIVE_QUEUE_CONTRACT');
+    var rows=sheet.getDataRange().getValues(),idx=mapearCabecalhoWMGJ_Compat_(rows[0]);
+    var candidates=auroraDriveConversionRetryCandidates_(rows,idx,stored.runtimeHash);
+    result.runtimeScopeSha256=stored.runtimeHash;result.candidateCount=candidates.count;
+    result.candidateSetSha256=candidates.candidateSetSha256;result.totalRecordedAttempts=candidates.totalRecordedAttempts;
+    result.ok=true;result.code='AURORA_DRIVE_CONVERSION_RETRY_DIAGNOSTIC_VERIFIED';
+  } catch(error) {
+    var code=String(error&&error.message||'');
+    var allowed=['AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED',
+      'AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED','AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID',
+      'AURORA_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_SOURCE_UNAVAILABLE',
+      'AURORA_DRIVE_QUEUE_CONTRACT','AURORA_DRIVE_QUEUE_SCOPE_INVALID'];
+    result.code=allowed.indexOf(code)>=0?code:'AURORA_DRIVE_CONVERSION_RETRY_DIAGNOSTIC_FAILED';
+  }
+  return result;
+}
+
+function auroraReabrirFalhasConversaoDriveAutorizadas(request) {
+  var result={ok:false,code:'AURORA_DRIVE_CONVERSION_RETRY_REOPEN_PENDING',decisionId:AURORA_CONTINUOUS_DRIVE_DECISION,
+    reopened:0,candidateSetSha256:null,remainingCandidates:null,sourceMutation:false,productionMutation:false};
+  try {
+    auroraConnectorReuseOwner_();auroraContinuousDriveWindow_();
+    var keys=['confirmation','expectedScopeSha256','expectedCandidateCount','expectedCandidateSetSha256'];
+    if(!request||typeof request!=='object'||Array.isArray(request)||Object.keys(request).sort().join(',')!==keys.sort().join(',')
+      ||request.confirmation!==AURORA_CONTINUOUS_DRIVE_RETRY_REOPEN_CONFIRMATION
+      ||request.expectedScopeSha256!==AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256
+      ||!Number.isSafeInteger(request.expectedCandidateCount)||request.expectedCandidateCount<1||request.expectedCandidateCount>20
+      ||typeof request.expectedCandidateSetSha256!=='string'||!/^[a-f0-9]{64}$/.test(request.expectedCandidateSetSha256))
+      throw new Error('AURORA_DRIVE_CONVERSION_RETRY_REOPEN_REQUEST_REJECTED');
+    var stored=auroraContinuousDriveScopeFromProperties_(),scope=stored.scope;
+    auroraContinuousDriveSystemGuard_(scope,stored.runtimeHash,true);
+    if(typeof comTravaIngestaoGmailWMGJ_!=='function') throw new Error('AURORA_DRIVE_DEPENDENCY_MISSING');
+    return comTravaIngestaoGmailWMGJ_(function(){
+      var sheet=getPlanilhaWMGJ_Compat_().getSheetByName(getConfigWMGJ_Compat_().SHEETS.FILA);
+      if(!sheet) throw new Error('AURORA_DRIVE_QUEUE_CONTRACT');
+      var rows=sheet.getDataRange().getValues(),idx=mapearCabecalhoWMGJ_Compat_(rows[0]);
+      var before=auroraDriveConversionRetryCandidates_(rows,idx,stored.runtimeHash);
+      if(before.count!==request.expectedCandidateCount||before.candidateSetSha256!==request.expectedCandidateSetSha256)
+        throw new Error('AURORA_DRIVE_CONVERSION_RETRY_REOPEN_CAS_CONFLICT');
+      var now=new Date().toISOString();
+      before.items.forEach(function(item){
+        var itemScope=item.scope;
+        itemScope.retryReopenedFrom=itemScope.lastCode;
+        itemScope.lastCode='AURORA_DRIVE_CONVERSION_FAILED';
+        itemScope.retryReopenedAt=now;
+        delete itemScope.humanReviewJustified;delete itemScope.humanReviewReason;delete itemScope.humanReviewJustifiedAt;
+        atualizarLinhaFilaWMGJ_Compat_(sheet,item.row,idx,{STATUS:'ERRO_REPROCESSAR',
+          ULTIMO_ERRO:'AURORA_DRIVE_CONVERSION_FAILED',OBSERVACAO:auroraDriveScopeWrite_(itemScope)});
+      });
+      var after=auroraDriveConversionRetryCandidates_(sheet.getDataRange().getValues(),idx,stored.runtimeHash);
+      if(after.count!==0) throw new Error('AURORA_DRIVE_CONVERSION_RETRY_REOPEN_READBACK_FAILED');
+      result.ok=true;result.code='AURORA_DRIVE_CONVERSION_RETRIES_REOPENED';result.reopened=before.count;
+      result.candidateSetSha256=before.candidateSetSha256;result.remainingCandidates=0;return result;
+    });
+  } catch(error) {
+    var code=String(error&&error.message||'');
+    var allowed=['AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED',
+      'AURORA_DRIVE_CONVERSION_RETRY_REOPEN_REQUEST_REJECTED','AURORA_DRIVE_CONVERSION_RETRY_REOPEN_CAS_CONFLICT',
+      'AURORA_DRIVE_CONVERSION_RETRY_REOPEN_READBACK_FAILED','AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID',
+      'AURORA_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_SOURCE_UNAVAILABLE',
+      'AURORA_DRIVE_DEPENDENCY_MISSING','AURORA_DRIVE_QUEUE_CONTRACT','AURORA_DRIVE_QUEUE_SCOPE_INVALID'];
+    result.code=allowed.indexOf(code)>=0?code:'AURORA_DRIVE_CONVERSION_RETRY_REOPEN_FAILED';return result;
+  }
+}
+
+
 function auroraLerStatusAlimentacaoContinuaDriveAutorizada(expectedScopeSha256) {
   var result={ok:false,code:'AURORA_CONTINUOUS_DRIVE_STATUS_PENDING',decisionId:AURORA_CONTINUOUS_DRIVE_DECISION,
     authorizationValid:false,sourceActive:false,sourceCount:0,triggerCount:0,duplicateCollectors:0,
@@ -1453,11 +1556,12 @@ function auroraLerStatusAlimentacaoContinuaDriveAutorizada(expectedScopeSha256) 
 
 /* First-cycle containment evidence.
  * The exact activation run 40273578914 started at 2026-10-26T05:19:16Z and
- * completed before 05:22Z. Candidate selection is deliberately narrower than
- * the run window and accepts only newly-entered, unproved PENDING_EXTRACTION
+ * was followed by ungated trigger cycles until the REMEDIATE_ONLY deployment
+ * completed at 05:27:47Z. Candidate selection covers only that bounded activation
+ * interval and accepts only newly-entered, unproved PENDING_EXTRACTION
  * rows with zero/one attempt in the exact runtime scope. */
 var AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_FROM = '2026-10-26T05:19:00.000Z';
-var AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_TO = '2026-10-26T05:22:30.000Z';
+var AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_TO = '2026-10-26T05:28:00.000Z';
 var AURORA_CONTINUOUS_DRIVE_FIRST_CYCLE_ROLLBACK_CONFIRMATION = 'QUARANTINE_FIRST_CONTINUOUS_DRIVE_ENUMERATION';
 
 function auroraDriveFirstCycleCandidates_(rows,idx,runtimeHash) {
