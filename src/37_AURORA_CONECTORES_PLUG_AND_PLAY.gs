@@ -1046,24 +1046,17 @@ function auroraContinuousDrivePrivateScope_(scopeJson, expectedHash) {
     ||auroraConnectorReuseSha_(scopeJson)!==expectedHash) throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED');
   var value;
   try { value=JSON.parse(scopeJson); } catch(ignore) { throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED'); }
-  var id=function(v){return typeof v==='string'&&/^[A-Za-z0-9_-]{10,256}$/.test(v);};
   if(!value||value.schemaVersion!=='aurora.authorized-drive-source-scope.v1'||value.orgId!=='wmgj'
     ||value.projectId!=='wmgj-hml-jfn-20260927'||!value.authorization
-    ||value.authorization.realDataAuthorized!==true||value.authorization.sourceMutationAllowed!==false
-    ||!Array.isArray(value.sources)||value.sources.length!==1
-    ||!Array.isArray(value.fileIds)||value.fileIds.length>200||!value.fileIds.every(id)
-    ||!Array.isArray(value.excludedFolderIds)||value.excludedFolderIds.length>100||!value.excludedFolderIds.every(id))
+    ||value.authorization.realDataAuthorized!==true||value.authorization.sourceMutationAllowed!==false)
     throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED');
-  var source=value.sources[0];
-  if(!source||source.sourceId!=='drive-primary'||source.system!=='DRIVE'||source.active!==true
-    ||source.folderId!==AURORA_CONNECTOR_REUSE_FOLDER||!Number.isSafeInteger(source.slaMinutes)
-    ||source.slaMinutes<15||source.slaMinutes>43200
-    ||value.fileIds.some(function(x){return x===source.folderId;})
-    ||value.excludedFolderIds.some(function(x){return x===source.folderId;}))
-    throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED');
-  if(value.fileIds.length!==value.fileIds.filter(function(v,i,a){return a.indexOf(v)===i;}).length
-    ||value.excludedFolderIds.length!==value.excludedFolderIds.filter(function(v,i,a){return a.indexOf(v)===i;}).length)
-    throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED');
+  // Reuse the same closed parser already proven by DRIVE_TOTAL. The exact private
+  // SHA-256 is the authority; do not invent assumptions about sourceId naming or
+  // number of authorized roots.
+  try {
+    auroraDriveIntakeScope_({mode:'PREVIEW',orgId:value.orgId,sources:value.sources,fileIds:value.fileIds,
+      excludedFolderIds:value.excludedFolderIds,maxScan:300,limit:20,expectedScopeSha256:null});
+  } catch(ignoreScope) { throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED'); }
   return value;
 }
 
@@ -1071,6 +1064,17 @@ function auroraContinuousDriveNormalizedScope_(privateScope, mode) {
   return auroraDriveIntakeScope_({mode:mode||'PREVIEW',orgId:privateScope.orgId,sources:privateScope.sources,
     fileIds:privateScope.fileIds,excludedFolderIds:privateScope.excludedFolderIds,maxScan:300,limit:20,
     expectedScopeSha256:null});
+}
+
+function auroraContinuousDriveSourcesMatch_(configured,scope) {
+  if(!Array.isArray(configured)||!scope||!Array.isArray(scope.sources)) return false;
+  function clean(item) {
+    return {sourceId:String(item.sourceId||''),system:String(item.system||''),folderId:String(item.folderId||''),
+      slaMinutes:Number(item.slaMinutes),active:item.active!==false};
+  }
+  var left=configured.map(clean).sort(function(a,b){return a.sourceId<b.sourceId?-1:a.sourceId>b.sourceId?1:0;});
+  var right=scope.sources.map(clean).sort(function(a,b){return a.sourceId<b.sourceId?-1:a.sourceId>b.sourceId?1:0;});
+  return JSON.stringify(left)===JSON.stringify(right);
 }
 
 function auroraContinuousDriveSystemGuard_(scope, expectedHash, verifyAccess) {
@@ -1138,15 +1142,13 @@ function auroraAtivarAlimentacaoContinuaDriveAutorizada(request) {
     var privateScope=auroraContinuousDrivePrivateScope_(request.scopeJson,request.expectedScopeSha256);
     var scope=auroraContinuousDriveNormalizedScope_(privateScope,'PREVIEW');
     var guarded=auroraContinuousDriveSystemGuard_(scope,null,true),props=PropertiesService.getScriptProperties();
-    var resolved=auroraResolverFontesDocumentais_(props),candidate=resolved.candidates[0];
-    if(resolved.candidates.length!==1||!candidate||candidate.folderId!==AURORA_CONNECTOR_REUSE_FOLDER
-      ||candidate.sourceId!=='drive-primary'||candidate.system!=='DRIVE') throw new Error('AURORA_CONTINUOUS_DRIVE_SOURCE_CONFLICT');
-    if(props.getProperty('WMGJ_PASTA_ENTRADA_ID')&&props.getProperty('WMGJ_PASTA_ENTRADA_ID')!==AURORA_CONNECTOR_REUSE_FOLDER)
+    var legacyFolder=String(props.getProperty('WMGJ_PASTA_ENTRADA_ID')||'');
+    if(legacyFolder&&!scope.sources.some(function(source){return source.folderId===legacyFolder;}))
       throw new Error('AURORA_CONTINUOUS_DRIVE_SOURCE_CONFLICT');
-    var registry=JSON.stringify([{sourceId:'drive-primary',system:'DRIVE',mode:'DRIVE_FOLDER',
-      folderId:AURORA_CONNECTOR_REUSE_FOLDER,slaMinutes:privateScope.sources[0].slaMinutes,active:true}]);
+    var registry=JSON.stringify(scope.sources.map(function(source){return {
+      sourceId:source.sourceId,system:'DRIVE',mode:'DRIVE_FOLDER',folderId:source.folderId,
+      slaMinutes:source.slaMinutes,active:true};}));
     props.setProperties({
-      WMGJ_PASTA_ENTRADA_ID:AURORA_CONNECTOR_REUSE_FOLDER,
       WMGJ_FIRESTORE_DRY_RUN:'false',AURORA_FIRESTORE_MIRROR_REQUIRED:'true',
       AURORA_DOCUMENT_SOURCE_REGISTRY:registry,AURORA_CONNECTOR_SETUP_VERSION:AURORA_CONNECTOR_SETUP_VERSION,
       AURORA_CONTINUOUS_DRIVE_DECISION:AURORA_CONTINUOUS_DRIVE_DECISION,
@@ -1167,7 +1169,7 @@ function auroraAtivarAlimentacaoContinuaDriveAutorizada(request) {
     var state=auroraContinuousDriveCollectorState_();
     if(state.target!==1||state.duplicateCollectors!==0) throw new Error('AURORA_CONTINUOUS_DRIVE_TRIGGER_CONFLICT');
     result.ok=true;result.code='AURORA_CONTINUOUS_DRIVE_ACTIVATED';result.continuousExtraction=true;
-    result.sourceCount=1;result.triggerCount=1;result.duplicateCollectorsRemoved=removed;
+    result.sourceCount=scope.sources.length;result.triggerCount=1;result.duplicateCollectorsRemoved=removed;
     result.runtimeScopeSha256=guarded.scopeSha256;
     result.firstCycle=auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj();
     return result;
@@ -1190,8 +1192,7 @@ function auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj() {
     var authorizationDeadline=auroraContinuousDriveWindow_(),stored=auroraContinuousDriveScopeFromProperties_();
     var scope=stored.scope,guarded=auroraContinuousDriveSystemGuard_(scope,stored.runtimeHash,true);
     var props=PropertiesService.getScriptProperties(),resolved=auroraResolverFontesDocumentais_(props),state=auroraContinuousDriveCollectorState_();
-    if(resolved.sources.length!==1||resolved.sources[0].sourceId!=='drive-primary'
-      ||resolved.sources[0].folderId!==AURORA_CONNECTOR_REUSE_FOLDER||resolved.sources[0].active===false
+    if(!auroraContinuousDriveSourcesMatch_(resolved.sources,scope)
       ||props.getProperty('WMGJ_FIRESTORE_DRY_RUN')!=='false'||props.getProperty('AURORA_FIRESTORE_MIRROR_REQUIRED')!=='true'
       ||state.target!==1||state.duplicateCollectors!==0) throw new Error('AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID');
     if(typeof comTravaIngestaoGmailWMGJ_!=='function'||typeof auroraExecutarCicloDriveAutorizado_!=='function')
@@ -1311,8 +1312,7 @@ function auroraLerStatusAlimentacaoContinuaDriveAutorizada(expectedScopeSha256) 
     var deadline=auroraContinuousDriveWindow_(),stored=auroraContinuousDriveScopeFromProperties_(),props=PropertiesService.getScriptProperties();
     var resolved=auroraResolverFontesDocumentais_(props),state=auroraContinuousDriveCollectorState_();
     result.authorizationValid=Date.now()<deadline;result.sourceCount=resolved.sources.length;
-    result.sourceActive=resolved.sources.length===1&&resolved.sources[0].sourceId==='drive-primary'
-      &&resolved.sources[0].folderId===AURORA_CONNECTOR_REUSE_FOLDER&&resolved.sources[0].active!==false;
+    result.sourceActive=auroraContinuousDriveSourcesMatch_(resolved.sources,stored.scope);
     result.triggerCount=state.target;result.duplicateCollectors=state.duplicateCollectors;result.runtimeScopeSha256=stored.runtimeHash;
     var rawLast=props.getProperty('AURORA_CONTINUOUS_DRIVE_LAST_CYCLE');
     if(rawLast) try {
