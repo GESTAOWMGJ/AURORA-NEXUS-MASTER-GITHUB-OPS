@@ -148,7 +148,9 @@ jobs:
               '[{confirmation:"ACTIVATE_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED",scopeJson:$scope,expectedScopeSha256:$hash}]')"
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraAtivarAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/action-private.json" "$params"
             jq -e '.response.ok==true and .response.code=="AURORA_CONTINUOUS_DRIVE_ACTIVATED"
-              and .response.continuousExtraction==true and (.response.sourceCount>=1 and .response.sourceCount<=12) and .response.triggerCount==1
+              and .response.continuousExtraction==false and .response.phase=="REMEDIATE_ONLY"
+              and .response.firstCycle.ok==true and .response.firstCycle.code=="AURORA_CONTINUOUS_DRIVE_REMEDIATION_GATE"
+              and (.response.sourceCount>=1 and .response.sourceCount<=12) and .response.triggerCount==1
               and .response.privateScopeSha256=="d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa"
               and .response.sourceMutation==false and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
           elif [ "$action" = "REMEDIATE" ]; then
@@ -186,7 +188,10 @@ jobs:
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraLerStatusAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/action-private.json" "$params"
             jq -e '.response.ok==true and .response.code=="AURORA_CONTINUOUS_DRIVE_STATUS_VERIFIED"
               and .response.sourceActive==true and (.response.sourceCount>=1 and .response.sourceCount<=12) and .response.triggerCount==1
-              and .response.duplicateCollectors==0 and .response.sourceMutation==false
+              and .response.duplicateCollectors==0
+              and (.response.phase=="REMEDIATE_ONLY" or .response.phase=="LIVE_ENUMERATION")
+              and (.response.liveEnumerationEnabled==(.response.phase=="LIVE_ENUMERATION"))
+              and .response.sourceMutation==false
               and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
           fi
 

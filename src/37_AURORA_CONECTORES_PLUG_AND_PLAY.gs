@@ -1138,7 +1138,7 @@ function auroraContinuousDriveScopeFromProperties_() {
 
 function auroraAtivarAlimentacaoContinuaDriveAutorizada(request) {
   var result={ok:false,code:'AURORA_CONTINUOUS_DRIVE_PENDING',decisionId:AURORA_CONTINUOUS_DRIVE_DECISION,
-    continuousExtraction:false,sourceCount:0,triggerCount:0,duplicateCollectorsRemoved:0,
+    continuousExtraction:false,phase:null,sourceCount:0,triggerCount:0,duplicateCollectorsRemoved:0,
     privateScopeSha256:AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256,runtimeScopeSha256:null,
     firstCycle:null,sourceMutation:false,productionMutation:false};
   try {
@@ -1182,10 +1182,16 @@ function auroraAtivarAlimentacaoContinuaDriveAutorizada(request) {
     ScriptApp.newTrigger(AURORA_CONTINUOUS_DRIVE_HANDLER).timeBased().everyMinutes(15).create();
     var state=auroraContinuousDriveCollectorState_();
     if(state.target!==1||state.duplicateCollectors!==0) throw new Error('AURORA_CONTINUOUS_DRIVE_TRIGGER_CONFLICT');
-    result.ok=true;result.code='AURORA_CONTINUOUS_DRIVE_ACTIVATED';result.continuousExtraction=true;
     result.sourceCount=scope.sources.length;result.triggerCount=1;result.duplicateCollectorsRemoved=removed;
     result.runtimeScopeSha256=guarded.scopeSha256;
     result.firstCycle=auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj();
+    if(!result.firstCycle||result.firstCycle.ok!==true
+      ||result.firstCycle.phase!=='REMEDIATE_ONLY'
+      ||result.firstCycle.code!=='AURORA_CONTINUOUS_DRIVE_REMEDIATION_GATE')
+      throw new Error('AURORA_CONTINUOUS_DRIVE_ACTIVATION_GATE_FAILED');
+    // A safely installed trigger is not a running continuous extractor.
+    result.ok=true;result.code='AURORA_CONTINUOUS_DRIVE_ACTIVATED';
+    result.phase='REMEDIATE_ONLY';result.continuousExtraction=false;
     return result;
   } catch(error) {
     var code=String(error&&error.message||'');
@@ -1193,7 +1199,7 @@ function auroraAtivarAlimentacaoContinuaDriveAutorizada(request) {
       'AURORA_CONTINUOUS_DRIVE_REQUEST_REJECTED','AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED',
       'AURORA_CONTINUOUS_DRIVE_SOURCE_CONFLICT','AURORA_CONTINUOUS_DRIVE_TRIGGER_CONFLICT',
       'AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING','AURORA_DRIVE_CONFIGURATION_INVALID',
-      'AURORA_DRIVE_SOURCE_UNAVAILABLE'];
+      'AURORA_DRIVE_SOURCE_UNAVAILABLE','AURORA_CONTINUOUS_DRIVE_ACTIVATION_GATE_FAILED'];
     result.code=allowed.indexOf(code)>=0?code:'AURORA_CONTINUOUS_DRIVE_ACTIVATION_FAILED';return result;
   }
 }
@@ -1224,6 +1230,10 @@ function auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj() {
     var deadline=Math.min(Date.now()+150000,authorizationDeadline-5000);
     if(deadline<=Date.now()+15000) throw new Error('AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED');
     var value=comTravaIngestaoGmailWMGJ_(function(){
+      // Phase must be checked under the SAME lock as ingestion. A prior phase
+      // read is stale when ACTIVATE/containment races with the trigger.
+      if(String(props.getProperty('AURORA_CONTINUOUS_DRIVE_PHASE')||'REMEDIATE_ONLY')!=='LIVE_ENUMERATION')
+        throw new Error('AURORA_CONTINUOUS_DRIVE_PHASE_NOT_LIVE');
       var current=auroraContinuousDriveSystemGuard_(scope,guarded.scopeSha256,false);
       return auroraExecutarCicloDriveAutorizado_({orgId:scope.orgId,sources:scope.sources,
         sourceIds:scope.sources.map(function(s){return s.sourceId;}),fileIds:scope.fileIds,
@@ -1232,6 +1242,8 @@ function auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj() {
         nonBlockingBacklog:true,
         beforeRequest:function(){
           if(Date.now()>=deadline) throw new Error('AURORA_DRIVE_DEADLINE_EXCEEDED');
+          if(String(props.getProperty('AURORA_CONTINUOUS_DRIVE_PHASE')||'REMEDIATE_ONLY')!=='LIVE_ENUMERATION')
+            throw new Error('AURORA_CONTINUOUS_DRIVE_PHASE_NOT_LIVE');
           auroraContinuousDriveSystemGuard_(scope,current.scopeSha256,false);
         }});
     });
@@ -1244,7 +1256,8 @@ function auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj() {
     var code=String(error&&error.message||'');
     var allowed=['AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED','AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID',
       'AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING','AURORA_DRIVE_CONFIGURATION_INVALID',
-      'AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_SOURCE_UNAVAILABLE','AURORA_DRIVE_DEADLINE_EXCEEDED'];
+      'AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_SOURCE_UNAVAILABLE','AURORA_DRIVE_DEADLINE_EXCEEDED',
+      'AURORA_CONTINUOUS_DRIVE_PHASE_NOT_LIVE'];
     summary.code=allowed.indexOf(code)>=0?code:'AURORA_CONTINUOUS_DRIVE_CYCLE_FAILED';
   }
   try {PropertiesService.getScriptProperties().setProperty('AURORA_CONTINUOUS_DRIVE_LAST_CYCLE',JSON.stringify(summary));} catch(ignore){}
@@ -1332,6 +1345,7 @@ function auroraLerStatusAlimentacaoContinuaDriveAutorizada(expectedScopeSha256) 
   var result={ok:false,code:'AURORA_CONTINUOUS_DRIVE_STATUS_PENDING',decisionId:AURORA_CONTINUOUS_DRIVE_DECISION,
     authorizationValid:false,sourceActive:false,sourceCount:0,triggerCount:0,duplicateCollectors:0,
     privateScopeSha256:AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256,runtimeScopeSha256:null,phase:null,lastCycle:null,
+    liveEnumerationEnabled:false,continuousExtractionVerified:false,
     sourceMutation:false,productionMutation:false};
   try {
     auroraConnectorReuseOwner_();
@@ -1342,6 +1356,8 @@ function auroraLerStatusAlimentacaoContinuaDriveAutorizada(expectedScopeSha256) 
     result.sourceActive=auroraContinuousDriveRegistryMatchesScope_(resolved,stored.scope);
     result.triggerCount=state.target;result.duplicateCollectors=state.duplicateCollectors;result.runtimeScopeSha256=stored.runtimeHash;
     result.phase=String(props.getProperty('AURORA_CONTINUOUS_DRIVE_PHASE')||'REMEDIATE_ONLY');
+    if(['REMEDIATE_ONLY','LIVE_ENUMERATION'].indexOf(result.phase)<0)
+      throw new Error('AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID');
     var rawLast=props.getProperty('AURORA_CONTINUOUS_DRIVE_LAST_CYCLE');
     if(rawLast) try {
       var last=JSON.parse(rawLast);
@@ -1351,6 +1367,13 @@ function auroraLerStatusAlimentacaoContinuaDriveAutorizada(expectedScopeSha256) 
         failed:Number(last.failed||0),review:Number(last.review||0),extractionErrors:Number(last.extractionErrors||0)};
     } catch(ignoreLast) {}
     result.ok=result.authorizationValid&&result.sourceActive&&result.triggerCount===1&&result.duplicateCollectors===0;
+    result.liveEnumerationEnabled=result.ok&&result.phase==='LIVE_ENUMERATION';
+    var liveAt=Date.parse(String(props.getProperty('AURORA_CONTINUOUS_DRIVE_LIVE_ENABLED_AT')||''));
+    var lastAt=Date.parse(result.lastCycle&&result.lastCycle.checkedAt||'');
+    result.continuousExtractionVerified=result.liveEnumerationEnabled
+      &&Number.isFinite(liveAt)&&Number.isFinite(lastAt)&&lastAt>=liveAt
+      &&result.lastCycle.ok===true&&result.lastCycle.code==='AURORA_CONTINUOUS_DRIVE_CYCLE_VERIFIED'
+      &&result.lastCycle.scanExamined>0;
     result.code=result.ok?'AURORA_CONTINUOUS_DRIVE_STATUS_VERIFIED':'AURORA_CONTINUOUS_DRIVE_STATUS_INCOMPLETE';
   } catch(error) {
     var code=String(error&&error.message||'');
@@ -1512,7 +1535,15 @@ function auroraPromoverAlimentacaoContinuaDriveAutorizada(request) {
     return comTravaIngestaoGmailWMGJ_(function(){
       var ss=getPlanilhaWMGJ_Compat_(),fila=ss.getSheetByName(getConfigWMGJ_Compat_().SHEETS.FILA);
       if(!fila) throw new Error('AURORA_DRIVE_QUEUE_CONTRACT');
-      var rows=fila.getDataRange().getValues(),idx=mapearCabecalhoWMGJ_Compat_(rows[0]);
+      var rows=fila.getDataRange().getValues();
+      if(!Array.isArray(rows)||!Array.isArray(rows[0])||rows[0].length===0)
+        throw new Error('AURORA_DRIVE_QUEUE_CONTRACT');
+      var idx=mapearCabecalhoWMGJ_Compat_(rows[0]);
+      // Missing/renamed columns MUST NOT turn unreadable backlog into pending=0.
+      ['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO'].forEach(function(name){
+        if(!idx||!Number.isSafeInteger(idx[name])||idx[name]<0||idx[name]>=rows[0].length)
+          throw new Error('AURORA_DRIVE_QUEUE_CONTRACT');
+      });
       var justifiedCodes=['AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED','AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED',
         'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED'];
       for(var i=1;i<rows.length;i++) {
