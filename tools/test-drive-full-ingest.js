@@ -785,3 +785,64 @@ test('continuous Drive scan skips legacy inflight backlog without mutating that 
   assert.equal(result.ok,true);assert.equal(result.scan.duplicates,1);
   assert.deepEqual(f.rows[1],legacy);
 });
+
+
+test('first-cycle CAS diagnostic still recognizes activation rows after broad remediation',()=>{
+  const f=fixture();addAuthenticatedWrapper(f);
+  const idx=f.context.mapearCabecalhoWMGJ_Compat_(f.rows[0]);
+  const fileId='activation-remediated-0001';
+  const scope={schemaVersion:1,orgId:'wmgj',scopeSha256:H,sourceId:'drive-primary',rootId:'root-activation-0001',
+    folderId:'root-activation-0001',fileId,explicit:false,sourceVersion:'10000',coverage:'PENDING_EXTRACTION',
+    lastCode:'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED',previousLastCode:'NOT_RECORDED',
+    humanReviewJustified:true,humanReviewReason:'OWNER_ACCEPTED_NON_BLOCKING_BACKLOG',
+    humanReviewJustifiedAt:'2026-10-26T05:25:45.000Z'};
+  f.rows.push(['2026-10-26T05:20:00.000Z','DRIVE',fileId,'private','text/plain','REVISAR_HUMANO',0,'',
+    'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED',f.context.auroraDriveScopeWrite_(scope)]);
+  const candidates=f.context.auroraDriveFirstCycleCandidates_(f.rows,idx,H);
+  assert.equal(candidates.count,1);assert.match(candidates.candidateSetSha256,/^[a-f0-9]{64}$/);
+  assert.equal(candidates.byStatus.REVISAR_HUMANO,1);assert.equal(candidates.byAttempts['0'],1);
+});
+
+test('live promotion requires complete justified remediation and rolls back on a failed first live cycle',()=>{
+  function promotionFixture(unjustified=0,liveOk=true){
+    const f=fixture();addAuthenticatedWrapper(f);
+    const scope={orgId:'wmgj',sources:[{sourceId:'drive-primary',system:'DRIVE',mode:'DRIVE_FOLDER',
+      folderId:'root-promotion-0001',slaMinutes:1440,active:true}],fileIds:[],excludedFolderIds:[],maxScan:300,limit:20};
+    f.props.set('WMGJ_FIRESTORE_DRY_RUN','false');f.props.set('AURORA_FIRESTORE_MIRROR_REQUIRED','true');
+    f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','REMEDIATE_ONLY');
+    f.context.auroraConnectorReuseOwner_=()=>{};
+    f.context.auroraContinuousDriveWindow_=()=>Date.now()+60000;
+    f.context.auroraContinuousDriveScopeFromProperties_=()=>({scope,runtimeHash:H});
+    f.context.auroraContinuousDriveSystemGuard_=()=>({scopeSha256:H,config:{orgId:'wmgj'}});
+    f.context.auroraContinuousDriveCollectorState_=()=>({target:1,duplicateCollectors:0,unrelated:1,total:2});
+    f.context.auroraResolverFontesDocumentais_=()=>({sources:scope.sources,candidates:scope.sources});
+    f.context.auroraContinuousDriveRegistryMatchesScope_=()=>true;
+    f.context.auroraContinuousDriveRemediationState_=()=>({pending:2,justifiedHumanReview:2-unjustified,
+      unjustifiedPending:unjustified,byCode:{}});
+    f.context.auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj=()=>({ok:liveOk,phase:'LIVE_ENUMERATION',
+      failed:liveOk?0:1,code:liveOk?'AURORA_CONTINUOUS_DRIVE_CYCLE_VERIFIED':'AURORA_CONTINUOUS_DRIVE_CYCLE_PENDING'});
+    return f;
+  }
+  const blocked=promotionFixture(1,true);
+  const denied=blocked.context.auroraPromoverAlimentacaoContinuaDriveAutorizada({
+    confirmation:'PROMOTE_AUTHORIZED_WMGJ_DRIVE_LIVE_ENUMERATION',
+    expectedScopeSha256:blocked.context.AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256});
+  assert.equal(denied.ok,false);assert.equal(denied.code,'AURORA_CONTINUOUS_DRIVE_REMEDIATION_INCOMPLETE');
+  assert.equal(blocked.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
+
+  const success=promotionFixture(0,true);
+  const promoted=success.context.auroraPromoverAlimentacaoContinuaDriveAutorizada({
+    confirmation:'PROMOTE_AUTHORIZED_WMGJ_DRIVE_LIVE_ENUMERATION',
+    expectedScopeSha256:success.context.AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256});
+  assert.equal(promoted.ok,true);assert.equal(promoted.code,'AURORA_CONTINUOUS_DRIVE_LIVE_VERIFIED');
+  assert.equal(promoted.phase,'LIVE_ENUMERATION');assert.equal(promoted.unjustifiedPending,0);
+  assert.equal(success.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'LIVE_ENUMERATION');
+
+  const failing=promotionFixture(0,false);
+  const rolled=failing.context.auroraPromoverAlimentacaoContinuaDriveAutorizada({
+    confirmation:'PROMOTE_AUTHORIZED_WMGJ_DRIVE_LIVE_ENUMERATION',
+    expectedScopeSha256:failing.context.AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256});
+  assert.equal(rolled.ok,false);assert.equal(rolled.code,'AURORA_CONTINUOUS_DRIVE_FIRST_LIVE_CYCLE_FAILED');
+  assert.equal(rolled.rolledBack,true);assert.equal(rolled.phase,'REMEDIATE_ONLY');
+  assert.equal(failing.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
+});
