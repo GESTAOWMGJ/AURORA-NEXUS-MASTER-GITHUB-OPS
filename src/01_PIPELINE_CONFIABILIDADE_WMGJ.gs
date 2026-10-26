@@ -1079,8 +1079,10 @@ function auroraExecutarCicloDriveAutorizado_(options) {
     if (old && old.scopeSha256 === options.scopeSha256 && old.sourceVersion === version) { duplicates++; return; }
     // Existing sources retain one queue row. A scoped retry revalidates current bytes/receipt.
     if (known) {
-      if (['EXTRAINDO','CLASSIFICANDO'].indexOf(String(known.values[idx.STATUS])) >= 0)
+      if (['EXTRAINDO','CLASSIFICANDO'].indexOf(String(known.values[idx.STATUS])) >= 0) {
+        if(options.nonBlockingBacklog===true) { duplicates++; return; }
         throw new Error('AURORA_DRIVE_INFLIGHT_RECONCILIATION_REQUIRED');
+      }
       atualizarLinhaFilaWMGJ_Compat_(fila, known.row, idx, {STATUS:'PENDENTE',ULTIMO_ERRO:'',
         OBSERVACAO:auroraDriveScopeWrite_(scope)});
       known.values[idx.STATUS] = 'PENDENTE'; known.values[idx.OBSERVACAO] = auroraDriveScopeWrite_(scope);
