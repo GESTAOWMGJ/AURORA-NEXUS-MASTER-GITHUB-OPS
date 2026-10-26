@@ -204,14 +204,14 @@ export function createProfileEngine(store: ProfileStore, auth: ProfileAuth, cloc
     if (!profileAdmin(actor)) throw new ProfileError("PROFILE_ADMIN_MFA_REQUIRED", 403);
     if (!/^anx_[a-f0-9]{40}$/.test(uid) || uid === actor.uid) throw new ProfileError("PROFILE_REVOCATION_NOT_ALLOWED", 400);
     const base = `organizations/${actor.orgId}`;
-    const user = await auth.getUser(uid);
-    if (user.customClaims?.auroraOrgId !== actor.orgId || user.customClaims?.auroraProfileVersion !== PROFILE_VERSION) throw new ProfileError("PROFILE_REVOCATION_NOT_ALLOWED", 403);
-    await store.transaction(async tx => {
+    // Revoke local authorization before any provider call: even an Auth lookup
+    // outage must not leave a managed membership usable. Provider mutation still
+    // requires the exact identity binding after the transaction commits.
+    const operationId = await store.transaction(async tx => {
       await authorized(tx, actor, false);
       const path = `${base}/members/${uid}`;
       const member = await tx.read(path);
-      if (member?.profileVersion !== PROFILE_VERSION || !/^profile-[a-f0-9]{64}$/.test(member.profileOperationId)
-          || member.profileOperationId !== user.customClaims?.auroraProfileOperation) throw new ProfileError("PROFILE_REVOCATION_NOT_ALLOWED", 403);
+      if (member?.profileVersion !== PROFILE_VERSION || !/^profile-[a-f0-9]{64}$/.test(member.profileOperationId)) throw new ProfileError("PROFILE_REVOCATION_NOT_ALLOWED", 403);
       const opPath = `${base}/apiIdempotency/${member.profileOperationId}`;
       const op = await tx.read(opPath);
       if (!op || op.uid !== uid) throw new ProfileError("PROFILE_REQUIRES_REVIEW");
@@ -221,7 +221,11 @@ export function createProfileEngine(store: ProfileStore, auth: ProfileAuth, cloc
         tx.update(opPath, { status: "REVOKED", leaseUntil: 0 });
         tx.create(`${base}/auditEvents/${member.profileOperationId}-revoke`, { type: "USER_PROFILE_REVOKED", actorUid: actor.uid, targetUid: uid, orgId: actor.orgId, atUtc: new Date(clock()).toISOString() });
       }
+      return member.profileOperationId as string;
     });
+    const user = await auth.getUser(uid);
+    if (user.uid !== uid || user.customClaims?.auroraOrgId !== actor.orgId || user.customClaims?.auroraProfileVersion !== PROFILE_VERSION
+        || user.customClaims?.auroraProfileOperation !== operationId) throw new ProfileError("PROFILE_REVOCATION_NOT_ALLOWED", 403);
     await auth.updateUser(uid, { disabled: true });
     await auth.revokeRefreshTokens(uid);
     return { ok: true, uid, profileState: "REVOKED" };
