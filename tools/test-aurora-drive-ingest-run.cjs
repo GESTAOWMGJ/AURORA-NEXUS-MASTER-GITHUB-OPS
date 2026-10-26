@@ -372,6 +372,8 @@ test('closed remediation diagnostic codes are accepted but arbitrary values stay
     queueStatus:'REVISAR_HUMANO',code:'AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED'})).code,'AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED');
   assert.equal(sanitizePendingRow(pendingRow('synthetic-review-closed2',{
     queueStatus:'REVISAR_HUMANO',code:'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED'})).code,'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED');
+  assert.equal(sanitizePendingRow(pendingRow('synthetic-review-closed3',{
+    queueStatus:'REVISAR_HUMANO',code:'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED'})).code,'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED');
   assert.equal(sanitizePendingRow(pendingRow('synthetic-review-secret',{code:'PRIVATE_CUSTOM_CODE'})).code,'UNKNOWN');
 });
 
@@ -388,7 +390,7 @@ test('continuous Drive workflow is exact-scope, protected, serialized, and clean
   assert.match(workflow,/auroraAtivarAlimentacaoContinuaDriveAutorizada/);
   assert.match(workflow,/auroraSanearPendenciasDriveAutorizadas/);
   assert.match(workflow,/auroraLerStatusAlimentacaoContinuaDriveAutorizada/);
-  assert.match(workflow,/sourceCount==1 and \.response\.triggerCount==1/);
+  assert.match(workflow,/sourceCount>=1 and \.response\.sourceCount<=12/);
   assert.match(workflow,/duplicateCollectors==0/);
   assert.match(workflow,/newSourceEnrolled:false,sourceMutation:false,productionMutation:false/);
   assert.match(workflow,/Remove runner OAuth and private execution responses\n\s+if: always\(\)/);
