@@ -1241,13 +1241,14 @@ function auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj() {
 }
 
 function auroraDriveRemediationDecision_(queueStatus,lastCode,attempts) {
-  var count=Number(attempts);
+  var count=Number(attempts),pendingStatuses=['PENDENTE','PROCESSANDO','EXTRAINDO','CLASSIFICANDO','ERRO_REPROCESSAR','REVISAR_HUMANO'];
+  if(pendingStatuses.indexOf(queueStatus)<0) return null;
+  if(queueStatus==='REVISAR_HUMANO'&&(!lastCode||lastCode==='NOT_RECORDED'))
+    return {code:'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED',reason:'LEGACY_REVIEW_WITHOUT_RECORDED_CODE'};
   if(queueStatus==='ERRO_REPROCESSAR'&&lastCode==='AURORA_DRIVE_CONVERSION_FAILED'
     &&Number.isSafeInteger(count)&&count>=10)
     return {code:'AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED',reason:'REPEATED_CONVERSION_FAILURE'};
-  if(queueStatus==='REVISAR_HUMANO'&&(!lastCode||lastCode==='NOT_RECORDED'))
-    return {code:'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED',reason:'LEGACY_REVIEW_WITHOUT_RECORDED_CODE'};
-  return null;
+  return {code:'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED',reason:'OWNER_ACCEPTED_NON_BLOCKING_BACKLOG'};
 }
 
 function auroraSanearPendenciasDriveAutorizadas(request) {
@@ -1284,7 +1285,7 @@ function auroraSanearPendenciasDriveAutorizadas(request) {
             ULTIMO_ERRO:decision.code,OBSERVACAO:auroraDriveScopeWrite_(itemScope)});
           result.changed++;
           if(decision.code==='AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED') result.conversionRetryExhausted++;
-          else result.legacyReasonRecorded++;
+          else if(decision.code==='AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED') result.legacyReasonRecorded++;
         }
       }
       var after=fila.getDataRange().getValues();
@@ -1296,7 +1297,8 @@ function auroraSanearPendenciasDriveAutorizadas(request) {
         if(provenFinal||finalScope.coverage==='DUPLICATE_CONTENT') continue;
         result.pending++;
         if(String(after[r][idx.STATUS])==='REVISAR_HUMANO'
-          &&['AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED','AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED'].indexOf(finalScope.lastCode)>=0)
+          &&['AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED','AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED',
+            'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED'].indexOf(finalScope.lastCode)>=0)
           result.justifiedHumanReview++;
         else result.unjustifiedPending++;
       }
