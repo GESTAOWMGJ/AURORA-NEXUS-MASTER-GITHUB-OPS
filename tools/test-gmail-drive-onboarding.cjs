@@ -534,3 +534,17 @@ test('configuration repair decision does not renew publication, risk acceptance 
   for(const key of ['hmlPublicationRenewed','riskAcceptanceRenewed','realSourceActivationAuthorized','productionAuthorized','clinicalSensitiveAuthorized'])assert.equal(policy[key],false);
   assert.equal(f.c.AURORA_CONNECTOR_REUSE_DEADLINE,'2026-10-16T03:00:00.000Z');
 });
+
+
+test('dedicated exact-scope Drive collector makes the broad operational trigger skip Drive only', () => {
+  const {c, calls, props} = fixture();
+  props.set('AURORA_CONTINUOUS_DRIVE_DECISION','AURORA-HML-CONTINUOUS-DRIVE-20261026');
+  const result=c.executarAutomacaoOperacionalWMGJ();
+  assert.equal(result.ok,true);
+  assert.equal(result.driveCollectorDelegated,true);
+  assert.equal(result.preparo.skipped,true);
+  assert.equal(result.processamento.skipped,true);
+  assert.equal(result.preparo.code,'AURORA_CONTINUOUS_DRIVE_DELEGATED');
+  assert.ok(!calls.some(call => /^(prepare:|mirror:|v3:)/.test(call)));
+  assert.ok(calls.includes('existing-robot'));
+});

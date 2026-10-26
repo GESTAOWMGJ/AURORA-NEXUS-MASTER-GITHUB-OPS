@@ -1216,7 +1216,7 @@ function auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj() {
       var current=auroraContinuousDriveSystemGuard_(scope,guarded.scopeSha256,false);
       return auroraExecutarCicloDriveAutorizado_({orgId:scope.orgId,sources:scope.sources,
         sourceIds:scope.sources.map(function(s){return s.sourceId;}),fileIds:scope.fileIds,
-        excludedFolderIds:scope.excludedFolderIds,maxScan:scope.maxScan,limit:scope.limit,processLimit:scope.limit,
+        excludedFolderIds:scope.excludedFolderIds,maxScan:scope.maxScan,limit:scope.limit,processLimit:Math.min(10,scope.limit),
         scopeSha256:current.scopeSha256,configurationHash:current.scopeSha256,config:current.config,deadlineMs:deadline,
         nonBlockingBacklog:true,
         beforeRequest:function(){
