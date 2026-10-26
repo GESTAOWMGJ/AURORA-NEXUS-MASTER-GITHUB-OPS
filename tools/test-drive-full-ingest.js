@@ -846,3 +846,57 @@ test('live promotion requires complete justified remediation and rolls back on a
   assert.equal(rolled.rolledBack,true);assert.equal(rolled.phase,'REMEDIATE_ONLY');
   assert.equal(failing.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
 });
+
+
+test('historical conversion retry diagnosis isolates only remediated conversion failures and CAS reopen restores retry state',()=>{
+  const f=fixture();addAuthenticatedWrapper(f);
+  const fileId='historical-conversion-0001';
+  const scope={schemaVersion:1,orgId:'wmgj',scopeSha256:H,sourceId:'drive-primary',rootId:'root-history-0001',
+    folderId:'root-history-0001',fileId,explicit:false,sourceVersion:'10000',coverage:'PENDING_EXTRACTION',
+    lastCode:'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED',previousLastCode:'AURORA_DRIVE_CONVERSION_FAILED',
+    humanReviewJustified:true,humanReviewReason:'OWNER_ACCEPTED_NON_BLOCKING_BACKLOG',
+    humanReviewJustifiedAt:'2026-10-26T05:25:45.000Z'};
+  f.rows.push(['2026-10-20T10:00:00.000Z','DRIVE',fileId,'private','application/pdf','REVISAR_HUMANO',9,'',
+    'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED',f.context.auroraDriveScopeWrite_(scope)]);
+  const idx=f.context.mapearCabecalhoWMGJ_Compat_(f.rows[0]);
+  let candidates=f.context.auroraDriveConversionRetryCandidates_(f.rows,idx,H);
+  assert.equal(candidates.count,1);assert.equal(candidates.totalRecordedAttempts,9);
+  assert.match(candidates.candidateSetSha256,/^[a-f0-9]{64}$/);
+
+  const runtimeScope={orgId:'wmgj',sources:[],fileIds:[],excludedFolderIds:[],maxScan:300,limit:20};
+  f.context.auroraConnectorReuseOwner_=()=>{};
+  f.context.auroraContinuousDriveWindow_=()=>Date.now()+60000;
+  f.context.auroraContinuousDriveScopeFromProperties_=()=>({scope:runtimeScope,runtimeHash:H});
+  f.context.auroraContinuousDriveSystemGuard_=()=>({scopeSha256:H,config:{orgId:'wmgj'}});
+  const diag=f.context.auroraDiagnosticarFalhasConversaoDriveAutorizadas(
+    f.context.AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256);
+  assert.equal(diag.ok,true);assert.equal(diag.candidateCount,1);assert.equal(diag.totalRecordedAttempts,9);
+  const reopened=f.context.auroraReabrirFalhasConversaoDriveAutorizadas({
+    confirmation:'REOPEN_ORIGINAL_DRIVE_CONVERSION_RETRIES',
+    expectedScopeSha256:f.context.AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256,
+    expectedCandidateCount:diag.candidateCount,expectedCandidateSetSha256:diag.candidateSetSha256});
+  assert.equal(reopened.ok,true);assert.equal(reopened.reopened,1);assert.equal(reopened.remainingCandidates,0);
+  assert.equal(f.rows[1][5],'ERRO_REPROCESSAR');assert.equal(f.rows[1][8],'AURORA_DRIVE_CONVERSION_FAILED');
+  const reopenedScope=f.context.auroraDriveScopeRead_(f.rows[1][9]);
+  assert.equal(reopenedScope.lastCode,'AURORA_DRIVE_CONVERSION_FAILED');
+  assert.equal(reopenedScope.retryReopenedFrom,'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED');
+  assert.equal(reopenedScope.humanReviewJustified,undefined);
+  candidates=f.context.auroraDriveConversionRetryCandidates_(f.rows,idx,H);
+  assert.equal(candidates.count,0);
+});
+
+test('conversion retry diagnosis excludes activation-window backlog and unrelated human review',()=>{
+  const f=fixture();addAuthenticatedWrapper(f);const idx=f.context.mapearCabecalhoWMGJ_Compat_(f.rows[0]);
+  for(const [id,previous,attempts] of [
+    ['not-conversion-0001','NOT_RECORDED',0],
+    ['activation-backlog-0001','AURORA_DRIVE_CONVERSION_NOT_READY',1]
+  ]){
+    const scope={schemaVersion:1,orgId:'wmgj',scopeSha256:H,sourceId:'drive-primary',rootId:'root-x-00000001',
+      folderId:'root-x-00000001',fileId:id,explicit:false,sourceVersion:'10000',coverage:'PENDING_EXTRACTION',
+      lastCode:'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED',previousLastCode:previous,
+      humanReviewJustified:true,humanReviewReason:'OWNER_ACCEPTED_NON_BLOCKING_BACKLOG'};
+    f.rows.push(['2026-10-26T05:20:00.000Z','DRIVE',id,'private','text/plain','REVISAR_HUMANO',attempts,'',
+      'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED',f.context.auroraDriveScopeWrite_(scope)]);
+  }
+  assert.equal(f.context.auroraDriveConversionRetryCandidates_(f.rows,idx,H).count,0);
+});
