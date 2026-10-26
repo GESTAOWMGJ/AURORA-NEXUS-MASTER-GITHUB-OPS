@@ -262,7 +262,7 @@ test('all pending pages are counted once without publishing identifiers or free-
   assert.equal(coverage.allReceiptsVerified,true);assert.equal(coverage.pending,2);
   assert.deepEqual(coverage.pendingDiagnostics,{schemaVersion:'aurora.drive-pending-diagnostics.v1',queueMetadataOnly:true,
     count:2,byCode:{AURORA_DRIVE_CONVERSION_UNSUPPORTED:1,UNKNOWN:1},byStatus:{ERRO_REPROCESSAR:2},
-    byMediaType:{PDF:2},unknownSourceVersion:1,unknownAttempts:1,totalRecordedAttempts:3});
+    byMediaType:{PDF:2},byCodeMediaStatus:{'AURORA_DRIVE_CONVERSION_UNSUPPORTED|PDF|ERRO_REPROCESSAR':1,'UNKNOWN|PDF|ERRO_REPROCESSAR':1},unknownSourceVersion:1,unknownAttempts:1,totalRecordedAttempts:3});
   assert.ok(!JSON.stringify(coverage).includes('synthetic-pending'));assert.ok(!JSON.stringify(coverage).includes('SECRET'));
 });
 test('pending coverage rejects omitted rows, repeated identities, and overlap with a later primary or alias',async()=>{
@@ -326,4 +326,21 @@ test('READBACK-only recovers the existing canonical document and every alias wit
   assert.deepEqual(requests.map(x=>x.mode),['READBACK','READBACK']);assert.equal(canonicalReads,1);
   assert.equal(result.coverage.canonicalDocumentsVerified,1);assert.equal(result.coverage.aliasReferencesVerified,1);
   assert.equal(result.coverage.pendingDiagnostics.count,0);assert.equal(result.coverage.allReceiptsVerified,true);
+});
+
+// The extractor emits these fixed codes; shared diagnostics must not erase them.
+test('ZIP failures survive sanitization and joint diagnostics without source data',async()=>{
+  for(const code of ['AURORA_ZIP_EXTRACTION_FAILED','AURORA_ZIP_ENTRY_LIMIT','AURORA_ZIP_UNCOMPRESSED_SIZE_LIMIT']){
+    const read=()=>verifyCoverage(async()=>{
+      const p=pendingPage(0,1);
+      Object.assign(p.privatePendingRows[0],{code,mediaType:'ZIP',lastError:'PRIVATE_CONTENT'});
+      return p;
+    },()=>{throw Error('UNEXPECTED_CANONICAL_READ');});
+    const first=await read(),second=await read();
+    assert.deepEqual(first,second);
+    assert.deepEqual(first.pendingDiagnostics.byCode,{[code]:1});
+    assert.deepEqual(first.pendingDiagnostics.byCodeMediaStatus,{[code+'|ZIP|ERRO_REPROCESSAR']:1});
+    assert.ok(!JSON.stringify(first).includes('PRIVATE'));
+    assert.ok(!JSON.stringify(first).includes('synthetic-pending'));
+  }
 });

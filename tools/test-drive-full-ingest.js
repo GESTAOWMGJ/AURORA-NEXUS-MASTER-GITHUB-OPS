@@ -411,7 +411,7 @@ test('Excel conversion failure reports fixed codes and cleans only the temporary
   f.context.Drive={Files:{copy:()=>({id:temporary.getId(),mimeType:f.context.MimeType.GOOGLE_SHEETS})}};
   f.context.SpreadsheetApp.openById=()=>{throw Error('Service unavailable: PRIVATE_FILE_NAME PRIVATE_SOURCE_ID');};
   let result=f.realExtract(original);
-  assert.equal(result.ok,false);assert.equal(result.code,'AURORA_DRIVE_CONVERSION_NOT_READY');assert.deepEqual(trashed,[true]);
+  assert.equal(result.ok,false);assert.equal(result.code,'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE');assert.deepEqual(trashed,[true]);
   assert.equal(result.observacao.includes('PRIVATE_'),false);
   f.context.Drive.Files.copy=()=>{throw Error('User quota exceeded PRIVATE_FILE_NAME');};
   result=f.realExtract(original);assert.equal(result.code,'AURORA_DRIVE_EXTRACTION_QUOTA');
@@ -501,8 +501,8 @@ test('PDF OCR validates the converted identity and MIME before reading or cleani
 
 test('PDF copy and document-read failures remain pending with sanitized stage codes',()=>{
   const cases=[
-    {options:{copyError:'Service unavailable PRIVATE_FILE_NAME PRIVATE_SOURCE_ID'},code:'AURORA_DRIVE_CONVERSION_FAILED',temporary:false},
-    {options:{readError:'Service unavailable PRIVATE_FILE_NAME PRIVATE_SOURCE_ID'},code:'AURORA_DRIVE_CONVERSION_NOT_READY',temporary:true},
+    {options:{copyError:'Service unavailable PRIVATE_FILE_NAME PRIVATE_SOURCE_ID'},code:'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE',temporary:false},
+    {options:{readError:'Service unavailable PRIVATE_FILE_NAME PRIVATE_SOURCE_ID'},code:'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE',temporary:true},
     {options:{copyError:'User quota exceeded PRIVATE_FILE_NAME'},code:'AURORA_DRIVE_EXTRACTION_QUOTA',temporary:false}
   ];
   for(const item of cases) {
@@ -748,4 +748,23 @@ test('damaged or unconfirmed provider output remains pending and cleanup never t
   const deferred=bounded.f.context.auroraConverterTextoProviderDrive_(bounded.file,Date.now()+1000);
   assert.equal(deferred.ok,false);assert.equal(deferred.code,'AURORA_DRIVE_CONVERSION_DEFERRED');
   assert.equal(bounded.copies.length,0);assert.equal(bounded.trashed.length,0);
+});
+
+ test('pending diagnostics read legacy TIPO MIME only when MIME_TYPE is absent',()=>{
+  const f=fixture();
+  const idx={ID_ORIGEM:0,MIME_TYPE:1,TIPO:2,STATUS:3,TENTATIVAS:4};
+  const scope={fileId:'synthetic-legacy-pdf',sourceVersion:10000,lastCode:'AURORA_DRIVE_CONVERSION_FAILED'};
+  for(const missing of [undefined,null,'']){
+    const row=[scope.fileId,missing,'application/pdf','ERRO_REPROCESSAR',9];
+    const before=JSON.stringify(row);
+    const result=f.context.auroraDrivePendingDiagnostic_(scope,row,idx);
+    assert.equal(result.mediaType,'PDF');assert.equal(result.attempts,9);
+    assert.equal(JSON.stringify(row),before);assert.equal(f.sent.length,0);
+  }
+  for(const mime of ['application/zip','PRIVATE_CUSTOM_MIME']){
+    const row=[scope.fileId,mime,'application/pdf','REVISAR_HUMANO',1];
+    assert.equal(f.context.auroraDrivePendingDiagnostic_(scope,row,idx).mediaType,mime==='application/zip'?'ZIP':'OTHER');
+  }
+  const row=[scope.fileId,'','PRIVATE_CUSTOM_MIME','PENDENTE',0];
+  assert.equal(f.context.auroraDrivePendingDiagnostic_(scope,row,idx).mediaType,'OTHER');
 });

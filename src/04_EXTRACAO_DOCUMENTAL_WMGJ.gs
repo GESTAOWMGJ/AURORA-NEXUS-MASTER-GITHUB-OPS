@@ -351,6 +351,8 @@ function auroraCodigoFalhaExtracaoDrive_(error, fallback) {
     return 'AURORA_DRIVE_EXTRACTION_AUTH_FAILED';
   if(/quota|rate.?limit|too many|invoked too|limite.*excedid/i.test(message))
     return 'AURORA_DRIVE_EXTRACTION_QUOTA';
+  if(/service (?:is )?unavailable|temporarily unavailable|backend error/i.test(message))
+    return 'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE';
   if(/(?:conversion|convert).*(?:unsupported|not supported)|cannot convert/i.test(message))
     return 'AURORA_DRIVE_CONVERSION_UNSUPPORTED';
   return allowed.indexOf(fallback)>=0?fallback:'AURORA_DRIVE_CONTENT_READ_FAILED';
@@ -1638,6 +1640,10 @@ function auroraDrivePendingDiagnostic_(scope, row, idx) {
   var status=row[idx.STATUS],statuses=['PENDENTE','PROCESSANDO','EXTRAINDO','CLASSIFICANDO',
     'PROCESSADO','ERRO_REPROCESSAR','DUPLICADO','REVISAR_HUMANO'];
   var mime=row[idx.MIME_TYPE],mediaType='OTHER';
+  // Older queue rows stored a MIME in TIPO, before MIME_TYPE was appended.
+  // Read existing metadata only; never infer from filenames or mutate the row.
+  if((mime===undefined || mime===null || mime==='') && idx.TIPO!==undefined)
+    mime=row[idx.TIPO];
   if(mime==='application/pdf') mediaType='PDF';
   else if(mime==='application/vnd.google-apps.spreadsheet') mediaType='GOOGLE_SHEETS';
   else if(mime==='application/vnd.google-apps.document') mediaType='GOOGLE_DOCS';
