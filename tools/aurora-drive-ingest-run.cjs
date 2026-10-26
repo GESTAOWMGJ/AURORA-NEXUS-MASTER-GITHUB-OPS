@@ -175,7 +175,7 @@ async function verifyCoverage(getPage,verifyPlan) {
   let offset=0,expectedTotals=null,pages=0,returned=0;
   const verified=new Map(),aliases=new Map(),sourceIds=new Set(),pendingIds=new Set();
   const pendingDiagnostics={schemaVersion:'aurora.drive-pending-diagnostics.v1',queueMetadataOnly:true,
-    count:0,byCode:{},byStatus:{},byMediaType:{},unknownSourceVersion:0,unknownAttempts:0,totalRecordedAttempts:0};
+    count:0,byCode:{},byStatus:{},byMediaType:{},byCodeMediaStatus:{},unknownSourceVersion:0,unknownAttempts:0,totalRecordedAttempts:0};
   for(;;){
     const value=await getPage(offset),c=value?.coverage;
     if(value?.ok!==true||value.code!=='AURORA_DRIVE_READBACK_PLAN'||!c
@@ -208,6 +208,8 @@ async function verifyCoverage(getPage,verifyPlan) {
       const item=sanitizePendingRow(row);
       if(pendingIds.has(row.fileId))fail('DRIVE_PENDING_IDENTITY_REJECTED');pendingIds.add(row.fileId);
       pendingDiagnostics.count++;
+      const diagnosticKey=[item.code,item.mediaType,item.queueStatus].join('|');
+      pendingDiagnostics.byCodeMediaStatus[diagnosticKey]=(pendingDiagnostics.byCodeMediaStatus[diagnosticKey]||0)+1;
       for(const [group,key] of [['byCode','code'],['byStatus','queueStatus'],['byMediaType','mediaType']])
         pendingDiagnostics[group][item[key]]=(pendingDiagnostics[group][item[key]]||0)+1;
       if(item.sourceVersion===null)pendingDiagnostics.unknownSourceVersion++;
@@ -237,6 +239,7 @@ const pendingCodes=new Set(['NOT_RECORDED','UNKNOWN','FIRESTORE_INGEST_FAILED','
   'AURORA_DRIVE_AUTHORITY_RECHECK_FAILED','AURORA_DRIVE_BYTES_REQUIRED','AURORA_DRIVE_EVENT_SOURCE_CONFLICT',
   'AURORA_DRIVE_QUEUE_ID_CONFLICT','AURORA_DRIVE_RECEIPT_REQUIRED','AURORA_DRIVE_REPLAY_NOT_IDEMPOTENT',
   'AURORA_DRIVE_SOURCE_MOVED','AURORA_DRIVE_SOURCE_REVOKED','AURORA_SHEETS_TEXT_LIMIT','AURORA_SHEETS_CELL_LIMIT',
+  'AURORA_ZIP_EXTRACTION_FAILED','AURORA_ZIP_ENTRY_LIMIT','AURORA_ZIP_UNCOMPRESSED_SIZE_LIMIT',
   'AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING',
   'AURORA_DRIVE_CONFIGURATION_INVALID','AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_DEADLINE_EXCEEDED',
   'CONFIG_FIRESTORE_INCOMPLETA','EVENTO_FIRESTORE_INVALIDO','HMAC_SECRET_HEX_INVALIDO','HMAC_SECRET_BYTES_INVALIDO']);

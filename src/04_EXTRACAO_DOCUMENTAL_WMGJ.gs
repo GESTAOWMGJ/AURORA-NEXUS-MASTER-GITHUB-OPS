@@ -351,6 +351,8 @@ function auroraCodigoFalhaExtracaoDrive_(error, fallback) {
     return 'AURORA_DRIVE_EXTRACTION_AUTH_FAILED';
   if(/quota|rate.?limit|too many|invoked too|limite.*excedid/i.test(message))
     return 'AURORA_DRIVE_EXTRACTION_QUOTA';
+  if(/service (?:is )?unavailable|temporarily unavailable|backend error/i.test(message))
+    return 'AURORA_DRIVE_EXTRACTION_SERVICE_UNAVAILABLE';
   if(/(?:conversion|convert).*(?:unsupported|not supported)|cannot convert/i.test(message))
     return 'AURORA_DRIVE_CONVERSION_UNSUPPORTED';
   return allowed.indexOf(fallback)>=0?fallback:'AURORA_DRIVE_CONTENT_READ_FAILED';
