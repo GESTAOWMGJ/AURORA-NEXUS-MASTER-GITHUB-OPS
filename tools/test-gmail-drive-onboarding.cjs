@@ -60,6 +60,22 @@ test('required mirror uses the real extraction queue instead of consuming V3 mem
   assert.ok(calls.indexOf('mirror:20') < calls.indexOf('existing-robot'));
 });
 
+test('dedicated exact-scope Drive collector prevents duplicate Drive work while preserving Gmail/dashboard automation', () => {
+  const {c, calls, props} = fixture();
+  props.set('AURORA_CONTINUOUS_DRIVE_DECISION','AURORA-HML-CONTINUOUS-DRIVE-20261026');
+  c.executarRoboGmailDashboardWMGJ = options => {
+    assert.equal(options.executarPipelineDocumental,false);
+    calls.push('existing-robot');
+    return {ok:true};
+  };
+  const result=c.executarAutomacaoOperacionalWMGJ();
+  assert.equal(result.ok,true);assert.equal(result.driveCollectorDelegated,true);
+  assert.equal(result.preparo.code,'AURORA_CONTINUOUS_DRIVE_DELEGATED');
+  assert.equal(result.processamento.code,'AURORA_CONTINUOUS_DRIVE_DELEGATED');
+  assert.ok(calls.includes('existing-robot'));
+  assert.ok(!calls.some(call => /^(prepare:|mirror:|v3:)/.test(call)));
+});
+
 test('optional mirror preserves the existing V3 path', () => {
   const {c, calls} = fixture(false);
   assert.equal(c.executarAutomacaoOperacionalWMGJ().ok, true);
