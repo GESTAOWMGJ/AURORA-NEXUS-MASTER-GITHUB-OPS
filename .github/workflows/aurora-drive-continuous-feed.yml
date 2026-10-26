@@ -1,0 +1,180 @@
+name: Aurora WMGJ Authorized Drive Continuous Feed
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Activate exact-scope feed, remediate exhausted pending rows, or read sanitized status
+        type: choice
+        required: true
+        options: [ACTIVATE, REMEDIATE, STATUS]
+      expected_sha:
+        description: Exact main SHA authorized for this operation
+        type: string
+        required: true
+      scope_sha256:
+        description: SHA-256 of the private authorized Drive source scope
+        type: string
+        required: true
+      confirmation:
+        description: Exact confirmation for the selected action
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-rc11-hml
+  cancel-in-progress: false
+
+jobs:
+  continuous_drive:
+    name: Exact-scope WMGJ Drive continuous feed
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.expected_sha == github.sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: firebase-homologation
+    env:
+      APPS_SCRIPT_ID: 1_fQPqaq0EjaugyIF6jyuENDhJ2c2oTFm1kC-wdjmfaDqyRzy_uqwtiSW
+      PROJECT_ID: wmgj-hml-jfn-20260927
+      EXPECTED_SCOPE_SHA256: ${{ inputs.scope_sha256 }}
+      AURORA_DRIVE_SCOPE_JSON: ${{ secrets.AURORA_WMGJ_DRIVE_SOURCE_SCOPE }}
+    steps:
+      - name: Checkout exact authorized main source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+
+      - name: Validate bounded owner authorization and exact action
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "${{ inputs.expected_sha }}" = "$GITHUB_SHA"
+          test "$EXPECTED_SCOPE_SHA256" = "d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa"
+          case "${{ inputs.action }}" in
+            ACTIVATE)
+              test "${{ inputs.confirmation }}" = "ACTIVATE_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED"
+              ;;
+            REMEDIATE)
+              test "${{ inputs.confirmation }}" = "REMEDIATE_AUTHORIZED_WMGJ_DRIVE_PENDING"
+              ;;
+            STATUS)
+              test "${{ inputs.confirmation }}" = "CHECK_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED"
+              ;;
+            *) exit 64 ;;
+          esac
+          node <<'NODE'
+          const fs=require('node:fs');
+          const p=JSON.parse(fs.readFileSync('firebase-migration/policy/hml-owner-release-approval-v1.json','utf8'));
+          const decision=(p.reaffirmations||[]).find(x=>x.decisionId==='AURORA-HML-CONTINUOUS-DRIVE-20261026');
+          const expected='d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa';
+          if(!decision||decision.continuousDriveTriggerAuthorized!==true||decision.processExistingAuthorized!==true
+            ||decision.queueMetadataRemediationAuthorized!==true||decision.realSourceActivationAuthorized!==true
+            ||decision.sourceMutationAuthorized!==false||decision.newSourceEnrollmentAuthorized!==false
+            ||decision.productionAuthorized!==false||decision.clinicalSensitiveAuthorized!==false
+            ||decision.exactPrivateScopeSha256!==expected||p.scope?.continuousDriveScopeSha256!==expected
+            ||p.scope?.continuousDriveDecisionId!=='AURORA-HML-CONTINUOUS-DRIVE-20261026'
+            ||p.scope?.projectId!=='wmgj-hml-jfn-20260927'||p.scope?.environment!=='firebase-homologation'
+            ||Date.now()>=Date.parse(decision.validUntilUtc)) {
+            throw Error('CONTINUOUS_DRIVE_OWNER_AUTHORIZATION_INVALID');
+          }
+          NODE
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+
+      - name: Validate exact private source scope
+        run: |
+          set -euo pipefail
+          test -n "$AURORA_DRIVE_SCOPE_JSON"
+          node <<'NODE'
+          const {parseScope}=require('./tools/aurora-drive-ingest-run.cjs');
+          const crypto=require('node:crypto');
+          const raw=process.env.AURORA_DRIVE_SCOPE_JSON;
+          const expected=process.env.EXPECTED_SCOPE_SHA256;
+          const actual=crypto.createHash('sha256').update(raw).digest('hex');
+          if(actual!==expected) throw Error('DRIVE_PRIVATE_SCOPE_HASH_MISMATCH');
+          const scope=parseScope(raw,expected);
+          if(scope.sources.length!==1||scope.sources[0].sourceId!=='drive-primary'
+            ||scope.sources[0].system!=='DRIVE'||scope.sources[0].active!==true
+            ||scope.authorization.sourceMutationAllowed!==false) throw Error('CONTINUOUS_DRIVE_SCOPE_NOT_LEAST_PRIVILEGE');
+          NODE
+
+      - name: Use protected existing Apps Script OAuth
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          set -euo pipefail
+          test -n "$CLASPRC_JSON"
+          npm install -g @google/clasp@3.4.1
+          umask 077
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          mkdir -p "$RUNNER_TEMP/appscript-continuous"
+          printf '{"scriptId":"%s","projectId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" "$PROJECT_ID" > "$RUNNER_TEMP/appscript-continuous/.clasp.json"
+
+      - name: Execute exact-scope continuous feed action
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/appscript-continuous"
+          action="${{ inputs.action }}"
+          if [ "$action" = "ACTIVATE" ]; then
+            params="$(jq -nc --arg scope "$AURORA_DRIVE_SCOPE_JSON" --arg hash "$EXPECTED_SCOPE_SHA256" \
+              '[{confirmation:"ACTIVATE_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED",scopeJson:$scope,expectedScopeSha256:$hash}]')"
+            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraAtivarAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/action-private.json" "$params"
+            jq -e '.response.ok==true and .response.code=="AURORA_CONTINUOUS_DRIVE_ACTIVATED"
+              and .response.continuousExtraction==true and .response.sourceCount==1 and .response.triggerCount==1
+              and .response.privateScopeSha256=="d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa"
+              and .response.sourceMutation==false and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
+          elif [ "$action" = "REMEDIATE" ]; then
+            params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" \
+              '[{confirmation:"REMEDIATE_AUTHORIZED_WMGJ_DRIVE_PENDING",expectedScopeSha256:$hash}]')"
+            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraSanearPendenciasDriveAutorizadas "$RUNNER_TEMP/action-private.json" "$params"
+            jq -e '.response.ok==true and .response.code=="AURORA_DRIVE_REMEDIATION_JUSTIFIED"
+              and .response.unjustifiedPending==0 and .response.sourceMutation==false
+              and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
+          else
+            params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" '[$hash]')"
+            bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraLerStatusAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/action-private.json" "$params"
+            jq -e '.response.ok==true and .response.code=="AURORA_CONTINUOUS_DRIVE_STATUS_VERIFIED"
+              and .response.sourceActive==true and .response.sourceCount==1 and .response.triggerCount==1
+              and .response.duplicateCollectors==0 and .response.sourceMutation==false
+              and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
+          fi
+
+      - name: Verify one active collector and no duplicate Drive collector
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/appscript-continuous"
+          params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" '[$hash]')"
+          bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraLerStatusAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/status-private.json" "$params"
+          jq -e '.response.ok==true and .response.authorizationValid==true
+            and .response.sourceActive==true and .response.sourceCount==1
+            and .response.triggerCount==1 and .response.duplicateCollectors==0
+            and .response.privateScopeSha256=="d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa"
+            and .response.sourceMutation==false and .response.productionMutation==false' "$RUNNER_TEMP/status-private.json" >/dev/null
+          jq -n --arg action "${{ inputs.action }}" --arg sha "$GITHUB_SHA" --arg scope "$EXPECTED_SCOPE_SHA256" \
+            --slurpfile actionResult "$RUNNER_TEMP/action-private.json" --slurpfile status "$RUNNER_TEMP/status-private.json" \
+            '{schemaVersion:"aurora.continuous-drive-evidence.v1",action:$action,checkedSourceSha:$sha,
+              privateScopeSha256:$scope,actionResult:$actionResult[0].response,status:$status[0].response,
+              credentialsExported:false,newSourceEnrolled:false,sourceMutation:false,productionMutation:false}' \
+            > "$RUNNER_TEMP/aurora-drive-continuous-summary.json"
+
+      - name: Preserve sanitized continuous feed evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurora-drive-continuous-${{ github.run_id }}
+          path: ${{ runner.temp }}/aurora-drive-continuous-summary.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove runner OAuth and private execution responses
+        if: always()
+        run: |
+          rm -f "$HOME/.clasprc.json"
+          rm -rf "$RUNNER_TEMP/appscript-continuous"
+          rm -f "$RUNNER_TEMP/action-private.json" "$RUNNER_TEMP/status-private.json"

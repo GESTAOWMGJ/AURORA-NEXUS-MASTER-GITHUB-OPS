@@ -60,6 +60,22 @@ test('required mirror uses the real extraction queue instead of consuming V3 mem
   assert.ok(calls.indexOf('mirror:20') < calls.indexOf('existing-robot'));
 });
 
+test('dedicated exact-scope Drive collector prevents duplicate Drive work while preserving Gmail/dashboard automation', () => {
+  const {c, calls, props} = fixture();
+  props.set('AURORA_CONTINUOUS_DRIVE_DECISION','AURORA-HML-CONTINUOUS-DRIVE-20261026');
+  c.executarRoboGmailDashboardWMGJ = options => {
+    assert.equal(options.executarPipelineDocumental,false);
+    calls.push('existing-robot');
+    return {ok:true};
+  };
+  const result=c.executarAutomacaoOperacionalWMGJ();
+  assert.equal(result.ok,true);assert.equal(result.driveCollectorDelegated,true);
+  assert.equal(result.preparo.code,'AURORA_CONTINUOUS_DRIVE_DELEGATED');
+  assert.equal(result.processamento.code,'AURORA_CONTINUOUS_DRIVE_DELEGATED');
+  assert.ok(calls.includes('existing-robot'));
+  assert.ok(!calls.some(call => /^(prepare:|mirror:|v3:)/.test(call)));
+});
+
 test('optional mirror preserves the existing V3 path', () => {
   const {c, calls} = fixture(false);
   assert.equal(c.executarAutomacaoOperacionalWMGJ().ok, true);
@@ -342,10 +358,12 @@ test('reuse pilot owner, source and historical deadline remain separate from syn
   const historical=policy.reaffirmations.find(item=>item.decisionId==='AURORA-HML-OWNER-RENEWAL-20261014');
   assert.equal(raw.AURORA_CONNECTOR_REUSE_DEADLINE,historical.validUntilUtc);
   assert.equal(raw.AURORA_CONNECTOR_REUSE_DEADLINE,'2026-10-16T03:00:00.000Z');
-  const current=policy.reaffirmations.find(item=>item.validUntilUtc===policy.scope.validUntilUtc
-    && item.riskReviewDeadlineExtended===true);
-  assert.equal(current.realSourceActivationAuthorized,false);
-  assert.ok(Date.parse(raw.AURORA_CONNECTOR_REUSE_DEADLINE)<Date.parse(policy.scope.validUntilUtc));
+  const syntheticRenewal=policy.reaffirmations.find(item=>item.decisionId==='AURORA-HML-OWNER-RENEWAL-20261022-TO-20261026');
+  assert.ok(syntheticRenewal);assert.equal(syntheticRenewal.realSourceActivationAuthorized,false);
+  assert.ok(Date.parse(raw.AURORA_CONNECTOR_REUSE_DEADLINE)<Date.parse(syntheticRenewal.validUntilUtc));
+  const continuous=policy.reaffirmations.find(item=>item.decisionId==='AURORA-HML-CONTINUOUS-DRIVE-20261026');
+  assert.ok(continuous);assert.equal(continuous.realSourceActivationAuthorized,true);
+  assert.equal(continuous.exactPrivateScopeSha256,'d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa');
 });
 
 test('synthetic HML renewal cannot revive an expired customer-source reuse pilot',()=>{

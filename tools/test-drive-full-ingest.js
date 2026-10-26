@@ -749,3 +749,20 @@ test('damaged or unconfirmed provider output remains pending and cleanup never t
   assert.equal(deferred.ok,false);assert.equal(deferred.code,'AURORA_DRIVE_CONVERSION_DEFERRED');
   assert.equal(bounded.copies.length,0);assert.equal(bounded.trashed.length,0);
 });
+
+
+test('bounded Drive remediation converts exhausted retries and unrecorded review to closed human-review reasons',()=>{
+  const f=fixture();addAuthenticatedWrapper(f);
+  assert.equal(f.context.auroraDriveRemediationDecision_('ERRO_REPROCESSAR','AURORA_DRIVE_CONVERSION_FAILED',9),null);
+  assert.deepEqual(JSON.parse(JSON.stringify(
+    f.context.auroraDriveRemediationDecision_('ERRO_REPROCESSAR','AURORA_DRIVE_CONVERSION_FAILED',10))),
+    {code:'AURORA_DRIVE_RETRY_BUDGET_EXHAUSTED',reason:'REPEATED_CONVERSION_FAILURE'});
+  assert.deepEqual(JSON.parse(JSON.stringify(
+    f.context.auroraDriveRemediationDecision_('REVISAR_HUMANO',undefined,0))),
+    {code:'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED',reason:'LEGACY_REVIEW_WITHOUT_RECORDED_CODE'});
+  assert.deepEqual(JSON.parse(JSON.stringify(
+    f.context.auroraDriveRemediationDecision_('REVISAR_HUMANO','NOT_RECORDED',4))),
+    {code:'AURORA_DRIVE_LEGACY_REVIEW_REASON_UNRECORDED',reason:'LEGACY_REVIEW_WITHOUT_RECORDED_CODE'});
+  assert.equal(f.context.auroraDriveRemediationDecision_('REVISAR_HUMANO','AURORA_DRIVE_FORMAT_UNSUPPORTED',12),null);
+  assert.equal(f.context.auroraDriveRemediationDecision_('PENDENTE','PENDING_EXTRACTION',30),null);
+});

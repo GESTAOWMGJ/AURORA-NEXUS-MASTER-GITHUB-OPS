@@ -31,9 +31,13 @@ function processarFilaFonteCanonicaWMGJ_(limite) {
 
 function executarAutomacaoOperacionalWMGJ() {
   var inicio = new Date();
+  // When the exact-scope Drive collector is installed, this broad operational
+  // trigger keeps Gmail/dashboard duties but must not become a second Drive collector.
+  var driveDedicado = String(PropertiesService.getScriptProperties().getProperty('AURORA_CONTINUOUS_DRIVE_DECISION') || '')
+    === 'AURORA-HML-CONTINUOUS-DRIVE-20261026';
 
   try {
-    if (typeof prepararPipelineConfiavelWMGJ_V3 !== 'function') {
+    if (!driveDedicado && typeof prepararPipelineConfiavelWMGJ_V3 !== 'function') {
       throw new Error('Função prepararPipelineConfiavelWMGJ_V3 não encontrada.');
     }
 
@@ -43,8 +47,9 @@ function executarAutomacaoOperacionalWMGJ() {
       etapa: 'executarAutomacaoOperacionalWMGJ',
       inicio: inicio.toISOString(),
       fim: null,
-      preparo: prepararPipelineConfiavelWMGJ_V3(100),
-      processamento: processarFilaFonteCanonicaWMGJ_(20),
+      driveCollectorDelegated: driveDedicado,
+      preparo: driveDedicado ? {ok:true,skipped:true,code:'AURORA_CONTINUOUS_DRIVE_DELEGATED'} : prepararPipelineConfiavelWMGJ_V3(100),
+      processamento: driveDedicado ? {ok:true,skipped:true,code:'AURORA_CONTINUOUS_DRIVE_DELEGATED'} : processarFilaFonteCanonicaWMGJ_(20),
       roboGmailDashboard: null
     };
 
@@ -60,7 +65,7 @@ function executarAutomacaoOperacionalWMGJ() {
         limiteParser: 20,
         executarGmail: true,
         executarXml: true,
-        executarPipelineDocumental: true,
+        executarPipelineDocumental: !driveDedicado,
         executarRelatorioSocios: false,
         executarDashboard: true
       });
