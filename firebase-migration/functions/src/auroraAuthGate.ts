@@ -1,3 +1,5 @@
+import { isPracticeRole } from "./auroraPracticePolicy.js";
+import { practicePage } from "./auroraPracticeView.js";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
@@ -298,6 +300,10 @@ export const auroraNexusAuthGate = onRequest(
       logger.error("Aurora Nexus CSRF key is not configured");
       res.status(503).type("html").send(loginPage("Acesso temporariamente indisponível por configuração de segurança.", entry?.orgId));
       return;
+    }
+    if (isPracticeRole(member.role)) {
+      setSecurityHeaders(res);
+      res.status(200).type("html").send(practicePage(member, csrfTokens.userProfile, csrfTokens.logout)); return;
     }
     const runningRelease = await readRuntimeActiveRelease();
     setSecurityHeaders(res, member.allFacilities && member.mfaVerified && ["platform_admin", "org_admin"].includes(member.role));

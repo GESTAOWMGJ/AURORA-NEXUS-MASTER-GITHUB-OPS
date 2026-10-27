@@ -1,3 +1,4 @@
+import { isPracticeRole } from "./auroraPracticePolicy.js";
 import { randomUUID } from "node:crypto";
 import { ProfileError, PROFILE_VERSION, normalizeProfileRequest, profileAdmin, profileIdentity, type ProfileActor } from "./auroraUserProfilePolicy.js";
 
@@ -11,13 +12,14 @@ export type ProfileAuth = {
   updateUser(uid: string, data: { disabled: boolean }): Promise<unknown>;
   revokeRefreshTokens(uid: string): Promise<unknown>;
 };
-export function createProfileEngine(store: ProfileStore, auth: ProfileAuth, clock = Date.now) {
+export function createProfileEngine(store: ProfileStore, auth: ProfileAuth, clock = Date.now, bootstrapAuthorize?: (tx: ProfileTx, actor: ProfileActor) => Promise<void>) {
   async function authorized(tx: ProfileTx, actor: ProfileActor, creating = true) {
     if (!profileAdmin(actor)) throw new ProfileError("PROFILE_ADMIN_MFA_REQUIRED", 403);
+    if (bootstrapAuthorize) { await bootstrapAuthorize(tx, actor); return; }
     const org = await tx.read(`organizations/${actor.orgId}`);
     const member = await tx.read(`organizations/${actor.orgId}/members/${actor.uid}`);
     if (org?.active !== true || (creating && org.userProfilesEnabled !== true)) throw new ProfileError("PROFILE_ENGINE_NOT_ENABLED", 403);
-    if (member?.active !== true || member.allFacilities !== true || !["org_admin", "platform_admin"].includes(member.role)
+    if (member?.active !== true || member.role !== actor.role || member.allFacilities !== true || !["org_admin", "platform_admin", "practice_owner"].includes(member.role)
         || (member.onboardingRequired === true && member.onboardingState !== "COMPLETE")) {
       throw new ProfileError("PROFILE_ADMIN_REVOKED", 403);
     }
@@ -91,6 +93,11 @@ export function createProfileEngine(store: ProfileStore, auth: ProfileAuth, cloc
     const lease = randomUUID();
     const ready = await store.transaction(async tx => {
       await authorized(tx, actor);
+      const org = await tx.read(base);
+      if ((org?.profile === "PERSONALITE") !== isPracticeRole(request.role)
+          || (actor.role === "practice_owner" && request.role === "practice_owner")) {
+        throw new ProfileError("PROFILE_ROLE_SCOPE_REJECTED", 403);
+      }
       const op = await tx.read(opPath);
       const member = await tx.read(memberPath);
       await liveManager(tx);

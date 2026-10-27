@@ -153,6 +153,10 @@ jobs:
           python3 -m pip install -r aurora-coletor/requirements-release-verification.txt
           bash firebase-migration/scripts/bootstrap-homologacao.sh
 
+      - name: Validate Personalite organization and Auth provisioning in emulators
+        working-directory: firebase-migration/tests
+        run: npm run test:practice
+
       - name: Block high or critical production dependency advisories
         working-directory: firebase-migration/functions
         run: npm audit --omit=dev --audit-level=high

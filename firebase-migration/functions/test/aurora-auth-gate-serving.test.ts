@@ -1,3 +1,5 @@
+import { isPracticeRole } from "../src/auroraPracticePolicy.js";
+import { practicePage } from "../src/auroraPracticeView.js";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
@@ -30,6 +32,8 @@ function fixture(ready?: string, member: any = null) {
     validCsrf: () => true
   };
   const modules: Record<string, any> = {
+    "./auroraPracticePolicy.js": { isPracticeRole },
+    "./auroraPracticeView.js": { practicePage },
     "firebase-functions/params": { defineSecret: () => ({ value: () => "synthetic-secret" }) },
     "firebase-functions/v2/https": { onRequest: (_options: unknown, handler: unknown) => handler },
     "firebase-functions/logger": { error: () => {}, warn: () => {} },
@@ -195,3 +199,10 @@ test("tenant denial and public account screens never gain the local Master bridg
     assert.doesNotMatch(response.headers["content-security-policy"]!, /127\.0\.0\.1|localhost/);
   }
 });
+
+ test('canonical portal serves isolated Personalité view without loading WMGJ shell',async()=>{
+ const member={uid:'synthetic-owner',orgId:'synthetic-practice',email:'owner@example.invalid',role:'practice_owner',permissions:[],allFacilities:true,mfaVerified:true};
+ const f=fixture(undefined,member);const r=await f.request('auroraNexusAuthGate','/portal','auroranexus.com.br');
+ assert.equal(r.status,200);assert.match(r.body,/Seu consultório/);assert.doesNotMatch(r.body,/Centro de gestão WMGJ/);assert.equal(f.state.privateShells,0);
+ assertStandardHeaders(r.headers);
+ });

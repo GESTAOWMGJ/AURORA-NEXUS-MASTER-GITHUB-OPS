@@ -160,7 +160,7 @@ jobs:
           print('LOCAL_MASTER_CLEAN_EXACT_SOURCE_FILES_AND_ZIP_VERIFIED')
           PY
           AURORA_TEST_BUILD="${RUNNER_TEMP}/aurora-ia-master" AURORA_STUDIO_TEST_GIT="$(command -v git)" \
-            node --test desktop/ia-master/server.test.cjs desktop/ia-master/studio.test.cjs desktop/ia-master/knowledge-registry.test.cjs desktop/ia-master/update.test.cjs desktop/ia-master/published-update.test.cjs desktop/ia-master/safe-read.test.cjs desktop/ia-master/studio-local.test.cjs desktop/ia-master/publisher.test.cjs
+            node --test desktop/ia-master/server.test.cjs desktop/ia-master/studio.test.cjs desktop/ia-master/knowledge-registry.test.cjs desktop/ia-master/editorial-knowledge.test.cjs desktop/ia-master/update.test.cjs desktop/ia-master/published-update.test.cjs desktop/ia-master/safe-read.test.cjs desktop/ia-master/studio-local.test.cjs desktop/ia-master/publisher.test.cjs
       - name: Published release verification and Windows integration consumer tests
         run: |
           set -euo pipefail

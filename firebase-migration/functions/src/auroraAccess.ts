@@ -1,3 +1,4 @@
+import { isPracticeRole } from "./auroraPracticePolicy.js";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { DecodedIdToken } from "firebase-admin/auth";
 import * as logger from "firebase-functions/logger";
@@ -16,6 +17,7 @@ export const CSRF_PURPOSES = {
   integrationKey: "POST:/api/integration-keys",
   documentIngest: "POST:/api/integration/documents",
   userProfile: "POST:/api/user-profiles",
+  practice: "POST:/api/practice",
   distributionApproval: "POST:/api/distribution-approval",
   logout: "POST:/__sessionLogout"
 } as const;
@@ -89,6 +91,8 @@ export async function resolveMember(decoded: DecodedIdToken, orgId = sessionOrga
   const data = snapshot.data();
   if (!organization.exists || !isActiveOrganization(organization.data())) return null;
   if (!snapshot.exists || data?.active !== true || typeof data.role !== "string") return null;
+  if ((organization.data()?.profile === "PERSONALITE") !== isPracticeRole(data.role)) return null;
+  if (isPracticeRole(data.role) && (data.profileVersion !== 1 || decoded.auroraProfileVersion !== 1)) return null;
   if ((decoded.auroraProfileVersion !== undefined || data.profileVersion !== undefined)
       && !managedProfileMatches(decoded, data, orgId)) return null;
   return {
@@ -96,7 +100,7 @@ export async function resolveMember(decoded: DecodedIdToken, orgId = sessionOrga
     email: String(decoded.email ?? ""),
     orgId,
     role: data.role,
-    permissions: Array.isArray(data.permissions) ? data.permissions.filter((item): item is string => typeof item === "string") : [],
+    permissions: !isPracticeRole(data.role) && Array.isArray(data.permissions) ? data.permissions.filter((item): item is string => typeof item === "string") : [],
     facilityIds: Array.isArray(data.facilityIds) ? data.facilityIds.filter((item): item is string => typeof item === "string") : [],
     allFacilities: data.allFacilities === true,
     mfaVerified: Boolean(decoded.firebase?.sign_in_second_factor)
@@ -109,6 +113,7 @@ export async function verifyAuroraAccess(cookieHeader: string | undefined, allow
 }
 
 export function can(member: AuroraMember, permission: string, roles: string[] = []): boolean {
+  if (isPracticeRole(member.role)) return false;
   return roles.includes(member.role) || member.permissions.includes(permission);
 }
 

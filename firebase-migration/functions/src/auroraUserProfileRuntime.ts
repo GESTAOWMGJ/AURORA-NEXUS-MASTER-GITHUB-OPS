@@ -1,3 +1,4 @@
+import { createPracticeProvisioner } from "./auroraPracticeProvisioning.js";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import { CSRF_PURPOSES, validCsrf, verifyAuroraAccess } from "./auroraAccess.js";
@@ -16,12 +17,15 @@ export const profileStore: ProfileStore = {
   }))
 };
 const engine = createProfileEngine(profileStore, auroraAuth);
+const provisionPractice = createPracticeProvisioner(profileStore, auroraAuth);
 const invitations = createOnboardingInvitationEngine(profileStore);
 const onboardingOrigins = new Set(["https://auroranexus.com.br", "https://wmgj-hml-jfn-20260927.web.app"]);
 export const auroraNexusUserProfiles = onRequest(
   { cors: false, timeoutSeconds: 120, secrets: [allowedEmails, csrfSecret] },
   async (req, res) => {
     res.set("Cache-Control", "no-store");
+    res.set("Vary", "Cookie");
+    res.set("Referrer-Policy", "no-referrer");
     res.set("X-Content-Type-Options", "nosniff");
     res.set("X-Frame-Options", "DENY");
     // A new professional has no Aurora session until the UID-bound invitation is consumed.
@@ -45,9 +49,13 @@ export const auroraNexusUserProfiles = onRequest(
     if (!profileAdmin(actor)) { res.status(403).json({ ok: false, code: "PROFILE_ADMIN_MFA_REQUIRED" }); return; }
     try {
       if (req.method === "GET") {
+        if (req.query?.practiceGrantId !== undefined) {
+          if (Object.keys(req.query).length !== 1 || typeof req.query.practiceGrantId !== 'string') throw new ProfileError('INVALID_SYNC_REQUEST',400);
+          res.json(await provisionPractice.read(actor,req.query.practiceGrantId)); return;
+        }
         const org = await auroraDb.doc(`organizations/${actor.orgId}`).get();
         const rows = await auroraDb.collection(`organizations/${actor.orgId}/members`).limit(101).get();
-        res.json({ ok: true, orgId: actor.orgId, currentAdminUid: actor.uid, engineEnabled: org.data()?.userProfilesEnabled === true, truncated: rows.size > 100, profiles: rows.docs.slice(0,100).map(doc => {
+        res.json({ ok: true, schemaVersion: 'aurora.webapp-sync.v1', engineVersion: '0.1.3', orgId: actor.orgId, currentAdminUid: actor.uid, engineEnabled: org.data()?.userProfilesEnabled === true, truncated: rows.size > 100, profiles: rows.docs.slice(0,100).map(doc => {
           const data = doc.data();
           return { uid: doc.id, name: data.displayName ?? "Usuário", role: data.role, active: data.active === true,
             jobTitle: data.onboarding?.jobTitle ?? null, managerUid: data.onboarding?.managerUid ?? null,
@@ -60,6 +68,9 @@ export const auroraNexusUserProfiles = onRequest(
       if (req.get("sec-fetch-site") && req.get("sec-fetch-site") !== "same-origin") throw new ProfileError("CROSS_SITE_REJECTED", 403);
       if (String(req.get("content-type") ?? "").split(";",1)[0]?.toLowerCase() !== "application/json") throw new ProfileError("UNSUPPORTED_MEDIA_TYPE", 415);
       if (!validCsrf(req.get("cookie"), req.get("x-aurora-csrf"), csrfSecret.value(), CSRF_PURPOSES.userProfile)) throw new ProfileError("CSRF_REJECTED", 403);
+      if (req.body?.action === "CREATE_PRACTICE" && Object.keys(req.body).every(k => ["action","grantId"].includes(k)) && typeof req.body.grantId === "string") {
+        res.json(await provisionPractice(actor, req.body.grantId)); return;
+      }
       if (req.body?.action === "CREATE") {
         const result = await engine.create(actor, req.body);
         const invitation = req.body.onboarding && result.onboardingState === "INVITED" ? await invitations.issue(actor, result.uid, req.body.requestId) : null;

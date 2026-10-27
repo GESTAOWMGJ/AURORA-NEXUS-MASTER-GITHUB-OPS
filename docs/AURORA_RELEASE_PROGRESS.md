@@ -1,5 +1,14 @@
 # AURORA NEXUS — progresso até a versão vendável
 
+## Sincronizador do web app 0.1.3 — 26/10/2026
+
+Personalité permanece no fluxo de perfis existente, agora com readback autenticado
+e versionado e consulta de cadastro após interrupção. Reconciliado com main
+`5a89a766111a2942977198fbdacccbb2c0e8432f`; sem novo tenant real ou ingestão.
+Contrato e rollback: [AURORA_WEBAPP_SYNC_0_1_3](AURORA_WEBAPP_SYNC_0_1_3.md).
+O gate de primeiro acesso, TOTP real e implantação protegida permanece separado
+do resultado de código/CI. Cadastro READY não declara sincronização documental.
+
 ## Entrega vigente HML — 25/10/2026
 
 Registro canônico operacional: [AURORA-HML-DELIVERY-20261025-R1](AURORA_HML_DELIVERY_20261025_R1.md), com manifesto legível por máquina em [JSON](AURORA_HML_DELIVERY_20261025_R1.json).
@@ -231,3 +240,8 @@ vencimento. Credenciais, escopo documental, piloto real e janela de regularizaç
 da fonte não são prorrogados; produção, dados clínicos e ativação da pasta real
 permanecem excluídos. Estado: `IMPLEMENTED_PENDING_CI_REVIEW_DEPLOYMENT`, sem
 alegação de review independente, publicação, ingestão real ou instalação concluídas.
+
+
+## 26/10/2026 — Personalité 0.1.2, candidato de acesso isolado
+
+Cadastro de organização independente e titular, papéis administrativos restritos e tela própria no portal canônico. Reutiliza motor de perfis, CSRF, identidade, idempotência e auditoria. Nenhum tenant real ou gate produtivo promovido. Evidência local: 1.256 testes Functions, 30 Security Rules e integração Auth/Firestore emulados aprovados. Revisão técnica independente, CI no SHA final e HML com TOTP real permanecem gates distintos. Ver `AURORA_PERSONALITE_ACCESS_0_1_2.md` para fluxo, dados privados indispensáveis e rollback.

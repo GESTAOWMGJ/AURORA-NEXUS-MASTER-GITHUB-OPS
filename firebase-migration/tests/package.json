@@ -7,7 +7,8 @@
   },
   "scripts": {
     "test": "node --test firestore.rules.test.mjs",
-    "test:rules": "firebase emulators:exec --config ../firebase.json --project wmgj-firestore-rules-test --only firestore \"node --test firestore.rules.test.mjs\""
+    "test:rules": "firebase emulators:exec --config ../firebase.json --project wmgj-firestore-rules-test --only firestore \"node --test firestore.rules.test.mjs\"",
+    "test:practice": "firebase emulators:exec --config ../firebase.json --project wmgj-firestore-rules-test --only firestore,auth \"node ../functions/integration/practice-emulator.mjs\""
   },
   "devDependencies": {
     "@firebase/rules-unit-testing": "5.0.2",
