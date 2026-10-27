@@ -1,5 +1,18 @@
 # AURORA NEXUS — progresso até a versão vendável
 
+## Candidata — contrato de status Drive v2 / PR #342
+
+A auditoria do SHA `f2bbccaacc5ec1dc1f9267168890be05aa3b2936` reproduziu
+sete regressões de status sem READBACK, revogação durante enumeração e
+validação de fila/recibo. A correção mantém o mesmo coletor e escopo;
+separa configuração, fase, ciclo recente e comprovação documental.
+Relatório e reprodução: [AURORA-DRIVE-STATUS-002](AURORA_PR342_AUDIT_20261026.md).
+Estado do gate: `IMPLEMENTED_PENDING_HML_VALIDATION`; CI no SHA final e
+revisão humana são requisitos de integração, não autorização de publicação.
+Nenhum gate HML/produção/GA é promovido; manter REMEDIATE_ONLY até validação
+real protegida. Nenhuma implantação ou mudança operacional nesta auditoria.
+
+
 ## Entrega vigente HML — 25/10/2026
 
 Registro canônico operacional: [AURORA-HML-DELIVERY-20261025-R1](AURORA_HML_DELIVERY_20261025_R1.md), com manifesto legível por máquina em [JSON](AURORA_HML_DELIVERY_20261025_R1.json).

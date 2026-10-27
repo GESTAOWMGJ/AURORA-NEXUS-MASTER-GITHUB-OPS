@@ -209,9 +209,9 @@ test('replay divergence is blocking and never emits a successful readback',()=>{
 });
 test('authority callback is required before each HMAC transmission and fails closed',()=>{
   const f=fixture();f.addFile('fileexplicit1',null);f.options.fileIds=['fileexplicit1'];f.options.processLimit=1;
-  let checks=0;f.options.beforeRequest=()=>{if(++checks===3)throw Error('REVOKED');};
+  let checks=0;f.options.beforeRequest=()=>{checks++;if(f.sent.length===1)throw Error('REVOKED');};
   const result=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
-  assert.equal(result.ok,false);assert.equal(checks,3);assert.equal(f.sent.length,1);assert.equal(result.process.pending,1);
+  assert.equal(result.ok,false);assert.ok(checks>3);assert.equal(f.sent.length,1);assert.equal(result.process.pending,1);
 });
 test('expired continuation restarts a folder and reaches remaining source without duplicates',()=>{
   const f=fixture();f.addFile('file000000001','folder000001');f.addFile('file000000002','folder000001');
@@ -602,6 +602,20 @@ test('manifest methods persist manifest-only review coverage instead of text-ext
     assert.equal(result.process.accepted,1);assert.equal(f.sent[0].record.extractionEvidence.coverage,'SOURCE_MANIFESTED_REVIEW_PENDING');
     const row=f.rows.find(r=>r[2]===fileId),scope=f.context.auroraDriveScopeRead_(row[9]);
     assert.equal(scope.coverage,'SOURCE_MANIFESTED_REVIEW_PENDING');
+    const readback=f.context.auroraLerPlanoReadbackDriveAutorizado_({...f.options,readbackOffset:0});
+    assert.equal(readback.coverage.documents,0);assert.equal(readback.coverage.manifests,1);
+    assert.equal(readback.coverage.pending,0);assert.equal(readback.coverage.pageManifests,1);
+    assert.equal(readback.privateReadbackPlan.length,1);assert.equal(readback.privatePendingRows.length,0);
+    // A manifest is a separate proved category, never a shortcut around the
+    // source identity, version, content hash or replay requirements.
+    for(const change of [s=>{s.receipt.replayVerified=false;},s=>{s.receipt.sourceId='different-source-0001';},
+      s=>{s.receipt.sourceVersion++;},s=>{s.receipt.contentSha256='9'.repeat(64);}]) {
+      const damaged=JSON.parse(JSON.stringify(scope));change(damaged);
+      row[9]=f.context.auroraDriveScopeWrite_(damaged);
+      const pending=f.context.auroraLerPlanoReadbackDriveAutorizado_({...f.options,readbackOffset:0});
+      assert.equal(pending.coverage.manifests,0);assert.equal(pending.coverage.documents,0);
+      assert.equal(pending.coverage.pending,1);assert.equal(pending.privateReadbackPlan.length,0);
+    }
   }
 });
 
@@ -784,4 +798,33 @@ test('continuous Drive scan skips legacy inflight backlog without mutating that 
   const result=f.context.auroraExecutarCicloDriveAutorizado_(f.options);
   assert.equal(result.ok,true);assert.equal(result.scan.duplicates,1);
   assert.deepEqual(f.rows[1],legacy);
+});
+
+test('scanner stops before the next Drive read or queue write after containment',()=>{
+  const f=fixture();f.addFile('fileexplicit1',null);f.addFile('fileexplicit2',null);
+  f.options.fileIds=['fileexplicit1','fileexplicit2'];f.options.maxScan=2;
+  let live=true,reads=0;
+  const get=f.context.DriveApp.getFileById;
+  f.context.DriveApp.getFileById=id=>{reads++;const file=get(id);live=false;return file;};
+  f.options.beforeRequest=()=>{if(!live)throw Error('AURORA_CONTINUOUS_DRIVE_PHASE_NOT_LIVE');};
+  assert.throws(()=>f.context.auroraExecutarCicloDriveAutorizado_(f.options),/PHASE_NOT_LIVE/);
+  assert.equal(reads,1);assert.equal(f.rows.length,1);assert.equal(f.sent.length,0);
+});
+
+test('scanner checks authority even when no extraction is requested',()=>{
+  const f=fixture();let reads=0;
+  f.addFolder('folder000001',null,[]);f.options.sources=[{sourceId:'drive-primary',folderId:'folder000001'}];
+  f.context.DriveApp.getFolderById=()=>{reads++;throw Error('UNEXPECTED_DRIVE_READ');};
+  f.options.beforeRequest=()=>{throw Error('AURORA_CONTINUOUS_DRIVE_PHASE_NOT_LIVE');};
+  assert.throws(()=>f.context.auroraExecutarCicloDriveAutorizado_(f.options),/PHASE_NOT_LIVE/);
+  assert.equal(reads,0);
+});
+
+test('revocation during extraction aborts before HMAC and preserves the pending queue record',()=>{
+  const f=fixture();f.addFile('fileexplicit1',null);f.options.fileIds=['fileexplicit1'];f.options.processLimit=1;
+  let live=true;f.options.beforeRequest=()=>{if(!live)throw Error('AURORA_CONTINUOUS_DRIVE_PHASE_NOT_LIVE');};
+  f.context.extrairConteudoArquivoWMGJ_V1_=()=>{live=false;return {ok:true,metodo:'blob_text',texto:'synthetic'};};
+  assert.throws(()=>f.context.auroraExecutarCicloDriveAutorizado_(f.options),/PHASE_NOT_LIVE/);
+  assert.equal(f.sent.length,0);assert.equal(f.rows.length,2);assert.equal(f.rows[1][5],'PENDENTE');
+  assert.equal(f.rows[1][6],0);
 });

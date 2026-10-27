@@ -80,6 +80,7 @@ test('canonical readback accepts only governed manifest method and coverage pair
     f.version.snapshot=JSON.parse(JSON.stringify(f.data));
     const result=await verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher);
     assert.equal(result.verified,1);
+    assert.equal(result.evidence[0].extractionCoverage,'SOURCE_MANIFESTED_REVIEW_PENDING');
   }
   for(const pair of [
     ['google_sheets_manifest','TEXT_EXTRACTED_REVIEW_PENDING'],
@@ -98,10 +99,94 @@ test('canonical readback accepts only governed manifest method and coverage pair
 test('an unrelated immutable version cannot prove the receipt',async()=>{const f=readbackFixture();f.version.entityId='f'.repeat(48);await assert.rejects(()=>verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher),/IMMUTABLE_READBACK_MISMATCH/);});
 test('a revision mismatch and absent replay evidence cannot verify',async()=>{const f=readbackFixture();f.data.revision=3;await assert.rejects(()=>verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher),/CANONICAL_IDENTITY_MISMATCH/);f.row.replayVerified=false;await assert.rejects(()=>verifyReadback([f.row],'wmgj','synthetic-token',f.fetcher),/READBACK_IDENTITY_REJECTED/);});
 
-function coveragePage(row,offset){return {ok:true,code:'AURORA_DRIVE_READBACK_PLAN',triggersChanged:false,globalSettingsChanged:false,privateReadbackPlan:[row],privateAliasRows:offset===1?[{fileId:'synthetic-alias-only',primaryFileId:row.sourceId,contentHash:row.contentHash,entityId:row.entityId}]:[],coverage:{offset,nextOffset:offset===0?1:null,total:2,documents:1,aliases:1,pending:0,complete:offset===1,returned:1,pageDocuments:offset===0?1:0,pageAliases:offset===1?1:0,pagePending:0}};}
+function coveragePage(row,offset){return {ok:true,code:'AURORA_DRIVE_READBACK_PLAN',triggersChanged:false,globalSettingsChanged:false,privateReadbackPlan:[row],privateAliasRows:offset===1?[{fileId:'synthetic-alias-only',primaryFileId:row.sourceId,contentHash:row.contentHash,entityId:row.entityId}]:[],coverage:{offset,nextOffset:offset===0?1:null,total:2,documents:1,manifests:0,aliases:1,pending:0,complete:offset===1,returned:1,pageDocuments:offset===0?1:0,pageManifests:0,pageAliases:offset===1?1:0,pagePending:0}};}
 test('restart verifies durable receipts and aliases even with no newly accepted event',async()=>{const f=readbackFixture();let checks=0;const result=await verifyCoverage(async offset=>coveragePage(f.row,offset),async plan=>{checks++;return verifyReadback(plan,'wmgj','synthetic-token',f.fetcher);});assert.equal(checks,1);assert.equal(result.total,2);assert.equal(result.canonicalDocumentsVerified,1);assert.equal(result.aliasReferencesVerified,1);assert.equal(result.pending,0);});
-test('coverage cannot omit a durable receipt or change a page total',async()=>{const f=readbackFixture();await assert.rejects(()=>verifyCoverage(async offset=>{const page=coveragePage(f.row,offset);page.privateReadbackPlan=[];return page;},async()=>({verified:1})),/COVERAGE_PAGINATION_REJECTED/);await assert.rejects(()=>verifyCoverage(async offset=>{const page=coveragePage(f.row,offset);if(offset){page.coverage.total=3;page.coverage.pending=1;}return page;},async()=>({verified:1})),/COVERAGE_CHANGED/);});
-test('an alias requires the primary content hash and actual receipt',async()=>{const f=readbackFixture();await assert.rejects(()=>verifyCoverage(async offset=>{const page=coveragePage(f.row,offset);if(offset)page.privateAliasRows[0].contentHash='f'.repeat(64);return page;},async()=>({verified:1})),/ALIAS_PROOF_REJECTED/);});
+test('coverage cannot omit a durable receipt or change a page total',async()=>{const f=readbackFixture();await assert.rejects(()=>verifyCoverage(async offset=>{const page=coveragePage(f.row,offset);page.privateReadbackPlan=[];return page;},async plan=>verifyReadback(plan,'wmgj','synthetic-token',f.fetcher)),/COVERAGE_PAGINATION_REJECTED/);await assert.rejects(()=>verifyCoverage(async offset=>{const page=coveragePage(f.row,offset);if(offset){page.coverage.total=3;page.coverage.pending=1;}return page;},async plan=>verifyReadback(plan,'wmgj','synthetic-token',f.fetcher)),/COVERAGE_CHANGED/);});
+test('an alias requires the primary content hash and actual receipt',async()=>{const f=readbackFixture();await assert.rejects(()=>verifyCoverage(async offset=>{const page=coveragePage(f.row,offset);if(offset)page.privateAliasRows[0].contentHash='f'.repeat(64);return page;},async plan=>verifyReadback(plan,'wmgj','synthetic-token',f.fetcher)),/ALIAS_PROOF_REJECTED/);});
+
+function manifestCoverageScenario() {
+  const text=readbackFixture();
+  const manifests=['google_sheets_manifest','zip_manifest'].map(method=>{
+    const f=readbackFixture();
+    Object.assign(f.row,{entityId:sha(method).slice(0,48),sourceId:'synthetic-'+method+'-file',versionId:sha('version-'+method)});
+    f.data.source.sourceId=f.row.sourceId;f.data.extractionEvidence.method=method;
+    f.data.extractionEvidence.coverage='SOURCE_MANIFESTED_REVIEW_PENDING';
+    f.version.entityId=f.row.entityId;f.version.snapshot=JSON.parse(JSON.stringify(f.data));
+    return f;
+  });
+  // The alias precedes its manifest primary: canonical verification must be
+  // unique and the classification must come from Firestore, not page order.
+  const entries=[{kind:'aliases',fixture:manifests[1]},{kind:'documents',fixture:text},
+    {kind:'pending'},{kind:'manifests',fixture:manifests[1]},{kind:'manifests',fixture:manifests[0]}];
+  const fixtures=[text,...manifests],calls=[];
+  const page=offset=>{
+    const entry=entries[offset],row=entry.fixture?.row;
+    return {ok:true,code:'AURORA_DRIVE_READBACK_PLAN',triggersChanged:false,globalSettingsChanged:false,
+      privateReadbackPlan:row?[row]:[],
+      privateAliasRows:entry.kind==='aliases'?[{fileId:'synthetic-manifest-alias',primaryFileId:row.sourceId,
+        entityId:row.entityId,contentHash:row.contentHash}]:[],
+      privatePendingRows:entry.kind==='pending'?[pendingRow('synthetic-still-pending')]:[],
+      coverage:{offset,nextOffset:offset+1<entries.length?offset+1:null,total:5,documents:1,manifests:2,aliases:1,pending:1,
+        returned:1,complete:offset+1===entries.length,pageDocuments:entry.kind==='documents'?1:0,
+        pageManifests:entry.kind==='manifests'?1:0,pageAliases:entry.kind==='aliases'?1:0,pagePending:entry.kind==='pending'?1:0}};
+  };
+  const verify=plan=>{
+    calls.push(plan[0].entityId);
+    const f=fixtures.find(item=>item.row.entityId===plan[0].entityId);assert.ok(f);
+    return verifyReadback(plan,'wmgj','synthetic-token',f.fetcher);
+  };
+  return {page,verify,calls,manifests};
+}
+test('coverage proves and counts text, manifests, aliases and pending rows separately across restart pages',async()=>{
+  const f=manifestCoverageScenario(),coverage=await verifyCoverage(f.page,f.verify);
+  assert.equal(coverage.total,5);assert.equal(coverage.documents,1);assert.equal(coverage.manifests,2);
+  assert.equal(coverage.aliases,1);assert.equal(coverage.pending,1);assert.equal(coverage.pages,5);
+  assert.equal(coverage.canonicalDocumentsVerified,3);assert.equal(coverage.canonicalTextDocumentsVerified,1);
+  assert.equal(coverage.canonicalManifestDocumentsVerified,2);assert.equal(coverage.aliasReferencesVerified,1);
+  assert.equal(coverage.pendingDiagnostics.count,1);assert.equal(coverage.allReceiptsVerified,true);
+  assert.equal(f.calls.length,3);assert.equal(new Set(f.calls).size,3);
+  assert.equal(JSON.stringify(coverage).includes('synthetic-'),false);
+});
+test('coverage cannot relabel canonical manifests as text or omit their readback proof',async()=>{
+  const f=manifestCoverageScenario();
+  await assert.rejects(()=>verifyCoverage(offset=>{
+    const page=f.page(offset);page.coverage.documents=3;page.coverage.manifests=0;
+    page.coverage.pageDocuments+=page.coverage.pageManifests;page.coverage.pageManifests=0;
+    return page;
+  },f.verify),/DRIVE_COVERAGE_INCOMPLETE/);
+  const g=manifestCoverageScenario();
+  await assert.rejects(()=>verifyCoverage(g.page,async()=>({verified:1})),/DRIVE_COVERAGE_READBACK_FAILED/);
+  for(const mutate of [proof=>{proof.extractionCoverage='UNKNOWN';},proof=>{proof.entityIdSha256='f'.repeat(64);}]) {
+    const h=manifestCoverageScenario();
+    await assert.rejects(()=>verifyCoverage(h.page,async plan=>{
+      const checked=await h.verify(plan);mutate(checked.evidence[0]);return checked;
+    }),/DRIVE_COVERAGE_READBACK_FAILED/);
+  }
+  const invalid=manifestCoverageScenario();invalid.manifests[1].version.snapshot.extractionEvidence.textSha256='f'.repeat(64);
+  await assert.rejects(()=>verifyCoverage(invalid.page,invalid.verify),/DRIVE_IMMUTABLE_READBACK_MISMATCH/);
+});
+test('coverage rejects absent, negative or changed manifest counters',async()=>{
+  for(const mutate of [c=>{delete c.manifests;},c=>{c.manifests=-1;},c=>{c.pageManifests=NaN;}]) {
+    const f=manifestCoverageScenario();
+    await assert.rejects(()=>verifyCoverage(offset=>{const page=f.page(offset);mutate(page.coverage);return page;},f.verify),
+      /DRIVE_COVERAGE_COUNTER_REJECTED/);
+  }
+  const f=manifestCoverageScenario();
+  await assert.rejects(()=>verifyCoverage(offset=>{
+    const page=f.page(offset);if(offset===1){page.coverage.manifests--;page.coverage.pending++;}return page;
+  },f.verify),/DRIVE_COVERAGE_CHANGED/);
+});
+test('manifest-only coverage still requires content extraction and human review after enumeration finishes',()=>{
+  const coverage={allReceiptsVerified:true,pending:0,manifests:2};
+  for(const mode of ['EXECUTE','PROCESS_EXISTING','READBACK']) {
+    const result=completionFromCoverage(mode,{scan:{complete:true}},coverage);
+    assert.equal(result.complete,false);assert.equal(result.scopedQueueDrained,true);
+    assert.equal(result.scopedQueueRemediated,true);assert.equal(result.fullSynchronizationVerified,false);
+    assert.equal(result.documentReviewRequired,true);assert.equal(result.pendingExtractionRequiresFollowup,true);
+  }
+  assert.throws(()=>completionFromCoverage('READBACK',null,{...coverage,manifests:-1}),/DRIVE_COVERAGE_INCOMPLETE/);
+  assert.throws(()=>completionFromCoverage('READBACK',null,{allReceiptsVerified:true,pending:0}),/DRIVE_COVERAGE_INCOMPLETE/);
+});
 
 function busyResponse(){return {response:{ok:false,code:'AURORA_DRIVE_ENGINE_BUSY',failureStage:'SHARED_LOCK',scopeSha256:'a'.repeat(64),triggersChanged:false,globalSettingsChanged:false,sourceMutation:false,privateReadbackPlan:[],scan:{examined:0,queued:0,aliases:0,complete:false},processing:{attempted:0,accepted:0,duplicates:0,pending:0,failed:0,review:0,extractionErrors:0,aliases:0,replayVerified:0}}};}
 test('runtime failure retains the closed cause and stage instead of hiding it behind missing counters',()=>{
@@ -224,9 +309,9 @@ test('default EXECUTE keeps enumeration completion and does not silently fall ba
   const f=batchHarness([batchResponse({attempted:1,pending:1}),batchResponse({complete:true})],'',20);
   const result=await f.execute();assert.equal(result.stopReason,'ENUMERATION_AND_QUEUE_DRAINED');assert.equal(f.saved.length,2);
   assert.deepEqual(f.requests.map(x=>x.mode),['PREVIEW','EXECUTE','PREVIEW','EXECUTE']);
-  const complete=completionFromCoverage('EXECUTE',result.lastBatch,{allReceiptsVerified:true,pending:0});
+  const complete=completionFromCoverage('EXECUTE',result.lastBatch,{allReceiptsVerified:true,manifests:0,pending:0});
   assert.equal(complete.complete,true);
-  assert.equal(completionFromCoverage('PROCESS_EXISTING',result.lastBatch,{allReceiptsVerified:true,pending:0,complete:true}).complete,false);
+  assert.equal(completionFromCoverage('PROCESS_EXISTING',result.lastBatch,{allReceiptsVerified:true,manifests:0,pending:0,complete:true}).complete,false);
   assert.throws(()=>completionFromCoverage('PROCESS_EXISTING',result.lastBatch,{pending:0}),/COVERAGE_INCOMPLETE/);
   const blocked=batchHarness([{response:{ok:false,code:'AURORA_DRIVE_INFLIGHT_RECONCILIATION_REQUIRED',failureStage:'EXECUTE'}}],'EXECUTE');
   await assert.rejects(blocked.execute,/INFLIGHT_RECONCILIATION_REQUIRED/);
@@ -253,8 +338,8 @@ function pendingRow(fileId='synthetic-pending-0001',extra={}){
 function pendingPage(offset,total=2){
   return {ok:true,code:'AURORA_DRIVE_READBACK_PLAN',triggersChanged:false,globalSettingsChanged:false,
     privateReadbackPlan:[],privateAliasRows:[],privatePendingRows:[pendingRow('synthetic-pending-'+offset)],
-    coverage:{offset,nextOffset:offset+1===total?null:offset+1,total,documents:0,aliases:0,pending:total,
-      complete:offset+1===total,returned:1,pageDocuments:0,pageAliases:0,pagePending:1}};
+    coverage:{offset,nextOffset:offset+1===total?null:offset+1,total,documents:0,manifests:0,aliases:0,pending:total,
+      complete:offset+1===total,returned:1,pageDocuments:0,pageManifests:0,pageAliases:0,pagePending:1}};
 }
 function readOnlyEnvelope(value){
   return {response:{scopeSha256:'a'.repeat(64),sourceMutation:false,triggersChanged:false,globalSettingsChanged:false,
@@ -310,8 +395,8 @@ test('READBACK-only verifies guards and all pages without entering the mutating 
   assert.equal(result.coverage.pendingDiagnostics.count,2);
   const f=batchHarness([batchResponse()],'READBACK');
   await assert.rejects(f.execute,/DRIVE_MUTATING_MODE_REQUIRED/);assert.equal(f.guards,0);assert.deepEqual(f.requests,[]);
-  assert.deepEqual(completionFromCoverage('READBACK',{scan:{complete:true}},{allReceiptsVerified:true,pending:0}),
-    {complete:false,scopedQueueDrained:true,scopedQueueRemediated:true,fullSynchronizationVerified:false,documentReviewRequired:false});
+  assert.deepEqual(completionFromCoverage('READBACK',{scan:{complete:true}},{allReceiptsVerified:true,manifests:0,pending:0}),
+    {complete:false,scopedQueueDrained:true,scopedQueueRemediated:true,fullSynchronizationVerified:false,documentReviewRequired:false,pendingExtractionRequiresFollowup:false});
 });
 test('read-only proof rejects scope/source drift and any claimed operational write',async()=>{
   for(const mutate of [v=>{v.scopeSha256='b'.repeat(64);},v=>{v.processing.attempted=1;},
@@ -329,8 +414,8 @@ test('read-only proof rejects scope/source drift and any claimed operational wri
     /DRIVE_PUBLISHED_SOURCE_CHANGED/);assert.equal(calls,1);
 });
 test('READBACK verifies an empty queue without asserting enumeration or full synchronization',async()=>{
-  const page={...pendingPage(0),privatePendingRows:[],coverage:{offset:0,nextOffset:null,total:0,documents:0,aliases:0,
-    pending:0,complete:true,returned:0,pageDocuments:0,pageAliases:0,pagePending:0}};
+  const page={...pendingPage(0),privatePendingRows:[],coverage:{offset:0,nextOffset:null,total:0,documents:0,manifests:0,aliases:0,
+    pending:0,complete:true,returned:0,pageDocuments:0,pageManifests:0,pageAliases:0,pagePending:0}};
   const result=await readDriveCoverage({scope:scope(),scopeSha256:'a'.repeat(64),beforeRead:()=>{},
     call:async()=>readOnlyEnvelope(page),verifyPlan:async()=>({verified:0})});
   assert.equal(result.coverage.pendingDiagnostics.count,0);assert.equal(result.coverage.pages,1);
@@ -355,8 +440,8 @@ test('justified human review closes scoped remediation without claiming queue dr
   const coverage=await verifyCoverage(async offset=>({
     ok:true,code:'AURORA_DRIVE_READBACK_PLAN',triggersChanged:false,globalSettingsChanged:false,
     privateReadbackPlan:[],privateAliasRows:[],privatePendingRows:[rows[offset]],
-    coverage:{offset,nextOffset:offset===0?1:null,total:2,documents:0,aliases:0,pending:2,
-      complete:offset===1,returned:1,pageDocuments:0,pageAliases:0,pagePending:1}
+    coverage:{offset,nextOffset:offset===0?1:null,total:2,documents:0,manifests:0,aliases:0,pending:2,
+      complete:offset===1,returned:1,pageDocuments:0,pageManifests:0,pageAliases:0,pagePending:1}
   }),()=>{throw Error('UNEXPECTED_CANONICAL_READ');});
   assert.equal(coverage.pendingDiagnostics.justifiedHumanReview,2);
   assert.equal(coverage.pendingDiagnostics.unjustifiedPending,0);
@@ -547,4 +632,165 @@ test('protected ACTIVATE verifies paused phase and may not report live extractio
   assert.match(workflow,/\.response\.continuousExtraction==false and \.response\.phase=="REMEDIATE_ONLY"/);
   assert.match(workflow,/\.response\.firstCycle\.code=="AURORA_CONTINUOUS_DRIVE_REMEDIATION_GATE"/);
   assert.match(source,/result\.phase='REMEDIATE_ONLY';result\.continuousExtraction=false;/);
+});
+
+test('STATUS never treats a successful scan or acceptance counters as canonical extraction proof',()=>{
+  for(const counts of [{scanExamined:5},{scanExamined:5,attempted:1,accepted:1},{scanExamined:5,extractionErrors:5,pending:5}]) {
+    const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+    f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','LIVE_ENUMERATION');
+    f.props.set('AURORA_CONTINUOUS_DRIVE_LAST_CYCLE',JSON.stringify({ok:true,
+      code:'AURORA_CONTINUOUS_DRIVE_CYCLE_VERIFIED',checkedAt:new Date().toISOString(),...counts}));
+    const value=f.c.auroraLerStatusAlimentacaoContinuaDriveAutorizada(f.req.expectedScopeSha256);
+    assert.equal(value.continuousExtractionVerified,false);
+  }
+});
+
+test('STATUS rejects stale runtime configuration even with one installed trigger',()=>{
+  for(const mutate of [f=>f.props.set('WMGJ_FIRESTORE_DRY_RUN','true'),
+    f=>f.props.set('AURORA_FIRESTORE_MIRROR_REQUIRED','false'),
+    f=>{f.c.auroraContinuousDriveSystemGuard_=()=>{throw Error('AURORA_DRIVE_SCOPE_CHANGED');};}]) {
+    const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+    f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','LIVE_ENUMERATION');mutate(f);
+    const value=f.c.auroraLerStatusAlimentacaoContinuaDriveAutorizada(f.req.expectedScopeSha256);
+    assert.equal(value.ok,false);assert.equal(value.liveEnumerationEnabled,false);
+  }
+});
+
+test('duplicate required headers cannot hide the observation column during promotion or remediation',()=>{
+  const rows=[['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO',' OBSERVACAO '],
+    ['synthetic-file','PENDENTE',0,JSON.stringify({orgId:'wmgj',scopeSha256:'a'.repeat(64)}),'']];
+  for(const action of ['promote','remediate']) {
+    const f=makeContinuousGateFixture(rows);
+    f.c.mapearCabecalhoWMGJ_Compat_=h=>Object.fromEntries(h.map((v,i)=>[v.trim(),i]));
+    const result=action==='promote'?f.c.auroraPromoverAlimentacaoContinuaDriveAutorizada(f.req)
+      :f.c.auroraSanearPendenciasDriveAutorizadas({...f.req,confirmation:f.c.AURORA_CONTINUOUS_DRIVE_REMEDIATE_CONFIRMATION});
+    assert.equal(result.ok,false);assert.equal(result.code,'AURORA_DRIVE_QUEUE_CONTRACT');
+    assert.equal(f.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
+  }
+});
+
+test('hashless receipt and unproved alias cannot close a pending item for promotion',()=>{
+  for(const extra of [{receipt:{replayVerified:true}},{coverage:'DUPLICATE_CONTENT'},
+    {contentSha256:'a'.repeat(64),receipt:{replayVerified:true,contentHash:'a'.repeat(64),contentSha256:'a'.repeat(64)}}]) {
+    const rows=[['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO'],['synthetic-file','PENDENTE',0,
+      JSON.stringify({orgId:'wmgj',scopeSha256:'a'.repeat(64),...extra})]];
+    const f=makeContinuousGateFixture(rows),result=f.c.auroraPromoverAlimentacaoContinuaDriveAutorizada(f.req);
+    assert.equal(result.ok,false);assert.equal(result.code,'AURORA_CONTINUOUS_DRIVE_LIVE_BACKLOG_NOT_CLOSED');
+    assert.equal(f.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
+  }
+});
+
+test('promotion rechecks authorization and configuration after lock acquisition',()=>{
+  for(const failure of ['AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED','AURORA_DRIVE_SCOPE_CHANGED']) {
+    const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+    f.c.comTravaIngestaoGmailWMGJ_=cb=>{
+      if(failure.includes('WINDOW'))f.c.auroraContinuousDriveWindow_=()=>{throw Error(failure);};
+      else f.c.auroraContinuousDriveSystemGuard_=()=>{throw Error(failure);};
+      return cb();
+    };
+    const result=f.c.auroraPromoverAlimentacaoContinuaDriveAutorizada(f.req);
+    assert.equal(result.ok,false);assert.equal(result.code,failure);
+    assert.equal(f.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
+  }
+});
+
+test('STATUS reports a recent scoped cycle separately from canonical readback and expires its evidence',()=>{
+  const now=Date.now(),liveAt=new Date(now-10000).toISOString();
+  const last={statusContractVersion:2,phase:'LIVE_ENUMERATION',runtimeScopeSha256:'a'.repeat(64),liveEnabledAt:liveAt,
+    checkedAt:new Date(now-5000).toISOString(),completedAt:new Date(now-1000).toISOString(),ok:true,
+    code:'AURORA_CONTINUOUS_DRIVE_CYCLE_VERIFIED',scanExamined:5,queued:1,attempted:1,accepted:1,duplicates:0,
+    pending:0,failed:0,review:1,extractionErrors:0,canonicalReceiptsRecorded:1};
+  for(const mutate of [null,x=>{x.checkedAt=new Date(now-3600000).toISOString();},
+    x=>{x.completedAt=new Date(now+60000).toISOString();},x=>{x.runtimeScopeSha256='b'.repeat(64);},
+    x=>{x.liveEnabledAt=new Date(now-20000).toISOString();},x=>{x.phase='REMEDIATE_ONLY';},
+    x=>{x.scanExamined='5';},x=>{x.canonicalReceiptsRecorded=-1;},x=>{delete x.statusContractVersion;}]) {
+    const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]),cycle={...last};
+    f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','LIVE_ENUMERATION');
+    f.props.set('AURORA_CONTINUOUS_DRIVE_LIVE_ENABLED_AT',liveAt);if(mutate)mutate(cycle);
+    f.props.set('AURORA_CONTINUOUS_DRIVE_LAST_CYCLE',JSON.stringify(cycle));
+    const result=f.c.auroraLerStatusAlimentacaoContinuaDriveAutorizada(f.req.expectedScopeSha256);
+    assert.equal(result.ok,true);assert.equal(result.recentCycleVerified,!mutate);
+    assert.equal(result.enumerationObserved,!mutate);assert.equal(result.continuousExtractionVerified,false);
+    assert.equal(result.canonicalReadbackVerified,false);assert.equal(result.fullSynchronizationVerified,false);
+  }
+});
+
+test('queue promotion accepts bound receipts and aliases, but rejects wrong versions and missing anchors',()=>{
+  const receipt=readbackFixture().row;
+  const canonical={orgId:'wmgj',scopeSha256:'a'.repeat(64),fileId:receipt.sourceId,sourceVersion:String(receipt.sourceVersion),
+    coverage:'EXTRACTED_REVIEW_PENDING',contentSha256:receipt.contentHash,receipt};
+  const alias={...canonical,fileId:'synthetic-alias-only',coverage:'DUPLICATE_CONTENT',aliasFileId:receipt.sourceId};
+  const row=x=>[x.fileId,'REVISAR_HUMANO',0,JSON.stringify(x)];
+  const header=['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO'];
+  for(const items of [[canonical,alias],[{...canonical,sourceVersion:'2'}],[alias],
+    [{...canonical,receipt:{...receipt,sourceId:'wrong-source-only'}}]]) {
+    const f=makeContinuousGateFixture([header,...items.map(row)]);
+    const result=f.c.auroraPromoverAlimentacaoContinuaDriveAutorizada(f.req);
+    assert.equal(result.ok,items.length===2);
+  }
+});
+
+test('scheduled summary stores scoped cycle metadata but refuses malformed receipt counters',()=>{
+  for(const receipt of [readbackFixture().row,{replayVerified:true}]) {
+    const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+    f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','LIVE_ENUMERATION');
+    f.c.auroraExecutarCicloDriveAutorizado_=()=>({ok:true,scan:{visited:1},process:{attempted:1,accepted:1,privateReadbackPlan:[receipt]}});
+    const result=f.c.auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj();
+    assert.equal(result.ok,!!receipt.entityId);
+    if(result.ok){assert.equal(result.canonicalReceiptsRecorded,1);assert.equal(result.statusContractVersion,2);
+      assert.equal(result.runtimeScopeSha256,'a'.repeat(64));assert.ok(result.completedAt);}
+  }
+});
+
+test('ACTIVATE refuses a failed or live first cycle without claiming extraction',()=>{
+  for(const firstCycle of [{ok:false},{ok:true,phase:'LIVE_ENUMERATION',code:'AURORA_CONTINUOUS_DRIVE_CYCLE_VERIFIED'},
+    {ok:true,phase:'REMEDIATE_ONLY',code:'AURORA_CONTINUOUS_DRIVE_REMEDIATION_GATE'}]) {
+    const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+    f.c.auroraContinuousDrivePrivateScope_=()=>({});
+    f.c.auroraContinuousDriveNormalizedScope_=()=>f.c.auroraContinuousDriveScopeFromProperties_().scope;
+    f.c.auroraResolverFontesDocumentais_=()=>({sources:[],candidates:[]});
+    f.c.ScriptApp={getProjectTriggers:()=>[],newTrigger:()=>({timeBased:()=>({everyMinutes:()=>({create:()=>{}})})})};
+    f.c.auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj=()=>firstCycle;
+    const result=f.c.auroraAtivarAlimentacaoContinuaDriveAutorizada({confirmation:f.c.AURORA_CONTINUOUS_DRIVE_CONFIRMATION,
+      scopeJson:'{}',expectedScopeSha256:f.req.expectedScopeSha256});
+    assert.equal(result.ok,firstCycle.phase==='REMEDIATE_ONLY');assert.equal(result.continuousExtraction,false);
+    assert.equal(f.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
+  }
+});
+
+test('continuous workflow checks published bytes and deployment stability offline before accepting evidence',()=>{
+  const cp=require('node:child_process'),repo=path.resolve(__dirname,'..');
+  const workflow=fs.readFileSync(path.join(repo,'.github/workflows/aurora-drive-continuous-feed.yml'),'utf8');
+  const script=name=>workflow.split('- name: '+name)[1].split('- name: ')[0]
+    .match(/node <<'NODE'\n([\s\S]*?)\n\s*NODE/)[1].split('\n').map(line=>line.replace(/^          /,'')).join('\n');
+  const pre=script('Verify canonical published bytes before any operational action');
+  const post=script('Verify one active collector and no duplicate Drive collector');
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'continuous-published-'));
+  const bin=path.join(root,'bin');fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin,'clasp'),`#!/usr/bin/env node
+const fs=require('node:fs'),path=require('node:path');
+if(process.argv[2]==='deployments') console.log(JSON.stringify([{description:'AURORA_EXECUTION_API_CANONICAL '+'a'.repeat(40),versionNumber:Number(process.env.SYNTHETIC_VERSION||1),deploymentId:'synthetic-deployment-only'}]));
+else if(process.argv[2]==='pull') {
+  for(const name of fs.readdirSync(path.join(process.env.GITHUB_WORKSPACE,'src')).filter(x=>x.endsWith('.gs')))
+    fs.copyFileSync(path.join(process.env.GITHUB_WORKSPACE,'src',name),path.join(process.cwd(),name));
+  fs.copyFileSync(path.join(process.env.GITHUB_WORKSPACE,'appsscript.json'),'appsscript.json');
+  if(process.env.SYNTHETIC_BAD_BYTES)fs.appendFileSync('37_AURORA_CONECTORES_PLUG_AND_PLAY.gs','\\n// drift');
+}else process.exit(2);
+`,{mode:0o700});
+  try {
+    for(const bad of [false,true]) {
+      const temp=path.join(root,bad?'bad':'good'),workspace=path.join(temp,'appscript-continuous');
+      fs.mkdirSync(workspace,{recursive:true});fs.writeFileSync(path.join(workspace,'.clasp.json'),'{}');
+      const env={...process.env,PATH:bin+path.delimiter+process.env.PATH,RUNNER_TEMP:temp,GITHUB_WORKSPACE:repo,
+        SYNTHETIC_BAD_BYTES:bad?'1':'',SYNTHETIC_VERSION:'1'};
+      const result=cp.spawnSync(process.execPath,['-e',pre],{cwd:repo,env,encoding:'utf8'});
+      assert.equal(result.status,bad?1:0,result.stderr);
+      if(bad){assert.match(result.stderr,/DRIVE_PUBLISHED_SOURCE_MISMATCH/);continue;}
+      const proof=JSON.parse(fs.readFileSync(path.join(workspace,'published-proof.json')));
+      assert.equal(proof.modulesVerified,30);assert.equal(proof.versionNumber,1);
+      assert.equal(cp.spawnSync(process.execPath,['-e',post],{cwd:workspace,env}).status,0);
+      const changed=cp.spawnSync(process.execPath,['-e',post],{cwd:workspace,env:{...env,SYNTHETIC_VERSION:'2'},encoding:'utf8'});
+      assert.equal(changed.status,1);assert.match(changed.stderr,/DRIVE_PUBLISHED_SOURCE_CHANGED/);
+    }
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
 });

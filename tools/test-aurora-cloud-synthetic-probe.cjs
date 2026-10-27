@@ -242,12 +242,12 @@ for(const [name,change]of [
 test('deadline cannot be extended by request',()=>{
   const f=fixture({now:DEADLINE+1000}),result=f.execute();assert.equal(result.code,'PROBE_REQUEST_REJECTED');assert.equal(f.calls.configReads,0);
 });
-test('renewed Cloud hard deadline agrees with the explicit owner decision and permits the former cutoff',()=>{
+test('Cloud hard deadline follows its historical risk renewal and ignores operational continuations',()=>{
   const decision=JSON.parse(fs.readFileSync(path.join(ROOT,'firebase-migration/policy/hml-owner-release-approval-v1.json'),'utf8'));
-  // A later scope decision is not a deadline renewal. Match the current window
-  // explicitly and reject ambiguous history rather than relying on list order.
+  // A later operational window does not renew the synthetic probe or R029.
+  // Match the actual immutable probe deadline, never the current global scope.
   const renewals=decision.reaffirmations.filter(item=>item.riskReviewDeadlineExtended===true
-    && item.validUntilUtc===decision.scope.validUntilUtc);
+    && Date.parse(item.validUntilUtc)===DEADLINE);
   assert.equal(renewals.length,1);
   const renewal=renewals[0];
   assert.equal(renewal.decisionId,'AURORA-HML-OWNER-RENEWAL-20261022-TO-20261026');
@@ -257,10 +257,10 @@ test('renewed Cloud hard deadline agrees with the explicit owner decision and pe
     assert.equal(renewal[field],false,field);
   assert.equal(decision.reaffirmations.find(item=>item.decisionId==='AURORA-HML-DOCUMENT-SCOPE-20261015')
     .validUntilUtc,'2026-10-16T03:00:00.000Z');
-  assert.equal(DEADLINE,Date.parse(decision.scope.validUntilUtc));
+  assert.equal(DEADLINE,Date.parse(renewal.validUntilUtc));
   assert.equal(renewal.riskReviewDeadlineExtended,true);assert.equal(renewal.laterMainCodeReviewClaimed,false);
   const previous=Date.parse(renewal.previousValidUntilUtc),f=fixture({now:previous});
-  assert.equal(f.c.AURORA_HML_SYNTHETIC_DEADLINE,decision.scope.validUntilUtc);
+  assert.equal(f.c.AURORA_HML_SYNTHETIC_DEADLINE,renewal.validUntilUtc);
   assert.equal(f.execute().status,'PASS');
   assert.equal(fixture({now:Date.parse('2026-10-19T23:00:00Z')}).execute().status,'PASS');
   assert.doesNotThrow(()=>canonical.assertWindow({expiresAt:new Date(previous+600000).toISOString(),deadline:DEADLINE,now:()=>previous}));
@@ -270,6 +270,18 @@ test('renewed Cloud hard deadline agrees with the explicit owner decision and pe
   assert.equal(atDeadline.calls.configReads,0);assert.equal(atDeadline.calls.filesCreated,0);
   assert.doesNotThrow(()=>canonical.assertWindow({expiresAt:new Date(DEADLINE).toISOString(),deadline:DEADLINE,now:()=>DEADLINE-1}));
   assert.throws(()=>canonical.assertWindow({expiresAt:new Date(DEADLINE+600000).toISOString(),deadline:DEADLINE,now:()=>DEADLINE}),/PROBE_WINDOW_EXPIRED/);
+  const continuation=decision.reaffirmations.find(item=>item.decisionId===decision.scope.operationalContinuationDecisionId);
+  assert.equal(continuation.decisionId,'AURORA-HML-DOCUMENT-COMPATIBILITY-20261027');
+  assert.equal(continuation.validUntilUtc,decision.scope.validUntilUtc);
+  assert.equal(continuation.validUntilUtc,'2026-10-27T04:30:00.000Z');
+  assert.equal(continuation.riskReviewDeadlineExtended,false);assert.equal(continuation.riskExceptionRenewed,false);
+  const operationalNow=Date.parse(continuation.recordedAtUtc),operationalExpiry=new Date(operationalNow+600000).toISOString();
+  assert.ok(operationalNow>DEADLINE&&Date.parse(operationalExpiry)<Date.parse(continuation.validUntilUtc));
+  const stillExpired=fixture({now:operationalNow});
+  assert.equal(stillExpired.execute(request=>{request.expiresAt=operationalExpiry;}).code,'PROBE_REQUEST_REJECTED');
+  assert.equal(stillExpired.calls.configReads,0);assert.equal(stillExpired.calls.filesCreated,0);
+  assert.equal(stillExpired.calls.foldersCreated,0);assert.equal(stillExpired.calls.http.length,0);
+  assert.throws(()=>canonical.assertWindow({expiresAt:operationalExpiry,deadline:DEADLINE,now:()=>operationalNow}),/PROBE_WINDOW_EXPIRED/);
 });
 for(const [name,options]of [
   ['lease after an in-flight extractor',{expireAfterOperation:'extraction'}],

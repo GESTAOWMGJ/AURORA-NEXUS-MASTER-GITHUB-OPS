@@ -1,5 +1,7 @@
 # AURORA-HML-DRIVE-PHASE-GATE-001 — Gate de fase, fila e contenção
 
+**Revisão técnica:** a avaliação original foi complementada pela [auditoria AURORA-DRIVE-STATUS-002](AURORA_PR342_AUDIT_20261026.md). O critério original baseado em varredura era insuficiente; o contrato v2 não atesta extração sem READBACK.
+
 **Data:** 26/10/2026
 **Módulo:** Drive documental WMGJ / Apps Script canônico
 **Ambiente:** HML `wmgj-hml-jfn-20260927`; sem produção
@@ -18,7 +20,7 @@
 - Promoção: se `ID_ORIGEM`, `STATUS`, `TENTATIVAS` ou `OBSERVACAO` estiver ausente ou inválido, retornar `AURORA_DRIVE_QUEUE_CONTRACT` antes de avaliar pending/justified. Cabeçalho ausente jamais significa fila vazia.
 - Contenção: `ACTIVATE` retorna explicitamente `phase=REMEDIATE_ONLY` e `continuousExtraction=false` e valida o retorno do primeiro ciclo antes de atestar êxito; instalar trigger não equivale a extrair.
 - Ciclo: a fase `LIVE_ENUMERATION` é novamente verificada **depois de obter a trava compartilhada** e antes de cada requisição. Uma fase antiga/cacheada não autoriza continuação após rollback/pausa.
-- Estado: `liveEnumerationEnabled` distingue permissão de enumeração do mero registro de trigger; `continuousExtractionVerified` exige ciclo pós-habilitação com contagem de varredura e resultado comprovado.
+- Estado: `liveEnumerationEnabled` distingue permissão de enumeração do mero registro de trigger; no contrato original, `continuousExtractionVerified` dependia de um ciclo pós-habilitação com varredura. A auditoria reproduziu falso positivo; STATUS v2 mantém esse indicador falso sem READBACK canônico e usa `recentCycleVerified`/`enumerationObserved` para execução e varredura.
 - O GitHub Actions protegido exige o contrato de `ACTIVATE` em contenção, sem chamar coleta real na fase pausada.
 
 ## Critérios de segurança
