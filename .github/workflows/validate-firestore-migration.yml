@@ -86,6 +86,7 @@ jobs:
         run: |
           node --test tools/test-aurora-cloud-synthetic-probe.cjs
           node --test tools/test-aurora-wmgj-reuse-preview.cjs
+          node --test tools/test-drive-private-content.cjs
 
       - name: Test controlled HML IAM repair without cloud access
         run: python3 -m unittest discover -s firebase-migration/scripts -p test_hml_eventarc_iam.py -v
