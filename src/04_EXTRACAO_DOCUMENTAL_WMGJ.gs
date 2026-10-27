@@ -1665,7 +1665,7 @@ function auroraLerPlanoReadbackDriveAutorizado_(options) {
   if(!Number.isSafeInteger(offset) || offset<0 || !Number.isSafeInteger(limit) || limit<1)
     throw new Error('AURORA_DRIVE_READBACK_CURSOR_INVALID');
   var result={privateReadbackPlan:[],privateAliasRows:[],privatePendingRows:[],coverage:{offset:offset,nextOffset:null,
-    total:0,documents:0,aliases:0,pending:0,complete:false,returned:0,pageDocuments:0,pageAliases:0,pagePending:0},
+    total:0,documents:0,manifests:0,aliases:0,pending:0,complete:false,returned:0,pageDocuments:0,pageManifests:0,pageAliases:0,pagePending:0},
     fullSynchronizationVerified:false};
   var coverage=result.coverage;
   for(var r=1;r<rows.length;r++) {
@@ -1678,6 +1678,8 @@ function auroraLerPlanoReadbackDriveAutorizado_(options) {
       && receipt.contentHash===receipt.contentSha256;
     if(proven && scope.coverage==='EXTRACTED_REVIEW_PENDING' && receipt.sourceId===scope.fileId
       && receipt.sourceVersion===Number(scope.sourceVersion)) kind='documents';
+    else if(proven && scope.coverage==='SOURCE_MANIFESTED_REVIEW_PENDING' && receipt.sourceId===scope.fileId
+      && receipt.sourceVersion===Number(scope.sourceVersion)) kind='manifests';
     else if(proven && scope.coverage==='DUPLICATE_CONTENT' && scope.aliasFileId && scope.aliasFileId===receipt.sourceId) kind='aliases';
     coverage[kind]++;scoped.push({scope:scope,kind:kind,row:rows[r]});
   }
@@ -1693,6 +1695,7 @@ function auroraLerPlanoReadbackDriveAutorizado_(options) {
     }
     result.privateReadbackPlan.push(value.receipt);
     if(item.kind==='documents') coverage.pageDocuments++;
+    else if(item.kind==='manifests') coverage.pageManifests++;
     else {
       coverage.pageAliases++;
       result.privateAliasRows.push({fileId:value.fileId,primaryFileId:value.aliasFileId,
