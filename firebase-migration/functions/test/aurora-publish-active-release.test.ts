@@ -181,9 +181,9 @@ test('HML owner mode consumes real deployment approval and preserves original ch
   assert.equal(verifyActiveReleaseEnvelope(f.envelope(),publicKey,{now:ownerNow}).status,'CANDIDATE_UNVERIFIED');
 });
 
-test('explicit owner renewal preserves earlier decisions and still rejects promotion at the new deadline',async()=>{
+test('historical owner renewals remain intact and the operational deadline still rejects promotion',async()=>{
   assert.equal(ownerDecision.recordedOn,'2026-10-08');
-  assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-26T03:00:00.000Z');
+  assert.equal(ownerDecision.scope.previousOperationalValidUntilUtc,'2026-10-26T03:00:00.000Z');
   assert.equal(ownerDecision.riskAcceptance.reviewBy,'2026-10-25');
   // Preserve all five prior owner decisions, including the separate PR #299 approval.
   assert.equal(createHash('sha256').update(JSON.stringify(ownerDecision.reaffirmations.slice(0,5))).digest('hex'),
@@ -227,7 +227,8 @@ test('explicit owner renewal preserves earlier decisions and still rejects promo
   assert.equal(Object.hasOwn(latest,'authorizedCandidateHeadSha'),false);
   assert.equal(latest.previousValidUntilUtc,regularization.validUntilUtc);
   assert.equal(latest.previousReviewBy,regularization.reviewBy);
-  assert.equal(latest.validUntilUtc,ownerDecision.scope.validUntilUtc);
+  assert.equal(latest.validUntilUtc,'2026-10-26T03:00:00.000Z');
+  assert.equal(latest.validUntilUtc,ownerDecision.scope.previousOperationalValidUntilUtc);
   assert.equal(latest.reviewBy,ownerDecision.riskAcceptance.reviewBy);
   assert.equal(latest.approvalSource,'DIRECT_OWNER_CHAT');
   assert.equal(latest.protectedRunOwnerApprovalStillRequired,true);
@@ -246,6 +247,41 @@ test('explicit owner renewal preserves earlier decisions and still rejects promo
   await publishActiveRelease(lastMoment.env,lastMoment.deps);assert.equal(lastMoment.writes(),1);
   const expired=ownerFixture();expired.deps.now=()=>Date.parse(ownerDecision.scope.validUntilUtc);
   await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(expired.writes(),0);
+});
+
+test('document compatibility continuation binds the remediated dependencies without rewriting risk history',async()=>{
+  const continuation=ownerDecision.reaffirmations.at(-1);
+  const drive=ownerDecision.reaffirmations.find((row:any)=>row.decisionId==='AURORA-HML-CONTINUOUS-DRIVE-20261026');
+  assert.equal(createHash('sha256').update(JSON.stringify(ownerDecision.reaffirmations.slice(0,7))).digest('hex'),
+    'c31a7bf4ea8be9b1fc008829e1822963d73b525cd763cceec192aaf9563781e5');
+  assert.equal(createHash('sha256').update(JSON.stringify(ownerDecision.riskAcceptance)).digest('hex'),
+    '8cffacc4514faafd31689408b198a19f537f9986c08af0a787bd738927c081ca');
+  assert.equal(continuation.decisionId,'AURORA-HML-DOCUMENT-COMPATIBILITY-20261027');
+  assert.equal(ownerDecision.scope.operationalContinuationDecisionId,continuation.decisionId);
+  assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-27T04:30:00.000Z');
+  assert.equal(continuation.validUntilUtc,ownerDecision.scope.validUntilUtc);
+  assert.equal(continuation.validUntilUtc,drive.validUntilUtc);
+  assert.equal(continuation.windowBasisDecisionId,drive.decisionId);
+  assert.equal(continuation.exactPrivateScopeSha256,drive.exactPrivateScopeSha256);
+  assert.equal(continuation.previousOperationalValidUntilUtc,ownerDecision.scope.previousOperationalValidUntilUtc);
+  assert.equal(continuation.historicalRiskAcceptanceValidUntilUtc,'2026-10-26T03:00:00.000Z');
+  assert.equal(continuation.recordedOn,'2026-10-27');
+  assert.equal(continuation.userAuthorizationPersists,true);
+  for(const field of ['riskReviewDeadlineExtended','riskExceptionRenewed','newResidualRiskAcceptanceClaimed',
+    'sourceMutationAuthorized','newSourceEnrollmentAuthorized','productionAuthorized','clinicalSensitiveAuthorized',
+    'iamChangeAuthorized','secretRotationAuthorized','credentialExportAuthorized','credentialValidityExtended',
+    'documentScopeValidityExtended','laterMainCodeReviewClaimed','independentGithubPullRequestReviewClaimed'])
+    assert.equal(continuation[field],false,field);
+  const evidence=continuation.dependencyRemediationEvidence;
+  for(const [file,expected] of [['package.json',evidence.requiredPackageJsonSha256],['package-lock.json',evidence.requiredPackageLockSha256]])
+    assert.equal(createHash('sha256').update(readFileSync(new URL(`../../tests/${file}`,import.meta.url))).digest('hex'),expected,file);
+  assert.deepEqual(evidence.candidateObservedAdvisories,{info:0,low:0,moderate:0,high:0,critical:0,total:0});
+  const current=ownerFixture();current.deps.now=()=>Date.parse(continuation.recordedAtUtc);
+  await publishActiveRelease(current.env,current.deps);assert.equal(current.writes(),1);
+  const unapproved=ownerFixture();unapproved.deps.now=()=>Date.parse(continuation.recordedAtUtc);
+  unapproved.responses.set(`/actions/runs/${releaseRunId}/approvals`,[]);
+  await assert.rejects(publishActiveRelease(unapproved.env,unapproved.deps),/OWNER_DEPLOYMENT_APPROVAL_NOT_VERIFIED/);
+  assert.equal(unapproved.writes(),0);
 });
 
 test('pre-cloud workflow gate requires signed promotion when a canonical public key is configured',()=>{
