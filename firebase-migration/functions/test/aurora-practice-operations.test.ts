@@ -128,3 +128,15 @@ test('provider payment binds account, organization, amount, mode, session and im
  await assert.rejects(f.engine.recordPayment(owner.orgId,{...event,account:'acct_other'},context.configHash),rejects('PAYMENT_EVENT_CONFLICT'));
  f.rows.get(base).practicePayments.accountId='acct_changed';await assert.rejects(f.engine.recordPayment(owner.orgId,event,context.configHash),rejects('PAYMENT_CONFIGURATION_CHANGED'));
 });
+test('website exports public services without private records or prices',()=>{
+ const html=practiceWebsite({business,website:{headline:'Cuidado próximo',about:'Linha um\nLinha dois',contactLabel:'Agendar'},contacts:[{name:'PRIVATE_CONTACT_SENTINEL'}],charges:[{amountCents:987654321}],knowledge:[{answer:'PRIVATE_KNOWLEDGE_SENTINEL'}]});
+ assert.ok(html.includes('<html lang="pt-BR">'));assert.ok(html.includes('50 minutos'));assert.ok(html.includes('Consulta'));assert.ok(html.includes('office%40example.invalid'));
+ for(const secret of ['PRIVATE_CONTACT_SENTINEL','PRIVATE_KNOWLEDGE_SENTINEL','987654321','20000'])assert.equal(html.includes(secret),false);
+ assert.equal(html.includes('<script'),false);assert.equal(html.includes('<form'),false);
+});
+test('website encodes service names and email delimiters and omits absent contact links',()=>{
+ const website={headline:'Título',about:'Texto',contactLabel:'Contato'};
+ const html=practiceWebsite({business:{...business,publicEmail:'office@example.invalid?bcc=other@example.invalid',services:[{name:'<img src=x onerror=alert(1)>',durationMinutes:50}]},website});
+ assert.ok(html.includes('invalid%3Fbcc%3D'));assert.equal(html.includes('<img'),false);
+ const empty=practiceWebsite({business:{...business,publicEmail:'',services:[]},website});assert.equal(empty.includes('mailto:'),false);assert.equal(empty.includes('id="servicos"'),false);
+});
