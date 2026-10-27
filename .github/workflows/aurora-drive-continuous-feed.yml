@@ -138,6 +138,23 @@ jobs:
           mkdir -p "$RUNNER_TEMP/appscript-continuous"
           printf '{"scriptId":"%s","projectId":"%s","rootDir":"."}\n' "$APPS_SCRIPT_ID" "$PROJECT_ID" > "$RUNNER_TEMP/appscript-continuous/.clasp.json"
 
+      - name: Verify canonical published bytes before any operational action
+        run: |
+          node <<'NODE'
+          const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');
+          const {selectDriveDeployment,verifyPublishedDriveProject}=require('./tools/aurora-drive-ingest-run.cjs');
+          const workspace=path.join(process.env.RUNNER_TEMP,'appscript-continuous');
+          const command=(args,cwd)=>cp.execFileSync('clasp',args,{cwd,encoding:'utf8',stdio:['ignore','pipe','pipe']});
+          const before=selectDriveDeployment(JSON.parse(command(['deployments','--json'],workspace)));
+          const published=path.join(workspace,'published');fs.mkdirSync(published,{mode:0o700});
+          fs.copyFileSync(path.join(workspace,'.clasp.json'),path.join(published,'.clasp.json'));
+          command(['pull','--versionNumber',String(before.versionNumber),'--json'],published);
+          const proof=verifyPublishedDriveProject(process.env.GITHUB_WORKSPACE,published);
+          fs.writeFileSync(path.join(workspace,'published-proof.json'),JSON.stringify({
+            deploymentId:before.deploymentId,versionNumber:before.versionNumber,
+            publishedSourceSha:before.publishedSourceSha,...proof}),{mode:0o600});
+          NODE
+
       - name: Execute exact-scope continuous feed action
         run: |
           set -euo pipefail
@@ -148,7 +165,9 @@ jobs:
               '[{confirmation:"ACTIVATE_AUTHORIZED_WMGJ_DRIVE_CONTINUOUS_FEED",scopeJson:$scope,expectedScopeSha256:$hash}]')"
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraAtivarAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/action-private.json" "$params"
             jq -e '.response.ok==true and .response.code=="AURORA_CONTINUOUS_DRIVE_ACTIVATED"
-              and .response.continuousExtraction==true and (.response.sourceCount>=1 and .response.sourceCount<=12) and .response.triggerCount==1
+              and .response.continuousExtraction==false and .response.phase=="REMEDIATE_ONLY"
+              and .response.firstCycle.ok==true and .response.firstCycle.code=="AURORA_CONTINUOUS_DRIVE_REMEDIATION_GATE"
+              and (.response.sourceCount>=1 and .response.sourceCount<=12) and .response.triggerCount==1
               and .response.privateScopeSha256=="d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa"
               and .response.sourceMutation==false and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
           elif [ "$action" = "REMEDIATE" ]; then
@@ -186,7 +205,13 @@ jobs:
             bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraLerStatusAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/action-private.json" "$params"
             jq -e '.response.ok==true and .response.code=="AURORA_CONTINUOUS_DRIVE_STATUS_VERIFIED"
               and .response.sourceActive==true and (.response.sourceCount>=1 and .response.sourceCount<=12) and .response.triggerCount==1
-              and .response.duplicateCollectors==0 and .response.sourceMutation==false
+              and .response.duplicateCollectors==0
+              and (.response.phase=="REMEDIATE_ONLY" or .response.phase=="LIVE_ENUMERATION")
+              and (.response.liveEnumerationEnabled==(.response.phase=="LIVE_ENUMERATION"))
+              and .response.statusContractVersion==2 and .response.collectorConfigured==true
+              and .response.continuousExtractionVerified==false and .response.canonicalReadbackVerified==false
+              and .response.fullSynchronizationVerified==false
+              and .response.sourceMutation==false
               and .response.productionMutation==false' "$RUNNER_TEMP/action-private.json" >/dev/null
           fi
 
@@ -197,13 +222,34 @@ jobs:
           params="$(jq -nc --arg hash "$EXPECTED_SCOPE_SHA256" '[$hash]')"
           bash "$GITHUB_WORKSPACE/tools/run-clasp-checked.sh" auroraLerStatusAlimentacaoContinuaDriveAutorizada "$RUNNER_TEMP/status-private.json" "$params"
           jq -e '.response.ok==true and .response.authorizationValid==true
+            and .response.statusContractVersion==2 and .response.collectorConfigured==true
+            and (.response.phase=="REMEDIATE_ONLY" or .response.phase=="LIVE_ENUMERATION")
+            and (.response.liveEnumerationEnabled==(.response.phase=="LIVE_ENUMERATION"))
+            and .response.continuousExtractionVerified==false and .response.canonicalReadbackVerified==false
+            and .response.fullSynchronizationVerified==false
             and .response.sourceActive==true and (.response.sourceCount>=1 and .response.sourceCount<=12)
             and .response.triggerCount==1 and .response.duplicateCollectors==0
             and .response.privateScopeSha256=="d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa"
             and .response.sourceMutation==false and .response.productionMutation==false' "$RUNNER_TEMP/status-private.json" >/dev/null
+          if [ "${{ inputs.action }}" = "ACTIVATE" ]; then
+            jq -e '.response.phase=="REMEDIATE_ONLY" and .response.liveEnumerationEnabled==false' "$RUNNER_TEMP/status-private.json" >/dev/null
+          fi
+          node <<'NODE'
+          const fs=require('node:fs'),path=require('node:path'),cp=require('node:child_process');
+          const {selectDriveDeployment}=require(path.join(process.env.GITHUB_WORKSPACE,'tools/aurora-drive-ingest-run.cjs'));
+          const before=JSON.parse(fs.readFileSync('published-proof.json','utf8'));
+          const after=selectDriveDeployment(JSON.parse(cp.execFileSync('clasp',['deployments','--json'],{encoding:'utf8',stdio:['ignore','pipe','pipe']})));
+          if(['deploymentId','versionNumber','publishedSourceSha'].some(k=>before[k]!==after[k]))
+            throw Error('DRIVE_PUBLISHED_SOURCE_CHANGED');
+          NODE
           jq -n --arg action "${{ inputs.action }}" --arg sha "$GITHUB_SHA" --arg scope "$EXPECTED_SCOPE_SHA256" \
+            --slurpfile publishedProof "$RUNNER_TEMP/appscript-continuous/published-proof.json" \
             --slurpfile actionResult "$RUNNER_TEMP/action-private.json" --slurpfile status "$RUNNER_TEMP/status-private.json" \
-            '{schemaVersion:"aurora.continuous-drive-evidence.v1",action:$action,checkedSourceSha:$sha,
+            '{schemaVersion:"aurora.continuous-drive-evidence.v2",action:$action,checkedSourceSha:$sha,
+              publishedSourceMatchesCheckedCommit:true,publishedVersionNumber:$publishedProof[0].versionNumber,
+              publishedDeploymentSourceSha:$publishedProof[0].publishedSourceSha,
+              publishedSourceFilesVerified:$publishedProof[0].modulesVerified,
+              publishedManifestSha256:$publishedProof[0].manifestSha256,
               privateScopeSha256:$scope,actionResult:$actionResult[0].response,status:$status[0].response,
               credentialsExported:false,newSourceEnrolled:false,sourceMutation:false,productionMutation:false}' \
             > "$RUNNER_TEMP/aurora-drive-continuous-summary.json"

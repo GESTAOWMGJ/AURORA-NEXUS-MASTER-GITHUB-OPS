@@ -1044,6 +1044,12 @@ function auroraExecutarCicloDriveAutorizado_(options) {
   var processLimit = Math.min(20, Math.max(0, Number(options.processLimit === undefined ? options.limit : options.processLimit) || 0));
   if (!Number.isSafeInteger(maxScan) || !Number.isSafeInteger(processLimit)) throw new Error('AURORA_DRIVE_LIMIT_INVALID');
   var end = Math.min(Date.now() + 145000, Number(options.deadlineMs) || Date.now() + 145000);
+  function checkScanAuthority() {
+    if(typeof options.beforeRequest==='function') options.beforeRequest();
+    if(Date.now()>=end) throw new Error('AURORA_DRIVE_DEADLINE_EXCEEDED');
+  }
+  function guardedRead(read) {checkScanAuthority();var value=read();checkScanAuthority();return value;}
+  checkScanAuthority();
   var props = PropertiesService.getScriptProperties();
   var key = 'AURORA_DRIVE_CURSOR_' + options.orgId + '_' + options.scopeSha256.slice(0, 24);
   var raw = props.getProperty(key), state = raw ? JSON.parse(raw) : {
@@ -1063,14 +1069,14 @@ function auroraExecutarCicloDriveAutorizado_(options) {
     if (id && !existing[id]) existing[id] = {row: r + 1, values: rows[r]};
   }
   var visited = 0, enqueued = 0, duplicates = 0, excludedCount = 0;
-  function checkpoint() { auroraDriveSaveCursor_(props, key, state); }
+  function checkpoint() { checkScanAuthority();auroraDriveSaveCursor_(props, key, state); }
   function queueFile(file, sourceId, rootId, folderId, explicit) {
-    var id = file.getId(), mime = file.getMimeType();
+    var id = guardedRead(function(){return file.getId();}), mime = guardedRead(function(){return file.getMimeType();});
     visited++; state.scanned++;
     if (mime === 'application/vnd.google-apps.shortcut' || mime === 'application/vnd.google-apps.folder') {
       excludedCount++; state.excluded++; return;
     }
-    var version = String(file.getLastUpdated().getTime());
+    var version = String(guardedRead(function(){return file.getLastUpdated();}).getTime());
     var scope = {schemaVersion:1,orgId:options.orgId,scopeSha256:options.scopeSha256,
       sourceId:sourceId,rootId:rootId,folderId:folderId,fileId:id,explicit:explicit,
       sourceVersion:version,coverage:'PENDING_EXTRACTION'};
@@ -1083,22 +1089,24 @@ function auroraExecutarCicloDriveAutorizado_(options) {
         if(options.nonBlockingBacklog===true) { duplicates++; return; }
         throw new Error('AURORA_DRIVE_INFLIGHT_RECONCILIATION_REQUIRED');
       }
+      checkScanAuthority();
       atualizarLinhaFilaWMGJ_Compat_(fila, known.row, idx, {STATUS:'PENDENTE',ULTIMO_ERRO:'',
         OBSERVACAO:auroraDriveScopeWrite_(scope)});
       known.values[idx.STATUS] = 'PENDENTE'; known.values[idx.OBSERVACAO] = auroraDriveScopeWrite_(scope);
     } else {
       var row = new Array(rows[0].length).fill('');
-      var values = {DATA_ENTRADA:new Date(),ORIGEM:'DRIVE',ID_ORIGEM:id,NOME_ARQUIVO:file.getName(),
+      var values = {DATA_ENTRADA:new Date(),ORIGEM:'DRIVE',ID_ORIGEM:id,NOME_ARQUIVO:guardedRead(function(){return file.getName();}),
         MIME_TYPE:mime,STATUS:'PENDENTE',TENTATIVAS:0,ACAO_SUGERIDA:'EXTRAIR_CONTEUDO',ULTIMO_ERRO:'',OBSERVACAO:auroraDriveScopeWrite_(scope)};
       Object.keys(values).forEach(function(k) { if (idx[k] !== undefined) row[idx[k]] = values[k]; });
-      fila.appendRow(row); existing[id] = {row:fila.getLastRow(),values:row};
+      checkScanAuthority();fila.appendRow(row); existing[id] = {row:fila.getLastRow(),values:row};
     }
     enqueued++;
   }
   while (!state.complete && visited < maxScan && Date.now() < end - 15000) {
+    checkScanAuthority();
     if (state.explicitIndex < fileIds.length) {
       var explicitId = fileIds[state.explicitIndex];
-      queueFile(DriveApp.getFileById(explicitId), 'drive-explicit', null, null, true);
+      queueFile(guardedRead(function(){return DriveApp.getFileById(explicitId);}), 'drive-explicit', null, null, true);
       state.explicitIndex++; checkpoint(); continue;
     }
     if (!state.stack.length) {
@@ -1110,43 +1118,45 @@ function auroraExecutarCicloDriveAutorizado_(options) {
     }
     var frame = state.stack[state.stack.length - 1];
     if (!validId(frame.folderId) || !validId(frame.rootId)) throw new Error('AURORA_DRIVE_CURSOR_CONFLICT');
-    var folder = DriveApp.getFolderById(frame.folderId);
+    var folder = guardedRead(function(){return DriveApp.getFolderById(frame.folderId);});
     if(frame.stage!=='FILES' && frame.stage!=='FOLDERS') throw new Error('AURORA_DRIVE_CURSOR_CONFLICT');
     var iterator;
     try {
-      iterator = frame.stage === 'FILES'
+      iterator = guardedRead(function(){return frame.stage === 'FILES'
         ? (frame.token ? DriveApp.continueFileIterator(frame.token) : folder.getFiles())
-        : (frame.token ? DriveApp.continueFolderIterator(frame.token) : folder.getFolders());
+        : (frame.token ? DriveApp.continueFolderIterator(frame.token) : folder.getFolders());});
     } catch(cursorError) {
+      checkScanAuthority();
       if(!frame.token) throw cursorError;
       // Continuation tokens expire. Restart this folder and rely on the durable
       // file/version queue deduplication; permission errors on restart still fail.
       frame.token=null;
-      iterator=frame.stage==='FILES'?folder.getFiles():folder.getFolders();
+      iterator=guardedRead(function(){return frame.stage==='FILES'?folder.getFiles():folder.getFolders();});
       checkpoint();
     }
-    if (!iterator.hasNext()) {
+    if (!guardedRead(function(){return iterator.hasNext();})) {
       if (frame.stage === 'FILES') { frame.stage='FOLDERS'; frame.token=null; }
       else state.stack.pop();
       checkpoint(); continue;
     }
-    var item = iterator.next();
+    var item = guardedRead(function(){return iterator.next();});
     if (frame.stage === 'FILES') queueFile(item, frame.sourceId, frame.rootId, frame.folderId, false);
     else {
       visited++;
-      var childId = item.getId();
+      var childId = guardedRead(function(){return item.getId();});
       if (excluded.indexOf(childId) >= 0) { state.excluded++; excludedCount++; }
       else {
         if (state.stack.length >= 24 || state.stack.some(function(f) { return f.folderId === childId; }))
           throw new Error('AURORA_DRIVE_DEPTH_OR_CYCLE');
         // Parent token is persisted together with the newly discovered child.
-        frame.token = iterator.getContinuationToken();
+        frame.token = guardedRead(function(){return iterator.getContinuationToken();});
         state.stack.push({folderId:childId,rootId:frame.rootId,sourceId:frame.sourceId,stage:'FILES',token:null});
         state.folders++; checkpoint(); continue;
       }
     }
-    frame.token = iterator.getContinuationToken(); checkpoint();
+    frame.token = guardedRead(function(){return iterator.getContinuationToken();}); checkpoint();
   }
+  checkScanAuthority();
   var processing = auroraProcessarFilaDriveAutorizada_(fila, options, processLimit, end);
   return {ok:processing.blockingErrors === 0,orgId:options.orgId,scopeSha256:options.scopeSha256,
     scan:{visited:visited,enqueued:enqueued,duplicates:duplicates,excluded:excludedCount,

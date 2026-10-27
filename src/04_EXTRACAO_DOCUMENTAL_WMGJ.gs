@@ -1498,7 +1498,9 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
         atualizarLinhaFilaWMGJ_Compat_(fila,i+1,idx,{STATUS:'PENDENTE',OBSERVACAO:auroraDriveScopeWrite_(scope)});
       }
       if(file.getSize()>16*1024*1024) throw new Error('AURORA_DRIVE_FILE_SIZE_LIMIT');
+      checkAuthority();
       var byteHash=wmgjFirestoreHashArquivo_(file);
+      checkAuthority();
       if(byteHash.method!=='content_sha256') throw new Error('AURORA_DRIVE_BYTES_REQUIRED');
       var alias=knownHashes[byteHash.value];
       if(alias && alias.fileId!==scope.fileId) {
@@ -1507,6 +1509,7 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
         result.aliases++;rememberAttempt(candidate);continue;
       }
       var extraction=extrairConteudoArquivoWMGJ_V1_(file,deadlineMs);
+      checkAuthority();
       if(!extracaoDocumentalCompletaWMGJ_(extraction)) {
         var empty=extraction && extraction.ok===true && typeof extraction.texto==='string' && !extraction.texto.trim();
         throw new Error(auroraCodigoFalhaExtracaoDrive_(extraction && (extraction.code || extraction.observacao),
@@ -1548,6 +1551,7 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
       scope.contentSha256=byteHash.value;scope.textSha256=textHash;
       scope.coverage=manifested?'SOURCE_MANIFESTED_REVIEW_PENDING':'EXTRACTED_REVIEW_PENDING';scope.receipt=receipt;
       delete scope.lastCode;
+      checkAuthority();
       registrarExtracaoDocumentalWMGJ_V1_(file,byteHash.value,extraction);
       registrarFirestoreMirrorWMGJ_(file,byteHash.value,{ok:true,required:true,status:response.duplicate?'DUPLICATE_CONFIRMED':'ACCEPTED',entityId:response.entityId,eventId:receipt.eventId});
       atualizarLinhaFilaWMGJ_Compat_(fila,i+1,idx,{STATUS:'REVISAR_HUMANO',ULTIMO_ERRO:'',OBSERVACAO:auroraDriveScopeWrite_(scope)});
@@ -1556,6 +1560,9 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
       result.privateReadbackPlan.push(receipt);
     } catch(error) {
       var code=String(error && error.message || 'AURORA_DRIVE_EXTRACTION_FAILED');
+      if(['AURORA_CONTINUOUS_DRIVE_PHASE_NOT_LIVE','AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED',
+        'AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_DEADLINE_EXCEEDED','AURORA_DRIVE_AUTHORITY_RECHECK_FAILED'].indexOf(code)>=0)
+        throw error;
       if(!/^[A-Z][A-Z0-9_:.-]{0,160}$/.test(code)) code='AURORA_DRIVE_EXTRACTION_FAILED';
       var recoverable=['PENDING_EXTRACTION','AURORA_DRIVE_FILE_SIZE_LIMIT','AURORA_DRIVE_TEXT_LIMIT',
         'AURORA_DRIVE_TEXT_ENCODING_UNVERIFIED',

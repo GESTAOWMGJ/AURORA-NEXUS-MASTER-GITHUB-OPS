@@ -520,3 +520,277 @@ test('live continuous Drive promotion is gated by fully justified backlog and bo
   assert.match(source,/processLimit:Math\.min\(10,scope\.limit\)/);
   assert.match(source,/phase=String\(props\.getProperty\('AURORA_CONTINUOUS_DRIVE_PHASE'\)\|\|'REMEDIATE_ONLY'\)/);
 });
+
+
+const vmDriveGate=require('node:vm');
+function makeContinuousGateFixture(rows) {
+  const source=fs.readFileSync(path.join(__dirname,'../src/37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'),'utf8');
+  const props=new Map([
+    ['AURORA_CONTINUOUS_DRIVE_PHASE','REMEDIATE_ONLY'],
+    ['AURORA_CONTINUOUS_DRIVE_LIVE_ENABLED_AT','2026-10-26T05:52:03.000Z'],
+    ['AURORA_CONTINUOUS_DRIVE_LAST_CYCLE',JSON.stringify({ok:true,code:'AURORA_CONTINUOUS_DRIVE_REMEDIATION_GATE',checkedAt:'2026-10-26T05:52:04.000Z',scanExamined:0})],
+    ['WMGJ_FIRESTORE_DRY_RUN','false'],['AURORA_FIRESTORE_MIRROR_REQUIRED','true']
+  ]);
+  const store={getProperty:key=>props.get(key)??null,
+    setProperty:(key,value)=>props.set(key,value),
+    setProperties:object=>{for(const [key,value] of Object.entries(object))props.set(key,value);}};
+  const c=vmDriveGate.createContext({console,Date,JSON,Number,Array,Object,String,Math,Error,
+    PropertiesService:{getScriptProperties:()=>store}});
+  vmDriveGate.runInContext(source,c);
+  const scope={orgId:'wmgj',sources:[{sourceId:'synthetic-root'}],
+    fileIds:[],excludedFolderIds:[],maxScan:300,limit:20};
+  c.auroraConnectorReuseOwner_=()=>{};
+  c.auroraContinuousDriveWindow_=()=>Date.now()+300000;
+  c.auroraContinuousDriveScopeFromProperties_=()=>({scope,runtimeHash:'a'.repeat(64)});
+  c.auroraContinuousDriveSystemGuard_=()=>({scopeSha256:'b'.repeat(64),config:{orgId:'wmgj'}});
+  c.auroraContinuousDriveCollectorState_=()=>({target:1,duplicateCollectors:0});
+  c.auroraContinuousDriveRegistryMatchesScope_=()=>true;
+  c.auroraResolverFontesDocumentais_=()=>({sources:[{sourceId:'synthetic-root'}]});
+  c.comTravaIngestaoGmailWMGJ_=callback=>callback();
+  c.getPlanilhaWMGJ_Compat_=()=>({getSheetByName:()=>({getDataRange:()=>({getValues:()=>rows})})});
+  c.getConfigWMGJ_Compat_=()=>({SHEETS:{FILA:'queue'}});
+  c.mapearCabecalhoWMGJ_Compat_=header=>Object.fromEntries(header.map((name,i)=>[name,i]));
+  c.auroraDriveScopeRead_=text=>text?JSON.parse(text):null;
+  c.auroraExecutarCicloDriveAutorizado_=()=>({ok:true,scan:{visited:1,enqueued:0},process:{attempted:0,accepted:0}});
+  const req={confirmation:c.AURORA_CONTINUOUS_DRIVE_LIVE_CONFIRMATION,
+    expectedScopeSha256:c.AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256};
+  return {c,props,req};
+}
+test('live promotion fails closed on renamed or absent queue headers, even when records exist',()=>{
+  for(const missing of ['OBSERVACAO','STATUS','ID_ORIGEM','TENTATIVAS']){
+    const header=['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO'].map(x=>x===missing?'RENAMED_'+x:x);
+    const rows=[header,['synthetic-file','PENDENTE',0,JSON.stringify({
+      orgId:'wmgj',scopeSha256:'a'.repeat(64),coverage:'PENDING_EXTRACTION'})]];
+    const f=makeContinuousGateFixture(rows);
+    const result=f.c.auroraPromoverAlimentacaoContinuaDriveAutorizada(f.req);
+    assert.equal(result.ok,false);
+    assert.equal(result.code,'AURORA_DRIVE_QUEUE_CONTRACT');
+    assert.equal(f.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
+  }
+  const f=makeContinuousGateFixture([]);
+  const result=f.c.auroraPromoverAlimentacaoContinuaDriveAutorizada(f.req);
+  assert.equal(result.code,'AURORA_DRIVE_QUEUE_CONTRACT');
+});
+test('live promotion requires all unproved current-scope items to have closed human-review reasons',()=>{
+  const header=['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO'];
+  const review={orgId:'wmgj',scopeSha256:'a'.repeat(64),coverage:'PENDING_EXTRACTION',
+    lastCode:'AURORA_DRIVE_BACKLOG_NON_BLOCKING_OWNER_ACCEPTED',humanReviewJustified:true};
+  const rows=[header,['synthetic-review','REVISAR_HUMANO',11,JSON.stringify(review)]];
+  const f=makeContinuousGateFixture(rows);
+  const accepted=f.c.auroraPromoverAlimentacaoContinuaDriveAutorizada(f.req);
+  assert.equal(accepted.ok,true);
+  assert.equal(accepted.pending,1);
+  assert.equal(accepted.justifiedHumanReview,1);
+  assert.equal(f.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'LIVE_ENUMERATION');
+  rows[1][1]='PENDENTE';
+  const g=makeContinuousGateFixture(rows);
+  const refused=g.c.auroraPromoverAlimentacaoContinuaDriveAutorizada(g.req);
+  assert.equal(refused.ok,false);
+  assert.equal(refused.code,'AURORA_CONTINUOUS_DRIVE_LIVE_BACKLOG_NOT_CLOSED');
+  assert.equal(g.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
+});
+test('scheduled Drive cycle rechecks phase after acquiring shared lock and refuses stale LIVE phase',()=>{
+  const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+  f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','LIVE_ENUMERATION');
+  let scans=0;
+  f.c.auroraExecutarCicloDriveAutorizado_=()=>{scans++;return{ok:true}};
+  f.c.comTravaIngestaoGmailWMGJ_=cb=>{f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','REMEDIATE_ONLY');return cb();};
+  const result=f.c.auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj();
+  assert.equal(result.ok,false);
+  assert.equal(result.code,'AURORA_CONTINUOUS_DRIVE_PHASE_NOT_LIVE');
+  assert.equal(scans,0);
+});
+test('per-request checkpoint prevents continuation when containment revokes LIVE phase',()=>{
+  const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+  f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','LIVE_ENUMERATION');
+  let attempted=0;
+  f.c.auroraExecutarCicloDriveAutorizado_=options=>{
+    attempted++;f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','REMEDIATE_ONLY');
+    options.beforeRequest();return {ok:true,scan:{visited:1},process:{attempted:1}};
+  };
+  const result=f.c.auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj();
+  assert.equal(attempted,1);
+  assert.equal(result.ok,false);
+  assert.equal(result.code,'AURORA_CONTINUOUS_DRIVE_PHASE_NOT_LIVE');
+});
+test('sanitized STATUS distinguishes a configured paused collector from verified live extraction',()=>{
+  const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+  const paused=f.c.auroraLerStatusAlimentacaoContinuaDriveAutorizada(f.req.expectedScopeSha256);
+  assert.equal(paused.ok,true);
+  assert.equal(paused.phase,'REMEDIATE_ONLY');
+  assert.equal(paused.liveEnumerationEnabled,false);
+  assert.equal(paused.continuousExtractionVerified,false);
+  f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','LIVE_ENUMERATION');
+  const live=f.c.auroraLerStatusAlimentacaoContinuaDriveAutorizada(f.req.expectedScopeSha256);
+  assert.equal(live.ok,true);
+  assert.equal(live.liveEnumerationEnabled,true);
+  assert.equal(live.continuousExtractionVerified,false);
+});
+test('protected ACTIVATE verifies paused phase and may not report live extraction',()=>{
+  const workflow=fs.readFileSync(path.join(__dirname,'../.github/workflows/aurora-drive-continuous-feed.yml'),'utf8');
+  const source=fs.readFileSync(path.join(__dirname,'../src/37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'),'utf8');
+  assert.match(workflow,/\.response\.continuousExtraction==false and \.response\.phase=="REMEDIATE_ONLY"/);
+  assert.match(workflow,/\.response\.firstCycle\.code=="AURORA_CONTINUOUS_DRIVE_REMEDIATION_GATE"/);
+  assert.match(source,/result\.phase='REMEDIATE_ONLY';result\.continuousExtraction=false;/);
+});
+
+test('STATUS never treats a successful scan or acceptance counters as canonical extraction proof',()=>{
+  for(const counts of [{scanExamined:5},{scanExamined:5,attempted:1,accepted:1},{scanExamined:5,extractionErrors:5,pending:5}]) {
+    const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+    f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','LIVE_ENUMERATION');
+    f.props.set('AURORA_CONTINUOUS_DRIVE_LAST_CYCLE',JSON.stringify({ok:true,
+      code:'AURORA_CONTINUOUS_DRIVE_CYCLE_VERIFIED',checkedAt:new Date().toISOString(),...counts}));
+    const value=f.c.auroraLerStatusAlimentacaoContinuaDriveAutorizada(f.req.expectedScopeSha256);
+    assert.equal(value.continuousExtractionVerified,false);
+  }
+});
+
+test('STATUS rejects stale runtime configuration even with one installed trigger',()=>{
+  for(const mutate of [f=>f.props.set('WMGJ_FIRESTORE_DRY_RUN','true'),
+    f=>f.props.set('AURORA_FIRESTORE_MIRROR_REQUIRED','false'),
+    f=>{f.c.auroraContinuousDriveSystemGuard_=()=>{throw Error('AURORA_DRIVE_SCOPE_CHANGED');};}]) {
+    const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+    f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','LIVE_ENUMERATION');mutate(f);
+    const value=f.c.auroraLerStatusAlimentacaoContinuaDriveAutorizada(f.req.expectedScopeSha256);
+    assert.equal(value.ok,false);assert.equal(value.liveEnumerationEnabled,false);
+  }
+});
+
+test('duplicate required headers cannot hide the observation column during promotion or remediation',()=>{
+  const rows=[['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO',' OBSERVACAO '],
+    ['synthetic-file','PENDENTE',0,JSON.stringify({orgId:'wmgj',scopeSha256:'a'.repeat(64)}),'']];
+  for(const action of ['promote','remediate']) {
+    const f=makeContinuousGateFixture(rows);
+    f.c.mapearCabecalhoWMGJ_Compat_=h=>Object.fromEntries(h.map((v,i)=>[v.trim(),i]));
+    const result=action==='promote'?f.c.auroraPromoverAlimentacaoContinuaDriveAutorizada(f.req)
+      :f.c.auroraSanearPendenciasDriveAutorizadas({...f.req,confirmation:f.c.AURORA_CONTINUOUS_DRIVE_REMEDIATE_CONFIRMATION});
+    assert.equal(result.ok,false);assert.equal(result.code,'AURORA_DRIVE_QUEUE_CONTRACT');
+    assert.equal(f.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
+  }
+});
+
+test('hashless receipt and unproved alias cannot close a pending item for promotion',()=>{
+  for(const extra of [{receipt:{replayVerified:true}},{coverage:'DUPLICATE_CONTENT'},
+    {contentSha256:'a'.repeat(64),receipt:{replayVerified:true,contentHash:'a'.repeat(64),contentSha256:'a'.repeat(64)}}]) {
+    const rows=[['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO'],['synthetic-file','PENDENTE',0,
+      JSON.stringify({orgId:'wmgj',scopeSha256:'a'.repeat(64),...extra})]];
+    const f=makeContinuousGateFixture(rows),result=f.c.auroraPromoverAlimentacaoContinuaDriveAutorizada(f.req);
+    assert.equal(result.ok,false);assert.equal(result.code,'AURORA_CONTINUOUS_DRIVE_LIVE_BACKLOG_NOT_CLOSED');
+    assert.equal(f.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
+  }
+});
+
+test('promotion rechecks authorization and configuration after lock acquisition',()=>{
+  for(const failure of ['AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED','AURORA_DRIVE_SCOPE_CHANGED']) {
+    const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+    f.c.comTravaIngestaoGmailWMGJ_=cb=>{
+      if(failure.includes('WINDOW'))f.c.auroraContinuousDriveWindow_=()=>{throw Error(failure);};
+      else f.c.auroraContinuousDriveSystemGuard_=()=>{throw Error(failure);};
+      return cb();
+    };
+    const result=f.c.auroraPromoverAlimentacaoContinuaDriveAutorizada(f.req);
+    assert.equal(result.ok,false);assert.equal(result.code,failure);
+    assert.equal(f.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
+  }
+});
+
+test('STATUS reports a recent scoped cycle separately from canonical readback and expires its evidence',()=>{
+  const now=Date.now(),liveAt=new Date(now-10000).toISOString();
+  const last={statusContractVersion:2,phase:'LIVE_ENUMERATION',runtimeScopeSha256:'a'.repeat(64),liveEnabledAt:liveAt,
+    checkedAt:new Date(now-5000).toISOString(),completedAt:new Date(now-1000).toISOString(),ok:true,
+    code:'AURORA_CONTINUOUS_DRIVE_CYCLE_VERIFIED',scanExamined:5,queued:1,attempted:1,accepted:1,duplicates:0,
+    pending:0,failed:0,review:1,extractionErrors:0,canonicalReceiptsRecorded:1};
+  for(const mutate of [null,x=>{x.checkedAt=new Date(now-3600000).toISOString();},
+    x=>{x.completedAt=new Date(now+60000).toISOString();},x=>{x.runtimeScopeSha256='b'.repeat(64);},
+    x=>{x.liveEnabledAt=new Date(now-20000).toISOString();},x=>{x.phase='REMEDIATE_ONLY';},
+    x=>{x.scanExamined='5';},x=>{x.canonicalReceiptsRecorded=-1;},x=>{delete x.statusContractVersion;}]) {
+    const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]),cycle={...last};
+    f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','LIVE_ENUMERATION');
+    f.props.set('AURORA_CONTINUOUS_DRIVE_LIVE_ENABLED_AT',liveAt);if(mutate)mutate(cycle);
+    f.props.set('AURORA_CONTINUOUS_DRIVE_LAST_CYCLE',JSON.stringify(cycle));
+    const result=f.c.auroraLerStatusAlimentacaoContinuaDriveAutorizada(f.req.expectedScopeSha256);
+    assert.equal(result.ok,true);assert.equal(result.recentCycleVerified,!mutate);
+    assert.equal(result.enumerationObserved,!mutate);assert.equal(result.continuousExtractionVerified,false);
+    assert.equal(result.canonicalReadbackVerified,false);assert.equal(result.fullSynchronizationVerified,false);
+  }
+});
+
+test('queue promotion accepts bound receipts and aliases, but rejects wrong versions and missing anchors',()=>{
+  const receipt=readbackFixture().row;
+  const canonical={orgId:'wmgj',scopeSha256:'a'.repeat(64),fileId:receipt.sourceId,sourceVersion:String(receipt.sourceVersion),
+    coverage:'EXTRACTED_REVIEW_PENDING',contentSha256:receipt.contentHash,receipt};
+  const alias={...canonical,fileId:'synthetic-alias-only',coverage:'DUPLICATE_CONTENT',aliasFileId:receipt.sourceId};
+  const row=x=>[x.fileId,'REVISAR_HUMANO',0,JSON.stringify(x)];
+  const header=['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO'];
+  for(const items of [[canonical,alias],[{...canonical,sourceVersion:'2'}],[alias],
+    [{...canonical,receipt:{...receipt,sourceId:'wrong-source-only'}}]]) {
+    const f=makeContinuousGateFixture([header,...items.map(row)]);
+    const result=f.c.auroraPromoverAlimentacaoContinuaDriveAutorizada(f.req);
+    assert.equal(result.ok,items.length===2);
+  }
+});
+
+test('scheduled summary stores scoped cycle metadata but refuses malformed receipt counters',()=>{
+  for(const receipt of [readbackFixture().row,{replayVerified:true}]) {
+    const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+    f.props.set('AURORA_CONTINUOUS_DRIVE_PHASE','LIVE_ENUMERATION');
+    f.c.auroraExecutarCicloDriveAutorizado_=()=>({ok:true,scan:{visited:1},process:{attempted:1,accepted:1,privateReadbackPlan:[receipt]}});
+    const result=f.c.auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj();
+    assert.equal(result.ok,!!receipt.entityId);
+    if(result.ok){assert.equal(result.canonicalReceiptsRecorded,1);assert.equal(result.statusContractVersion,2);
+      assert.equal(result.runtimeScopeSha256,'a'.repeat(64));assert.ok(result.completedAt);}
+  }
+});
+
+test('ACTIVATE refuses a failed or live first cycle without claiming extraction',()=>{
+  for(const firstCycle of [{ok:false},{ok:true,phase:'LIVE_ENUMERATION',code:'AURORA_CONTINUOUS_DRIVE_CYCLE_VERIFIED'},
+    {ok:true,phase:'REMEDIATE_ONLY',code:'AURORA_CONTINUOUS_DRIVE_REMEDIATION_GATE'}]) {
+    const f=makeContinuousGateFixture([['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO']]);
+    f.c.auroraContinuousDrivePrivateScope_=()=>({});
+    f.c.auroraContinuousDriveNormalizedScope_=()=>f.c.auroraContinuousDriveScopeFromProperties_().scope;
+    f.c.auroraResolverFontesDocumentais_=()=>({sources:[],candidates:[]});
+    f.c.ScriptApp={getProjectTriggers:()=>[],newTrigger:()=>({timeBased:()=>({everyMinutes:()=>({create:()=>{}})})})};
+    f.c.auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj=()=>firstCycle;
+    const result=f.c.auroraAtivarAlimentacaoContinuaDriveAutorizada({confirmation:f.c.AURORA_CONTINUOUS_DRIVE_CONFIRMATION,
+      scopeJson:'{}',expectedScopeSha256:f.req.expectedScopeSha256});
+    assert.equal(result.ok,firstCycle.phase==='REMEDIATE_ONLY');assert.equal(result.continuousExtraction,false);
+    assert.equal(f.props.get('AURORA_CONTINUOUS_DRIVE_PHASE'),'REMEDIATE_ONLY');
+  }
+});
+
+test('continuous workflow checks published bytes and deployment stability offline before accepting evidence',()=>{
+  const cp=require('node:child_process'),repo=path.resolve(__dirname,'..');
+  const workflow=fs.readFileSync(path.join(repo,'.github/workflows/aurora-drive-continuous-feed.yml'),'utf8');
+  const script=name=>workflow.split('- name: '+name)[1].split('- name: ')[0]
+    .match(/node <<'NODE'\n([\s\S]*?)\n\s*NODE/)[1].split('\n').map(line=>line.replace(/^          /,'')).join('\n');
+  const pre=script('Verify canonical published bytes before any operational action');
+  const post=script('Verify one active collector and no duplicate Drive collector');
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'continuous-published-'));
+  const bin=path.join(root,'bin');fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin,'clasp'),`#!/usr/bin/env node
+const fs=require('node:fs'),path=require('node:path');
+if(process.argv[2]==='deployments') console.log(JSON.stringify([{description:'AURORA_EXECUTION_API_CANONICAL '+'a'.repeat(40),versionNumber:Number(process.env.SYNTHETIC_VERSION||1),deploymentId:'synthetic-deployment-only'}]));
+else if(process.argv[2]==='pull') {
+  for(const name of fs.readdirSync(path.join(process.env.GITHUB_WORKSPACE,'src')).filter(x=>x.endsWith('.gs')))
+    fs.copyFileSync(path.join(process.env.GITHUB_WORKSPACE,'src',name),path.join(process.cwd(),name));
+  fs.copyFileSync(path.join(process.env.GITHUB_WORKSPACE,'appsscript.json'),'appsscript.json');
+  if(process.env.SYNTHETIC_BAD_BYTES)fs.appendFileSync('37_AURORA_CONECTORES_PLUG_AND_PLAY.gs','\\n// drift');
+}else process.exit(2);
+`,{mode:0o700});
+  try {
+    for(const bad of [false,true]) {
+      const temp=path.join(root,bad?'bad':'good'),workspace=path.join(temp,'appscript-continuous');
+      fs.mkdirSync(workspace,{recursive:true});fs.writeFileSync(path.join(workspace,'.clasp.json'),'{}');
+      const env={...process.env,PATH:bin+path.delimiter+process.env.PATH,RUNNER_TEMP:temp,GITHUB_WORKSPACE:repo,
+        SYNTHETIC_BAD_BYTES:bad?'1':'',SYNTHETIC_VERSION:'1'};
+      const result=cp.spawnSync(process.execPath,['-e',pre],{cwd:repo,env,encoding:'utf8'});
+      assert.equal(result.status,bad?1:0,result.stderr);
+      if(bad){assert.match(result.stderr,/DRIVE_PUBLISHED_SOURCE_MISMATCH/);continue;}
+      const proof=JSON.parse(fs.readFileSync(path.join(workspace,'published-proof.json')));
+      assert.equal(proof.modulesVerified,30);assert.equal(proof.versionNumber,1);
+      assert.equal(cp.spawnSync(process.execPath,['-e',post],{cwd:workspace,env}).status,0);
+      const changed=cp.spawnSync(process.execPath,['-e',post],{cwd:workspace,env:{...env,SYNTHETIC_VERSION:'2'},encoding:'utf8'});
+      assert.equal(changed.status,1);assert.match(changed.stderr,/DRIVE_PUBLISHED_SOURCE_CHANGED/);
+    }
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
