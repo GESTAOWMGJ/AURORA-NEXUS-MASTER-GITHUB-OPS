@@ -182,13 +182,15 @@ async function verifyReadback(plan,orgId,token,fetcher=fetch) {
     if(version.orgId!==orgId||version.entityId!==row.entityId||version.entityType!=='sourceDocument'||version.revision!==row.revision
       ||version.sourceVersion!==row.sourceVersion||version.snapshot?.source?.contentHash!==row.contentHash
       ||version.snapshot?.canonicalSnapshotHash!==row.canonicalSnapshotHash||stable(version.snapshot?.extractionEvidence)!==stable(proof))fail('DRIVE_IMMUTABLE_READBACK_MISMATCH');
-    verified++;evidence.push({entityIdSha256:sha(row.entityId),contentHash:row.contentHash,textSha256:row.textSha256,sourceVersion:data.sourceVersion,extractionComplete:true,nativeReady:false,revision:data.revision,replayVerified:true,immutableVersionVerified:true});
+    verified++;evidence.push({entityIdSha256:sha(row.entityId),contentHash:row.contentHash,textSha256:row.textSha256,sourceVersion:data.sourceVersion,
+      extractionComplete:true,extractionCoverage:expectedCoverage,nativeReady:false,revision:data.revision,replayVerified:true,immutableVersionVerified:true});
   }
   return {verified,evidence};
 }
 async function verifyCoverage(getPage,verifyPlan) {
   let offset=0,expectedTotals=null,pages=0,returned=0;
   const verified=new Map(),aliases=new Map(),sourceIds=new Set(),pendingIds=new Set();
+  const canonicalCounts={documents:0,manifests:0};
   const pendingDiagnostics={schemaVersion:'aurora.drive-pending-diagnostics.v1',queueMetadataOnly:true,
     count:0,byCode:{},byStatus:{},byMediaType:{},unknownSourceVersion:0,unknownAttempts:0,totalRecordedAttempts:0,
     justifiedHumanReview:0,unjustifiedPending:0};
@@ -197,20 +199,26 @@ async function verifyCoverage(getPage,verifyPlan) {
     if(value?.ok!==true||value.code!=='AURORA_DRIVE_READBACK_PLAN'||!c
       ||!Array.isArray(value.privateReadbackPlan)||!Array.isArray(value.privateAliasRows)
       ||value.triggersChanged!==false||value.globalSettingsChanged!==false)fail('DRIVE_COVERAGE_PAGE_REJECTED');
-    for(const key of ['offset','total','documents','aliases','pending','returned','pageDocuments','pageAliases','pagePending'])if(!Number.isSafeInteger(c[key])||c[key]<0)fail('DRIVE_COVERAGE_COUNTER_REJECTED');
-    if(c.offset!==offset||c.documents+c.aliases+c.pending!==c.total||c.pageDocuments+c.pageAliases+c.pagePending!==c.returned
-      ||c.returned>20||value.privateReadbackPlan.length!==c.pageDocuments+c.pageAliases||value.privateAliasRows.length!==c.pageAliases
+    for(const key of ['offset','total','documents','manifests','aliases','pending','returned','pageDocuments','pageManifests','pageAliases','pagePending'])if(!Number.isSafeInteger(c[key])||c[key]<0)fail('DRIVE_COVERAGE_COUNTER_REJECTED');
+    if(c.offset!==offset||c.documents+c.manifests+c.aliases+c.pending!==c.total||c.pageDocuments+c.pageManifests+c.pageAliases+c.pagePending!==c.returned
+      ||c.returned>20||value.privateReadbackPlan.length!==c.pageDocuments+c.pageManifests+c.pageAliases||value.privateAliasRows.length!==c.pageAliases
       ||typeof c.complete!=='boolean'||c.complete!==(c.nextOffset===null)
       ||(!c.complete&&(!Number.isSafeInteger(c.nextOffset)||c.nextOffset!==offset+c.returned||c.returned===0)))fail('DRIVE_COVERAGE_PAGINATION_REJECTED');
     const pending=value.privatePendingRows===undefined && c.pagePending===0?[]:value.privatePendingRows;
     if(!Array.isArray(pending)||pending.length!==c.pagePending)fail('DRIVE_PENDING_COVERAGE_REJECTED');
-    const totals={total:c.total,documents:c.documents,aliases:c.aliases,pending:c.pending};
+    const totals={total:c.total,documents:c.documents,manifests:c.manifests,aliases:c.aliases,pending:c.pending};
     if(expectedTotals&&stable(expectedTotals)!==stable(totals))fail('DRIVE_COVERAGE_CHANGED');expectedTotals=totals;
     const pageReceipts=new Map();
     for(const row of value.privateReadbackPlan){
       const key=sha(stable(row));pageReceipts.set(row.entityId,row);
       if(!verified.has(row.entityId)){
-        const checked=await verifyPlan([row]);if(checked.verified!==1)fail('DRIVE_COVERAGE_READBACK_FAILED');
+        const checked=await verifyPlan([row]);
+        if(checked?.verified!==1 || !Array.isArray(checked.evidence) || checked.evidence.length!==1
+          || checked.evidence[0]?.entityIdSha256!==sha(row.entityId))fail('DRIVE_COVERAGE_READBACK_FAILED');
+        const extractionCoverage=checked.evidence[0].extractionCoverage;
+        if(extractionCoverage==='TEXT_EXTRACTED_REVIEW_PENDING')canonicalCounts.documents++;
+        else if(extractionCoverage==='SOURCE_MANIFESTED_REVIEW_PENDING')canonicalCounts.manifests++;
+        else fail('DRIVE_COVERAGE_READBACK_FAILED');
         verified.set(row.entityId,{key,sourceId:row.sourceId});sourceIds.add(row.sourceId);
       }else if(verified.get(row.entityId).key!==key)fail('DRIVE_COVERAGE_RECEIPT_CHANGED');
     }
@@ -236,12 +244,15 @@ async function verifyCoverage(getPage,verifyPlan) {
     if(c.complete)break;
     if(pages>10000)fail('DRIVE_COVERAGE_PAGE_LIMIT');offset=c.nextOffset;
   }
-  if(returned!==expectedTotals.total||verified.size!==expectedTotals.documents||aliases.size!==expectedTotals.aliases
+  if(returned!==expectedTotals.total||verified.size!==expectedTotals.documents+expectedTotals.manifests
+    ||canonicalCounts.documents!==expectedTotals.documents||canonicalCounts.manifests!==expectedTotals.manifests
+    ||aliases.size!==expectedTotals.aliases
     ||[...aliases.keys()].some(id=>sourceIds.has(id))||pendingIds.size!==expectedTotals.pending
     ||[...pendingIds].some(id=>sourceIds.has(id)||aliases.has(id)))fail('DRIVE_COVERAGE_INCOMPLETE');
   pendingDiagnostics.unjustifiedPending=pendingDiagnostics.count-pendingDiagnostics.justifiedHumanReview;
   if(!Number.isSafeInteger(pendingDiagnostics.unjustifiedPending)||pendingDiagnostics.unjustifiedPending<0)fail('DRIVE_PENDING_COUNTER_REJECTED');
-  return{...expectedTotals,pages,canonicalDocumentsVerified:verified.size,aliasReferencesVerified:aliases.size,
+  return{...expectedTotals,pages,canonicalDocumentsVerified:verified.size,
+    canonicalTextDocumentsVerified:canonicalCounts.documents,canonicalManifestDocumentsVerified:canonicalCounts.manifests,aliasReferencesVerified:aliases.size,
     allReceiptsVerified:true,pendingDiagnostics};
 }
 // Only these fixed values can enter the shared summary. Neither arbitrary upper-
@@ -341,13 +352,15 @@ async function runDriveBatches({scope,mode,maxBatches,beforeBatch,call,verifyPla
 }
 function completionFromCoverage(mode,lastBatch,coverage) {
   mode=parseDriveMode(mode);
-  if(!coverage||coverage.allReceiptsVerified!==true||!Number.isSafeInteger(coverage.pending)||coverage.pending<0)
+  if(!coverage||coverage.allReceiptsVerified!==true||!Number.isSafeInteger(coverage.pending)||coverage.pending<0
+    ||!Number.isSafeInteger(coverage.manifests)||coverage.manifests<0)
     fail('DRIVE_COVERAGE_INCOMPLETE');
   const justified=coverage.pendingDiagnostics?.justifiedHumanReview||0;
   const remediated=coverage.pending===0||justified===coverage.pending;
-  return {complete:mode==='EXECUTE'&&lastBatch?.scan.complete===true&&coverage.pending===0,
+  return {complete:mode==='EXECUTE'&&lastBatch?.scan.complete===true&&coverage.pending===0&&coverage.manifests===0,
     scopedQueueDrained:coverage.pending===0,scopedQueueRemediated:remediated,
-    fullSynchronizationVerified:false,documentReviewRequired:coverage.pending>0};
+    fullSynchronizationVerified:false,documentReviewRequired:coverage.pending>0||coverage.manifests>0,
+    pendingExtractionRequiresFollowup:coverage.pending>0||coverage.manifests>0};
 }
 function command(exe,args,cwd){const r=cp.spawnSync(exe,args,{cwd,encoding:'utf8',windowsHide:true,timeout:420000,maxBuffer:16000000,env:{...process.env,DEBUG:'',NODE_DEBUG:''},stdio:['ignore','pipe','pipe']});if(r.error||r.status!==0)fail('DRIVE_COORDINATOR_COMMAND_FAILED');return r.stdout;}
 async function verifyRecovery(repo,token) {
