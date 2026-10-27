@@ -602,6 +602,20 @@ test('manifest methods persist manifest-only review coverage instead of text-ext
     assert.equal(result.process.accepted,1);assert.equal(f.sent[0].record.extractionEvidence.coverage,'SOURCE_MANIFESTED_REVIEW_PENDING');
     const row=f.rows.find(r=>r[2]===fileId),scope=f.context.auroraDriveScopeRead_(row[9]);
     assert.equal(scope.coverage,'SOURCE_MANIFESTED_REVIEW_PENDING');
+    const readback=f.context.auroraLerPlanoReadbackDriveAutorizado_({...f.options,readbackOffset:0});
+    assert.equal(readback.coverage.documents,0);assert.equal(readback.coverage.manifests,1);
+    assert.equal(readback.coverage.pending,0);assert.equal(readback.coverage.pageManifests,1);
+    assert.equal(readback.privateReadbackPlan.length,1);assert.equal(readback.privatePendingRows.length,0);
+    // A manifest is a separate proved category, never a shortcut around the
+    // source identity, version, content hash or replay requirements.
+    for(const change of [s=>{s.receipt.replayVerified=false;},s=>{s.receipt.sourceId='different-source-0001';},
+      s=>{s.receipt.sourceVersion++;},s=>{s.receipt.contentSha256='9'.repeat(64);}]) {
+      const damaged=JSON.parse(JSON.stringify(scope));change(damaged);
+      row[9]=f.context.auroraDriveScopeWrite_(damaged);
+      const pending=f.context.auroraLerPlanoReadbackDriveAutorizado_({...f.options,readbackOffset:0});
+      assert.equal(pending.coverage.manifests,0);assert.equal(pending.coverage.documents,0);
+      assert.equal(pending.coverage.pending,1);assert.equal(pending.privateReadbackPlan.length,0);
+    }
   }
 });
 
