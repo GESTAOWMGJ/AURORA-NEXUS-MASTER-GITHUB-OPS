@@ -13,7 +13,17 @@ on:
         type: choice
         required: false
         default: EXECUTE
-        options: [EXECUTE, PROCESS_EXISTING, READBACK]
+        options: [EXECUTE, PROCESS_EXISTING, READBACK, CONTENT]
+      content_hashes:
+        description: CONTENT only — up to three exact SHA-256 hashes of fully reviewed non-clinical UTF-8 sources; no IDs or text
+        type: string
+        required: false
+      content_review_method:
+        description: CONTENT only — factual full-file assistant review, without claiming human review
+        type: choice
+        required: false
+        default: NONE
+        options: [NONE, ASSISTANT_FULL_FILE_REVIEW]
       expected_sha:
         description: Exact authorized main SHA; published Apps Script bytes are verified separately
         type: string
@@ -628,6 +638,7 @@ jobs:
           set -euo pipefail
           node tools/audit-appscript.js
           node --test tools/test-drive-full-ingest.js tools/test-drive-activation.js tools/test-aurora-drive-ingest-run.cjs
+          node --test tools/test-drive-private-content.cjs
       - name: Authenticate the existing HML reader
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
@@ -652,6 +663,8 @@ jobs:
           EXPECTED_SOURCE_SHA: ${{ inputs.expected_sha }}
           AURORA_DRIVE_MAX_BATCHES: ${{ inputs.max_batches }}
           AURORA_DRIVE_MODE: ${{ inputs.drive_mode || 'EXECUTE' }}
+          AURORA_CONTENT_HASHES: ${{ inputs.content_hashes }}
+          AURORA_CONTENT_REVIEW_METHOD: ${{ inputs.content_review_method || 'NONE' }}
           APPROVED_PROJECT: ${{ vars.FIREBASE_HML_PROJECT_ID }}
           GH_TOKEN: ${{ github.token }}
         run: node tools/aurora-drive-ingest-run.cjs
