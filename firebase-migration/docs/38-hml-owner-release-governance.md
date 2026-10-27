@@ -32,7 +32,7 @@ revisão independente, deploy ou ingestão comprovados.
 
 O gateway v5 é um incremento técnico posterior, fonte `46fa11c7d4be68893a616530509872254ef809e6`, deploy `appgdep_6ac74c3ecd8081919043fc4bf3e2da37` concluído em 08/10/2026 às 07:54:57 UTC, com 22 cenários isolados e 8 GETs anônimos compilados aprovados conforme evidência técnica registrada pelo executor. Esse resultado não amplia retroativamente o escopo da revisão humana de `d94f2c93` nem comprova uma sessão pessoal/MFA.
 
-O caminho padrão `GITHUB_PULL_REQUEST_REVIEW` preserva a exigência de review humano aprovado, no head exato, por pessoa distinta do autor. O modo opcional `OWNER_DEPLOYMENT_APPROVAL` permite a governança pelo titular somente no projeto `wmgj-hml-jfn-20260927`, ambiente `firebase-homologation`, branch `main`, até o prazo expressamente renovado acima. Ele exige:
+O caminho padrão `GITHUB_PULL_REQUEST_REVIEW` preserva a exigência de review humano aprovado, no head exato, por pessoa distinta do autor. O modo opcional `OWNER_DEPLOYMENT_APPROVAL` permite a governança pelo titular somente no projeto `wmgj-hml-jfn-20260927`, ambiente `firebase-homologation`, branch `main`, dentro da validade operacional registrada na política e do escopo da decisão aplicável. Os aceites históricos de risco conservam seus próprios limites; a continuidade documental registrada ao final não renova R029. O modo exige:
 
 - PR integrado cujo merge commit seja o SHA exato promovido, main atual e CI/checks exatos aprovados;
 - actor e triggering actor GitHub do titular, ambos do tipo User, e identidade do runner correspondente;
@@ -51,7 +51,7 @@ O booleano compatível `humanReviewApproved` representa a aprovação humana par
 
 Na reconciliação local de 12/10, a baseline observada é `cd296dc46366429d5b09d7117f5ee66e757980b5`. O ambiente GitHub consultado conserva reviewer `GESTAOWMGJ` do tipo User, ID `278915189`, e uma única branch policy `main`. O run `38280466024` registra aprovação desse titular no ambiente `firebase-homologation`, ID `22941465860`, e validação bem-sucedida; seu deploy falhou no smoke autenticado e o publisher foi pulado. A aprovação real desse run não comprova deploy/smoke nem libera promoção. O guard `CANONICAL_RELEASE_PROMOTION_REQUIRED`, a verificação do par Ed25519 e os gates de fonte, smoke e CAS permanecem preservados após #211/#212. Esta reconciliação é código/teste local; nenhum pin foi publicado por ela.
 
-R029 mantém 7 agregações HIGH e 4 MODERATE, zero CRITICAL, apenas nas ferramentas de teste. As compensações, prazo e condições de suspensão estão no [registro de risco](32-security-risk-register.md). Produção e `CLINICAL_SENSITIVE` continuam fora desta autorização. Reverter este incremento restaura o modo exclusivamente baseado em review de PR, preservando o histórico já gravado.
+O aceite histórico de R029 registrou 7 agregações HIGH e 4 MODERATE, zero CRITICAL, apenas nas ferramentas de teste. Esse registro não descreve automaticamente uma árvore posterior. As compensações, o prazo histórico e a candidata de remediação estão no [registro de risco](32-security-risk-register.md). Produção e `CLINICAL_SENSITIVE` continuam fora desta autorização. Reverter o incremento original do modo do titular restaura o modo exclusivamente baseado em review de PR, preservando o histórico já gravado.
 
 ## Tráfego da revisão exata
 
@@ -60,3 +60,58 @@ A promoção assinada exige o preflight canônico completo antes de autenticar a
 O snapshot sanitizado no `RUNNER_TEMP` preserva o tráfego anterior e a identidade da alteração própria. Falha ou cancelamento no job de deploy permite rollback somente se essa alteração ainda for a vigente e os destinos anteriores estiverem prontos. Resultado HTTP incerto, baseline `LATEST`, conflito concorrente ou falha posterior do publisher exigem reconciliação explícita. Não há rollback automático após uma possível gravação do pin: é necessário conferir o ponteiro e o histórico para preservar sua relação com a fonte realmente servida.
 
 Em 12/10, a recuperação operacional restaurou 100% em `auroranexusauthgate-00016-mom`, anteriormente validada no run `37733907172`, e conferiu HTTP 200 no setup HML. Quatorze verificações HTTP anônimas e oito GETs do Worker compilado passaram. A origem canônica ainda retornava 404 e `platformRuntime/activeRelease` estava ausente. Essa recuperação preserva a entrada HML; não constitui promoção assinada, sessão nominal com MFA ou recibo de dispositivo.
+
+## Registro de continuidade documental — 27/10/2026
+
+`AURORA-HML-DOCUMENT-COMPATIBILITY-20261027` registra as ordens do titular para
+entregar a ingestão real WMGJ, usar o Drive como fonte principal e continuar o
+trabalho com a autonomia já expressamente concedida. A política preserva as
+mensagens literais. `recordedOn` e `recordedAtUtc` são a data e a hora deste
+registro; não atribuem timestamps desconhecidos às mensagens e não afirmam uma
+nova revisão humana de cada linha da main.
+
+O escopo operacional é a publicação da compatibilidade documental da mesma beta
+no HML existente, seguida de verificação e continuidade do mesmo escopo privado
+Drive. A versão final deve preservar os hashes da remediação de dependências
+indicados na política. Não cadastra novas fontes, amplia IAM, exporta ou prorroga
+credenciais, modifica documentos originais, autoriza produção ou habilita dados
+clínicos sensíveis. Texto extraído, manifesto e pendência continuam distintos.
+
+A validade operacional anterior de `scope.validUntilUtc` era
+`2026-10-26T03:00:00.000Z`; para esta continuidade específica fica limitada a
+`2026-10-27T04:30:00.000Z` (27/10 às 01h30 de Brasília), o mesmo encerramento já
+registrado em `AURORA-HML-CONTINUOUS-DRIVE-20261026`. É uma janela técnica
+conservadora derivada, não uma data apresentada como literalmente ditada pelo
+titular. A ligação consta em `scope.operationalContinuationDecisionId`, e a
+reafirmação conserva o valor anterior. Não existe renovação automática da janela.
+
+O objeto histórico `riskAcceptance`, inclusive seu literal de status, os
+11 riscos então aceitos e `reviewBy=2026-10-25`, permanece inalterado. O prazo
+desse aceite continua encerrado em `2026-10-26T03:00:00.000Z`. A nova continuidade
+não afirma que o titular aceitou as 12 agregações observadas depois, não prolonga
+a revisão R029 e não usa essa exceção para justificar dependências vulneráveis.
+
+A base técnica nova é a candidata de remediação: o manifesto e o lockfile de
+`firebase-migration/tests` têm seus SHA-256 fixados na reafirmação. A consulta npm
+de 27/10 às 01:50:10 UTC retornou zero advisories em todas as severidades para
+esses bytes. A instalação limpa, a árvore de dependências íntegra, o smoke das
+interfaces transitivas e 29 testes sintéticos no emulador foram comprovados
+localmente. Os hashes da auditoria e do log estão registrados. Isso comprova
+remediação na candidata, sem declarar que a nuvem já recebeu a alteração.
+
+O código dos checkers não muda neste registro. O publisher ainda exige o literal
+histórico de `riskAcceptance.status`, além da validade operacional, mas não
+valida por si os campos adicionais de remediação ou a semântica desta janela.
+O teste de contrato preserva os hashes do histórico e compara os dois arquivos
+de dependências com a evidência fixada, além de exercitar a janela operacional
+e a rejeição de execução sem aprovação protegida. Antes de solicitar a
+publicação, o executor deve confirmar esses hashes na fonte final e conservar os recibos de CI
+exatos, aprovação real do run protegido, backup, smoke, assinatura e readback.
+Qualquer divergência nos bytes ou falha nos gates mantém a publicação pendente;
+os campos documentais não são substitutos desses comprovantes.
+
+Estado deste incremento: registro documental candidato. A integração, o CI e
+a promoção possuem evidências próprias; nenhuma revisão independente ou nova
+instalação é declarada. Rollback deste registro restaura a validade operacional
+anterior e remove somente a reafirmação de continuidade, sem apagar os aceites
+históricos ou a evidência técnica da correção de dependências.
