@@ -8,3 +8,4 @@ export * from "./auroraDocumentGovernance.js";
 export * from "./auroraShareholderReportRuntime.js";
 export * from "./auroraFinancialDecisionRuntime.js";
 export * from "./auroraUserProfileRuntime.js";
+export * from "./auroraDocumentContentRuntime.js";
