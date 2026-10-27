@@ -43,7 +43,7 @@ function fixture() {
       assert.equal(state.lock,true);state.calls.push('readback');state.readbackOptions=options;
       const count=options.readbackOffset===0?1:0;
       return {privateReadbackPlan:count?[receipt]:[],privateAliasRows:[],coverage:{offset:options.readbackOffset,nextOffset:null,
-        total:1,documents:1,aliases:0,pending:0,complete:true,returned:count,pageDocuments:count,pageAliases:0,pagePending:0}};
+        total:1,documents:1,manifests:0,aliases:0,pending:0,complete:true,returned:count,pageDocuments:count,pageManifests:0,pageAliases:0,pagePending:0}};
     }
   });
   state.queue={name:'synthetic-existing-queue',getDataRange:()=>({getValues:()=>[['ID_ORIGEM','STATUS','OBSERVACAO']]})};
@@ -125,10 +125,28 @@ test('READBACK rejects uncovered aliases and strips noncontract private fields',
   const request={...f.request,mode:'READBACK',expectedScopeSha256:preview.scopeSha256,readbackOffset:0};
   f.context.auroraLerPlanoReadbackDriveAutorizado_=()=>({privateReadbackPlan:[{...f.receipt,text:'PRIVATE'}],
     privateAliasRows:[{fileId:'alias-file-00001',primaryFileId:f.receipt.sourceId,contentHash:f.receipt.contentHash,entityId:f.receipt.entityId,text:'PRIVATE'}],
-    coverage:{offset:0,nextOffset:null,total:1,documents:0,aliases:1,pending:0,complete:true,returned:1,pageDocuments:0,pageAliases:1,pagePending:0}});
+    coverage:{offset:0,nextOffset:null,total:1,documents:0,manifests:0,aliases:1,pending:0,complete:true,returned:1,pageDocuments:0,pageManifests:0,pageAliases:1,pagePending:0}});
   let result=f.call(request);assert.equal(result.ok,true);assert.equal(result.privateAliasRows.length,1);
   assert.ok(!JSON.stringify(result).includes('PRIVATE'));
   f.receipt.contentHash='8'.repeat(64);result=f.call(request);assert.equal(result.ok,false);
+});
+
+test('READBACK transports manifest receipts separately and rejects missing or inconsistent manifest counters',()=>{
+  const f=fixture(),preview=f.call();
+  const request={...f.request,mode:'READBACK',expectedScopeSha256:preview.scopeSha256,readbackOffset:0};
+  const page={privateReadbackPlan:[f.receipt],privateAliasRows:[],privatePendingRows:[],
+    coverage:{offset:0,nextOffset:null,total:1,documents:0,manifests:1,aliases:0,pending:0,
+      complete:true,returned:1,pageDocuments:0,pageManifests:1,pageAliases:0,pagePending:0}};
+  f.context.auroraLerPlanoReadbackDriveAutorizado_=()=>page;
+  const result=f.call(request);assert.equal(result.ok,true);assert.equal(result.coverage.manifests,1);
+  assert.equal(result.coverage.documents,0);assert.equal(result.coverage.pending,0);
+  assert.equal(result.privateReadbackPlan.length,1);assert.equal(result.privatePendingRows.length,0);
+  for(const mutate of [c=>{delete c.manifests;},c=>{c.manifests=-1;},c=>{c.pageManifests=0;},c=>{c.documents=1;}]) {
+    const invalid=plain(page);mutate(invalid.coverage);
+    f.context.auroraLerPlanoReadbackDriveAutorizado_=()=>invalid;
+    assert.equal(f.call(request).ok,false);
+  }
+  assert.ok(!f.state.calls.includes('execute'));assert.ok(!f.state.calls.includes('process-existing'));
 });
 
 test('shared-lock refusal has a complete zero-write contract and a distinct bounded code',()=>{
