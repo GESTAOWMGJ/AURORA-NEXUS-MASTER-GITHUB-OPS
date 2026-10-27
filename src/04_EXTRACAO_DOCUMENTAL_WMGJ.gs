@@ -1586,6 +1586,163 @@ function auroraProcessarFilaDriveAutorizada_(fila, options, limit, deadlineMs) {
   return result;
 }
 
+// Private content is a separate, bounded sidecar. These helpers never mutate a
+// queue row, canonical receipt, source file, extraction sample or scanner cursor.
+function auroraDriveContentChunks_(text) {
+  if(typeof text!=='string' || !text.length || /[\u0000\uFFFD]/.test(text))
+    throw new Error('AURORA_CONTENT_ENCODING_REJECTED');
+  var chunks=[],start=0,length=0,total=0;
+  for(var i=0;i<text.length;i++) {
+    var unit=text.charCodeAt(i),width=unit<128?1:unit<2048?2:3,units=1;
+    if(unit>=0xD800 && unit<=0xDBFF) {
+      var low=text.charCodeAt(i+1);
+      if(!(low>=0xDC00 && low<=0xDFFF)) throw new Error('AURORA_CONTENT_ENCODING_REJECTED');
+      width=4;units=2;
+    } else if(unit>=0xDC00 && unit<=0xDFFF) throw new Error('AURORA_CONTENT_ENCODING_REJECTED');
+    if(length+width>65536) {
+      var part=text.slice(start,i);
+      chunks.push({index:chunks.length,text:part,byteLength:length,sha256:wmgjFirestoreHashString_(part)});
+      start=i;length=0;
+    }
+    length+=width;total+=width;
+    if(total>1048576) throw new Error('AURORA_CONTENT_LIMIT_EXCEEDED');
+    i+=units-1;
+  }
+  var tail=text.slice(start);
+  chunks.push({index:chunks.length,text:tail,byteLength:length,sha256:wmgjFirestoreHashString_(tail)});
+  if(chunks.length>16) throw new Error('AURORA_CONTENT_LIMIT_EXCEEDED');
+  return {chunks:chunks,byteLength:total,textSha256:wmgjFirestoreHashString_(text)};
+}
+
+function auroraDriveContentQueueState_(row,idx) {
+  var attempts=Number(row[idx.TENTATIVAS]||0);
+  if(!Number.isSafeInteger(attempts)||attempts<0) throw new Error('AURORA_CONTENT_QUEUE_CONFLICT');
+  return wmgjFirestoreHashString_(JSON.stringify([String(row[idx.ID_ORIGEM]||''),
+    String(row[idx.STATUS]||''),attempts,String(row[idx.OBSERVACAO]||'')]));
+}
+
+function auroraDriveContentTargets_(sheet,options,hashes) {
+  var rows=sheet.getDataRange().getValues(),idx=mapearCabecalhoWMGJ_Compat_(rows[0]);
+  if(['ID_ORIGEM','STATUS','TENTATIVAS','OBSERVACAO'].some(function(key){return idx[key]===undefined;}))
+    throw new Error('AURORA_CONTENT_QUEUE_CONFLICT');
+  var found=Object.create(null),out=[];
+  for(var i=1;i<rows.length;i++) {
+    var marker=auroraDriveScopeRead_(rows[i][idx.OBSERVACAO]);
+    if(!marker || marker.orgId!==options.orgId || marker.scopeSha256!==options.scopeSha256
+      || hashes.indexOf(marker.contentSha256)<0 || marker.coverage!=='EXTRACTED_REVIEW_PENDING') continue;
+    var receipt=auroraDriveIntakeReceipt_(marker.receipt);
+    if(marker.fileId!==String(rows[i][idx.ID_ORIGEM]) || receipt.sourceId!==marker.fileId
+      || marker.sourceVersion!==String(receipt.sourceVersion) || marker.contentSha256!==receipt.contentSha256
+      || marker.textSha256!==receipt.textSha256 || found[marker.contentSha256])
+      throw new Error('AURORA_CONTENT_TARGET_AMBIGUOUS');
+    found[marker.contentSha256]=true;
+    out.push({queueRow:i+1,queueStateSha256:auroraDriveContentQueueState_(rows[i],idx),
+      receipt:receipt,sourceId:marker.sourceId,rootId:marker.rootId,folderId:marker.folderId,
+      explicit:marker.explicit===true});
+  }
+  if(out.length!==hashes.length) throw new Error('AURORA_CONTENT_TARGET_UNAVAILABLE');
+  return out.sort(function(a,b){return a.receipt.contentSha256<b.receipt.contentSha256?-1:1;});
+}
+
+function auroraDriveContentCheckTarget_(sheet,target,options) {
+  if(typeof options.beforeRequest==='function') options.beforeRequest();
+  var rows=sheet.getDataRange().getValues(),idx=mapearCabecalhoWMGJ_Compat_(rows[0]);
+  if(!Number.isSafeInteger(target.queueRow)||target.queueRow<2||target.queueRow>rows.length
+    ||auroraDriveContentQueueState_(rows[target.queueRow-1],idx)!==target.queueStateSha256)
+    throw new Error('AURORA_CONTENT_QUEUE_CONFLICT');
+  var marker=auroraDriveScopeRead_(rows[target.queueRow-1][idx.OBSERVACAO]);
+  if(!marker || marker.orgId!==options.orgId || marker.scopeSha256!==options.scopeSha256
+    || marker.coverage!=='EXTRACTED_REVIEW_PENDING'
+    || JSON.stringify(auroraDriveIntakeReceipt_(marker.receipt))!==JSON.stringify(target.receipt))
+    throw new Error('AURORA_CONTENT_QUEUE_CONFLICT');
+  var file=DriveApp.getFileById(target.receipt.sourceId);
+  if(file.getId()!==target.receipt.sourceId || (typeof file.isTrashed==='function' && file.isTrashed())
+    || file.getLastUpdated().getTime()!==target.receipt.sourceVersion)
+    throw new Error('AURORA_CONTENT_SOURCE_CHANGED');
+  if(target.explicit) {
+    if(options.fileIds.indexOf(file.getId())<0) throw new Error('AURORA_CONTENT_SOURCE_REVOKED');
+  } else {
+    if(!options.sources.some(function(source){return source.sourceId===target.sourceId && source.folderId===target.rootId;}))
+      throw new Error('AURORA_CONTENT_SOURCE_REVOKED');
+    var parents=file.getParents(),found=false;
+    while(parents.hasNext()) if(parents.next().getId()===target.folderId) found=true;
+    if(!found) throw new Error('AURORA_CONTENT_SOURCE_CHANGED');
+    var queue=[target.folderId],visited={},authorized=false,steps=0;
+    while(queue.length && steps++<64) {
+      var folderId=queue.shift();
+      if(visited[folderId] || options.excludedFolderIds.indexOf(folderId)>=0) continue;
+      visited[folderId]=true;
+      if(folderId===target.rootId){authorized=true;break;}
+      var folderParents=DriveApp.getFolderById(folderId).getParents();
+      while(folderParents.hasNext()) queue.push(folderParents.next().getId());
+    }
+    if(!authorized) throw new Error('AURORA_CONTENT_SOURCE_REVOKED');
+  }
+  if(file.getSize()>1048576) throw new Error('AURORA_CONTENT_LIMIT_EXCEEDED');
+  return file;
+}
+
+function auroraDriveContentAcquire_(sheet,target,options) {
+  var file=auroraDriveContentCheckTarget_(sheet,target,options),mime=file.getMimeType();
+  if(['text/plain','text/xml','application/xml','text/csv','application/json','application/x-ofx',
+    'application/vnd.intu.qfx','application/octet-stream'].indexOf(mime)<0)
+    throw new Error('AURORA_CONTENT_FORMAT_UNSUPPORTED');
+  var blob=file.getBlob(),bytes=blob.getBytes();
+  if(!bytes.length||bytes.length>1048576) throw new Error('AURORA_CONTENT_LIMIT_EXCEEDED');
+  if(!auroraBytesTextoUtf8Validos_(bytes)) throw new Error('AURORA_CONTENT_ENCODING_REJECTED');
+  var byteHash=auroraDigestHexBytes_(bytes);
+  if(byteHash!==target.receipt.contentSha256) throw new Error('AURORA_CONTENT_SOURCE_CHANGED');
+  var text=blob.getDataAsString('UTF-8');
+  if(mime==='application/octet-stream' && (!/<OFX\s*>/i.test(text) || !/<\/OFX\s*>\s*$/i.test(text)))
+    throw new Error('AURORA_CONTENT_FORMAT_UNSUPPORTED');
+  var prepared=auroraDriveContentChunks_(text);
+  if(prepared.textSha256!==target.receipt.textSha256 || prepared.byteLength!==bytes.length)
+    throw new Error('AURORA_CONTENT_EXTRACTION_CHANGED');
+  auroraDriveContentCheckTarget_(sheet,target,options);
+  return prepared;
+}
+
+function auroraDriveContentTransfer_(sheet,target,prepared,options,verifyOnly) {
+  function check() {
+    var file=auroraDriveContentCheckTarget_(sheet,target,options),hash=wmgjFirestoreHashArquivo_(file);
+    if(hash.method!=='content_sha256' || hash.value!==target.receipt.contentSha256
+      || file.getLastUpdated().getTime()!==target.receipt.sourceVersion)
+      throw new Error('AURORA_CONTENT_SOURCE_CHANGED');
+  }
+  var base={schemaVersion:'aurora.document-content.request.v1',orgId:options.orgId,
+    documentId:target.receipt.entityId};
+  function send(operation,fields) {
+    var payload={schemaVersion:base.schemaVersion,operation:operation,orgId:base.orgId,documentId:base.documentId};
+    Object.keys(fields||{}).forEach(function(key){payload[key]=fields[key];});
+    var response=wmgjFirestoreEnviarConteudoPrivado_(payload,options.config,check);
+    if(response.textSha256!==prepared.textSha256 || response.textByteLength!==prepared.byteLength
+      || response.chunkCount!==prepared.chunks.length || response.documentId!==base.documentId
+      || response.orgId!==base.orgId) throw new Error('AURORA_CONTENT_RECEIPT_MISMATCH');
+    return response;
+  }
+  var versionId=target.contentVersionId,duplicateChunks=0;
+  if(!verifyOnly) {
+    var begin=send('BEGIN',{binding:{revision:target.receipt.revision,canonicalVersionId:target.receipt.versionId,
+      sourceVersion:target.receipt.sourceVersion,sourceContentSha256:target.receipt.contentSha256},
+      assessmentId:target.assessmentId,textSha256:prepared.textSha256,textByteLength:prepared.byteLength,
+      chunkCount:prepared.chunks.length,extractionMethod:'blob_text',extractionVersion:'1.0.0'});
+    versionId=begin.contentVersionId;
+    prepared.chunks.forEach(function(chunk){
+      var uploaded=send('PUT_CHUNK',{contentVersionId:versionId,index:chunk.index,text:chunk.text,chunkSha256:chunk.sha256});
+      if(uploaded.contentVersionId!==versionId) throw new Error('AURORA_CONTENT_RECEIPT_MISMATCH');
+      if(uploaded.duplicate)duplicateChunks++;
+    });
+    var final=send('FINALIZE',{contentVersionId:versionId});
+    if(final.contentVersionId!==versionId||final.state!=='VERIFIED'||final.storedVerified!==true) throw new Error('AURORA_CONTENT_RECEIPT_MISMATCH');
+  }
+  var verified=send('VERIFY_STORED',{contentVersionId:versionId});
+  if(verified.contentVersionId!==versionId||verified.state!=='VERIFIED'||verified.storedVerified!==true) throw new Error('AURORA_CONTENT_RECEIPT_MISMATCH');
+  check();
+  return {documentId:verified.documentId,contentVersionId:versionId,textSha256:verified.textSha256,
+    textByteLength:verified.textByteLength,chunkCount:verified.chunkCount,state:'VERIFIED',
+    duplicateChunks:duplicateChunks,storedReadbackVerified:true};
+}
+
 // Full row coverage, bounded before each read/allocation. Limit failures stay explicit.
 function auroraExtrairTextoSheetsCompleto_(spreadsheetId) {
   var ss=SpreadsheetApp.openById(spreadsheetId),parts=[],characters=0,cells=0;
