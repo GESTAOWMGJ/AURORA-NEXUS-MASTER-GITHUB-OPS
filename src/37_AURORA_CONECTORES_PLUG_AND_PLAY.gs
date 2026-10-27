@@ -875,15 +875,15 @@ function auroraDriveReadbackResult_(value, result, expectedOffset, limit) {
   var c=value.coverage;
   var pending=value.privatePendingRows===undefined && c.pagePending===0?[]:value.privatePendingRows;
   if(!Array.isArray(pending) || pending.length!==c.pagePending) throw new Error('AURORA_DRIVE_RECEIPT_COVERAGE_INVALID');
-  ['offset','total','documents','aliases','pending','returned','pageDocuments','pageAliases','pagePending'].forEach(function(key) {
+  ['offset','total','documents','manifests','aliases','pending','returned','pageDocuments','pageManifests','pageAliases','pagePending'].forEach(function(key) {
     if(!Number.isSafeInteger(c[key]) || c[key]<0) throw new Error('AURORA_DRIVE_RESULT_INVALID');
   });
-  if(c.offset!==expectedOffset || c.documents+c.aliases+c.pending!==c.total
-    || c.pageDocuments+c.pageAliases+c.pagePending!==c.returned || c.returned>limit
+  if(c.offset!==expectedOffset || c.documents+c.manifests+c.aliases+c.pending!==c.total
+    || c.pageDocuments+c.pageManifests+c.pageAliases+c.pagePending!==c.returned || c.returned>limit
     || c.returned!==Math.min(limit,c.total-c.offset)
     || c.complete!==(c.offset+c.returned===c.total)
     || c.nextOffset!==(c.complete?null:c.offset+c.returned)
-    || value.privateReadbackPlan.length!==c.pageDocuments+c.pageAliases
+    || value.privateReadbackPlan.length!==c.pageDocuments+c.pageManifests+c.pageAliases
     || value.privateAliasRows.length!==c.pageAliases) throw new Error('AURORA_DRIVE_RECEIPT_COVERAGE_INVALID');
   result.privateReadbackPlan=value.privateReadbackPlan.map(auroraDriveIntakeReceipt_);
   result.privateAliasRows=value.privateAliasRows.map(function(alias) {
@@ -906,8 +906,9 @@ function auroraDriveReadbackResult_(value, result, expectedOffset, limit) {
     return {fileId:row.fileId,sourceVersion:row.sourceVersion,queueStatus:row.queueStatus,
       attempts:row.attempts,code:row.code,mediaType:row.mediaType};
   });
-  result.coverage={offset:c.offset,nextOffset:c.nextOffset,total:c.total,documents:c.documents,aliases:c.aliases,
-    pending:c.pending,complete:c.complete,returned:c.returned,pageDocuments:c.pageDocuments,pageAliases:c.pageAliases,pagePending:c.pagePending};
+  result.coverage={offset:c.offset,nextOffset:c.nextOffset,total:c.total,documents:c.documents,manifests:c.manifests,aliases:c.aliases,
+    pending:c.pending,complete:c.complete,returned:c.returned,pageDocuments:c.pageDocuments,pageManifests:c.pageManifests,
+    pageAliases:c.pageAliases,pagePending:c.pagePending};
   result.ok=true;result.code='AURORA_DRIVE_READBACK_PLAN';
   return result;
 }
