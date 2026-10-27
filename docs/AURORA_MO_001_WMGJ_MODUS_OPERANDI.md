@@ -73,6 +73,15 @@ Cada entrega deve declarar até onde o aprendizado foi efetivamente persistido o
 
 ## Aprendizado de ingestão — revisão de 04/10/2026
 
+Correção candidata de 26/10/2026: o readback documental distingue texto extraído,
+manifesto da fonte, aliases e itens sem recibo comprovado. Manifestos de planilha,
+ZIP e PDF criptografado exigem a mesma leitura canônica e da versão imutável;
+seus contadores são reconciliados com a categoria retornada pelo Firestore.
+Manifesto não comprova extração do conteúdo, não dispensa revisão humana e não
+permite declarar sincronização integral. A correção reutiliza o executor existente,
+sem alterar fontes, credenciais, autorização, fila ou agenda. Código e testes
+permanecem candidatos até publicação e readback real do mesmo incremento.
+
 Regra transversal M01/M08/M10: toda falha de alimentação deve confrontar mensagem-fonte,
 filtro/janela, execução do gatilho na conta proprietária, frescor do índice, contrato de
 colunas, arquivo pelo hash, fila e idempotência. Atualização da planilha ou deploy verde
