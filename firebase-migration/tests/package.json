@@ -20,6 +20,12 @@
     },
     "gaxios": {
       "uuid": "11.1.1"
+    },
+    "get-uri@6.0.5": {
+      "basic-ftp": "6.2.3"
+    },
+    "@google-cloud/pubsub@5.3.1": {
+      "@opentelemetry/core": "2.8.0"
     }
   }
 }

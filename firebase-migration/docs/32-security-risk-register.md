@@ -146,3 +146,71 @@ alerta após o merge ainda retornou `open`; não se declara encerramento por
 inferência. Esse alerta não integra os 11 riscos históricos de R029 e não recebe
 aceite por esta renovação. A regra CRITICAL da seção 3 continua aplicável aos
 ambientes afetados até comprovar a remediação ou outra decisão específica.
+
+## 9. Candidata de remediação das ferramentas de teste — 26/10/2026
+
+Uma auditoria nova do lockfile da main `8264dccededd498299d0565414e6b5ebd1aaffd6`
+encontrou 12 agregações transitivas: 8 HIGH, 4 MODERATE e zero CRITICAL. Portanto,
+as 11 agregações históricas de R029 não descrevem a árvore observada nesta data.
+Esta correção elimina os advisories observados na árvore candidata; não renova
+a exceção anterior, seu prazo ou uma autorização de publicação.
+
+O Firebase CLI de teste permanece em `15.32.1`, o SDK Firebase em `12.18.0` e
+`@firebase/rules-unit-testing` em `5.0.2`. O runtime Functions, o CLI de deploy,
+Security Rules, IAM, dados e políticas de aprovação não são alterados.
+
+| Dependência transitiva | Antes | Candidata | Alcance |
+|---|---|---|---|
+| `body-parser` | `1.20.8` / `2.3.0` | `1.20.9` / `2.4.0` | Atualizações nos majors exigidos pelos pais |
+| `qs` | `6.16.0` | `6.16.1` | Patch requerido pelo `body-parser` atualizado |
+| `fast-uri` | `3.1.8` | `3.1.9` | Patch compatível |
+| `ip-address` | `10.7.3` | `10.7.5` | Patch compatível |
+| `undici` | `6.29.0` / `8.11.2` | `6.29.1` / `8.12.3` | Majors de cada consumidor preservados |
+| `zod` | `4.4.3` | `4.6.7` | Mesmo major exigido pelo CLI |
+| `basic-ftp` | `5.3.1` | `6.2.3` | Override somente sob `get-uri@6.0.5` |
+| `@opentelemetry/core` | `1.30.1` | `2.8.0` | Override somente sob `@google-cloud/pubsub@5.3.1` |
+
+Os dois overrides cruzam a faixa major original do consumidor e foram tratados
+como mudanças de compatibilidade, sem `npm audit fix --force`. O consumidor FTP
+usa as interfaces públicas `Client` e `FileInfo`, cujas declarações relevantes
+permanecem iguais; a nova biblioteca nega por padrão transferência de dados para
+outro host. Esse endurecimento é preservado, sem opt-out. PubSub usa somente
+`W3CTraceContextPropagator` de `core`, com construtor, `inject` e `extract`; as
+declarações e a implementação desse propagador são equivalentes entre as versões.
+Isso não implica equivalência de todo o SDK: o `TraceState` interno mudou regras
+de parsing e limites, diferença preservada pela candidata e registrada na revisão.
+As restrições por versão do pacote pai evitam aplicar silenciosamente estes
+overrides a uma futura revisão do consumidor.
+
+As fontes consultadas foram o registry npm e os avisos publicados pelos projetos:
+[basic-ftp](https://github.com/advisories/GHSA-c475-qrg2-pj4r),
+[OpenTelemetry](https://github.com/advisories/GHSA-8988-4f7v-96qf),
+[body-parser](https://github.com/advisories/GHSA-27r3-jxmh-p828),
+[fast-uri](https://github.com/advisories/GHSA-w74x-v6f9-j3xg),
+[ip-address](https://github.com/advisories/GHSA-rxp7-6hxx-x8q5),
+[undici](https://github.com/advisories/GHSA-xjj6-f33q-929c) e
+[zod](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5).
+
+Validação local da candidata em 26/10/2026:
+
+- `npm audit --package-lock-only --json`: zero advisories em todas as severidades;
+- instalação limpa com `npm ci --ignore-scripts`: 723 pacotes, sem execução de
+  scripts de instalação;
+- `npm ls --all`: árvore íntegra, sem dependências inválidas;
+- 29 testes de Security Rules aprovados no emulador local, zero falhas/skips,
+  usando Node `22.23.4` e Java `21.0.13`, somente fixtures sintéticas;
+- smoke local das versões instaladas: injeção/extração de contexto sintético pelo
+  PubSub/core e construção/API/fechamento do cliente FTP, sem operações de rede;
+- revisão técnica de agente das interfaces transitivas, sem alegação de revisão
+  humana independente, certificação ou validação de serviços PubSub/FTP reais.
+
+Estado: `IMPLEMENTED` e `TESTED` localmente. CI do SHA final, integração e
+publicação ainda precisam dos próprios recibos. Zero advisories nesta consulta
+não significa ausência universal de vulnerabilidades nem atualização do ambiente
+implantado. A autorização HML histórica e o prazo separado do Drive permanecem
+inalterados; a correção de dependências não publica nem promove a beta.
+
+Rollback: reverter somente o manifesto e o lockfile deste incremento se houver
+incompatibilidade, preservando o registro e reabrindo a pendência de segurança.
+Uma reversão reintroduz os advisories conhecidos e não permite promoção baseada
+na auditoria da candidata corrigida.
