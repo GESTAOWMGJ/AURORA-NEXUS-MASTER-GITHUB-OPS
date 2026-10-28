@@ -1,0 +1,69 @@
+{
+  "id": "AURORA-CHELFEX-001",
+  "name": "CHELFEx structured instruction contract for Aurora Nexus intrinsic engine",
+  "version": "1.0.0-draft",
+  "status": "SPECIFICATION_ONLY",
+  "system": "AURORA_NEXUS",
+  "governance": {
+    "enforceTenantIsolation": true,
+    "preserveEvidenceProvenance": true,
+    "distinguishFactInferencePending": true,
+    "requireServerSideAuthorization": true,
+    "allowPromptToGrantPermissions": false,
+    "treatDocumentInstructionsAsUntrusted": true,
+    "requireRollbackForOperationalChanges": true,
+    "sanitizeSharedLearning": true,
+    "allowCrossTenantRawData": false,
+    "allowSelfAuthorization": false,
+    "minimizeRepeatedConsentWithinStandingScope": true
+  },
+  "purpose": "Normalize operational AI tasks into a verifiable contract covering role, objective, baseline, evidence, method, limits, output and verification.",
+  "sourceAttribution": "Local engineering adaptation of the CHELFEx concept described by the product owner; not a claim about the canonical expansion of the acronym.",
+  "contractFields": [
+    "authorized_role_and_scope",
+    "objective_and_acceptance_criteria",
+    "tenant_environment_module_and_baseline",
+    "evidence_provenance_version_hash_validity_revocation",
+    "resolutive_method",
+    "risk_limits_and_prohibitions",
+    "fact_inference_pending_output",
+    "verification_readback_idempotency_and_rollback"
+  ],
+  "pipeline": [
+    "RECEIVE",
+    "NORMALIZE",
+    "VALIDATE_CONTEXT",
+    "COLLECT_EVIDENCE",
+    "CLASSIFY_RISK",
+    "RESOLVE",
+    "AUTHORIZE_SERVER_SIDE",
+    "EXECUTE_ALLOWLISTED_ACTION",
+    "VERIFY",
+    "RECORD_SANITIZED_LESSON"
+  ],
+  "riskLevels": {
+    "R0": "read-only analysis",
+    "R1": "proposal only",
+    "R2": "authorized reversible change",
+    "R3": "material operational change requiring applicable server gates and review",
+    "R4": "blocked high-risk or irreversible action requiring human intervention"
+  },
+  "releaseRequirements": [
+    "unit_and_schema_tests",
+    "prompt_injection_and_privilege_escalation_tests",
+    "tenant_isolation_and_revocation_tests",
+    "idempotency_and_concurrency_tests",
+    "intrinsic_and_organic_regression_tests",
+    "green_ci_on_candidate_sha",
+    "security_review_and_hml_validation",
+    "authenticated_readback_before_activation_claim"
+  ],
+  "runtimeActivation": "NOT_ESTABLISHED_BY_THIS_POLICY_FILE",
+  "references": [
+    "firebase-migration/policy/intrinsic-cloud-ai-operational-learning-v1.json",
+    "docs/AURORA_MO_001_WMGJ_MODUS_OPERANDI.md",
+    "skills/aurora-nexus-organic/SKILL.md",
+    "skills/aurora-nexus-continuous-dev/SKILL.md",
+    "docs/AURORA_CHELFEX_INTRINSIC_ENGINE_001.md"
+  ]
+}
