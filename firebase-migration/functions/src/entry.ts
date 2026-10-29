@@ -9,3 +9,5 @@ export * from "./auroraShareholderReportRuntime.js";
 export * from "./auroraFinancialDecisionRuntime.js";
 export * from "./auroraUserProfileRuntime.js";
 export * from "./auroraMedicalPartnerRuntime.js";
+
+export * from "./auroraFinancialPanelRuntime.js";
