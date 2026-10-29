@@ -71,11 +71,14 @@ export function buildFinancialPanelView(input: {
   const sourceComplete = status.sourceComplete === true
     && report.state === "READY_FOR_PDF"
     && record(report.completeness).completeFinancialSnapshot === true;
-  const emitted = safeEvidence(closing.invoiceXmlEvidenceRef)
+  const emitted = closing.invoiceXmlReadbackVerified === true
+    && safeEvidence(closing.invoiceXmlEvidenceRef)
     && safeEvidence(closing.invoiceNumber);
-  const sent = emitted && safeEvidence(closing.invoiceSentEvidenceRef)
+  const sent = emitted && closing.invoiceSentVerified === true
+    && safeEvidence(closing.invoiceSentEvidenceRef)
     && typeof closing.invoiceSentAt === "string" && Number.isFinite(Date.parse(closing.invoiceSentAt));
-  const received = safeEvidence(closing.bankReconciliationEvidenceRef)
+  const received = closing.bankReconciliationVerified === true
+    && safeEvidence(closing.bankReconciliationEvidenceRef)
     && values.receivedCents !== null;
   const hash = record(report.closing).closingHash;
   return {
