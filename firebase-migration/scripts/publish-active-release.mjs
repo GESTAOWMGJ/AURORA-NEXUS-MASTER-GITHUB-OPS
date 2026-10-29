@@ -43,7 +43,16 @@ function requireCurrentOwnerDecision(now,reviewPrNumber) {
   const mediaWindow=media?.decisionId==='AURORA-HML-CREDMED-20261029'
     &&media.approvalSource==='DIRECT_OWNER_CHAT'&&media.ownerHmlDeploymentApproved===true
     &&media.repo===REPOSITORY&&media.projectId===HML_PROJECT&&media.environment===HML_ENVIRONMENT
-    &&media.branch==='main'&&String(media.authorizedPullRequest)===String(reviewPrNumber)
+    &&media.branch==='main'
+    &&(String(media.authorizedPullRequest)===String(reviewPrNumber)
+      || (media.authorizedTransportSmokeFollowUp?.pullRequest===Number(reviewPrNumber)
+        &&media.authorizedTransportSmokeFollowUp?.scope==='AURORA_CREDMED_PUBLIC_PDF_MP4_HTTP_TRANSPORT_SMOKE_ONLY'
+        &&media.authorizedTransportSmokeFollowUp?.source==='DIRECT_OWNER_CHAT_AUTOMATED_CI_AND_PROTECTED_DEPLOY'
+        &&media.authorizedTransportSmokeFollowUp?.historicalDriveDeadlineExtended===false
+        &&media.authorizedTransportSmokeFollowUp?.productionAuthorized===false
+        &&media.authorizedTransportSmokeFollowUp?.clinicalSensitiveAuthorized===false
+        &&media.authorizedTransportSmokeFollowUp?.realApplicantDataEnabled===false
+        &&media.authorizedTransportSmokeFollowUp?.mfaOrProtectedApprovalBypassed===false))
     &&media.protectedRunOwnerApprovalStillRequired===true&&media.exactFinalSourceCiStillRequired===true
     &&media.canonicalSmokeAndReadbackStillRequired===true&&media.riskReviewDeadlineExtended===false
     &&media.newResidualRiskAcceptanceClaimed===false&&media.productionAuthorized===false

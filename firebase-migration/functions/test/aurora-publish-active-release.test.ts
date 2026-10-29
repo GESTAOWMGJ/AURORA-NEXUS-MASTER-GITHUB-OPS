@@ -288,22 +288,34 @@ test('new CREDMED HML owner approval is PR-scoped, time-bounded and never renews
   const media=ownerDecision.publicMediaHmlAuthorization;
   assert.equal(media.decisionId,'AURORA-HML-CREDMED-20261029');
   assert.equal(media.authorizedPullRequest,349);
+  assert.deepEqual(media.authorizedTransportSmokeFollowUp,{
+    pullRequest:354,scope:'AURORA_CREDMED_PUBLIC_PDF_MP4_HTTP_TRANSPORT_SMOKE_ONLY',
+    source:'DIRECT_OWNER_CHAT_AUTOMATED_CI_AND_PROTECTED_DEPLOY',historicalDriveDeadlineExtended:false,
+    productionAuthorized:false,clinicalSensitiveAuthorized:false,realApplicantDataEnabled:false,
+    mfaOrProtectedApprovalBypassed:false
+  });
   assert.equal(media.projectId,'wmgj-hml-jfn-20260927');
   assert.equal(media.protectedRunOwnerApprovalStillRequired,true);
   for(const flag of ['productionAuthorized','clinicalSensitiveAuthorized','newSourceEnrollmentAuthorized',
     'existingCredentialValidityExtended','riskReviewDeadlineExtended','newResidualRiskAcceptanceClaimed'])
     assert.equal(media[flag],false,flag);
   assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-27T04:30:00.000Z');
-  const asMedia=()=>{
+  const asMedia=(pr='349')=>{
     const f=ownerFixture();
-    f.env.AURORA_ACTIVE_RELEASE_REVIEW_PR='349';
-    f.responses.set('/pulls/349',structuredClone(f.responses.get('/pulls/42')));
-    f.responses.set('/pulls/349/reviews?per_page=100',[]);
+    f.env.AURORA_ACTIVE_RELEASE_REVIEW_PR=pr;
+    f.responses.set('/pulls/'+pr,structuredClone(f.responses.get('/pulls/42')));
+    f.responses.set('/pulls/'+pr+'/reviews?per_page=100',[]);
     return f;
   };
   const approved=asMedia();approved.deps.now=()=>Date.parse('2026-10-29T17:00:00.000Z');
   const result=await publishActiveRelease(approved.env,approved.deps);
   assert.equal(result.status,'ACTIVE_PIN_PUBLISHED');assert.equal(approved.writes(),1);
+  const followUp=asMedia('354');followUp.deps.now=()=>Date.parse('2026-10-29T17:00:00.000Z');
+  assert.equal((await publishActiveRelease(followUp.env,followUp.deps)).status,'ACTIVE_PIN_PUBLISHED');
+  assert.equal(followUp.writes(),1);
+  const unauthorized=asMedia('355');unauthorized.deps.now=()=>Date.parse('2026-10-29T17:00:00.000Z');
+  await assert.rejects(publishActiveRelease(unauthorized.env,unauthorized.deps),/OWNER_APPROVAL_EXPIRED/);
+  assert.equal(unauthorized.writes(),0);
   const wrongPr=ownerFixture();wrongPr.deps.now=()=>Date.parse('2026-10-29T17:00:00.000Z');
   await assert.rejects(publishActiveRelease(wrongPr.env,wrongPr.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(wrongPr.writes(),0);
   const expired=asMedia();expired.deps.now=()=>Date.parse(media.validUntilUtc);
