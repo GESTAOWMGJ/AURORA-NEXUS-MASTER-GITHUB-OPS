@@ -61,8 +61,9 @@ test("faturamento e recebimento do fechamento não provam envio nem crédito", (
 test("explicit verifiable evidence distinguishes issue, send and reconciliation", () => {
   const closing = {
     status: "CLOSED", invoiceNumber: "12", invoiceXmlEvidenceRef: "sha256:xml",
+    invoiceXmlReadbackVerified: true, invoiceSentVerified: true,
     invoiceSentEvidenceRef: "sha256:email", invoiceSentAt: "2026-09-30T14:00:00Z",
-    bankReconciliationEvidenceRef: "sha256:bank"
+    bankReconciliationEvidenceRef: "sha256:bank", bankReconciliationVerified: true
   };
   const view = buildFinancialPanelView({
     ...base, closing,
@@ -81,4 +82,19 @@ test("escapes untrusted organization content and preserves reading timestamp", (
   assert.match(html, /&lt;script&gt;/);
   assert.match(html, /2026-10-29T18:00:00.000Z/);
   assert.doesNotMatch(html, /https?:\/\/[^\s]*patient/i);
+});
+
+
+test("evidence references without validation cannot prove invoices or cash", () => {
+  const view = buildFinancialPanelView({
+    ...base,
+    closing: { status: "CLOSED", invoiceNumber: "13", invoiceXmlEvidenceRef: "sha256:doc",
+      invoiceSentEvidenceRef: "sha256:email", invoiceSentAt: "2026-10-29T10:00:00Z",
+      bankReconciliationEvidenceRef: "sha256:credit" },
+    report: { financialCents: { receivedCents: 500000 } },
+    status: { sourceComplete: true }
+  });
+  assert.equal(view.invoiceIssued, "NAO_COMPROVADO");
+  assert.equal(view.invoiceSent, "NAO_COMPROVADO");
+  assert.equal(view.bankReconciled, "NAO_COMPROVADO");
 });
