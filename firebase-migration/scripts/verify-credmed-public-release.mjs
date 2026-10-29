@@ -9,6 +9,7 @@ import {request} from 'node:https';
 import {readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {dirname,resolve} from 'node:path';
+import {verifyHeadLength,verifyVideoRangeResponse} from './credmed-http-transport-contract.mjs';
 
 const args=process.argv.slice(2);
 if(args.length!==2||args[0]!=='--origin'||![
@@ -60,8 +61,7 @@ console.log('PRIVATE_MANAGEMENT_DENIED');
 for(const f of files){
   const path='/arquivos/wmgj/'+f.name;
   const head=await fetch(path,'HEAD');checkHeaders(head,f);
-  assert.equal(Number(head.headers['content-length']),f.bytes);
-  assert.equal(head.bytes.length,0);
+  console.log(verifyHeadLength(head,f),f.name);
   const get=await fetch(path);
   checkHeaders(get,f);
   assert.equal(get.bytes.length,f.bytes);
@@ -69,11 +69,7 @@ for(const f of files){
   console.log('DOWNLOAD_VERIFIED',f.name,'bytes='+f.bytes,'SHA256='+f.sha256);
   if(f.mimeType==='video/mp4'){
     const partial=await fetch(path,'GET',{Range:'bytes=0-31'});
-    assert.equal(partial.code,206,'HTTP Range 206 required for video progressive seek');
-    assert.equal(partial.bytes.length,32);
-    assert.match(String(partial.headers['content-range']),/^bytes 0-31\/[0-9]+$/);
-    assert.equal(partial.bytes.subarray(4,8).toString('ascii'),'ftyp');
-    console.log('MP4_RANGE_206_VERIFIED');
+    console.log(verifyVideoRangeResponse(partial,get,f));
   }
 }
 console.log('CREDMED_PUBLIC_DOWNLOADS_AND_BOUNDARIES_VERIFIED');

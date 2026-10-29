@@ -267,6 +267,16 @@
       "environment": "firebase-homologation",
       "branch": "main",
       "authorizedPullRequest": 349,
+      "authorizedTransportSmokeFollowUp": {
+        "pullRequest": 354,
+        "scope": "AURORA_CREDMED_PUBLIC_PDF_MP4_HTTP_TRANSPORT_SMOKE_ONLY",
+        "source": "DIRECT_OWNER_CHAT_AUTOMATED_CI_AND_PROTECTED_DEPLOY",
+        "historicalDriveDeadlineExtended": false,
+        "productionAuthorized": false,
+        "clinicalSensitiveAuthorized": false,
+        "realApplicantDataEnabled": false,
+        "mfaOrProtectedApprovalBypassed": false
+      },
       "windowBasis": "Technical least-privilege window derived from 29 October authorization; not a user-dictated deadline.",
       "protectedRunOwnerApprovalStillRequired": true,
       "exactFinalSourceCiStillRequired": true,
