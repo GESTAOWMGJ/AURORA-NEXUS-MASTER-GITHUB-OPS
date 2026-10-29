@@ -39,17 +39,35 @@
       {
         "source": "/arquivos/wmgj/*.pdf",
         "headers": [
-          {"key": "Content-Type", "value": "application/pdf"},
-          {"key": "Content-Disposition", "value": "attachment"},
-          {"key": "X-Aurora-Asset-Class", "value": "PUBLIC_INSTITUTIONAL_TEMPLATE"}
+          {
+            "key": "Content-Type",
+            "value": "application/pdf"
+          },
+          {
+            "key": "Content-Disposition",
+            "value": "attachment"
+          },
+          {
+            "key": "X-Aurora-Asset-Class",
+            "value": "PUBLIC_INSTITUTIONAL_TEMPLATE"
+          }
         ]
       },
       {
         "source": "/arquivos/wmgj/*.mp4",
         "headers": [
-          {"key": "Content-Type", "value": "video/mp4"},
-          {"key": "Content-Disposition", "value": "attachment"},
-          {"key": "X-Aurora-Asset-Class", "value": "PUBLIC_EDUCATIONAL_VIDEO"}
+          {
+            "key": "Content-Type",
+            "value": "video/mp4"
+          },
+          {
+            "key": "Content-Disposition",
+            "value": "attachment"
+          },
+          {
+            "key": "X-Aurora-Asset-Class",
+            "value": "PUBLIC_EDUCATIONAL_VIDEO"
+          }
         ]
       }
     ],
@@ -146,6 +164,20 @@
         }
       },
       {
+        "source": "/financeiro",
+        "function": {
+          "functionId": "auroraNexusFinancialPanel",
+          "region": "southamerica-east1"
+        }
+      },
+      {
+        "source": "/api/financial-status",
+        "function": {
+          "functionId": "auroraNexusFinancialPanel",
+          "region": "southamerica-east1"
+        }
+      },
+      {
         "source": "/reports/shareholders",
         "function": {
           "functionId": "auroraNexusShareholderReport",
@@ -168,15 +200,24 @@
       },
       {
         "source": "/wmgj/medicos",
-        "function": { "functionId": "auroraNexusMedicalPartners", "region": "southamerica-east1" }
+        "function": {
+          "functionId": "auroraNexusMedicalPartners",
+          "region": "southamerica-east1"
+        }
       },
       {
         "source": "/wmgj/medicos/gestao",
-        "function": { "functionId": "auroraNexusMedicalPartners", "region": "southamerica-east1" }
+        "function": {
+          "functionId": "auroraNexusMedicalPartners",
+          "region": "southamerica-east1"
+        }
       },
       {
         "source": "/api/wmgj/medicos",
-        "function": { "functionId": "auroraNexusMedicalPartners", "region": "southamerica-east1" }
+        "function": {
+          "functionId": "auroraNexusMedicalPartners",
+          "region": "southamerica-east1"
+        }
       },
       {
         "source": "**",
