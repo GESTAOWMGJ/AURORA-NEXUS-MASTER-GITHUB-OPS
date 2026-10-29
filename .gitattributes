@@ -9,3 +9,7 @@ aurora-coletor/document_intake*.cjs text eol=lf
 aurora-coletor/document_fact_mapping.cjs text eol=lf
 aurora-coletor/document_intake.py text eol=lf
 aurora-coletor/document-intake-manifest.json text eol=lf
+
+# Public institutional CREDMED media must preserve exact SHA-256 across Windows/Linux.
+firebase-migration/hosting/aurora-nexus/arquivos/wmgj/*.pdf binary
+firebase-migration/hosting/aurora-nexus/arquivos/wmgj/*.mp4 binary
