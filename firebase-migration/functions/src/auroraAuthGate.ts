@@ -312,6 +312,9 @@ export const auroraNexusAuthGate = onRequest(
     if (member.allFacilities && (["platform_admin", "org_admin", "director"].includes(member.role) || member.permissions.includes("shareholder.report.read"))) {
       shell = shell.replace("</nav>", '<a href="/reports/shareholders">Relatório financeiro aos sócios</a></nav>');
     }
+    if (member.allFacilities && member.mfaVerified && (["platform_admin", "org_admin", "director", "auditor", "finance"].includes(member.role) || member.permissions.includes("financial.read") || member.permissions.includes("shareholder.report.read"))) {
+      shell = shell.replace("</nav>", '<a href="/financeiro">Situação financeira</a></nav>');
+    }
     res.status(200).type("html").send(shell);
   }
 );
