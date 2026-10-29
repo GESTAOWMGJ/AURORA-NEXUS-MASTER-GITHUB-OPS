@@ -16,6 +16,7 @@ export const CSRF_PURPOSES = {
   integrationKey: "POST:/api/integration-keys",
   documentIngest: "POST:/api/integration/documents",
   userProfile: "POST:/api/user-profiles",
+  medicalPartner: "POST:/api/wmgj/medicos",
   distributionApproval: "POST:/api/distribution-approval",
   logout: "POST:/__sessionLogout"
 } as const;
