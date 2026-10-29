@@ -151,6 +151,18 @@
         }
       },
       {
+        "source": "/wmgj/medicos",
+        "function": { "functionId": "auroraNexusMedicalPartners", "region": "southamerica-east1" }
+      },
+      {
+        "source": "/wmgj/medicos/gestao",
+        "function": { "functionId": "auroraNexusMedicalPartners", "region": "southamerica-east1" }
+      },
+      {
+        "source": "/api/wmgj/medicos",
+        "function": { "functionId": "auroraNexusMedicalPartners", "region": "southamerica-east1" }
+      },
+      {
         "source": "**",
         "function": {
           "functionId": "auroraNexusAuthGate",
