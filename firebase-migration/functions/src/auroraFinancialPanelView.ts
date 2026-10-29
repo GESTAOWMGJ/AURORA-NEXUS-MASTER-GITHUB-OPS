@@ -11,7 +11,7 @@ type Member = {
 type RecordMap = Record<string, unknown>;
 
 export function mayReadFinancialPanel(member: Member): boolean {
-  if (!member.allFacilities || !member.mfaVerified) return false;
+  if (!member.allFacilities || !member.mfaVerified || member.role === "patient") return false;
   if (["platform_admin", "org_admin", "director", "auditor", "finance"].includes(member.role)) return true;
   return member.permissions.includes("financial.read") || member.permissions.includes("shareholder.report.read");
 }
@@ -110,14 +110,14 @@ function amount(value: number | null): string {
 
 export function renderFinancialPanelHtml(v: FinancialPanelView): string {
   const rows: Array<[string, number | null]> = [
-    ["Produção de referência (estimativa)", v.financialCents.forecastCents],
-    ["Valor apto a faturar (registrado)", v.financialCents.billableCents],
-    ["Faturamento registrado", v.financialCents.billedCents],
-    ["Recebimentos registrados", v.financialCents.receivedCents],
-    ["A receber registrado", v.financialCents.receivableCents],
-    ["Saldo de caixa no fechamento", v.financialCents.cashBalanceCents],
-    ["Resultado do fechamento", v.financialCents.closingResultCents],
-    ["Glosas e divergências em revisão", v.financialCents.glossCents]
+    ["Produção de referência (estimativa)", v.financialCents.forecastCents ?? null],
+    ["Valor apto a faturar (registrado)", v.financialCents.billableCents ?? null],
+    ["Faturamento registrado", v.financialCents.billedCents ?? null],
+    ["Recebimentos registrados", v.financialCents.receivedCents ?? null],
+    ["A receber registrado", v.financialCents.receivableCents ?? null],
+    ["Saldo de caixa no fechamento", v.financialCents.cashBalanceCents ?? null],
+    ["Resultado do fechamento", v.financialCents.closingResultCents ?? null],
+    ["Glosas e divergências em revisão", v.financialCents.glossCents ?? null]
   ];
   const stage: Array<[string, string]> = [
     ["Nota fiscal emitida e XML vinculado", v.invoiceIssued],
