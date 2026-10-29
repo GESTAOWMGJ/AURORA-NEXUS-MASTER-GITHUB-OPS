@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "scope": "PUBLIC_BLANK_TEMPLATES_ONLY",
+  "module": "AURORA-CRED-MED-001",
+  "files": [
+    {
+      "name": "ficha-pre-cadastro-medico.pdf",
+      "sha256": "591c2a11c73ba34c7021a1d00b685abfbb0c7eff69a6620e498f57f295658e0b",
+      "bytes": 4090,
+      "mimeType": "application/pdf"
+    },
+    {
+      "name": "termo-pre-credenciamento-medico.pdf",
+      "sha256": "ad3157b9f843b989b801bff1ba15fd70237601d1465c21e399269485874375a7",
+      "bytes": 4375,
+      "mimeType": "application/pdf"
+    }
+  ],
+  "videoAssets": [
+    {
+      "name": "guia-pre-cadastro-medico.mp4",
+      "sha256": "508b4013b0f092c35dd38b92024c9e9de130d0e6d87b402bea28951d8a749c31",
+      "bytes": 64299,
+      "mimeType": "video/mp4",
+      "streamable": true
+    }
+  ]
+}

@@ -58,6 +58,10 @@ jobs:
       - name: Validate security gate integration
         run: node scripts/aurora/certification_security_gate.js
 
+      - name: Monitor deployed CREDMED form and public media (existing hourly guardian)
+        if: ${{ github.event_name == 'schedule' && vars.AURORA_CREDMED_PUBLIC_SMOKE_ENABLED == 'true' }}
+        run: node firebase-migration/scripts/verify-credmed-public-release.mjs --origin https://wmgj-hml-jfn-20260927.web.app
+
       - name: Audit forbidden split-brain bypass patterns
         shell: bash
         run: |

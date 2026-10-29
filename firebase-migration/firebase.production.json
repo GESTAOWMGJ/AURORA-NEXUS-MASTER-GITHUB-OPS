@@ -35,6 +35,22 @@
             "value": "camera=(), microphone=(), geolocation=(), payment=()"
           }
         ]
+      },
+      {
+        "source": "/arquivos/wmgj/*.pdf",
+        "headers": [
+          {"key": "Content-Type", "value": "application/pdf"},
+          {"key": "Content-Disposition", "value": "attachment"},
+          {"key": "X-Aurora-Asset-Class", "value": "PUBLIC_INSTITUTIONAL_TEMPLATE"}
+        ]
+      },
+      {
+        "source": "/arquivos/wmgj/*.mp4",
+        "headers": [
+          {"key": "Content-Type", "value": "video/mp4"},
+          {"key": "Content-Disposition", "value": "attachment"},
+          {"key": "X-Aurora-Asset-Class", "value": "PUBLIC_EDUCATIONAL_VIDEO"}
+        ]
       }
     ],
     "rewrites": [

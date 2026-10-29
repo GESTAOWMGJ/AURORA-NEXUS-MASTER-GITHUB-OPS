@@ -284,6 +284,32 @@ test('document compatibility continuation binds the remediated dependencies with
   assert.equal(unapproved.writes(),0);
 });
 
+test('new CREDMED HML owner approval is PR-scoped, time-bounded and never renews historical Drive authorization',async()=>{
+  const media=ownerDecision.publicMediaHmlAuthorization;
+  assert.equal(media.decisionId,'AURORA-HML-CREDMED-20261029');
+  assert.equal(media.authorizedPullRequest,349);
+  assert.equal(media.projectId,'wmgj-hml-jfn-20260927');
+  assert.equal(media.protectedRunOwnerApprovalStillRequired,true);
+  for(const flag of ['productionAuthorized','clinicalSensitiveAuthorized','newSourceEnrollmentAuthorized',
+    'existingCredentialValidityExtended','riskReviewDeadlineExtended','newResidualRiskAcceptanceClaimed'])
+    assert.equal(media[flag],false,flag);
+  assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-27T04:30:00.000Z');
+  const asMedia=()=>{
+    const f=ownerFixture();
+    f.env.AURORA_ACTIVE_RELEASE_REVIEW_PR='349';
+    f.responses.set('/pulls/349',structuredClone(f.responses.get('/pulls/42')));
+    f.responses.set('/pulls/349/reviews?per_page=100',[]);
+    return f;
+  };
+  const approved=asMedia();approved.deps.now=()=>Date.parse('2026-10-29T17:00:00.000Z');
+  const result=await publishActiveRelease(approved.env,approved.deps);
+  assert.equal(result.status,'ACTIVE_PIN_PUBLISHED');assert.equal(approved.writes(),1);
+  const wrongPr=ownerFixture();wrongPr.deps.now=()=>Date.parse('2026-10-29T17:00:00.000Z');
+  await assert.rejects(publishActiveRelease(wrongPr.env,wrongPr.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(wrongPr.writes(),0);
+  const expired=asMedia();expired.deps.now=()=>Date.parse(media.validUntilUtc);
+  await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(expired.writes(),0);
+});
+
 test('pre-cloud workflow gate requires signed promotion when a canonical public key is configured',()=>{
   const workflow=readFileSync(new URL('../../../.github/workflows/deploy-aurora-firebase.yml',import.meta.url),'utf8').replace(/\r\n/g,'\n');
   const preflight=workflow.split('      - name: Require canonical publisher configuration before cloud changes')[1]

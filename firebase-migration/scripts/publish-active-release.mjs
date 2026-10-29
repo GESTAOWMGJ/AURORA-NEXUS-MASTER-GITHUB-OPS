@@ -24,7 +24,7 @@ const ownerDecisionSha256=hash(JSON.stringify(ownerDecision));
 const runMatches=(run,sourceSha,path)=>run?.head_sha===sourceSha&&run?.head_branch==='main'&&run?.path===path
   &&run?.repository?.full_name===REPOSITORY&&run?.status==='completed'&&run?.conclusion==='success';
 
-function requireCurrentOwnerDecision(now) {
+function requireCurrentOwnerDecision(now,reviewPrNumber) {
   if(ownerDecision.schemaVersion!==1||ownerDecision.approvalSource!=='DIRECT_OWNER_CHAT'
     ||ownerDecision.scope.repository!==REPOSITORY||ownerDecision.scope.projectId!==HML_PROJECT
     ||ownerDecision.scope.environment!==HML_ENVIRONMENT||ownerDecision.scope.branch!=='main'
@@ -33,12 +33,31 @@ function requireCurrentOwnerDecision(now) {
     ||ownerDecision.independentGithubPullRequestReviewClaimed!==false
     ||ownerDecision.riskAcceptance.status!=='ACCEPTED_BY_OWNER_HML_TEST_TOOLS_ONLY') fail('OWNER_APPROVAL_SCOPE_INVALID');
   const recordedAt=Date.parse(`${ownerDecision.recordedOn}T00:00:00.000Z`),expiresAt=Date.parse(ownerDecision.scope.validUntilUtc);
-  if(!Number.isSafeInteger(recordedAt)||!Number.isSafeInteger(expiresAt)||expiresAt<=recordedAt
-    ||!Number.isSafeInteger(now)||now<recordedAt||now>=expiresAt) fail('OWNER_APPROVAL_EXPIRED');
+  const historicalWindow=Number.isSafeInteger(recordedAt)&&Number.isSafeInteger(expiresAt)
+    &&expiresAt>recordedAt&&Number.isSafeInteger(now)&&now>=recordedAt&&now<expiresAt;
+  // The historical operational/Drive authorization and R029 deadline are immutable.
+  // A later, independently scoped public-media HML decision cannot renew them.
+  const media=ownerDecision.publicMediaHmlAuthorization;
+  const mediaStart=Date.parse(`${media?.recordedOn}T00:00:00.000Z`);
+  const mediaExpiry=Date.parse(media?.validUntilUtc);
+  const mediaWindow=media?.decisionId==='AURORA-HML-CREDMED-20261029'
+    &&media.approvalSource==='DIRECT_OWNER_CHAT'&&media.ownerHmlDeploymentApproved===true
+    &&media.repo===REPOSITORY&&media.projectId===HML_PROJECT&&media.environment===HML_ENVIRONMENT
+    &&media.branch==='main'&&String(media.authorizedPullRequest)===String(reviewPrNumber)
+    &&media.protectedRunOwnerApprovalStillRequired===true&&media.exactFinalSourceCiStillRequired===true
+    &&media.canonicalSmokeAndReadbackStillRequired===true&&media.riskReviewDeadlineExtended===false
+    &&media.newResidualRiskAcceptanceClaimed===false&&media.productionAuthorized===false
+    &&media.clinicalSensitiveAuthorized===false&&media.realApplicantDataAuthorizedBeforePrivacyReadiness===false
+    &&media.newSourceEnrollmentAuthorized===false&&media.existingCredentialValidityExtended===false
+    &&media.iamChangeAuthorized===false&&media.secretRotationAuthorized===false
+    &&media.laterMainCodeReviewClaimed===false&&media.independentGithubPullRequestReviewClaimed===false
+    &&Number.isSafeInteger(mediaStart)&&Number.isSafeInteger(mediaExpiry)
+    &&mediaExpiry>mediaStart&&now>=mediaStart&&now<mediaExpiry;
+  if(!historicalWindow&&!mediaWindow) fail('OWNER_APPROVAL_EXPIRED');
 }
 
 async function verifyOwnerDeploymentApproval(input,release,pr,githubJSON) {
-  requireCurrentOwnerDecision(input.now);
+  requireCurrentOwnerDecision(input.now,input.reviewPrNumber);
   const owner=ownerDecision.repositoryOwner;
   const ownerUser=user=>user?.type==='User'&&user.id===owner.id&&user.login===owner.login;
   if(input.projectId!==HML_PROJECT||input.deploymentEnvironment!==HML_ENVIRONMENT
@@ -212,12 +231,12 @@ export async function publishActiveRelease(env,deps) {
   if(verified.status!=='CANDIDATE_UNVERIFIED') fail('SIGNED_CANDIDATE_REJECTED');
   // Recheck main after evidence/artifact collection, immediately before atomic promotion.
   if((await deps.githubJSON('/git/ref/heads/main'))?.object?.sha!==env.GITHUB_SHA) fail('CURRENT_MAIN_CONFLICT');
-  if(approvalProvenance.mode===OWNER_MODE) requireCurrentOwnerDecision(deps.now?.()??Date.now());
+  if(approvalProvenance.mode===OWNER_MODE) requireCurrentOwnerDecision(deps.now?.()??Date.now(),env.AURORA_ACTIVE_RELEASE_REVIEW_PR);
   await deps.commit(envelope,previous,verified.certificateSha256,env.AURORA_ACTIVE_RELEASE_PUBLIC_KEY,
     async()=>{
-      if(approvalProvenance.mode===OWNER_MODE) requireCurrentOwnerDecision(deps.now?.()??Date.now());
+      if(approvalProvenance.mode===OWNER_MODE) requireCurrentOwnerDecision(deps.now?.()??Date.now(),env.AURORA_ACTIVE_RELEASE_REVIEW_PR);
       const currentMainSha=(await deps.githubJSON('/git/ref/heads/main'))?.object?.sha;
-      if(approvalProvenance.mode===OWNER_MODE) requireCurrentOwnerDecision(deps.now?.()??Date.now());
+      if(approvalProvenance.mode===OWNER_MODE) requireCurrentOwnerDecision(deps.now?.()??Date.now(),env.AURORA_ACTIVE_RELEASE_REVIEW_PR);
       return currentMainSha;
     },approvalProvenance);
   return {status:'ACTIVE_PIN_PUBLISHED',sourceSha:certificate.sourceSha,certificateSha256:verified.certificateSha256,
