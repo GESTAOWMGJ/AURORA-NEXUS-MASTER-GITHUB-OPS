@@ -2175,7 +2175,7 @@
     },
     {
       "path": "firebase-migration/scripts/verify-installed-writer-guardian.mjs",
-      "sha256": "5bb70f7632da160cfa5c272eb36f06d50685be42007a44762bbf9098321f0346",
+      "sha256": "9ea2c257f7700e4fedd29aa0fe89e161d2b9efd5222d97114178fc37de851023",
       "writeLikeLines": [
         7,
         40,

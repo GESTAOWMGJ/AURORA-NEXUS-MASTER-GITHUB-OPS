@@ -63,7 +63,7 @@ async function main() {
       if(response.status===404)return null;if(!response.ok)fail('WRITER_SMOKE_READBACK_UNAVAILABLE');return response.json();
     };
     const leasePath=writerLeasePath('wmgj'),before=await getDocument(leasePath);
-    const shell=await fetch(origin+'/',{headers:{Cookie:cookie},redirect:'error',signal:AbortSignal.timeout(15000)});
+    const shell=await fetch(origin+'/portal',{headers:{Cookie:cookie},redirect:'error',signal:AbortSignal.timeout(15000)});
     if(!shell.ok)fail('WRITER_SMOKE_SHELL_UNAVAILABLE');
     const html=await shell.text(),match=/const csrf=(\{[^\r\n]*?\});const capabilities=/.exec(html);
     const csrf=match?JSON.parse(match[1]).refresh:null;
