@@ -520,3 +520,23 @@ test('live continuous Drive promotion is gated by fully justified backlog and bo
   assert.match(source,/processLimit:Math\.min\(10,scope\.limit\)/);
   assert.match(source,/phase=String\(props\.getProperty\('AURORA_CONTINUOUS_DRIVE_PHASE'\)\|\|'REMEDIATE_ONLY'\)/);
 });
+
+
+test('continuous Drive runtime persists after the derived admin window only for the already-promoted exact scope',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'../src/37_AURORA_CONECTORES_PLUG_AND_PLAY.gs'),'utf8').replace(/\r\n/g,'\n');
+  assert.match(source,/function auroraContinuousDriveRuntimeGrant_\(\)/);
+  assert.match(source,/AURORA_CONTINUOUS_DRIVE_LIVE_ENABLED_AT/);
+  assert.match(source,/enabledAt<start\|\|enabledAt>=deadline/);
+  assert.match(source,/var runtimeGrant=auroraContinuousDriveRuntimeGrant_\(\),stored=auroraContinuousDriveScopeFromProperties_\(\)/);
+  assert.match(source,/var deadline=Date\.now\(\)\+150000/);
+  assert.doesNotMatch(source,/authorizationDeadline=auroraContinuousDriveWindow_\(\)/);
+});
+test('continuous Drive workflow keeps mutating actions time-bounded but permits persisted read-only STATUS',()=>{
+  const workflow=fs.readFileSync(path.join(__dirname,'../.github/workflows/aurora-drive-continuous-feed.yml'),'utf8').replace(/\r\n/g,'\n');
+  assert.match(workflow,/AURORA_CONTINUOUS_ACTION: \$\{\{ inputs\.action \}\}/);
+  assert.match(workflow,/const statusOnly=action==='STATUS'/);
+  assert.match(workflow,/AURORA-HML-DOCUMENT-COMPATIBILITY-20261027/);
+  assert.match(workflow,/persistence\?\.userAuthorizationPersists===true/);
+  assert.match(workflow,/\(!statusOnly && Date\.now\(\)>=Date\.parse\(decision\.validUntilUtc\)\)/);
+  assert.match(workflow,/\(statusOnly && !persistentRuntime\)/);
+});

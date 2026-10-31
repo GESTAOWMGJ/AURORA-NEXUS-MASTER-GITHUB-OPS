@@ -1041,6 +1041,29 @@ function auroraContinuousDriveWindow_() {
   return deadline;
 }
 
+// The finite window above gates administrative mutations. An already-promoted
+// LIVE_ENUMERATION runtime persists until explicit revocation, but only when
+// activation properties prove LIVE was enabled inside that original window.
+function auroraContinuousDriveRuntimeGrant_() {
+  var props=PropertiesService.getScriptProperties();
+  if(props.getProperty('AURORA_CONTINUOUS_DRIVE_DECISION')!==AURORA_CONTINUOUS_DRIVE_DECISION
+    ||props.getProperty('AURORA_CONTINUOUS_DRIVE_VALID_UNTIL')!==AURORA_CONTINUOUS_DRIVE_DEADLINE
+    ||props.getProperty('AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256')!==AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256)
+    throw new Error('AURORA_CONTINUOUS_DRIVE_RUNTIME_GRANT_INVALID');
+  var phase=String(props.getProperty('AURORA_CONTINUOUS_DRIVE_PHASE')||'REMEDIATE_ONLY');
+  if(['REMEDIATE_ONLY','LIVE_ENUMERATION'].indexOf(phase)<0)
+    throw new Error('AURORA_CONTINUOUS_DRIVE_RUNTIME_GRANT_INVALID');
+  if(phase==='LIVE_ENUMERATION') {
+    var enabledAt=Date.parse(String(props.getProperty('AURORA_CONTINUOUS_DRIVE_LIVE_ENABLED_AT')||''));
+    var start=Date.parse(AURORA_CONTINUOUS_DRIVE_NOT_BEFORE),deadline=Date.parse(AURORA_CONTINUOUS_DRIVE_DEADLINE);
+    if(!Number.isFinite(enabledAt)||!Number.isFinite(start)||!Number.isFinite(deadline)
+      ||enabledAt<start||enabledAt>=deadline)
+      throw new Error('AURORA_CONTINUOUS_DRIVE_RUNTIME_GRANT_INVALID');
+  }
+  return {phase:phase,persisted:true,administrativeWindowValid:Date.now()>=Date.parse(AURORA_CONTINUOUS_DRIVE_NOT_BEFORE)
+    &&Date.now()<Date.parse(AURORA_CONTINUOUS_DRIVE_DEADLINE)};
+}
+
 function auroraContinuousDrivePrivateScope_(scopeJson, expectedHash) {
   if(typeof scopeJson!=='string'||scopeJson.length<2||scopeJson.length>131072
     ||expectedHash!==AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256
@@ -1204,7 +1227,7 @@ function auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj() {
     scanExamined:0,queued:0,aliases:0,attempted:0,accepted:0,duplicates:0,pending:0,failed:0,review:0,
     extractionErrors:0,sourceMutation:false,productionMutation:false,checkedAt:new Date().toISOString()};
   try {
-    var authorizationDeadline=auroraContinuousDriveWindow_(),stored=auroraContinuousDriveScopeFromProperties_();
+    var runtimeGrant=auroraContinuousDriveRuntimeGrant_(),stored=auroraContinuousDriveScopeFromProperties_();
     var scope=stored.scope,guarded=auroraContinuousDriveSystemGuard_(scope,stored.runtimeHash,true);
     var props=PropertiesService.getScriptProperties(),resolved=auroraResolverFontesDocumentais_(props),state=auroraContinuousDriveCollectorState_();
     if(!auroraContinuousDriveRegistryMatchesScope_(resolved,scope)
@@ -1212,7 +1235,7 @@ function auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj() {
       ||state.target!==1||state.duplicateCollectors!==0) throw new Error('AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID');
     // Fail-safe two-phase gate: an activation created before this field existed
     // defaults to remediation-only and therefore cannot enumerate more Drive items.
-    var phase=String(props.getProperty('AURORA_CONTINUOUS_DRIVE_PHASE')||'REMEDIATE_ONLY');
+    var phase=runtimeGrant.phase;
     if(['REMEDIATE_ONLY','LIVE_ENUMERATION'].indexOf(phase)<0) throw new Error('AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID');
     summary.phase=phase;
     if(phase==='REMEDIATE_ONLY') {
@@ -1222,8 +1245,8 @@ function auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj() {
     }
     if(typeof comTravaIngestaoGmailWMGJ_!=='function'||typeof auroraExecutarCicloDriveAutorizado_!=='function')
       throw new Error('AURORA_DRIVE_DEPENDENCY_MISSING');
-    var deadline=Math.min(Date.now()+150000,authorizationDeadline-5000);
-    if(deadline<=Date.now()+15000) throw new Error('AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED');
+    // Per-cycle deadline is operational, not an authorization expiry.
+    var deadline=Date.now()+150000;
     var value=comTravaIngestaoGmailWMGJ_(function(){
       var current=auroraContinuousDriveSystemGuard_(scope,guarded.scopeSha256,false);
       return auroraExecutarCicloDriveAutorizado_({orgId:scope.orgId,sources:scope.sources,
@@ -1243,7 +1266,7 @@ function auroraExecutarAlimentacaoContinuaDriveAutorizadaWmgj() {
     summary.pending=Number(p.pending||0);summary.failed=Number(p.blockingErrors||0);summary.review=Number(p.review||0);summary.extractionErrors=Number(p.errors||0);
   } catch(error) {
     var code=String(error&&error.message||'');
-    var allowed=['AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED','AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID',
+    var allowed=['AURORA_CONTINUOUS_DRIVE_RUNTIME_GRANT_INVALID','AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID',
       'AURORA_DRIVE_TENANT_MISMATCH','AURORA_DRIVE_DEPENDENCY_MISSING','AURORA_DRIVE_CONFIGURATION_INVALID',
       'AURORA_DRIVE_SCOPE_CHANGED','AURORA_DRIVE_SOURCE_UNAVAILABLE','AURORA_DRIVE_DEADLINE_EXCEEDED'];
     summary.code=allowed.indexOf(code)>=0?code:'AURORA_CONTINUOUS_DRIVE_CYCLE_FAILED';
@@ -1337,9 +1360,10 @@ function auroraLerStatusAlimentacaoContinuaDriveAutorizada(expectedScopeSha256) 
   try {
     auroraConnectorReuseOwner_();
     if(expectedScopeSha256!==AURORA_CONTINUOUS_DRIVE_PRIVATE_SCOPE_SHA256) throw new Error('AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED');
-    var deadline=auroraContinuousDriveWindow_(),stored=auroraContinuousDriveScopeFromProperties_(),props=PropertiesService.getScriptProperties();
+    var runtimeGrant=auroraContinuousDriveRuntimeGrant_(),stored=auroraContinuousDriveScopeFromProperties_(),props=PropertiesService.getScriptProperties();
     var resolved=auroraResolverFontesDocumentais_(props),state=auroraContinuousDriveCollectorState_();
-    result.authorizationValid=Date.now()<deadline;result.sourceCount=resolved.sources.length;
+    result.authorizationValid=runtimeGrant.persisted===true;result.administrativeWindowValid=runtimeGrant.administrativeWindowValid===true;
+    result.sourceCount=resolved.sources.length;
     result.sourceActive=auroraContinuousDriveRegistryMatchesScope_(resolved,stored.scope);
     result.triggerCount=state.target;result.duplicateCollectors=state.duplicateCollectors;result.runtimeScopeSha256=stored.runtimeHash;
     result.phase=String(props.getProperty('AURORA_CONTINUOUS_DRIVE_PHASE')||'REMEDIATE_ONLY');
@@ -1355,7 +1379,7 @@ function auroraLerStatusAlimentacaoContinuaDriveAutorizada(expectedScopeSha256) 
     result.code=result.ok?'AURORA_CONTINUOUS_DRIVE_STATUS_VERIFIED':'AURORA_CONTINUOUS_DRIVE_STATUS_INCOMPLETE';
   } catch(error) {
     var code=String(error&&error.message||'');
-    var allowed=['AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_CONTINUOUS_DRIVE_WINDOW_EXPIRED',
+    var allowed=['AURORA_CONNECTOR_REUSE_OWNER_REQUIRED','AURORA_CONTINUOUS_DRIVE_RUNTIME_GRANT_INVALID',
       'AURORA_CONTINUOUS_DRIVE_SCOPE_REJECTED','AURORA_CONTINUOUS_DRIVE_CONFIGURATION_INVALID'];
     result.code=allowed.indexOf(code)>=0?code:'AURORA_CONTINUOUS_DRIVE_STATUS_FAILED';
   }
