@@ -1,5 +1,5 @@
 import { buildChelfexContract, type ChelfexContext } from "./auroraChelfex.js";
-import { readReliableFinancialResult, RELIABLE_RESULT_POLICY } from "./auroraReliableResult.js";
+import { readReliableFinancialResult, RELIABLE_RESULT_POLICY, redactFinancialProjection } from "./auroraReliableResult.js";
 import { generateNativeInsight, type NativeInsightFinding } from "./auroraNativeIntelligence.js";
 import { nativeRoutineSummary, buildClientAdoptionPlan, type AdoptionContext } from "./auroraNativeRoutines.js";
 import { iaMasterCapability } from "./auroraIaMaster.js";
@@ -8,6 +8,8 @@ import { assessNativeData, DATA_GOVERNANCE_POLICY, knownCount, masterCommandSurf
 
 export const AURORA_MASTER_ENGINE_VERSION = "0.4.0-chelfex-recommendation";
 type MasterContext = {
+  /** Server-derived restriction, never a permission or request-body field. */
+  redactFinancial?: boolean;
   chelfexContext?: ChelfexContext;
   actionSummary?: Record<string, unknown>;
   financialStatus?: Record<string, unknown> | null;
@@ -53,15 +55,19 @@ export function buildMasterOperationalState(
 ): Record<string, unknown> {
   // Never lend an authenticated tenant to a different snapshot.
   if (context.chelfexContext && context.chelfexContext.orgId !== projection.orgId) projection = {};
-  const assessment = assessNativeData(projection, now);
+  // Validate the canonical proof before removing financial values. No readiness
+  // flags from a redacted/client snapshot can substitute this validation.
+  const canonicalProjection = projection;
+  const assessment = assessNativeData(canonicalProjection, now);
+  if (context.redactFinancial === true) projection = redactFinancialProjection(projection);
   const denied = assessment.decision === "DENY";
   const reliableResult = denied ? null : readReliableFinancialResult(projection);
   // The data gate runs BEFORE inference, including the bootstrap's empty fallback.
   const nativeFindings = denied ? [] : uniqueFindings([
-    insightFindings(generateNativeInsight(projection, "EXECUTIVE", now)),
-    insightFindings(generateNativeInsight(projection, "REVENUE_RISK", now)),
-    insightFindings(generateNativeInsight(projection, "SLA_RISK", now)),
-    insightFindings(generateNativeInsight(projection, "DATA_QUALITY", now))
+    insightFindings(generateNativeInsight(canonicalProjection, "EXECUTIVE", now, context.redactFinancial === true)),
+    insightFindings(generateNativeInsight(canonicalProjection, "REVENUE_RISK", now, context.redactFinancial === true)),
+    insightFindings(generateNativeInsight(canonicalProjection, "SLA_RISK", now, context.redactFinancial === true)),
+    insightFindings(generateNativeInsight(canonicalProjection, "DATA_QUALITY", now, context.redactFinancial === true))
   ]);
   const reviewFinding = assessment.decision === "REVIEW" ? governanceReviewFinding(assessment.reasonCodes) : null;
   // Surface REVIEW reasons before ordinary findings, without masking a critical finding.
@@ -101,7 +107,7 @@ export function buildMasterOperationalState(
     operationalState, cycleStage,
     chelfex: buildChelfexContract({ schemaVersion: 'aurora.chelfex.task.v1',
       orgId: projection.orgId, operation: 'PROPOSE', objective: 'REVIEW_NATIVE_OPERATIONAL_STATE' },
-      context.chelfexContext, projection, now),
+      context.chelfexContext, canonicalProjection, now, context.redactFinancial === true),
     reliableResult, resultPolicy: RELIABLE_RESULT_POLICY,
     cycle: ["OBSERVAR", "INGESTAR", "COMPROVAR", "CONFRONTAR", "DETECTAR", "PRIORIZAR", "AGIR", "VALIDAR", "MEDIR", "APRENDER", "REUTILIZAR"],
     headline: nextFinding?.title ?? "Nenhuma exceção detectada neste recorte autorizado; isto não comprova ausência de risco.",

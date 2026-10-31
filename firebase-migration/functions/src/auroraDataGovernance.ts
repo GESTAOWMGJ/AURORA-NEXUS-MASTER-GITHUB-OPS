@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 /** Canonical native policy. Describes the master planner, not permission to call an API. */
 export const DATA_GOVERNANCE_POLICY = Object.freeze({
   id: "AURORA-DATA-GOV-AUTONOMY-001",
-  version: "1.1.0",
+  version: "1.1.1",
   effectiveLevel: "A1_RECOMMEND_ONLY",
   purpose: "OPERATIONAL_GOVERNANCE",
   maxSnapshotAgeMs: 30 * 60 * 1000,
@@ -44,13 +44,20 @@ function safeId(value: unknown): string | null {
   return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : null;
 }
 
+export function canonicalTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return false;
+  const milliseconds = Date.parse(value);
+  const expected = value.length === 20 ? value.slice(0, -1) + '.000Z' : value;
+  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === expected;
+}
+
 /** Checks data readiness, never identity. Session/RBAC/facility checks remain mandatory upstream. */
 export function assessNativeData(projection: unknown, now = new Date()): NativeDataAssessment {
   const p = record(projection), plane = record(p.nativeDataPlane), quality = record(p.dataQuality);
   const reasons: string[] = [];
   const snapshotId = safeId(p.snapshotId);
-  const sourceHash = typeof p.sourceHash === "string" && /^[a-f0-9]{64}$/i.test(p.sourceHash) ? p.sourceHash : null;
-  const asOf = typeof p.asOf === "string" && /^\d{4}-\d{2}-\d{2}T/.test(p.asOf) ? Date.parse(p.asOf) : NaN;
+  const sourceHash = typeof p.sourceHash === "string" && /^[a-f0-9]{64}$/i.test(p.sourceHash) && p.sourceHash !== "0".repeat(64) ? p.sourceHash : null;
+  const asOf = canonicalTimestamp(p.asOf) ? Date.parse(p.asOf) : NaN;
   const age = now.getTime() - asOf;
   if (!safeId(p.orgId)) reasons.push("GOV_ORG_REQUIRED");
   if (!snapshotId || !sourceHash) reasons.push("GOV_SNAPSHOT_PROVENANCE_REQUIRED");

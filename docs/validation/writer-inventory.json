@@ -5,7 +5,7 @@
   "method": "CONSERVATIVE_LEXICAL_CANDIDATES",
   "allLegacyWritersEnforced": false,
   "runtimeInventoryVerified": false,
-  "scannedFiles": 248,
+  "scannedFiles": 249,
   "candidateFiles": 169,
   "writeLikeLines": 1314,
   "files": [
@@ -1065,10 +1065,10 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraChelfex.ts",
-      "sha256": "c2c0a4b49c34cf10fe6833d5a10a1b53104fe3b07755924b6cb40ef9eddbacea",
+      "sha256": "2cf2071a4c88689b2b82d905eadda27caa28f95b71b2ab8b9845921f8a57ade6",
       "writeLikeLines": [
-        14,
-        118
+        21,
+        153
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
@@ -1114,7 +1114,7 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraDataGovernance.ts",
-      "sha256": "c9fa8acff9da4301fd85df7a1498eb6b267ded616774fdba35fcb64c36ada0c6",
+      "sha256": "b464122b8ffb2e637d1ffdaadf0715f90e556eb05776d33288d95113a49b75e4",
       "writeLikeLines": [
         21
       ],
@@ -1468,9 +1468,9 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraMasterEngine.ts",
-      "sha256": "14ec93ddd73cb544e961702fc6f704b13bd995d49d94317606e95d7acc5b285a",
+      "sha256": "f3bebb14d3026eae82137ae9851c50ef2a1067aafb5aa8875c5401bef96ec3a7",
       "writeLikeLines": [
-        29
+        31
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
@@ -1659,42 +1659,42 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraRuntime.ts",
-      "sha256": "3625b5aa7e5bb4185635780eba0383c0bb3c17ad14b7ac4c8dad58535d5c2c1d",
+      "sha256": "51e00a8652bfbd1f626d1d35dcf70de5453528ff5f11965f45843a11e9ae3678",
       "writeLikeLines": [
-        32,
-        60,
-        77,
-        81,
-        82,
+        34,
+        62,
+        79,
         83,
         84,
         85,
-        162,
-        186,
+        86,
+        87,
+        164,
         188,
-        216,
-        217,
-        221,
-        222,
+        190,
+        218,
+        219,
         223,
         224,
-        255,
-        345,
-        398,
-        455,
-        485,
-        496,
-        497,
+        225,
+        226,
+        253,
+        347,
+        409,
+        471,
+        501,
+        512,
         513,
-        528,
-        568,
-        578,
-        589
+        529,
+        544,
+        584,
+        594,
+        605
       ],
       "guardedCallLines": [
-        45,
-        175,
-        499
+        47,
+        177,
+        515
       ],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
     },
@@ -1976,9 +1976,9 @@
     },
     {
       "path": "firebase-migration/scripts/chelfex-synthetic-readback.cjs",
-      "sha256": "5ded0878bb0564e47d73eea917c558253d7fecfe0940d77721787de7537c47e3",
+      "sha256": "3573b757ebeaa29fbab5938155b90cd3340382f2d99f9410649d8be0ae95a20a",
       "writeLikeLines": [
-        26
+        27
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
@@ -2085,7 +2085,7 @@
     },
     {
       "path": "firebase-migration/scripts/publish-active-release.mjs",
-      "sha256": "8f280e373d1fa6cfd38a3c08a9f3b01cd4e519d0f9f6ca0de6eb3c5b9bef304c",
+      "sha256": "63773f5efb22ca35941082a26b9dc036538d11edcf5a654771f83801f8b721f7",
       "writeLikeLines": [
         19,
         185,

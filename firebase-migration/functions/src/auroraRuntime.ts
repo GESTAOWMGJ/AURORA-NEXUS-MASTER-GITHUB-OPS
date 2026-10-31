@@ -1,3 +1,5 @@
+import { assessNativeData } from "./auroraDataGovernance.js";
+import { redactFinancialProjection } from "./auroraReliableResult.js";
 import { guardedCanonicalTransaction, WriterLeaseError } from "./auroraWriterGuardian.js";
 import { createHash, randomUUID } from "node:crypto";
 import { FieldValue, Timestamp, type Transaction } from "firebase-admin/firestore";
@@ -241,11 +243,7 @@ export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: Projectio
 function visibleProjection(projection: Record<string, unknown>, member: AuroraMember): Record<string, unknown> {
   const mayReadFinance = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
   if (mayReadFinance) return projection;
-  return {
-    ...projection,
-    financial: { billedAmount: null, receivedAmount: null, pendingAmount: null, reconciliationDifference: null, currency: "BRL" },
-    financialCents: { invoicedCents: null, receivedCents: null, glossCents: null, outstandingCents: null }
-  };
+  return redactFinancialProjection(projection);
 }
 
 export const auroraNexusBootstrap = onRequest(
@@ -279,9 +277,12 @@ export const auroraNexusBootstrap = onRequest(
         });
       }
     }
-    const rawProjection = snapshot.exists
+    const rawProjection: Record<string, unknown> = snapshot.exists
       ? { ...snapshot.data(), generatedAt: snapshot.data()?.generatedAt?.toDate?.().toISOString?.() ?? null }
       : { ...buildProjection(empty, new Date(), { orgId: member.orgId, competence }), generatedAt: null };
+    if (rawProjection.orgId !== member.orgId) {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_SCOPE_MISMATCH" }); return;
+    }
     const safeActions = actions
       ? actions.docs.map((doc) => publicAction(doc.id, doc.data())).filter((item): item is Record<string, unknown> => item !== null)
         .sort((a, b) => Date.parse(String(b.updatedAt ?? b.createdAt ?? 0)) - Date.parse(String(a.updatedAt ?? a.createdAt ?? 0)))
@@ -321,7 +322,8 @@ export const auroraNexusBootstrap = onRequest(
       organization: { id: member.orgId, name: String(org.data()?.name ?? "WMGJ") },
       member: { email: member.email, role: member.role, mfaVerified: member.mfaVerified },
       projection: visibleProjection(rawProjection, member),
-      masterEngine: buildMasterOperationalState(visibleProjection(rawProjection, member), {
+      masterEngine: buildMasterOperationalState(rawProjection, {
+        redactFinancial: !mayReadFinancialStatus,
         chelfexContext: { orgId: member.orgId, authority: "AUTHENTICATED_SERVER" },
         actionSummary,
         financialStatus,
@@ -379,14 +381,23 @@ export const auroraNexusNativeInsight = onRequest(
       res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_CONTRACT_REQUIRED" });
       return;
     }
-    const projection = visibleProjection(rawProjection, member);
+    // Canonical data must remain eligible at the same clock used for inference.
+    if (rawProjection.orgId !== member.orgId) {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_SCOPE_MISMATCH" }); return;
+    }
+    const insightNow = new Date();
+    const dataAssessment = assessNativeData(rawProjection, insightNow);
+    if (dataAssessment.decision === "DENY") {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_DATA_NOT_READY", reasonCodes: dataAssessment.reasonCodes }); return;
+    }
+    const mayReadFinance = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
     res.status(200).json({
       ok: true,
       environment: authenticatedOrganizationEnvironment(organization.exists ? organization.data() : undefined),
       mode: "FIREBASE_NATIVE",
       sourceAccessDuringInference: false,
       externalAiUsed: false,
-      insight: generateNativeInsight(projection, intent)
+      insight: generateNativeInsight(rawProjection, intent, insightNow, !mayReadFinance)
     });
   }
 );
@@ -427,9 +438,13 @@ export const auroraNexusMasterEngine = onRequest(
       res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_CONTRACT_REQUIRED" });
       return;
     }
+    if (rawProjection.orgId !== member.orgId) {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_SCOPE_MISMATCH" }); return;
+    }
     const projection = visibleProjection(rawProjection, member);
     const competence = typeof projection.competence === "string" ? projection.competence : null;
-    const financialStatus = competence
+    const mayReadFinance = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
+    const financialStatus = competence && mayReadFinance
       ? await loadFinancialClosingStatus(member.orgId, competence)
       : null;
     const canonicalVersion = await readRuntimeActiveRelease();
@@ -441,7 +456,8 @@ export const auroraNexusMasterEngine = onRequest(
       sourceAccessDuringInference: false,
       externalAiUsed: false,
       canonicalVersion,
-      master: buildMasterOperationalState(projection, { financialStatus, release,
+      master: buildMasterOperationalState(rawProjection, { financialStatus, release,
+        redactFinancial: !mayReadFinance,
         chelfexContext: { orgId: member.orgId, authority: "AUTHENTICATED_SERVER" },
         adoption: { member, installation: member.allFacilities ? await loadInstallationReadiness(member.orgId) : undefined } })
     });

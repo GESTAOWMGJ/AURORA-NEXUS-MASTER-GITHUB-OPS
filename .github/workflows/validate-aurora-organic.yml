@@ -58,7 +58,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --import tsx --test test/aurora-chelfex.test.ts test/aurora-chelfex-runtime.test.ts | tee ../../organic-evidence/chelfex-tests.tap
+          node --import tsx --test test/aurora-chelfex*.test.ts | tee ../../organic-evidence/chelfex-tests.tap
           node ../scripts/chelfex-synthetic-readback.cjs > ../../organic-evidence/chelfex-readback.json
       - name: Package exact source and build provenance
         shell: bash
@@ -104,3 +104,17 @@ jobs:
           node-version: '22'
       - name: Verify Windows subprocess and timeout contracts
         run: node --test scripts/aurora/windows_online_robot_orchestrator.test.js
+      - name: Verify canonical CHELFEx on native Windows and retain readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix firebase-migration/functions --ignore-scripts --no-audit --no-fund
+          npm run build --prefix firebase-migration/functions
+          (cd firebase-migration/functions && node --import tsx --test test/aurora-chelfex*.test.ts)
+          node firebase-migration/scripts/chelfex-synthetic-readback.cjs > "$RUNNER_TEMP/chelfex-windows-readback.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chelfex-native-windows-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/chelfex-windows-readback.json
+          if-no-files-found: error
+          retention-days: 14
