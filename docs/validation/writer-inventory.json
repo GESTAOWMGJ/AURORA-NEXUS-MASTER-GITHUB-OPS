@@ -1945,13 +1945,13 @@
     },
     {
       "path": "firebase-migration/scripts/build-release-manifests.mjs",
-      "sha256": "29854edea009c8889226be876b8b935d67245fd51d7f2592bc7f247d3987c3b7",
+      "sha256": "22959ed59b8e343150afcba7c49f928e7dd1328ee902d103f160f2962b3e2fa0",
       "writeLikeLines": [
         17,
-        31,
-        42,
-        55,
-        70
+        34,
+        45,
+        58,
+        73
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
