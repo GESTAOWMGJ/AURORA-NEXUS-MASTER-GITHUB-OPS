@@ -124,7 +124,7 @@ const hardeningText = readText("firebase-migration/policy/operational-delivery-h
 const unificationText = readText("firebase-migration/policy/platform-unification-conflict-certification-v1.json");
 
 const guardianPolicyText = readText("firebase-migration/policy/realtime-platform-guardian-v1.json");
-const guardianRuntimeText = readText("scripts/aurora/realtime_platform_guardian.js");
+const guardianRuntimeText = readText("firebase-migration/functions/src/realtimePlatformGuardian.js");
 
 const semanticChecks = [
   {

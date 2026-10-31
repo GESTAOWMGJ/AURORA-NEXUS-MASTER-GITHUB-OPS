@@ -591,3 +591,24 @@ test('traffic-order repair PR 364 uses the same bounded HML decision and cannot 
   const expired=fixture();expired.deps.now=()=>Date.parse(ownerDecision.chelfexHmlAuthorization.validUntilUtc);
   await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(expired.writes(),0);
 });
+
+test('writer migration authorization stays bound to PR362, HML, current CI and real protected approval',async()=>{
+  const prepare=()=>{
+    const f=ownerFixture();f.deps.now=()=>Date.parse('2026-10-31T12:00:00Z');
+    (f.env as any).AURORA_ACTIVE_RELEASE_REVIEW_PR='362';
+    f.responses.set('/pulls/362',structuredClone(f.responses.get(`/pulls/${reviewPrNumber}`)));
+    f.responses.set('/pulls/362/reviews?per_page=100',[]);
+    return f;
+  };
+  const valid=prepare();await publishActiveRelease(valid.env,valid.deps);assert.equal(valid.writes(),1);
+  assert.equal(valid.approvalProvenance().independentGithubPullRequestReviewClaimed,false);
+  const wrongPr=prepare();(wrongPr.env as any).AURORA_ACTIVE_RELEASE_REVIEW_PR='363';
+  await assert.rejects(publishActiveRelease(wrongPr.env,wrongPr.deps));assert.equal(wrongPr.writes(),0);
+  const expired=prepare();expired.deps.now=()=>Date.parse(ownerDecision.writerGuardianHmlAuthorization.validUntilUtc);
+  await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);
+  const unapproved=prepare();unapproved.responses.set(`/actions/runs/${releaseRunId}/approvals`,[]);
+  await assert.rejects(publishActiveRelease(unapproved.env,unapproved.deps),/OWNER_DEPLOYMENT_APPROVAL_NOT_VERIFIED/);
+  assert.equal(unapproved.writes(),0);
+  assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-27T04:30:00.000Z');
+  assert.equal(ownerDecision.riskAcceptance.reviewBy,'2026-10-25');
+});

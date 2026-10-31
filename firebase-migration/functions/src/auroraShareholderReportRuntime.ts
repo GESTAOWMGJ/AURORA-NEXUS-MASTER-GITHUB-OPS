@@ -1,3 +1,4 @@
+import { guardedCanonicalTransaction } from "./auroraWriterGuardian.js";
 import { auroraDesignStyles } from "./auroraDesignSystem.js";
 import { formatFinancialCents } from "./auroraFinancialPresentation.js";
 import { createHash, randomBytes } from "node:crypto";
@@ -128,7 +129,7 @@ export const auroraNexusShareholderReportGenerator = onDocumentWritten(
     const versionRef = auroraDb.doc(`${base}/shareholderReportVersions/${reportId}`);
     const auditRef = auroraDb.doc(`${base}/auditEvents/shareholder-report-${createHash("sha256").update(reportId).digest("hex").slice(0, 32)}`);
 
-    await auroraDb.runTransaction(async (tx) => {
+    await guardedCanonicalTransaction(auroraDb, orgId, async (tx) => {
       const current = await tx.get(currentRef);
       if (current.exists && current.data()?.closingHash === closingHash) return;
 

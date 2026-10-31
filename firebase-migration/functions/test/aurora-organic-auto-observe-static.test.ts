@@ -15,7 +15,7 @@ test("auto observation reuses organic transition and existing checkpoint idempot
   for (const needle of [
     "runtimeCheckpoints/",
     "apiIdempotency/",
-    "runTransaction",
+    "guardedCanonicalTransaction",
     "transition(original, command",
     "ORGANIC_DOCUMENT_OBSERVED",
     "organicSignalRecorded"

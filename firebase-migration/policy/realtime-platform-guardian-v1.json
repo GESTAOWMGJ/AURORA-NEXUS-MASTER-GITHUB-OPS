@@ -1,9 +1,9 @@
 {
   "id":"AURORA-REALTIME-PLATFORM-GUARDIAN-001",
   "name":"Aurora Nexus Realtime Platform Guardian",
-  "version":"1.0.0",
-  "date":"2026-10-07",
-  "status":"ACTIVE_POLICY",
+  "version":"1.1.0",
+  "date":"2026-10-31",
+  "status":"PARTIAL_IMPLEMENTATION_PENDING_RUNTIME_VALIDATION",
   "objective":"Prevent cross-platform execution conflicts, duplicate work and split-brain writes while preserving continuous fail-safe operation.",
   "authorityModel":{"singleWriter":true,"writerLeaseRequired":true,"leaseTtlSeconds":45,"heartbeatIntervalSeconds":15,"staleWriterMayBePreempted":true,"readersMayRunConcurrently":true},
   "platformPriority":["CLOUD_CONTROL_PLANE","WINDOWS_XEON_PHYSICAL_SERVER","CLIENT_SAFE_DEGRADED_MODE"],
@@ -12,5 +12,6 @@
   "circuitBreaker":{"enabled":true,"failureThreshold":3,"cooldownSeconds":60,"halfOpenProbeCount":1,"transientFailures":["TIMEOUT","NETWORK","RATE_LIMIT","UPSTREAM_5XX"],"permanentFailures":["AUTH_401_403","INVALID_CONTRACT","INTEGRITY_FAILURE"]},
   "failSafe":{"unsafeWrites":"PAUSE_AND_QUEUE","safeReads":"ALLOW_AUTHORIZED_READ_ONLY","retry":"EXPONENTIAL_BACKOFF_WITH_JITTER_AND_IDEMPOTENCY","rollback":"REQUIRED_FOR_AUTONOMOUS_PROMOTION","humanReview":"ADVISORY_UNLESS_ABSOLUTE_MATERIAL_BLOCKER"},
   "audit":{"appendOnlyEvents":true,"record":["guardianDecision","platform","leaseEpoch","operationIdentity","dedupDecision","circuitState","failoverReason","riskProfile","evidenceRefs"],"neverLog":["password","accessToken","refreshToken","secret","rawClinicalPayload"]},
+  "enforcementEvidence":{"canonicalImplementation":"firebase-migration/functions/src/realtimePlatformGuardian.js","transactionAdapter":"firebase-migration/functions/src/auroraWriterGuardian.ts","resource":"PER_ORG_CANONICAL_DATA","idempotency":"EXISTING_RECEIPTS_UNCHANGED","allLegacyWritersEnforced":false,"physicalHandoffVerified":false,"inventory":"docs/validation/writer-inventory.json"},
   "continuousMode":{"eventDriven":true,"heartbeatDriven":true,"schedulerCompatible":true,"startupArbitrationRequired":true,"everyMutationPassesGuardian":true}
 }

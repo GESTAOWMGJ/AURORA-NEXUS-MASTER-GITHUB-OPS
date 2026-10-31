@@ -10,9 +10,9 @@ assert.equal(routePlatform({cloud:{healthy:true},windowsXeon:{healthy:true}}),"C
 assert.equal(routePlatform({cloud:{healthy:false},windowsXeon:{healthy:true}}),"WINDOWS_XEON_PHYSICAL_SERVER");
 assert.equal(routePlatform({cloud:{healthy:false},windowsXeon:{healthy:false}}),"CLIENT_SAFE_DEGRADED_MODE");
 
-const first=arbitrateWriter({currentLease:null,candidatePlatform:"CLOUD_CONTROL_PLANE",now});
+const first=arbitrateWriter({currentLease:null,candidatePlatform:"CLOUD_CONTROL_PLANE",candidateId:"cloud-one",now});
 assert.equal(first.allowed,true);
-const split=arbitrateWriter({currentLease:first.lease,candidatePlatform:"WINDOWS_XEON_PHYSICAL_SERVER",now:now+1000});
+const split=arbitrateWriter({currentLease:first.lease,candidatePlatform:"WINDOWS_XEON_PHYSICAL_SERVER",candidateId:"xeon-one",now:now+1000});
 assert.equal(split.allowed,false);
 assert.equal(split.code,"SPLIT_BRAIN_PREVENTED");
 
@@ -31,7 +31,7 @@ assert.equal(cb.allow,false);
 assert.equal(cb.code,"CIRCUIT_OPENED");
 
 const degraded=guardianDecision({
-  now,
+  now,writerInstanceId:"degraded-one",
   health:{cloud:{healthy:false},windowsXeon:{healthy:false}},
   operation:{orgId:"wmgj",operationType:"WRITE",resourceKey:"x",mutation:true,payload:{x:1}}
 });

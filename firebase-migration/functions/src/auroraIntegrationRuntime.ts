@@ -1,3 +1,4 @@
+import { guardedCanonicalTransaction, WriterLeaseError } from "./auroraWriterGuardian.js";
 import { workspaceConnectorReadback } from './auroraWorkspaceConnectors.js';
 import { createHash } from "node:crypto";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
@@ -172,13 +173,14 @@ export const auroraNexusIntegrationKeys = onRequest(
         res.status(403).json({ok:false,code:'CROSS_SITE_REJECTED'});return;
       }
       try {
-        const configured=await auroraDb.runTransaction(async tx => configureCanonicalAutomation(member,req.body,{
+        const configured=await guardedCanonicalTransaction(auroraDb, member.orgId, async tx => configureCanonicalAutomation(member,req.body,{
           read:async path => {const value=await tx.get(auroraDb.doc(path));return value.exists ? value.data() ?? null : null;},
           create:(path,data)=>{tx.create(auroraDb.doc(path),data);},
           merge:(path,data)=>{tx.set(auroraDb.doc(path),data,{merge:true});}, timestamp:FieldValue.serverTimestamp()
         }));
         res.status(200).json({ok:true,...configured});
       } catch (error) {
+        if (error instanceof WriterLeaseError) {res.status(503).json({ok:false,code:error.code});return;}
         const code=error instanceof Error ? error.message : '';
         const known=['INVALID_AUTOMATION_CONFIGURATION','ADAPTER_EVIDENCE_REQUIRED','AUTOMATION_PIPELINE_DISABLED',
           'AUTOMATION_CREDENTIAL_INACTIVE','AUTOMATION_CONFIGURATION_CONFLICT','MEMBERSHIP_REVOKED','MFA_AND_INTEGRATION_ADMIN_REQUIRED'];
@@ -343,7 +345,7 @@ export const auroraNexusIntegrationPing = onRequest({cors:false}, async (req,res
       res.status(400).json({ok:false,code:'INVALID_AGENT_REPORT'});return;
     }
     const base=`organizations/${principal.orgId}`;
-    const accepted=await auroraDb.runTransaction(async tx=>{
+    const accepted=await guardedCanonicalTransaction(auroraDb, principal.orgId, async tx=>{
       const org=await tx.get(auroraDb.doc(base));
       const credential=await tx.get(auroraDb.doc(`${base}/integrationCredentials/${principal.keyId}`));
       if(!org.exists||org.data()?.active!==true||!credential.exists||!credentialAllowsScope(credential.data()||{},'documents.ingest'))return false;
@@ -353,7 +355,11 @@ export const auroraNexusIntegrationPing = onRequest({cors:false}, async (req,res
         pendingExtraction:body.pendingExtraction,providers:body.providers,
         reportedAt:FieldValue.serverTimestamp(),physicalInstallationVerified:false
       },{merge:true});return true;
+    }).catch((error: unknown) => {
+      if (error instanceof WriterLeaseError) return {leaseError:error.code};
+      throw error;
     });
+    if (typeof accepted === 'object') {res.status(503).json({ok:false,code:accepted.leaseError});return;}
     res.status(accepted?200:412).json(accepted?{ok:true,orgId:principal.orgId,reportAccepted:true,physicalInstallationVerified:false}
       :{ok:false,code:'ORGANIZATION_DISABLED'});return;
   }
@@ -408,7 +414,7 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
     const observation=parseDocumentObservationPayload(req.body);
     if (!observation) {res.status(400).json({ok:false,code:'INVALID_DOCUMENT_OBSERVATION'});return;}
     try {
-      const recorded=await auroraDb.runTransaction(tx=>recordDocumentObservation(principal,observation,idempotencyKey,{
+      const recorded=await guardedCanonicalTransaction(auroraDb, principal.orgId, tx=>recordDocumentObservation(principal,observation,idempotencyKey,{
         read:async path=>{const snap=await tx.get(auroraDb.doc(path));return snap.exists ? snap.data() ?? null : null;},
         create:(path,data)=>{tx.create(auroraDb.doc(path),data);},
         replace:(path,data)=>{tx.set(auroraDb.doc(path),data);},timestamp:FieldValue.serverTimestamp()
@@ -420,6 +426,7 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
       res.status(recorded.kind==='DUPLICATE'?200:202).json({ok:true,...recorded,
         recorded:recorded.kind==='RECORDED',duplicate:recorded.kind==='DUPLICATE',accepted:false});
     } catch (error) {
+      if (error instanceof WriterLeaseError) {res.status(503).json({ok:false,code:error.code});return;}
       const code=error instanceof Error ? error.message : '';
       const conflicts=['IDEMPOTENCY_CONFLICT','OBSERVATION_SUPERSEDED','OBSERVATION_CAS_CONFLICT','OBSERVATION_BINDING_CONFLICT',
         'SOURCE_ACQUISITION_CONFLICT','SOURCE_ACQUISITION_REGRESSION','ENTITY_REVISION_CONFLICT','ENTITY_VERSION_CONFLICT'];
@@ -448,7 +455,7 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
   const auditRef=auroraDb.doc(`${base}/auditEvents/integration-document-${idemId.slice(0,40)}`);
   const checkpointRef=auroraDb.doc(`${base}/runtimeCheckpoints/integration-documents`);
 
-  const result=await auroraDb.runTransaction(async(tx)=>{
+  const result=await guardedCanonicalTransaction(auroraDb, principal.orgId, async(tx)=>{
     const [orgSnap,idemSnap,currentSnap]=await Promise.all([
       tx.get(orgRef),tx.get(idemRef),tx.get(docRef)
     ]);
@@ -636,10 +643,13 @@ export const auroraNexusIntegrationDocuments = onRequest({cors:false, secrets:[A
       updatedAt:FieldValue.serverTimestamp()
     },{merge:true});
     return {kind:"ACCEPTED" as const,documentId:docRef.id};
+  }).catch((error: unknown) => {
+    if (error instanceof WriterLeaseError) return {kind:"ERROR" as const,code:error.code,leaseDenied:true};
+    throw error;
   });
 
   if (result.kind === "ERROR") {
-    const status=["IDEMPOTENCY_CONFLICT","SOURCE_VERSION_REGRESSION","SOURCE_VERSION_CONFLICT","SOURCE_ACQUISITION_REGRESSION","SOURCE_ACQUISITION_CONFLICT","DOCUMENT_OBSERVATION_PENDING_REVIEW"].includes(result.code)?409:412;
+    const status="leaseDenied" in result ? 503 : ["IDEMPOTENCY_CONFLICT","SOURCE_VERSION_REGRESSION","SOURCE_VERSION_CONFLICT","SOURCE_ACQUISITION_REGRESSION","SOURCE_ACQUISITION_CONFLICT","DOCUMENT_OBSERVATION_PENDING_REVIEW"].includes(result.code)?409:412;
     res.status(status).json({ok:false,code:result.code});
     return;
   }

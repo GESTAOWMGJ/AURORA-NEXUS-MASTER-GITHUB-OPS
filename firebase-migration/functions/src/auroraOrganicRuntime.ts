@@ -1,5 +1,6 @@
+import { guardedCanonicalTransaction, WriterLeaseError } from "./auroraWriterGuardian.js";
 import {randomBytes} from 'node:crypto';
-import {FieldValue} from 'firebase-admin/firestore';
+import {FieldValue, type Transaction} from 'firebase-admin/firestore';
 import {defineSecret} from 'firebase-functions/params';
 import {onRequest} from 'firebase-functions/v2/https';
 import {can,CSRF_PURPOSES,csrfTokenForSession,validCsrf,verifyAuroraAccess} from './auroraAccess.js';
@@ -37,7 +38,10 @@ export const auroraNexusOrganic=onRequest({cors:false,secrets:[ALLOWED_EMAILS,CS
     const orgPath=`organizations/${member.orgId}`,stateRef=auroraDb.doc(`${orgPath}/runtimeCheckpoints/${STATE_ID}`);
     const cmd=command,commandHash=cmd?digest(cmd):null;
     const idemId=digest([member.orgId,'organic',member.uid,idempotencyKey]);
-    const response=await auroraDb.runTransaction(async tx=>{
+    const transact = <T>(body: (tx: Transaction) => Promise<T>): Promise<T> => cmd
+      ? guardedCanonicalTransaction(auroraDb, member.orgId, body)
+      : auroraDb.runTransaction(body);
+    const response=await transact(async tx=>{
       // Cache reads within this transaction only. Every external dependency is read before writes.
       const cache=new Map<string,Record<string,unknown>|null>();
       const read=async(path:string)=>{if(cache.has(path))return cache.get(path)!;const doc=await tx.get(auroraDb.doc(path));const data=doc.exists?doc.data()??{}:null;cache.set(path,data);return data;};
@@ -58,6 +62,7 @@ export const auroraNexusOrganic=onRequest({cors:false,secrets:[ALLOWED_EMAILS,CS
     });
     res.status(req.method==='POST'&&!response.duplicate?201:200).json(response);
   } catch(error){
+    if(error instanceof WriterLeaseError){res.status(503).json({ok:false,code:error.code});return;}
     const raw=error instanceof Error?error.message:'ORGANIC_FAILED',code=EXPECTED_ERRORS.has(raw)?raw:'ORGANIC_FAILED';
     const status=code==='INVALID_COMMAND'?400:['PERMISSION_DENIED','MFA_AND_REVIEW_PERMISSION_REQUIRED'].includes(code)?403:code==='ORGANIC_FAILED'?500:409;
     res.status(status).json({ok:false,code});
