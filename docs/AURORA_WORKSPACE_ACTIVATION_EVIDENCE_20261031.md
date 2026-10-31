@@ -21,3 +21,11 @@ A evidência inspecionada é insuficiente para ativar ou declarar conexão real.
 3. Usar atualização/reconciliação governada do agente já existente. Conferir ping com orgId esperado, identidade/escopo de cada provedor, primeira exportação canônica autorizada, recibo persistido e replay idempotente. Narrativa/anexos/threads não extraídos permanecem pendentes.
 
 Não foram criados coletor, scheduler, tenant, token ou infraestrutura paralelos. Não houve leitura de conteúdo real Notion/Slack, envio de mensagem ou ativação inferida. O aceite do titular permanece válido no escopo; a lacuna é configuração/prova técnica, não novo consentimento genérico.
+
+## Atualização após autenticação e aceite do titular — 31/10/2026
+
+Conexão interna Notion criada após confirmação explícita do aceite dos termos. Configuração verificada: somente Ler conteúdo habilitado; Atualizar conteúdo e Inserir conteúdo desabilitados; comentários e agentes não habilitados. Acesso a conteúdo permanece vazio. Nenhum token foi revelado, copiado ou instalado no servidor. A conta autenticada no navegador não possui acesso ao hub operacional previamente localizado pelo conector: a página apresenta Sem acesso e identifica outro workspace proprietário. Não foi solicitado acesso nem alterado compartilhamento por inferência.
+
+No Slack, o painel passou a apresentar um aplicativo com o nome planejado, associado ao workspace Novo workspace e sem escopos OAuth. A criação desse aplicativo não foi executada pelas ações desta retomada. O workspace DR JOAO localizado pelo conector não está disponível na seleção do painel; não se presume equivalência entre workspaces. Nenhum escopo, instalação, token ou canal Slack foi concedido nesta passagem.
+
+Próxima ação necessária: autenticar a conta proprietária do hub Notion e o workspace Slack correto, ou indicar explicitamente outra fonte empresarial. Manter conexão Notion sem páginas até vínculo exato; não copiar corpus, criar workspace duplicado, ampliar acesso ou enviar solicitações automáticas. A configuração protegida e a prova de ingestão real continuam pendentes.
