@@ -13,10 +13,20 @@ on:
       - '.github/workflows/deploy-appscript.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: aurora-rc11-hml
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Push code to Google Apps Script
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: firebase-homologation
     env:
       APPS_SCRIPT_ID: 1_fQPqaq0EjaugyIF6jyuENDhJ2c2oTFm1kC-wdjmfaDqyRzy_uqwtiSW
       APPS_SCRIPT_GCP_PROJECT_ID: wmgj-hml-jfn-20260927
@@ -37,15 +47,18 @@ jobs:
         run: npm install -g @google/clasp@3.4.1
 
       - name: Validate required credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
           test -n "$APPS_SCRIPT_ID" || (echo "Missing APPS_SCRIPT_ID" && exit 1)
-          test -n '${{ secrets.CLASPRC_JSON }}' || (echo "Missing CLASPRC_JSON secret" && exit 1)
+          test -n "$CLASPRC_JSON" || (echo "Missing CLASPRC_JSON secret" && exit 1)
 
       - name: Configure clasp credentials
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
-          cat > ~/.clasprc.json <<'EOF'
-          ${{ secrets.CLASPRC_JSON }}
-          EOF
+          umask 077
+          printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
 
       - name: Prepare Apps Script project files
         run: |
@@ -60,6 +73,17 @@ jobs:
           }
           EOF
 
+      - name: Require the existing canonical deployment before publishing
+        working-directory: build-appscript
+        run: |
+          set -euo pipefail
+          canonical_id="$(clasp deployments --json | jq -er '
+            [.[] | select((.description // "") | startswith("AURORA_EXECUTION_API_CANONICAL "))]
+            | if length == 1 and (.[0].versionNumber | tonumber) >= 1
+              then .[0].deploymentId else error("CANONICAL_DEPLOYMENT_NOT_UNIQUE") end')"
+          [[ "$canonical_id" =~ ^[A-Za-z0-9_-]+$ ]]
+          printf 'CANONICAL_DEPLOYMENT_ID=%s\n' "$canonical_id" >> "$GITHUB_ENV"
+
       - name: Push to Apps Script
         working-directory: build-appscript
         run: clasp push --force
@@ -70,6 +94,7 @@ jobs:
           set -euo pipefail
           bash "$GITHUB_WORKSPACE/tools/ensure-appscript-execution-deployment.sh" "$RUNNER_TEMP/appscript-deployment.json"
           jq -e '.deploymentId and (.versionNumber|tonumber) >= 1' "$RUNNER_TEMP/appscript-deployment.json" >/dev/null
+          jq -e --arg id "$CANONICAL_DEPLOYMENT_ID" '.deploymentId == $id' "$RUNNER_TEMP/appscript-deployment.json" >/dev/null
 
       - name: Verify deployed source
         run: |
@@ -136,4 +161,8 @@ jobs:
         run: |
           echo "Apps Script source deployed and Execution API validated."
           echo "Operational Gmail/dashboard/trigger routines are intentionally not executed by the deploy workflow."
+
+      - name: Remove runner OAuth material
+        if: ${{ always() }}
+        run: rm -f ~/.clasprc.json
 

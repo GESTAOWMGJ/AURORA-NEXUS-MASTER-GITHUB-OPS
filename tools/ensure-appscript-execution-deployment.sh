@@ -18,6 +18,12 @@ deployment_id="$(jq -r --arg prefix "$prefix" '
   | .deploymentId // empty
 ' <<<"$deployments")"
 
+# Recovery must retain the preflighted identity, even if remote state changes.
+if [ -n "${CANONICAL_DEPLOYMENT_ID:-}" ] && [ "$deployment_id" != "$CANONICAL_DEPLOYMENT_ID" ]; then
+  echo "CANONICAL_DEPLOYMENT_CHANGED" >&2
+  exit 74
+fi
+
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
