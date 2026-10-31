@@ -1065,10 +1065,10 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraChelfex.ts",
-      "sha256": "c2c0a4b49c34cf10fe6833d5a10a1b53104fe3b07755924b6cb40ef9eddbacea",
+      "sha256": "3df3d306dabc59b4e292d31b99654b6482861c0f0a4d32afd649e51e61cf25f4",
       "writeLikeLines": [
-        14,
-        118
+        21,
+        159
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
@@ -1468,9 +1468,9 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraMasterEngine.ts",
-      "sha256": "14ec93ddd73cb544e961702fc6f704b13bd995d49d94317606e95d7acc5b285a",
+      "sha256": "f3bebb14d3026eae82137ae9851c50ef2a1067aafb5aa8875c5401bef96ec3a7",
       "writeLikeLines": [
-        29
+        31
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
@@ -1659,42 +1659,42 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraRuntime.ts",
-      "sha256": "3625b5aa7e5bb4185635780eba0383c0bb3c17ad14b7ac4c8dad58535d5c2c1d",
+      "sha256": "523e51bca6093bfefd241af19297f19fe9f09b57ca78b12007433f4237c960ea",
       "writeLikeLines": [
-        32,
-        60,
-        77,
-        81,
-        82,
+        34,
+        62,
+        79,
         83,
         84,
         85,
-        162,
-        186,
+        86,
+        87,
+        164,
         188,
-        216,
-        217,
-        221,
-        222,
+        190,
+        218,
+        219,
         223,
         224,
-        255,
-        345,
-        398,
-        455,
-        485,
-        496,
-        497,
-        513,
-        528,
-        568,
+        225,
+        226,
+        253,
+        344,
+        406,
+        465,
+        495,
+        506,
+        507,
+        523,
+        538,
         578,
-        589
+        588,
+        599
       ],
       "guardedCallLines": [
-        45,
-        175,
-        499
+        47,
+        177,
+        509
       ],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
     },
@@ -1976,9 +1976,9 @@
     },
     {
       "path": "firebase-migration/scripts/chelfex-synthetic-readback.cjs",
-      "sha256": "5ded0878bb0564e47d73eea917c558253d7fecfe0940d77721787de7537c47e3",
+      "sha256": "3573b757ebeaa29fbab5938155b90cd3340382f2d99f9410649d8be0ae95a20a",
       "writeLikeLines": [
-        26
+        27
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
