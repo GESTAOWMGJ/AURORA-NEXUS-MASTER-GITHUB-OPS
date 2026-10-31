@@ -2,6 +2,8 @@
 
 Incremento 1.1.0 do **AURORA-REALTIME-PLATFORM-GUARDIAN-001**, sobre
 `eef855d8ffbfd5ca63d3410bfba1cefd4863a48f`. Estado: implementação parcial candidata.
+Base posterior incorporada: `421611aec2c73c00390c7efb35ada055151127d0`
+(PR #361, mídia pública), com atualização do inventário após revisão do delta.
 Não constitui implantação, handoff físico, inventário instalado ou enforcement
 universal. `allLegacyWritersEnforced=false` permanece no registro nativo e cockpit.
 
@@ -112,7 +114,10 @@ proteção às cópias instaladas depende de publicação e recibos próprios.
   handoff no Xeon, rede particionada real ou operação publicada.
 - O primeiro teste SIGKILL antes do commit identificou contenção remanescente
   (run 41198118769); o caso depois do commit preservou o recibo. A correção conserva
-  a falha transitória e testa retomada pelo orçamento já usado no bridge.
+  a falha transitória. O run 41198402007 mostrou que três tentativas imediatas
+  ainda podem terminar PENDING. O teste preserva esse resultado e exige retomada
+  em ciclo posterior após o timeout de inatividade do provedor, usando a mesma
+  chave e o orçamento original; um tenant independente deve continuar elegível.
 - CI, revisão, emulador, implantação e recibos de cada plataforma são evidências
   separadas. O estado permanece parcial até migração e validação de cada família.
 

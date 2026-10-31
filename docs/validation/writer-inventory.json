@@ -5,9 +5,9 @@
   "method": "CONSERVATIVE_LEXICAL_CANDIDATES",
   "allLegacyWritersEnforced": false,
   "runtimeInventoryVerified": false,
-  "scannedFiles": 246,
-  "candidateFiles": 167,
-  "writeLikeLines": 1315,
+  "scannedFiles": 247,
+  "candidateFiles": 168,
+  "writeLikeLines": 1317,
   "files": [
     {
       "path": "apps-script/01_EstruturaAbas.gs",
@@ -1015,15 +1015,14 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraAuthGate.ts",
-      "sha256": "213a7efcc378a46a7cd33586ac9f1472b75689f9d81f18232511ee5bada3cfb0",
+      "sha256": "f25fad0afc359b172428dfc3e6cb90ebc8baf68e6d5c8fa70e32e48217a30cc9",
       "writeLikeLines": [
-        63,
-        68,
+        64,
         69,
         70,
         71,
         72,
-        75,
+        73,
         76,
         77,
         78,
@@ -1032,13 +1031,15 @@
         81,
         82,
         83,
-        305,
-        307,
-        310,
-        313,
-        316,
-        327,
-        387
+        84,
+        206,
+        309,
+        311,
+        314,
+        317,
+        320,
+        331,
+        391
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
@@ -1641,6 +1642,15 @@
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
     },
     {
+      "path": "firebase-migration/functions/src/auroraPublicVideo.ts",
+      "sha256": "830a716902304b314e2396ff8f432f555f340b98d5e0d60e7334b4a06b37cc70",
+      "writeLikeLines": [
+        8
+      ],
+      "guardedCallLines": [],
+      "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
+    },
+    {
       "path": "firebase-migration/functions/src/auroraRuntime.ts",
       "sha256": "3625b5aa7e5bb4185635780eba0383c0bb3c17ad14b7ac4c8dad58535d5c2c1d",
       "writeLikeLines": [
@@ -2067,16 +2077,16 @@
     },
     {
       "path": "firebase-migration/scripts/publish-active-release.mjs",
-      "sha256": "055c5c607dedf93d0ee061289f2bf48940101c2dce835f2f645950165f9eb497",
+      "sha256": "7bc0c51007c66bb21f9706c3694dcc4e24f59c206115000b609fd90b1089b8ec",
       "writeLikeLines": [
         19,
-        167,
-        181,
-        253,
-        281,
-        294,
-        296,
-        305
+        168,
+        182,
+        254,
+        282,
+        295,
+        297,
+        306
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"

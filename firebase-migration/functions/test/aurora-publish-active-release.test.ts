@@ -562,3 +562,18 @@ test('CHELFEx owner scope permits only PR 347 HML with actual protected approval
   const before=fixture();before.deps.now=()=>Date.parse('2026-10-30T23:59:59.000Z');
   await assert.rejects(publishActiveRelease(before.env,before.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(before.writes(),0);
 });
+
+
+test('public-video repair PR 361 uses the same bounded HML decision and cannot bypass deployment approval',async()=>{
+  assert.equal(ownerDecision.chelfexHmlAuthorization.authorizedFollowupPullRequest,361);
+  const fixture=()=>{const f=ownerFixture();f.env.AURORA_ACTIVE_RELEASE_REVIEW_PR='361';
+    f.responses.set('/pulls/361',structuredClone(f.responses.get('/pulls/42')));
+    f.responses.set('/pulls/361/reviews?per_page=100',[]);
+    f.deps.now=()=>Date.parse('2026-10-31T12:00:00.000Z');return f;};
+  const valid=fixture();await publishActiveRelease(valid.env,valid.deps);assert.equal(valid.writes(),1);
+  const denied=fixture();denied.responses.set(`/actions/runs/${releaseRunId}/approvals`,[]);
+  await assert.rejects(publishActiveRelease(denied.env,denied.deps),/OWNER_DEPLOYMENT_APPROVAL_NOT_VERIFIED/);
+  assert.equal(denied.writes(),0);
+  const expired=fixture();expired.deps.now=()=>Date.parse(ownerDecision.chelfexHmlAuthorization.validUntilUtc);
+  await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(expired.writes(),0);
+});

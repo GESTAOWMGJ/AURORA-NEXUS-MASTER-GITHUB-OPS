@@ -67,23 +67,39 @@ for(const phase of ['before','after']) test(`SIGKILL ${phase} commit preserves o
     const exited=once(child,'exit');child.kill('SIGKILL');await exited;
     // Model the existing bridge's bounded caller retry, preserving identity.
     // Killing the process does NOT immediately release provider transaction locks.
-    let result, attempts=0;
-    for(let attempt=1;attempt<=3;attempt++){
-      attempts=attempt;
-      try {
-        result=await guardedCanonicalTransaction(db,org,async tx=>{
-          const receipt=db.doc(`organizations/${org}/apiIdempotency/original-key`),prior=await tx.get(receipt);
-          if(prior.exists)return 'DUPLICATE';
-          tx.create(receipt,{effect:'one'});return 'ACCEPTED';
-        });
-        break;
-      } catch(error){
-        if(error.code!=='GUARDIAN_CONTENTION_RETRY'||attempt===3)throw error;
-        assert.equal(error.status,503);
-        await delay(attempt*750);
+    const killedAt=performance.now();
+    let result, attempts=0, cycles=0, pending;
+    for(let cycle=1;cycle<=2;cycle++){
+      cycles=cycle;
+      for(let attempt=1;attempt<=3;attempt++){
+        attempts++;
+        try {
+          result=await guardedCanonicalTransaction(db,org,async tx=>{
+            const receipt=db.doc(`organizations/${org}/apiIdempotency/original-key`),prior=await tx.get(receipt);
+            if(prior.exists)return 'DUPLICATE';
+            tx.create(receipt,{effect:'one'});return 'ACCEPTED';
+          });
+          break;
+        } catch(error){
+          if(error.code!=='GUARDIAN_CONTENTION_RETRY')throw error;
+          assert.equal(error.status,503);pending=error;
+          if(attempt<3)await delay(attempt*750);
+        }
       }
+      if(result)break;
+      // Budget exhaustion is PENDING, not recovered. Preserve that evidence.
+      // A later EXISTING caller cycle may retry once the provider's idle lock
+      // timeout has elapsed. No new runtime scheduler or guard retry is added.
+      assert.equal(phase,'before');
+      assert.equal((await db.doc(`organizations/${org}/apiIdempotency/original-key`).get()).exists,false);
+      const independent=tenant(`crash-independent-${cycle}`);
+      await guardedCanonicalTransaction(db,independent,async tx=>{
+        tx.create(db.doc(`organizations/${independent}/sourceDocuments/healthy`),{healthy:true});
+      });
+      if(cycle===1)await delay(Math.max(0,65_000-(performance.now()-killedAt)));
     }
-    console.log(JSON.stringify({fixture:'SYNTHETIC_PROCESS_CRASH',phase,attempts,result}));
+    if(!result)throw pending;
+    console.log(JSON.stringify({fixture:'SYNTHETIC_PROCESS_CRASH',phase,attempts,cycles,firstCycleDeferred:cycles>1,result}));
     assert.equal(result,phase==='before'?'ACCEPTED':'DUPLICATE');
     assert.equal((await db.collection(`organizations/${org}/apiIdempotency`).get()).size,1);
     assert.equal((await db.doc(writerLeasePath(org)).get()).data().epoch,1);
