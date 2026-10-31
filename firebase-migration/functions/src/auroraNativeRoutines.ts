@@ -208,6 +208,7 @@ export type NativeRoutine = {
 };
 
 export const AURORA_NATIVE_ROUTINES: readonly NativeRoutine[] = Object.freeze([
+  { id: "AURORA-REALTIME-PLATFORM-GUARDIAN-001", module: "M09", name: "Lease canônico de escrita", cadence: "PER_CANONICAL_TRANSACTION", trigger: "EXISTING_AUTHENTICATED_WRITER", state: "NATIVE_GOVERNED", tenantScope: "PER_ORG", humanGate: false, sourceMutation: false },
   { id: "WMGJ-LEGACY-GMAIL-SINGLE-REPLAY", module: "M01", name: "Recuperação documental de mensagem única", cadence: "ON_DEMAND", trigger: "MANUAL_EXACT_MESSAGE_WITH_REVIEWED_MANIFEST", state: "LEGACY_MIRRORED", tenantScope: "PER_ORG", humanGate: true, sourceMutation: false },
   { id: "AURORA-RUNTIME-WATCHDOG", module: "M08", name: "Watchdog de runtime", cadence: "EVERY_15_MINUTES", trigger: "SCHEDULE", state: "NATIVE_ACTIVE", tenantScope: "PLATFORM", humanGate: false, sourceMutation: false },
   { id: "AURORA-PROJECTION-ENGINE", module: "M07", name: "Projeção financeira/operacional", cadence: "ON_ACCEPTED_INGEST_AND_EVERY_15_MINUTES", trigger: "AUTHENTICATED_INGEST_OR_SCHEDULE", state: "NATIVE_ACTIVE", tenantScope: "PER_ORG", humanGate: false, sourceMutation: false },
@@ -258,6 +259,16 @@ export function nativeRoutineSummary(): Record<string, unknown> {
     },
     routines: AURORA_NATIVE_ROUTINES,
     counts,
+    writerGuardianPolicy: {
+      routineId: "AURORA-REALTIME-PLATFORM-GUARDIAN-001", version: "1.1.0",
+      state: "PARTIAL_IMPLEMENTATION_PENDING_RUNTIME_VALIDATION",
+      authority: "EXISTING_AUTHENTICATED_WRITER", scope: "PER_ORG_CANONICAL_DATA",
+      leaseStore: "EXISTING_RUNTIME_LOCKS", idempotency: "EXISTING_RECEIPTS_UNCHANGED",
+      fence: "INSTANCE_AND_EPOCH_IN_EFFECT_TRANSACTION", clock: "SERVER_READ_TIME_AND_MONOTONIC_ELAPSED",
+      externalSideEffectsAllowedInTransaction: false, schedulerCreated: false,
+      migratedTransactionBoundaries: 19, allLegacyWritersEnforced: false, physicalHandoffVerified: false,
+      documentation: "docs/AURORA_DISTRIBUTED_WRITER_ENFORCEMENT.md"
+    },
     medicalCredentialingPolicy: {
       routineId: "AURORA-CRED-MED-001", schemaVersion: "aurora.credmed.v1",
       targetTenant: "wmgj", reuseExistingIdentityAndDatabase: true,

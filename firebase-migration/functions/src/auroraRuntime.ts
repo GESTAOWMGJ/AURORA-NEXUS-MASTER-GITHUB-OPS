@@ -1,3 +1,4 @@
+import { guardedCanonicalTransaction, WriterLeaseError } from "./auroraWriterGuardian.js";
 import { createHash, randomUUID } from "node:crypto";
 import { FieldValue, Timestamp, type Transaction } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
@@ -41,7 +42,7 @@ export async function loadInstallationReadiness(orgId: string, documentId?: stri
 }
 
 export async function completeInstallation(orgId: string, uid: string) {
-  return auroraDb.runTransaction(async tx => {
+  return guardedCanonicalTransaction(auroraDb, orgId, async tx => {
     const org = await tx.get(auroraDb.doc(`organizations/${orgId}`));
     if (!org.exists || !isActiveOrganization(org.data())) throw new Error('ORGANIZATION_DISABLED');
     if (org.data()?.projectionEnabled !== true || org.data()?.projectionMode !== 'SHADOW') {
@@ -171,7 +172,7 @@ async function projectionSettings(orgId: string, tx: Transaction): Promise<{ com
 }
 
 export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: ProjectionActor = { uid: "scheduler", role: "system", source: "SCHEDULER" }): Promise<Record<string, unknown>> {
-  return auroraDb.runTransaction(async (tx) => {
+  return guardedCanonicalTransaction(auroraDb, orgId, async (tx) => {
   // Source and current projection share the transaction read point. A paused worker
   // cannot publish an old source snapshot over a newer committed revision.
   const settings = await projectionSettings(orgId, tx);
@@ -470,7 +471,7 @@ export const auroraNexusRefresh = onRequest(
       res.status(200).json({ ok: true, projection: visibleProjection(projection, member) });
     } catch (error) {
       const code = error instanceof Error ? error.message : "PROJECTION_FAILED";
-      const status = ["PROJECTION_DISABLED", "PROJECTION_NO_SOURCE", "PROJECTION_DATA_QUALITY_BLOCKED", "PROJECTION_COMPETENCE_REQUIRED", "FIRST_INGESTION_PENDING", "INSTALLATION_INTEGRATION_PENDING", "ORGANIZATION_DISABLED"].includes(code) ? 409 : 500;
+      const status = error instanceof WriterLeaseError ? 503 : ["PROJECTION_DISABLED", "PROJECTION_NO_SOURCE", "PROJECTION_DATA_QUALITY_BLOCKED", "PROJECTION_COMPETENCE_REQUIRED", "FIRST_INGESTION_PENDING", "INSTALLATION_INTEGRATION_PENDING", "ORGANIZATION_DISABLED"].includes(code) ? 409 : 500;
       if (status === 500) logger.error("Aurora projection failed", { code });
       res.status(status).json({ ok: false, code: status === 500 ? "PROJECTION_FAILED" : code });
     }
@@ -495,7 +496,7 @@ export const auroraNexusAction = onRequest(
     const commandHash = createHash("sha256").update(JSON.stringify(command)).digest("hex");
     const idemId = createHash("sha256").update(`${member.orgId}:${idempotencyKey}`).digest("hex");
     try {
-      const result = await auroraDb.runTransaction(async (tx) => {
+      const result = await guardedCanonicalTransaction(auroraDb, member.orgId, async (tx) => {
         const idemRef = auroraDb.doc(`organizations/${member.orgId}/apiIdempotency/${idemId}`);
         const idem = await tx.get(idemRef);
         if (idem.exists) {
@@ -603,7 +604,7 @@ export const auroraNexusAction = onRequest(
       res.status(result.duplicate ? 200 : 201).json({ ok: true, ...result, organicObservation });
     } catch (error) {
       const code = error instanceof Error ? error.message : "ACTION_FAILED";
-      const status = code === "ACTION_NOT_FOUND" ? 404
+      const status = error instanceof WriterLeaseError ? 503 : code === "ACTION_NOT_FOUND" ? 404
         : code === "MFA_REQUIRED" ? 403
           : ["ACTION_SCOPE_VIOLATION", "TARGET_SCOPE_VIOLATION", "EVIDENCE_SCOPE_VIOLATION"].includes(code) ? 403
             : ["IDEMPOTENCY_CONFLICT", "REVISION_CONFLICT", "INVALID_TRANSITION", "TARGET_NOT_FOUND", "EVIDENCE_NOT_FOUND", "EVIDENCE_NOT_LINKED"].includes(code) ? 409 : 500;

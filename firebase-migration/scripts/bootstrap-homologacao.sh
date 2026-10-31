@@ -67,7 +67,7 @@ echo "Executando testes unitários de Functions e Apps Script..."
 npm --prefix "$FUNCTIONS_DIR" test
 
 echo "Executando Security Rules somente no Emulator Suite..."
-TEST_COMMAND="npm --prefix \"$TESTS_DIR\" test"
+TEST_COMMAND="npm --prefix \"$TESTS_DIR\" test && node --test \"$TESTS_DIR/writer-guardian.firestore.test.mjs\""
 "$FIREBASE_BIN" emulators:exec \
   --config "$ROOT_DIR/firebase.json" \
   --project "$PROJECT_ID" \

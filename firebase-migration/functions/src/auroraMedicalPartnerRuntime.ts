@@ -1,3 +1,4 @@
+import { guardedCanonicalTransaction, WriterLeaseError } from "./auroraWriterGuardian.js";
 import { randomBytes, randomUUID } from "node:crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
@@ -42,7 +43,7 @@ const storageBucket = () => {
 const basePath = "organizations/" + ORG + "/";
 const errors = (e: unknown) => e instanceof CredentialError
   ? { status: e.httpStatus, code: e.code }
-  : { status: 503, code: "CREDENTIALING_UNAVAILABLE" };
+  : { status: 503, code: e instanceof WriterLeaseError ? e.code : "CREDENTIALING_UNAVAILABLE" };
 const isAdmin = (m: AuroraMember | null): m is AuroraMember => !!m && m.orgId === ORG && m.allFacilities
   && m.mfaVerified && ["org_admin","platform_admin","director"].includes(m.role);
 function browserOriginValid(req: { get(name: string): string | undefined }): boolean {
@@ -80,10 +81,14 @@ async function issueInvitation(actor: AuroraMember) {
   const token = randomBytes(32).toString("base64url");
   const invitationId = randomUUID();
   const createdAt = nowMs();
-  await auroraDb.doc(basePath + INVITES + "/" + invitationId).create({
+  await guardedCanonicalTransaction(auroraDb, ORG, async tx => {
+    const org = await tx.get(auroraDb.doc("organizations/" + ORG));
+    if (org.data()?.active !== true || org.data()?.medicalPartnersEnabled !== true || org.data()?.medicalPartnersPrivacyApproved !== true) throw new CredentialError("PRE_CREDENTIALING_NOT_ENABLED",503);
+    tx.create(auroraDb.doc(basePath + INVITES + "/" + invitationId), {
     schemaVersion: CREDMED_SCHEMA, orgId: ORG, tokenHash: sha256(token),
     state: "INVITED", createdAtIso: iso(createdAt), expiresAtIso: iso(createdAt + CREDMED_INVITATION_TTL_MS),
     issuedByUid: actor.uid, applicationId: null
+    });
   });
   return { ok: true, invitationUrl: "https://auroranexus.com.br/wmgj/medicos#convite=" + token,
     expiresAtIso: iso(createdAt + CREDMED_INVITATION_TTL_MS) };
@@ -96,7 +101,7 @@ async function submitApplication(body: Record<string, unknown>) {
   const inviteRef = await locateInvitation(body.token);
   const applicationId = sha256("aurora-credmed-application-v1:" + ORG + ":" + inviteRef.id);
   const applicationRef = auroraDb.doc(basePath + COLLECTION + "/" + applicationId);
-  const state = await auroraDb.runTransaction(async tx => {
+  const state = await guardedCanonicalTransaction(auroraDb, ORG, async tx => {
     const [invite, application, org] = await Promise.all([
       tx.get(inviteRef), tx.get(applicationRef), tx.get(auroraDb.doc("organizations/" + ORG))
     ]);
@@ -136,7 +141,7 @@ async function uploadDocument(body: Record<string, unknown>) {
   const documentRef = applicationRef.collection("documents").doc(documentId);
   const extension = attachment.mimeType === "application/pdf" ? ".pdf" : attachment.mimeType === "image/png" ? ".png" : ".jpg";
   const objectKey = "medical-partners/" + ORG + "/" + applicationId + "/" + documentId + extension;
-  const reserved = await auroraDb.runTransaction(async tx => {
+  const reserved = await guardedCanonicalTransaction(auroraDb, ORG, async tx => {
     const [invite, application, existing, org] = await Promise.all([
       tx.get(inviteRef), tx.get(applicationRef), tx.get(documentRef), tx.get(auroraDb.doc("organizations/" + ORG))
     ]);
@@ -175,7 +180,7 @@ async function uploadDocument(body: Record<string, unknown>) {
     if (!meta || meta.metadata?.sha256 !== attachment.sha256 || Number(meta.size) !== attachment.bytes.length)
       throw new CredentialError("PRIVATE_STORAGE_CONFLICT", 409);
   }
-  await auroraDb.runTransaction(async tx => {
+  await guardedCanonicalTransaction(auroraDb, ORG, async tx => {
     const [existing, app] = await Promise.all([tx.get(documentRef),tx.get(applicationRef)]);
     if (!existing.exists || existing.data()?.sha256 !== attachment.sha256 || !app.exists)
       throw new CredentialError("DOCUMENT_RECEIPT_CONFLICT", 409);

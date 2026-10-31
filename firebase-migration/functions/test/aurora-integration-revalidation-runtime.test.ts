@@ -48,7 +48,7 @@ async function fixture(t:any){
     sourceSystem:'ERP',enabled:true,expectedRevision:0},{read,merge:(path,data)=>Object.assign(state.get(path),data),
     create:(path,data)=>{assert.equal(state.has(path),false);state.set(path,data);},timestamp:stamp});
   const reads:string[]=[],writes:{path:string;data:any;merge:boolean}[]=[];
-  const snapshot=(path:string)=>({exists:state.has(path),id:path.split('/').pop(),data:()=>state.get(path)});
+  const snapshot=(path:string)=>({readTime:Timestamp.now(),exists:state.has(path),id:path.split('/').pop(),data:()=>state.get(path)});
   const materialize=(value:any):any=>{
     if(value instanceof FieldValue){assert.ok(value.isEqual(FieldValue.serverTimestamp()),'revalidation must never increment ingest counters');return stamp;}
     if(value instanceof Timestamp)return value;
@@ -68,7 +68,7 @@ async function fixture(t:any){
       set:(ref:any,data:any,opt?:any)=>pending.push({path:ref.path,data,merge:opt?.merge===true,create:false})});
     for(const write of pending){if(write.create)assert.equal(state.has(write.path),false);
       const data=materialize(write.data);state.set(write.path,write.merge?{...state.get(write.path),...data}:data);
-      writes.push({path:write.path,data,merge:write.merge});}
+      if(!write.path.includes("/runtimeLocks/")) writes.push({path:write.path,data,merge:write.merge});}
     return result;
   });
   const call=async(method='POST',query:any={},body:any=payload)=>{

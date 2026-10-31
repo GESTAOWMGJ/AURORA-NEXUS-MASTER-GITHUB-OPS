@@ -1,3 +1,4 @@
+import { guardedCanonicalTransaction, WriterLeaseError } from "./auroraWriterGuardian.js";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
@@ -124,7 +125,7 @@ export const auroraNexusCryptoSelfTest = onRequest(
     );
 
     try {
-      const keyResource = await auroraDb.runTransaction(async (tx) => {
+      const keyResource = await guardedCanonicalTransaction(auroraDb, member.orgId, async (tx) => {
         const [orgSnap, checkpointSnap] = await Promise.all([
           tx.get(auroraDb.doc(`organizations/${member.orgId}`)),
           tx.get(checkpointRef)
@@ -183,7 +184,9 @@ export const auroraNexusCryptoSelfTest = onRequest(
       const auditRef = auroraDb.doc(
         `organizations/${member.orgId}/auditEvents/crypto-${runId}`
       );
-      const batch = auroraDb.batch();
+      await guardedCanonicalTransaction(auroraDb, member.orgId, async batch => {
+      const current = await batch.get(checkpointRef);
+      if (current.data()?.runId !== runId) throw new CryptoRuntimeError(409,"CRYPTO_RUN_SUPERSEDED");
       batch.create(auditRef, {
         orgId: member.orgId,
         action: "CRYPTO_SELF_TEST_VERIFIED",
@@ -210,7 +213,7 @@ export const auroraNexusCryptoSelfTest = onRequest(
         lastVerifiedAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp()
       }, { merge: true });
-      await batch.commit();
+      });
 
       res.status(200).json({
         ok: true,
@@ -223,6 +226,7 @@ export const auroraNexusCryptoSelfTest = onRequest(
         clinicalDataUsed: false
       });
     } catch (error) {
+      if (error instanceof WriterLeaseError) {res.status(503).json({ok:false,code:error.code});return;}
       if (!(error instanceof CryptoRuntimeError)) {
         logger.error("Aurora crypto self-test failed", {
           runId,
@@ -231,12 +235,16 @@ export const auroraNexusCryptoSelfTest = onRequest(
         });
       }
       try {
-        await checkpointRef.set({
+        await guardedCanonicalTransaction(auroraDb, member.orgId, async tx => {
+          const current = await tx.get(checkpointRef);
+          if (current.data()?.runId !== runId) return;
+          tx.set(checkpointRef, {
           state: "ERROR",
           runId,
           failureCode: error instanceof CryptoRuntimeError ? error.code : "CRYPTO_SELF_TEST_FAILED",
           updatedAt: FieldValue.serverTimestamp()
         }, { merge: true });
+        });
       } catch (checkpointError) {
         logger.error("Aurora crypto checkpoint update failed", {
           runId,

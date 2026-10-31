@@ -1,3 +1,4 @@
+import { guardedCanonicalTransaction } from "./auroraWriterGuardian.js";
 import { FieldValue } from "firebase-admin/firestore";
 import { CATEGORIES, KINDS, digest, type Signal } from "./auroraOrganicCore.js";
 import {
@@ -49,7 +50,7 @@ export async function autoObserveResolvedDocumentAction(
   const stateRef = auroraDb.doc(`${orgPath}/runtimeCheckpoints/${STATE_ID}`);
   const actionRef = auroraDb.doc(`${orgPath}/actionItems/${actionId}`);
 
-  return auroraDb.runTransaction(async (tx) => {
+  return guardedCanonicalTransaction(auroraDb, orgId, async (tx) => {
     const cache = new Map<string, Record<string, unknown> | null>();
     const read = async (path: string): Promise<Record<string, unknown> | null> => {
       if (cache.has(path)) return cache.get(path)!;

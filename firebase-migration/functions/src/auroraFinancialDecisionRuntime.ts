@@ -1,3 +1,4 @@
+import { guardedCanonicalTransaction, WriterLeaseError } from "./auroraWriterGuardian.js";
 import { createHash, randomUUID } from "node:crypto";
 import { FieldValue } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
@@ -170,7 +171,7 @@ export const auroraNexusDistributionDecision = onRequest(
     const auditId = randomUUID();
 
     try {
-      const result = await auroraDb.runTransaction(async (tx) => {
+      const result = await guardedCanonicalTransaction(auroraDb, member.orgId, async (tx) => {
         const base = `organizations/${member.orgId}`;
         const idemRef = auroraDb.doc(`${base}/apiIdempotency/${idemId}`);
         const currentRef = auroraDb.doc(`${base}/distributionDecisions/${competence}`);
@@ -260,6 +261,7 @@ export const auroraNexusDistributionDecision = onRequest(
 
       res.status(200).json({ ok: true, duplicate: result.duplicate, decision: publicDecision(result.data) });
     } catch (error) {
+      if (error instanceof WriterLeaseError) {res.status(503).json({ok:false,code:error.code});return;}
       const code = error instanceof Error ? error.message : "DISTRIBUTION_DECISION_FAILED";
       const known = ["IDEMPOTENCY_CONFLICT", "CLOSING_NOT_FOUND", "STALE_FINANCIAL_SNAPSHOT", "DISTRIBUTION_GATE_NOT_ELIGIBLE", "REVISION_CONFLICT"];
       if (!known.includes(code)) logger.error("Distribution decision failed", { code });

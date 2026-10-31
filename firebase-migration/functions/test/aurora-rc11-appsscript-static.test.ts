@@ -115,7 +115,7 @@ test("RC1.1 HMAC probe is authenticated, dry-run and non-mutating", () => {
   const backend = readText(new URL("../src/index.ts", import.meta.url));
   const authIndex = backend.indexOf("const verification = verifyHmacV2");
   const validationIndex = backend.indexOf("const validation = validateEvent");
-  const txIndex = backend.indexOf("db.runTransaction");
+  const txIndex = backend.indexOf("guardedCanonicalTransaction(db, event.orgId");
   assert.ok(authIndex >= 0 && validationIndex > authIndex && txIndex > validationIndex);
 });
 

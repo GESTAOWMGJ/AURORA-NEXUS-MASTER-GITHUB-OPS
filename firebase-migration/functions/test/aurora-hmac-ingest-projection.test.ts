@@ -32,7 +32,7 @@ function fixture(t: any) {
   const sourceCollections = new Set(["invoices", "bankTransactions", "glosses", "actionItems",
     "sourceDocuments", "reconciliations", "auditFindings"]);
   const snapshot = (path: string) => ({ path, id: path.split("/").pop(),
-    exists: state.has(path), data: () => state.get(path) });
+    readTime: Timestamp.now(), exists: state.has(path), data: () => state.get(path) });
   const document = (path: string): any => ({ path, id: path.split("/").pop(),
     collection: (name: string) => collection(`${path}/${name}`) });
   const collection = (path: string): any => ({ path,

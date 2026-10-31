@@ -25,7 +25,7 @@ test('committed ingest resumes projection with the same key and one source effec
    firebase:{sign_in_second_factor:mfa?'totp':undefined}}));
  const cookie='__session=synthetic-session';
  const creates=new Map<string,number>();
- const snapshot=(path:string)=>({id:path.split('/').pop(),exists:state.has(path),data:()=>state.get(path)});
+ const snapshot=(path:string)=>({id:path.split('/').pop(),readTime:Timestamp.now(),exists:state.has(path),data:()=>state.get(path)});
  const stamp=Timestamp.fromDate(new Date('2026-10-08T05:00:00Z'));
  const materialize=(data:any):any=>{
   if(data instanceof FieldValue && data.isEqual(FieldValue.serverTimestamp()))return stamp;

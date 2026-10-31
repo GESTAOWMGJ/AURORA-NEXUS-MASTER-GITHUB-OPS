@@ -27,7 +27,10 @@ async function collect(directory,base,predicate=()=>true){
 }
 const serverFiles=await collect(resolve(functions,'lib'),functions,path=>path.endsWith('.js'));
 if(!serverFiles['lib/auroraRuntime.js']||!serverFiles['lib/auroraActiveReleaseRuntime.js'])throw Error('BUILT_RUNTIME_REQUIRED');
-const sources=await collect(resolve(functions,'src'),functions,path=>path.endsWith('.ts')&&!path.endsWith('.d.ts'));
+// Match the canonical JavaScript module explicitly included by tsconfig, while
+// preserving the exact source/build closure check (including stale-file rejection).
+const sources=await collect(resolve(functions,'src'),functions,path=>
+  (path.endsWith('.ts')&&!path.endsWith('.d.ts'))||path===resolve(functions,'src/realtimePlatformGuardian.js'));
 const expectedFiles=Object.keys(sources).map(name=>name.replace(/^src\//,'lib/').replace(/\.ts$/,'.js')).sort();
 if(JSON.stringify(Object.keys(serverFiles).sort())!==JSON.stringify(expectedFiles))throw Error('STALE_OR_INCOMPLETE_BUILD_REJECTED');
 // The web pin attests the dynamic interface emitted by Functions, whose bytes
