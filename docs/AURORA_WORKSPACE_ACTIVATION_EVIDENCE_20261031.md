@@ -42,3 +42,29 @@ Próxima ação necessária: autenticar a conta proprietária do hub Notion e o 
 ### PENDÊNCIA
 
 Concluir a autenticação Notion na conta proprietária; confirmar no momento do ato a criação/instalação Slack com os dois escopos explicitados; configurar credenciais oficiais pelo armazenamento protegido existente; conferir vínculo de tenant, fonte canônica, recibo e replay. A ingestão real permanece não validada. As observações anteriores deste documento são históricas; esta atualização substitui o status anterior de deploy em execução e de workspace Slack indisponível.
+
+## Recuperação Slack/Mac executada — 31/10/2026
+
+### FATO COMPROVADO
+
+- O painel oficial passou a apresentar o aplicativo planejado no workspace correto, já instalado, com bot scopes channels:read e channels:history e sem user scopes. A criação/instalação foi observada após intervenção do titular, não atribuída a esta execução.
+- Uma credencial de nível de aplicativo foi exposta pelo titular no relato de erro. Sua correspondência no painel oficial foi conferida sem reproduzir o valor. Essa credencial específica foi revogada e sua ausência na lista foi verificada; nenhuma credencial substituta foi criada. A credencial OAuth do bot não foi copiada nem alterada.
+- O aplicativo existente foi adicionado ao único canal de teste explicitado ao titular. O painel mostrou o vínculo e a listagem de membros do conector confirmou a presença do bot. Não houve publicação de mensagens de teste, leitura de documentos empresariais pelo novo bot ou concessão de escopos adicionais.
+- No Mac autorizado: Slack CLI 4.12.0 confirmado. O ambiente criado pelo template usava Python 3.9.6/pip 21.2.4, enquanto seu pyproject.toml exige Python >=3.10. A origem do template foi conferida no repositório oficial slack-samples/bolt-python-starter-agent, subdiretório openai-agents-sdk.
+- O ambiente anterior foi preservado por renomeação para backup com timestamp. Foi criado no mesmo projeto um ambiente Python 3.12.16/pip 26.2.2. As dependências declaradas, o extra de testes e ruff 0.17.2 foram instalados. Foi exigido pacote binário para dependências, evitando compilação nativa pesada no Mac.
+- A instalação editável concluiu com exit 0. Validação: pip check sem inconsistências; ruff check aprovado; ruff format --check com 25 arquivos já formatados; pytest com 7 aprovados em 39,29 s. O backup do ambiente foi excluído da varredura de lint/formatação.
+- slack doctor, executado com o ambiente ativado, confirmou runtime Python 3.12.16 e os SDKs. A única falha indicada foi Credentials/not_authed. O exit 0 desse comando não foi interpretado como autenticação concluída.
+- Nenhum serviço do template, agente externo, socket ou scheduler foi iniciado. O template de desenvolvimento não foi promovido a componente canônico do AURORA, nem foi criada chave de IA externa.
+- Uma inspeção limitada das áreas components/state/onboarding/operations do aplicativo no Mac não localizou agent-config.json, installation.json ou integration-setup.json até a profundidade consultada. Não foi realizada busca geral no disco ou no chaveiro.
+- O navegador Notion permaneceu na conta sem acesso ao hub. Um novo fluxo oficial de login da conta proprietária foi preparado, com código enviado pelo Notion e conclusão reservada ao titular na aba. Nenhum código foi consultado em e-mail ou copiado para esta evidência.
+
+### PENDÊNCIA MATERIAL
+
+1. CLI: concluir o desafio oficial de slack login caso a ferramenta de desenvolvimento seja necessária. Token app-level não substitui esse fluxo. O conector canônico de leitura não depende da criação de outro agente/template.
+2. Notion: concluir a autenticação da conta proprietária e o vínculo da página autorizada.
+3. Aurora: confirmar a configuração efetiva do agente/tenant, cadastrar a credencial OAuth do bot no armazenamento protegido existente e validar aquisição canônica, processamento e replay por recibo. Vínculo Slack e testes do template não comprovam essa operação.
+4. Publicação HML: permanece aplicável o resultado terminal do deploy registrado acima; nenhuma publicação ou nova execução cloud ocorreu nesta recuperação.
+
+### Aprendizado verificável para retomada
+
+Separar quatro estados: ferramenta instalada, sessão CLI autorizada, aplicativo instalado no workspace e ingestão canônica comprovada. Conferir a versão mínima de Python antes do hook de instalação editável. Preservar rollback local e exigir wheels quando o Mac funciona apenas como estação leve. As verificações desta passagem não substituem o aceite de runtime/publicação canônicos.
