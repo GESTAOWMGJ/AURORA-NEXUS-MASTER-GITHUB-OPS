@@ -266,7 +266,7 @@ export function nativeRoutineSummary(): Record<string, unknown> {
       leaseStore: "EXISTING_RUNTIME_LOCKS", idempotency: "EXISTING_RECEIPTS_UNCHANGED",
       fence: "INSTANCE_AND_EPOCH_IN_EFFECT_TRANSACTION", clock: "SERVER_READ_TIME_AND_MONOTONIC_ELAPSED",
       externalSideEffectsAllowedInTransaction: false, schedulerCreated: false,
-      migratedTransactionBoundaries: 19, allLegacyWritersEnforced: false, physicalHandoffVerified: false,
+      migratedTransactionBoundaries: 31, allLegacyWritersEnforced: false, physicalHandoffVerified: false,
       documentation: "docs/AURORA_DISTRIBUTED_WRITER_ENFORCEMENT.md"
     },
     medicalCredentialingPolicy: {
@@ -279,6 +279,8 @@ export function nativeRoutineSummary(): Record<string, unknown> {
       specialistTitleRequiresRqeVerification: true, contractExecutedByPreregistration: false,
       status: "IMPLEMENTED_CANDIDATE_PENDING_PRIVATE_BUCKET_AND_HML_READBACK",
       storage: "EXPLICIT_PRIVATE_WMGJ_BUCKET_NO_PUBLIC_LINKS",
+      storageReceiptProof: "CREATE_ONLY_GENERATION_BOUND_BYTES_SHA256",
+      storageLeaseFencingVerified: false, localWriterLeaseFencingVerified: false,
       confidentialDataSharedAcrossTenants: false, externalAiRequired: false,
       publicOpenUploadWithoutInvitation: false, mandatoryTrainingRequiresEvidence: true,
       runtimeActivationRequiresTenantFlag: true, permissionsGranted: false,

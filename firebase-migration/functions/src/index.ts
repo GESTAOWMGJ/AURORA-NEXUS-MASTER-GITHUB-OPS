@@ -1,4 +1,4 @@
-import { guardedCanonicalTransaction, WriterLeaseError } from "./auroraWriterGuardian.js";
+import { guardedCanonicalTransaction, expireLegacyRuntimeLock, WriterLeaseError } from "./auroraWriterGuardian.js";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { defineSecret, defineString, projectID } from "firebase-functions/params";
 import { setGlobalOptions } from "firebase-functions/v2";
@@ -508,16 +508,18 @@ export const runtimeWatchdog = onSchedule(
 
     if (stale.empty) return;
 
-    const batch = db.batch();
+    let expired = 0, pending = 0;
     for (const lock of stale.docs) {
-      batch.update(lock.ref, {
-        state: "EXPIRED",
-        expiredAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp()
-      });
+      const match = /^organizations\/([A-Za-z0-9_-]{1,128})\/runtimeLocks\/([A-Za-z0-9_-]{1,128})$/.exec(lock.ref.path);
+      if (!match || match[2]!.startsWith('platform-guardian-')) { pending++; continue; }
+      try {
+        if (await expireLegacyRuntimeLock(db, match[1]!, match[2]!)) expired++;
+      } catch (error) {
+        pending++;
+        logger.warn("WMGJ watchdog lock remains pending", {code:error instanceof WriterLeaseError ? error.code : 'LOCK_EXPIRY_PENDING'});
+      }
     }
-    await batch.commit();
-    logger.warn("WMGJ watchdog expired stale locks", { count: stale.size });
+    logger.warn("WMGJ watchdog reconciled stale locks", { expired, pending });
   }
 );
 

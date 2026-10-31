@@ -6,8 +6,8 @@ import {once} from 'node:events';
 import {setTimeout as delay} from 'node:timers/promises';
 const require = createRequire(new URL('../functions/package.json',import.meta.url));
 const {initializeApp,deleteApp} = require('firebase-admin/app');
-const {getFirestore} = require('firebase-admin/firestore');
-const {guardedCanonicalTransaction,writerLeasePath,WRITER_GUARDIAN_ID,CANONICAL_WRITE_RESOURCE} = require('../functions/lib/auroraWriterGuardian.js');
+const {getFirestore,Timestamp} = require('firebase-admin/firestore');
+const {guardedCanonicalTransaction,expireLegacyRuntimeLock,writerLeasePath,WRITER_GUARDIAN_ID,CANONICAL_WRITE_RESOURCE} = require('../functions/lib/auroraWriterGuardian.js');
 
 // No fallback to production or ADC: this suite can only use a local emulator.
 assert.match(process.env.FIRESTORE_EMULATOR_HOST ?? '', /^(127\.0\.0\.1|localhost):\d+$/);
@@ -56,6 +56,26 @@ test('failed document transaction leaves no lease/effect and independent next it
   assert.equal((await db.doc(writerLeasePath(org)).get()).exists,false);
   await guardedCanonicalTransaction(db,org,async tx=>{tx.create(db.doc(`organizations/${org}/sourceDocuments/good`),{});});
   assert.equal((await db.collection(`organizations/${org}/sourceDocuments`).get()).size,1);
+});
+
+test('legacy expiry and guardian release share a commit; renewed locks and fencing epochs survive',async()=>{
+  const db=databases[0],other=databases[1],org=tenant('legacy-expiry');
+  const ref=db.doc(`organizations/${org}/runtimeLocks/legacy`),lease=db.doc(writerLeasePath(org));
+  await ref.set({state:'LOCKED',leaseUntil:Timestamp.fromMillis(1)});
+  const scanned=await ref.get();assert.equal(scanned.data().state,'LOCKED');
+  // A second client renews after the watchdog scan. The fixed transition must
+  // consult the live document, not expire the earlier snapshot.
+  await other.doc(ref.path).update({leaseUntil:Timestamp.fromMillis(Date.now()+60000)});
+  assert.equal(await expireLegacyRuntimeLock(db,org,'legacy'),false);
+  assert.equal((await ref.get()).data().state,'LOCKED');assert.equal((await lease.get()).exists,false);
+  await ref.update({leaseUntil:Timestamp.fromMillis(1)});
+  assert.equal(await expireLegacyRuntimeLock(db,org,'legacy'),true);
+  const [expired,released]=await Promise.all([ref.get(),lease.get()]);
+  assert.equal(expired.data().state,'EXPIRED');assert.equal(released.data().state,'RELEASED');
+  assert.equal(released.data().epoch,1);assert.equal(expired.updateTime.isEqual(released.updateTime),true);
+  assert.equal(await expireLegacyRuntimeLock(other,org,'legacy'),false);
+  await assert.rejects(expireLegacyRuntimeLock(db,org,lease.id),/INVALID_LEGACY_LOCK_SCOPE/);
+  assert.equal((await lease.get()).updateTime.isEqual(released.updateTime),true);
 });
 
 for(const phase of ['before','after']) test(`SIGKILL ${phase} commit preserves original receipt on recovery`,{timeout:180000},async()=>{

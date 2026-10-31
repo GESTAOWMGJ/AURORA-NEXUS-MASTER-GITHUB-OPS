@@ -39,7 +39,7 @@ function fixture() {
   const writes: { path: string; data: any }[] = [];
   let now = 1_800_000_000_000;
   let lock = Promise.resolve();
-  const store: ProfileStore = { transaction: async body => {
+  const store: ProfileStore = { transaction: async (orgId, body) => {
     const previous = lock;
     let release!: () => void;
     lock = new Promise<void>(resolve => { release = resolve; });
@@ -48,7 +48,7 @@ function fixture() {
     const pending: typeof writes = [];
     let wrote = false;
     const tx: ProfileTx = {
-      read: async path => { assert.equal(wrote, false, "Firestore reads precede writes"); return structuredClone(draft.get(path)); },
+      read: async path => { assert.ok(path === `organizations/${orgId}` || path.startsWith(`organizations/${orgId}/`)); assert.equal(wrote, false, "Firestore reads precede writes"); return structuredClone(draft.get(path)); },
       create: (path, data) => {
         wrote = true;
         assert.equal(draft.has(path), false, "create-only protects existing records");
@@ -217,7 +217,7 @@ test("expiration is enforced at the exact 24-hour boundary and cannot be extende
 
 test("a queued consume request cannot use the earlier request-start time to bypass expiry", async () => {
   const f = fixture(); const issued = await f.engine.issue(actor, uid, requestId); f.advance(DAY_MS - 1);
-  const delayed: ProfileStore = { transaction: body => { f.advance(2); return f.store.transaction(body); } };
+  const delayed: ProfileStore = { transaction: (orgId, body) => { f.advance(2); return f.store.transaction(orgId, body); } };
   const engine = createOnboardingInvitationEngine(delayed, f.now);
   await assert.rejects(engine.consume(principal, issued.registrationPassword!), rejects("ONBOARDING_INVITATION_EXPIRED"));
   assert.equal(f.rows.get(memberPath).onboardingState, "INVITED"); assert.equal(f.writes.length, 3);
@@ -225,12 +225,12 @@ test("a queued consume request cannot use the earlier request-start time to bypa
 
 test("a consume callback retry rechecks expiry even when its discarded first attempt was valid", async () => {
   const f = fixture(); const issued = await f.engine.issue(actor, uid, requestId); f.advance(DAY_MS - 1);
-  const retrying: ProfileStore = { transaction: async body => {
+  const retrying: ProfileStore = { transaction: async (orgId, body) => {
     const discarded = new Map([...f.rows].map(([path, row]) => [path, structuredClone(row)]));
     await body({ read: async path => structuredClone(discarded.get(path)), create: (path, data) => discarded.set(path, data),
       update: (path, data) => discarded.set(path, { ...discarded.get(path), ...data }) });
     f.advance(2);
-    return f.store.transaction(body);
+    return f.store.transaction(orgId, body);
   } };
   const engine = createOnboardingInvitationEngine(retrying, f.now);
   await assert.rejects(engine.consume(principal, issued.registrationPassword!), rejects("ONBOARDING_INVITATION_EXPIRED"));
@@ -365,12 +365,12 @@ test("professional metadata must be present and canonical at issuance and consum
 
 test("a replayed transaction callback still delivers only the committed credential and persists no plaintext", async () => {
   const f = fixture();
-  const retrying: ProfileStore = { transaction: async body => {
+  const retrying: ProfileStore = { transaction: async (orgId, body) => {
     // Firestore can rerun callbacks on an optimistic conflict: discard the first draft.
     const discarded = new Map([...f.rows].map(([path, row]) => [path, structuredClone(row)]));
     await body({ read: async path => structuredClone(discarded.get(path)), create: (path, data) => discarded.set(path, data),
       update: (path, data) => discarded.set(path, { ...discarded.get(path), ...data }) });
-    return f.store.transaction(body);
+    return f.store.transaction(orgId, body);
   } };
   const engine = createOnboardingInvitationEngine(retrying, f.now);
   const issued = await engine.issue(actor, uid, requestId);

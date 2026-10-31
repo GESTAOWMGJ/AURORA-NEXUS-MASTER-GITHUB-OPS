@@ -1,3 +1,4 @@
+import { guardedCanonicalTransaction, WriterLeaseError } from "./auroraWriterGuardian.js";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import { CSRF_PURPOSES, validCsrf, verifyAuroraAccess } from "./auroraAccess.js";
@@ -9,7 +10,7 @@ import { createOnboardingInvitationEngine } from "./auroraOnboardingInvitations.
 const allowedEmails = defineSecret("AURORA_NEXUS_ALLOWED_EMAILS");
 const csrfSecret = defineSecret("AURORA_NEXUS_CSRF_HMAC_KEY");
 export const profileStore: ProfileStore = {
-  transaction: body => auroraDb.runTransaction(tx => body({
+  transaction: (orgId, body) => guardedCanonicalTransaction(auroraDb, orgId, tx => body({
     read: async path => (await tx.get(auroraDb.doc(path))).data(),
     create: (path, data) => { tx.create(auroraDb.doc(path), data); },
     update: (path, data) => { tx.update(auroraDb.doc(path), data); }
@@ -35,7 +36,7 @@ export const auroraNexusUserProfiles = onRequest(
         const principal = await auroraAuth.verifyIdToken(req.body.idToken, true);
         res.json(await invitations.consume(principal, req.body.registrationPassword));
       } catch (error) {
-        const known = error instanceof ProfileError;
+        const known = error instanceof ProfileError || error instanceof WriterLeaseError;
         res.status(known ? error.status : 401).json({ok: false, code: known ? error.code : "INVALID_ONBOARDING_IDENTITY"});
       }
       return;
@@ -74,7 +75,7 @@ export const auroraNexusUserProfiles = onRequest(
       }
       throw new ProfileError("INVALID_PROFILE_ACTION", 400);
     } catch (error) {
-      const known = error instanceof ProfileError;
+      const known = error instanceof ProfileError || error instanceof WriterLeaseError;
       res.status(known ? error.status : 503).json({ ok: false, code: known ? error.code : "PROFILE_OPERATION_UNAVAILABLE" });
     }
   }

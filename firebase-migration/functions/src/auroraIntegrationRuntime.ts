@@ -1,7 +1,7 @@
 import { guardedCanonicalTransaction, WriterLeaseError } from "./auroraWriterGuardian.js";
 import { workspaceConnectorReadback } from './auroraWorkspaceConnectors.js';
 import { createHash } from "node:crypto";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import { FieldValue, Timestamp, type Transaction } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
@@ -81,6 +81,25 @@ async function memberOrReject(req: any, res: any): Promise<AuroraMember | null> 
     return null;
   }
   return member;
+}
+
+class IntegrationKeyMutationError extends Error {
+  constructor(readonly code: string, readonly status: number) { super(code); }
+}
+
+async function guardedCredentialMutation<T>(member: AuroraMember, body: (tx: Transaction) => Promise<T>): Promise<T> {
+  return guardedCanonicalTransaction(auroraDb, member.orgId, async tx => {
+    const base = `organizations/${member.orgId}`;
+    const [org, actor] = await Promise.all([tx.get(auroraDb.doc(base)), tx.get(auroraDb.doc(`${base}/members/${member.uid}`))]);
+    const current = actor.data();
+    if (org.data()?.active !== true || current?.active !== true
+      || (current.onboardingRequired === true && current.onboardingState !== 'COMPLETE')
+      || !canManage({...member, role: current.role, allFacilities: current.allFacilities === true,
+        permissions: Array.isArray(current.permissions) ? current.permissions.filter((v: unknown): v is string => typeof v === 'string') : []})) {
+      throw new IntegrationKeyMutationError('MEMBERSHIP_REVOKED', 403);
+    }
+    return body(tx);
+  });
 }
 
 export async function verifyIntegrationBearer(
@@ -189,6 +208,7 @@ export const auroraNexusIntegrationKeys = onRequest(
       }
       return;
     }
+    try {
     if (action === "CREATE") {
       const name=typeof req.body?.name==="string"?req.body.name.trim():"";
       const scopes=normalizeScopes(req.body?.scopes);
@@ -198,7 +218,7 @@ export const auroraNexusIntegrationKeys = onRequest(
         return;
       }
       const issued=issueIntegrationCredential(scopes, days);
-      await collection.doc(issued.keyId).create({
+      await guardedCredentialMutation(member, async tx => { tx.create(collection.doc(issued.keyId), {
         schemaVersion:1,
         orgId:member.orgId,
         keyId:issued.keyId,
@@ -210,7 +230,7 @@ export const auroraNexusIntegrationKeys = onRequest(
         createdBy:member.uid,
         createdAt:FieldValue.serverTimestamp(),
         expiresAt:Timestamp.fromDate(issued.expiresAt)
-      });
+      }); });
       logger.info("Aurora integration credential issued", {orgId:member.orgId,keyId:issued.keyId,scopes:issued.scopes});
       res.status(201).json({
         ok:true,
@@ -244,11 +264,9 @@ export const auroraNexusIntegrationKeys = onRequest(
         return;
       }
       const ref=collection.doc(keyId);
-      if ((await ref.get()).exists) {
-        res.status(409).json({ok:false, code:"KEY_ID_EXISTS"});
-        return;
-      }
-      await ref.create({
+      await guardedCredentialMutation(member, async tx => {
+        if ((await tx.get(ref)).exists) throw new IntegrationKeyMutationError('KEY_ID_EXISTS', 409);
+        tx.create(ref, {
         schemaVersion:1,
         orgId:member.orgId,
         keyId,
@@ -261,7 +279,7 @@ export const auroraNexusIntegrationKeys = onRequest(
         createdBy:member.uid,
         createdAt:FieldValue.serverTimestamp(),
         expiresAt:Timestamp.fromDate(expiresAt)
-      });
+      }); });
       logger.info("Aurora installer integration credential registered", {orgId:member.orgId,keyId,scopes});
       res.status(201).json({ok:true,keyId,scopes,expiresAt:expiresAt.toISOString(),registeredFromHash:true});
       return;
@@ -274,22 +292,25 @@ export const auroraNexusIntegrationKeys = onRequest(
         return;
       }
       const ref=collection.doc(keyId);
-      const snap=await ref.get();
-      if (!snap.exists) {
-        res.status(404).json({ok:false, code:"KEY_NOT_FOUND"});
-        return;
-      }
-      await ref.update({
+      await guardedCredentialMutation(member, async tx => {
+        const snap=await tx.get(ref);
+        if (!snap.exists) throw new IntegrationKeyMutationError('KEY_NOT_FOUND', 404);
+        if (snap.data()?.active === false) return; // Preserve the original revocation receipt on replay.
+        tx.update(ref, {
         active:false,
         revokedAt:FieldValue.serverTimestamp(),
         revokedBy:member.uid
-      });
+      }); });
       logger.info("Aurora integration credential revoked", {orgId:member.orgId,keyId});
       res.status(200).json({ok:true,keyId,revoked:true});
       return;
     }
 
     res.status(400).json({ok:false, code:"INVALID_ACTION"});
+    } catch (error) {
+      const known = error instanceof WriterLeaseError || error instanceof IntegrationKeyMutationError;
+      res.status(known ? error.status : 503).json({ok:false, code:known ? error.code : 'INTEGRATION_KEY_MUTATION_PENDING'});
+    }
   }
 );
 

@@ -16,11 +16,11 @@ function fixture() {
   const users = new Map<string, any>(); const calls: {method:string;data:any}[] = [];
   const failures = new Map<string, number>(); let hook: (method:string,data:any) => Promise<void> = async () => {};
   let time = 1_800_000_000_000; let lock = Promise.resolve();
-  const store: ProfileStore = { transaction: async body => {
+  const store: ProfileStore = { transaction: async (orgId, body) => {
     const previous = lock; let release!: () => void; lock = new Promise(resolve => { release = resolve; }); await previous;
     const draft = new Map([...rows].map(([k,v]) => [k,structuredClone(v)])); let wrote = false;
     const tx: ProfileTx = {
-      read: async path => { assert.equal(wrote,false,'Firestore reads precede writes'); return structuredClone(draft.get(path)); },
+      read: async path => { assert.ok(path === `organizations/${orgId}` || path.startsWith(`organizations/${orgId}/`)); assert.equal(wrote,false,'Firestore reads precede writes'); return structuredClone(draft.get(path)); },
       create: (path,data) => { wrote = true; assert.equal(draft.has(path),false,'create must be absent'); draft.set(path,structuredClone(data)); },
       update: (path,data) => { wrote = true; assert.ok(draft.has(path)); draft.set(path,{...draft.get(path),...structuredClone(data)}); }
     };

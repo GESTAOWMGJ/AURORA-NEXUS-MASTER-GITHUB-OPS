@@ -82,8 +82,18 @@ async function issueInvitation(actor: AuroraMember) {
   const invitationId = randomUUID();
   const createdAt = nowMs();
   await guardedCanonicalTransaction(auroraDb, ORG, async tx => {
-    const org = await tx.get(auroraDb.doc("organizations/" + ORG));
+    const [org, member] = await Promise.all([
+      tx.get(auroraDb.doc("organizations/" + ORG)),
+      tx.get(auroraDb.doc(basePath + "members/" + actor.uid))
+    ]);
     if (org.data()?.active !== true || org.data()?.medicalPartnersEnabled !== true || org.data()?.medicalPartnersPrivacyApproved !== true) throw new CredentialError("PRE_CREDENTIALING_NOT_ENABLED",503);
+    // Session/MFA remain server-authenticated; mutable authority must be live in
+    // the SAME commit as the invitation, including on a Firestore retry.
+    const current = member.data();
+    if (current?.active !== true || (current.orgId !== undefined && current.orgId !== ORG)
+      || !isAdmin({ ...actor, role: String(current.role ?? ""), allFacilities: current.allFacilities === true })) {
+      throw new CredentialError("WMGJ_ADMIN_MFA_REQUIRED",403);
+    }
     tx.create(auroraDb.doc(basePath + INVITES + "/" + invitationId), {
     schemaVersion: CREDMED_SCHEMA, orgId: ORG, tokenHash: sha256(token),
     state: "INVITED", createdAtIso: iso(createdAt), expiresAtIso: iso(createdAt + CREDMED_INVITATION_TTL_MS),
@@ -130,6 +140,49 @@ async function submitApplication(body: Record<string, unknown>) {
   });
   return { ok: true, applicationId, status: state === "CREATED" ? "PENDING_DOCUMENTS_AND_CRM_REVIEW" : "ALREADY_SUBMITTED" };
 }
+// Native create-only precondition and generation-bound readback. This verifies
+// the external effect; it does not make GCS participate in the Firestore lease.
+export async function persistMedicalAttachment(
+  bucket: ReturnType<ReturnType<typeof getStorage>["bucket"]>, objectKey: string,
+  attachment: ReturnType<typeof validateMedicalAttachment>
+): Promise<{ generation: string }> {
+  const file = bucket.file(objectKey);
+  try {
+    await file.save(attachment.bytes, {
+      resumable: false, validation: "crc32c", preconditionOpts: { ifGenerationMatch: 0 },
+      metadata: { contentType: attachment.mimeType, cacheControl: "private,no-store",
+        metadata: { sha256: attachment.sha256, scope: "WMGJ_CREDMED_PRIVATE" } }
+    });
+  } catch {
+    // A lost response or precondition conflict has an unknown outcome until
+    // the exact stored generation is read. Never overwrite or delete it.
+  }
+  const [meta] = await file.getMetadata().catch(() => [null]);
+  if (!meta) throw new CredentialError("PRIVATE_STORAGE_UPLOAD_UNVERIFIED", 503);
+  const generation = String(meta.generation ?? "");
+  // The installed GCS SDK converts generation to Number; refuse precision loss.
+  if (!/^[1-9][0-9]*$/.test(generation) || !Number.isSafeInteger(Number(generation))
+      || Number(meta.size) !== attachment.bytes.length || meta.contentType !== attachment.mimeType
+      || (meta.contentEncoding && meta.contentEncoding !== "identity"))
+    throw new CredentialError("PRIVATE_STORAGE_CONFLICT", 409);
+  const source = bucket.file(objectKey, { generation }).createReadStream({
+    start: 0, end: attachment.bytes.length, decompress: false, validation: false
+  });
+  const chunks: Buffer[] = []; let size = 0;
+  try {
+    for await (const part of source) {
+      const chunk = Buffer.from(part); size += chunk.length;
+      if (size > attachment.bytes.length) throw new CredentialError("PRIVATE_STORAGE_CONFLICT", 409);
+      chunks.push(chunk);
+    }
+  } catch (error) {
+    if (error instanceof CredentialError) throw error;
+    throw new CredentialError("PRIVATE_STORAGE_READBACK_UNAVAILABLE", 503);
+  } finally { source.destroy(); }
+  if (size !== attachment.bytes.length || sha256(Buffer.concat(chunks)) !== attachment.sha256)
+    throw new CredentialError("PRIVATE_STORAGE_CONFLICT", 409);
+  return { generation };
+}
 async function uploadDocument(body: Record<string, unknown>) {
   await organizationReady();
   if (Object.keys(body).some(k => !["action","token","document"].includes(k))) throw new CredentialError("UNEXPECTED_UPLOAD_FIELD");
@@ -165,31 +218,29 @@ async function uploadDocument(body: Record<string, unknown>) {
     return { duplicate: false, uploaded: false };
   });
   if (reserved.uploaded) return {ok: true, documentId, status: "RECEIVED_PENDING_SECURITY_REVIEW", replay: true};
-  const file = getStorage().bucket(storageBucket()).file(objectKey);
-  try {
-    await file.save(attachment.bytes, {
-      resumable: false, validation: "crc32c", preconditionOpts: { ifGenerationMatch: 0 },
-      metadata: {contentType: attachment.mimeType, cacheControl: "private,no-store",
-        metadata: { sha256: attachment.sha256, scope: "WMGJ_CREDMED_PRIVATE" }}
-    });
-  } catch (error) {
-    // Retry only if bytes are provably already stored at this exact immutable key.
-    const [exists] = await file.exists().catch(() => [false]);
-    if (!exists) throw new CredentialError("PRIVATE_STORAGE_UPLOAD_FAILED", 503);
-    const [meta] = await file.getMetadata().catch(() => [null]);
-    if (!meta || meta.metadata?.sha256 !== attachment.sha256 || Number(meta.size) !== attachment.bytes.length)
-      throw new CredentialError("PRIVATE_STORAGE_CONFLICT", 409);
-  }
+  const destination = await persistMedicalAttachment(getStorage().bucket(storageBucket()), objectKey, attachment);
   await guardedCanonicalTransaction(auroraDb, ORG, async tx => {
-    const [existing, app] = await Promise.all([tx.get(documentRef),tx.get(applicationRef)]);
-    if (!existing.exists || existing.data()?.sha256 !== attachment.sha256 || !app.exists)
+    const [existing, app, org, invite] = await Promise.all([
+      tx.get(documentRef), tx.get(applicationRef), tx.get(auroraDb.doc("organizations/" + ORG)), tx.get(inviteRef)
+    ]);
+    if (org.data()?.active !== true || org.data()?.medicalPartnersEnabled !== true || org.data()?.medicalPartnersPrivacyApproved !== true)
+      throw new CredentialError("PRE_CREDENTIALING_NOT_ENABLED", 503);
+    requestIsCurrentInvitation(invite.data(), "SUBMITTED");
+    if (invite.data()?.tokenHash !== sha256(String(body.token)) || invite.data()?.applicationId !== applicationId)
+      throw new CredentialError("INVALID_OR_EXPIRED_INVITATION", 403);
+    if (!existing.exists || existing.data()?.sha256 !== attachment.sha256 || !app.exists
+        || existing.data()?.objectKey !== objectKey || app.data()?.invitationId !== inviteRef.id)
       throw new CredentialError("DOCUMENT_RECEIPT_CONFLICT", 409);
+    if (existing.data()?.storageGeneration && existing.data()?.storageGeneration !== destination.generation)
+      throw new CredentialError("DOCUMENT_GENERATION_CONFLICT", 409);
     if (existing.data()?.state !== "RECEIVED_PENDING_SECURITY_REVIEW") {
-      tx.update(documentRef, { state: "RECEIVED_PENDING_SECURITY_REVIEW", receivedAt: FieldValue.serverTimestamp() });
+      tx.update(documentRef, { state: "RECEIVED_PENDING_SECURITY_REVIEW", storageGeneration: destination.generation,
+        storageVerification: "GENERATION_BYTES_SHA256_VERIFIED", receivedAt: FieldValue.serverTimestamp() });
       tx.update(applicationRef, { receivedDocumentCount: FieldValue.increment(1), modifiedAt: FieldValue.serverTimestamp() });
       tx.create(auroraDb.doc(basePath + "auditEvents/" + sha256("credmed:document:" + documentId + ":" + applicationId)), {
         action: "CREDMED_PRIVATE_DOCUMENT_RECEIPT", subject: applicationId, documentId, orgId: ORG,
-        evidenceHash: attachment.sha256, timestamp: FieldValue.serverTimestamp(), factualVerification: false
+        evidenceHash: attachment.sha256, storageGeneration: destination.generation,
+        timestamp: FieldValue.serverTimestamp(), factualVerification: false
       });
     }
   });

@@ -1,3 +1,4 @@
+import { guardedCanonicalTransaction, WriterLeaseError } from "./auroraWriterGuardian.js";
 import { createHash } from "node:crypto";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { onSchedule } from "firebase-functions/v2/scheduler";
@@ -173,80 +174,89 @@ export async function syncDocumentGovernance(orgId = DEFAULT_ORG_ID, now = new D
     return { ok: true, orgId, scanned: snapshot.size, issues: 0, changed: 0, partial: false };
   }
 
-  const actionRefs = candidates.map(({ doc }) =>
-    auroraDb.doc(`organizations/${orgId}/actionItems/${deterministicId(orgId, doc.id)}`)
-  );
-  const currentActions = await Promise.all(actionRefs.map((ref) => ref.get()));
-  const batch = auroraDb.batch();
   let changed = 0;
+  const failures: Array<{ documentId: string; code: string }> = [];
+  // The scan is advisory; each source, membership scope and prior action is
+  // re-read under the canonical lease in the SAME transaction as its effects.
+  for (const { doc: candidate } of candidates) {
+    try {
+      const committed = await guardedCanonicalTransaction(auroraDb, orgId, async tx => {
+        const actionRef = auroraDb.doc(`organizations/${orgId}/actionItems/${deterministicId(orgId, candidate.id)}`);
+        const [currentOrg, doc, current] = await Promise.all([
+          tx.get(orgRef), tx.get(candidate.ref), tx.get(actionRef)
+        ]);
+        if (!currentOrg.exists || currentOrg.data()?.active !== true) throw Error("ORGANIZATION_DISABLED");
+        if (!doc.exists) return false;
+        const assessment = assessDocumentWatch(doc.id, doc.data()!, now);
+        if (!assessment) return false;
+        const currentData = current.exists ? current.data() ?? {} : null;
+        if (currentData?.watchFingerprint === assessment.fingerprint) return false;
+        const actionId = actionRef.id;
+        const findingRef = auroraDb.doc(`organizations/${orgId}/auditFindings/${actionId}`);
+        const revision = currentData && Number.isSafeInteger(currentData.revision)
+          ? Number(currentData.revision) + 1
+          : 1;
+        const docData = doc.data()!;
+        const createdAt = currentData?.createdAt ?? FieldValue.serverTimestamp();
 
-  candidates.forEach(({ doc, assessment }, index) => {
-    const actionRef = actionRefs[index]!;
-    const current = currentActions[index];
-    const currentData = current?.exists ? current.data() ?? {} : null;
-    if (currentData?.watchFingerprint === assessment.fingerprint) return;
+        tx.set(actionRef, {
+          orgId,
+          targetType: "sourceDocument",
+          targetId: doc.id,
+          reasonCode: assessment.reasonCode,
+          riskLevel: assessment.riskLevel,
+          competence: competenceOf(docData, now),
+          dueAt: Timestamp.fromMillis(assessment.dueAtMs),
+          status: "OPEN",
+          revision,
+          createdBy: currentData?.createdBy ?? "aurora-document-watchdog",
+          createdAt,
+          updatedBy: "aurora-document-watchdog",
+          updatedAt: FieldValue.serverTimestamp(),
+          resolutionCode: null,
+          evidenceRefs: [],
+          sanitized: true,
+          sensitivity: "INTERNAL",
+          systemGenerated: true,
+          source: "AURORA_DOCUMENT_WATCHDOG",
+          watchCodes: assessment.codes,
+          watchFingerprint: assessment.fingerprint,
+          sourceVersion: docData.sourceVersion ?? null,
+          originSystem: docData.originSystem ?? "UNKNOWN",
+          organicCandidate: true,
+          organicSignalKind: assessment.organicSignalKind,
+          organicCategory: assessment.organicCategory,
+          organicSector: assessment.organicSector
+        }, { merge: true });
 
-    const actionId = actionRef.id;
-    const findingRef = auroraDb.doc(`organizations/${orgId}/auditFindings/${actionId}`);
-    const revision = currentData && Number.isSafeInteger(currentData.revision)
-      ? Number(currentData.revision) + 1
-      : 1;
-    const docData = doc.data();
-    const createdAt = currentData?.createdAt ?? FieldValue.serverTimestamp();
-
-    batch.set(actionRef, {
-      orgId,
-      targetType: "sourceDocument",
-      targetId: doc.id,
-      reasonCode: assessment.reasonCode,
-      riskLevel: assessment.riskLevel,
-      competence: competenceOf(docData, now),
-      dueAt: Timestamp.fromMillis(assessment.dueAtMs),
-      status: "OPEN",
-      revision,
-      createdBy: currentData?.createdBy ?? "aurora-document-watchdog",
-      createdAt,
-      updatedBy: "aurora-document-watchdog",
-      updatedAt: FieldValue.serverTimestamp(),
-      resolutionCode: null,
-      evidenceRefs: [],
-      sanitized: true,
-      sensitivity: "INTERNAL",
-      systemGenerated: true,
-      source: "AURORA_DOCUMENT_WATCHDOG",
-      watchCodes: assessment.codes,
-      watchFingerprint: assessment.fingerprint,
-      sourceVersion: docData.sourceVersion ?? null,
-      originSystem: docData.originSystem ?? "UNKNOWN",
-      organicCandidate: true,
-      organicSignalKind: assessment.organicSignalKind,
-      organicCategory: assessment.organicCategory,
-      organicSector: assessment.organicSector
-    }, { merge: true });
-
-    batch.set(findingRef, {
-      orgId,
-      targetType: "sourceDocument",
-      targetId: doc.id,
-      linkedActionId: actionId,
-      status: "OPEN",
-      riskLevel: assessment.riskLevel,
-      reasonCode: assessment.reasonCode,
-      watchCodes: assessment.codes,
-      watchFingerprint: assessment.fingerprint,
-      evidenceRefs: [doc.id],
-      sourceVersion: docData.sourceVersion ?? null,
-      originSystem: docData.originSystem ?? "UNKNOWN",
-      sanitized: true,
-      sensitivity: "INTERNAL",
-      systemGenerated: true,
-      createdAt: currentData?.createdAt ?? FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp()
-    }, { merge: true });
-    changed++;
-  });
-
-  if (changed > 0) await batch.commit();
+        tx.set(findingRef, {
+          orgId,
+          targetType: "sourceDocument",
+          targetId: doc.id,
+          linkedActionId: actionId,
+          status: "OPEN",
+          riskLevel: assessment.riskLevel,
+          reasonCode: assessment.reasonCode,
+          watchCodes: assessment.codes,
+          watchFingerprint: assessment.fingerprint,
+          evidenceRefs: [doc.id],
+          sourceVersion: docData.sourceVersion ?? null,
+          originSystem: docData.originSystem ?? "UNKNOWN",
+          sanitized: true,
+          sensitivity: "INTERNAL",
+          systemGenerated: true,
+          createdAt: currentData?.createdAt ?? FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp()
+        }, { merge: true });
+        return true;
+      });
+      if (committed) changed++;
+    } catch (error) {
+      const code = error instanceof WriterLeaseError ? error.code
+        : error instanceof Error && error.message === 'ORGANIZATION_DISABLED' ? error.message : 'DOCUMENT_WATCH_ITEM_PENDING';
+      failures.push({ documentId: candidate.id, code });
+    }
+  }
 
   return {
     ok: true,
@@ -254,7 +264,9 @@ export async function syncDocumentGovernance(orgId = DEFAULT_ORG_ID, now = new D
     scanned: snapshot.size,
     issues: candidates.length,
     changed,
-    partial: candidates.length === DOCUMENT_WRITE_LIMIT
+    partial: candidates.length === DOCUMENT_WRITE_LIMIT || failures.length > 0,
+    pending: failures.length,
+    failures
   };
 }
 
