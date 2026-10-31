@@ -52,6 +52,9 @@ jobs:
       - name: Validate guardian runtime smoke
         run: node scripts/aurora/realtime_platform_guardian.js
 
+      - name: Detect unreviewed legacy writer inventory changes
+        run: python3 scripts/aurora/audit_writer_inventory.py --check
+
       - name: Validate failsafe orchestrator
         run: node scripts/aurora/windows_online_robot_orchestrator.js
 

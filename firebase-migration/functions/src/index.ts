@@ -1,3 +1,4 @@
+import { guardedCanonicalTransaction, WriterLeaseError } from "./auroraWriterGuardian.js";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import { defineSecret, defineString, projectID } from "firebase-functions/params";
 import { setGlobalOptions } from "firebase-functions/v2";
@@ -165,7 +166,7 @@ export const ingestWmgjEvent = onRequest(
       const auditRef = orgRef.collection("auditEvents").doc(idempotencyId);
       const checkpointRef = orgRef.collection("runtimeCheckpoints").doc("ingestion");
 
-      const result = await db.runTransaction(async (tx) => {
+      const result = await guardedCanonicalTransaction(db, event.orgId, async (tx) => {
         const orgSnap = await tx.get(orgRef);
         const nonceSnap = await tx.get(nonceRef);
         const idemSnap = await tx.get(idemRef);
@@ -473,7 +474,7 @@ export const ingestWmgjEvent = onRequest(
         projectionStatus
       });
     } catch (error) {
-      if (error instanceof IngestDomainError) {
+      if (error instanceof IngestDomainError || error instanceof WriterLeaseError) {
         logger.warn("WMGJ ingest domain rejected", {
           code: error.code,
           eventId: event.eventId,

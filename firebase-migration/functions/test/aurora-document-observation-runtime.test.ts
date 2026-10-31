@@ -28,7 +28,7 @@ function fixture(t:any) {
     [`${base}/integrationCredentials/${keyId}`,credential],
     [`${base}/members/synthetic-admin`,{active:true,role:'org_admin',allFacilities:true,permissions:[]}]]);
   const writes:{path:string;data:any;merge:boolean}[]=[],reads:string[]=[];
-  const snapshot=(path:string)=>({exists:state.has(path),id:path.split('/').pop(),data:()=>state.get(path)});
+  const snapshot=(path:string)=>({readTime:Timestamp.now(),exists:state.has(path),id:path.split('/').pop(),data:()=>state.get(path)});
   const materialize=(value:any):any=>{
     if(value instanceof FieldValue){assert.ok(value.isEqual(FieldValue.serverTimestamp()),'observations cannot increment factual ingestion');return stamp;}
     if(value instanceof Timestamp)return value;
@@ -47,7 +47,7 @@ function fixture(t:any) {
       set:(ref:any,data:any,opt?:any)=>pending.push({path:ref.path,data,merge:opt?.merge===true,create:false})});
     for(const write of pending){if(write.create)assert.equal(state.has(write.path),false);
       const data=materialize(write.data);state.set(write.path,write.merge?{...state.get(write.path),...data}:data);
-      writes.push({path:write.path,data,merge:write.merge});}
+      if(!write.path.includes("/runtimeLocks/")) writes.push({path:write.path,data,merge:write.merge});}
     return result;
   });
   const call=async(body:any=payload,idempotency='synthetic-http-observation-key',override:any={},method='POST',query:any={})=>{

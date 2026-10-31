@@ -33,7 +33,7 @@ test("bootstrap, native insight and master label only the authenticated tenant m
         dataQuality:{complete:true,sourcePresent:true},operations:{},audit:{},documentIntelligence:{},
         coverage:{},financial:{},financialCents:{},sources:[],alerts:[],pipeline:{}}
       :undefined;
-    return {exists:value!==undefined,data:()=>value};
+    return {readTime:{toMillis:()=>Date.now()},exists:value!==undefined,data:()=>value};
   }}));
   t.mock.method(db,"runTransaction",async(callback:any)=>callback({get:async(ref:any)=>ref.get()}));
   for (const [metadata, expected] of [["PRODUCTION","PRODUCTION"],["HOMOLOGATION","HOMOLOGATION"],[undefined,"UNKNOWN"]]) {

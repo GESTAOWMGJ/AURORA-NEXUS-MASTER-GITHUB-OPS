@@ -34,6 +34,7 @@ test("master consumes current entities after PR123 revisions, never the history 
   const stored = new Map<string, any>();
   const reads: string[] = [];
   t.mock.method(auroraDb, "doc", ((path: string) => ({ path, get: async () => {
+    if(path.includes("/runtimeLocks/")) return {readTime:{toMillis:()=>Date.now()},exists:stored.has(path),data:()=>stored.get(path)};
     assert.equal(path, base);
     return { exists: true, data: () => ({ active: true, projectionEnabled: true,
       projectionMode: "SHADOW", projectionCompetence: competence }) };
@@ -63,7 +64,7 @@ test("master consumes current entities after PR123 revisions, never the history 
       },
       set: (ref: { path: string }, data: any) => {
         writeStarted = true;
-        assert.ok(ref.path.startsWith(`${base}/dashboardSnapshots/`), "projection must not mutate ingested entities or versions");
+        assert.ok(ref.path.startsWith(`${base}/dashboardSnapshots/`) || ref.path.startsWith(`${base}/runtimeLocks/`), "projection must not mutate ingested entities or versions");
         stored.set(ref.path, data);
       }
     };
