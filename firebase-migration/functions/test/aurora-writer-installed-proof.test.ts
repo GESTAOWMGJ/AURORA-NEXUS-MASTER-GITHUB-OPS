@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {readFileSync} from 'node:fs';
+import {dirname,resolve,sep} from 'node:path';
 import {verifyInstalledWriterObservation,sessionFromCookieJar} from '../../scripts/verify-installed-writer-guardian.mjs';
 
 function fixture() {
@@ -50,4 +52,18 @@ test('cookie jar must contain one secure session for the exact canonical host',(
   assert.equal(sessionFromCookieJar(row),'__session=synthetic.jwt');
   for(const value of [row+'\n'+row,row.replace('auroranexus.com.br','foreign.example'),row.replace('\tTRUE\t','\tFALSE\t')])
     assert.throws(()=>sessionFromCookieJar(value),/WRITER_SMOKE_SESSION_REQUIRED/);
+});
+
+// Multiple upload paths use their least common ancestor as the archive root.
+// Preserve the publisher's established download layout when adding evidence.
+test('installed evidence shares the release artifact root expected by the publisher',()=>{
+  const workflow=readFileSync(new URL('../../../.github/workflows/deploy-aurora-firebase.yml',import.meta.url),'utf8');
+  const upload=workflow.split('      - name: Preserve exact release manifests\n')[1].split('      - name: ')[0];
+  const paths=[...upload.matchAll(/^            (.+)$/gm)].map(match=>match[1].trim());
+  const root=resolve('firebase-migration/functions/runtime-release');
+  assert.ok(paths.length>=6);
+  for(const path of paths)assert.ok(resolve(path).startsWith(root+sep),path);
+  const output=/--output ([^\s]+aurora-writer-installed-proof.json)/.exec(workflow)?.[1];
+  assert.ok(output);assert.equal(dirname(resolve(output)),root);assert.ok(paths.includes(output));
+  assert.match(workflow,/path: firebase-migration\/functions\/runtime-release/);
 });
