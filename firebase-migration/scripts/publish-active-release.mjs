@@ -79,7 +79,9 @@ function requireCurrentOwnerDecision(now,reviewPrNumber) {
     &&guardian.approvalSource==='DIRECT_OWNER_CHAT'&&guardian.ownerHmlDeploymentApproved===true
     &&guardian.repo===REPOSITORY&&guardian.projectId===HML_PROJECT&&guardian.environment===HML_ENVIRONMENT
     &&guardian.branch==='main'&&guardian.authorizedPullRequest===362
-    &&(String(reviewPrNumber)==='362'||(guardian.authorizedArtifactRepairPullRequest===365&&String(reviewPrNumber)==='365'))
+    &&(String(reviewPrNumber)==='362'||(guardian.authorizedArtifactRepairPullRequest===365&&String(reviewPrNumber)==='365')
+      ||(guardian.authorizedAuditedExtensionPullRequest===366&&guardian.auditedExtensionReviewedHeadSha==='d1d2426cac77afb372ee23fca9adf9893a328270'
+        &&(String(reviewPrNumber)==='366'||(guardian.authorizedApprovalRecordPullRequest===368&&String(reviewPrNumber)==='368'))))
     &&guardian.sameGuardianRequired===true&&guardian.existingIdempotencyRequired===true
     &&guardian.protectedRunOwnerApprovalStillRequired===true&&guardian.exactFinalSourceCiStillRequired===true
     &&guardian.canonicalSmokeAndReadbackStillRequired===true
