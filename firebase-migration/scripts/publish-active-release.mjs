@@ -60,7 +60,8 @@ function requireCurrentOwnerDecision(now,reviewPrNumber) {
   const chelfexWindow=chelfex?.decisionId==='AURORA-HML-CHELFEX-20261031'
     &&chelfex.approvalSource==='DIRECT_OWNER_CHAT'&&chelfex.ownerHmlDeploymentApproved===true
     &&chelfex.repo===REPOSITORY&&chelfex.projectId===HML_PROJECT&&chelfex.environment===HML_ENVIRONMENT
-    &&chelfex.branch==='main'&&chelfex.authorizedPullRequest===347&&String(reviewPrNumber)==='347'
+    &&chelfex.branch==='main'&&chelfex.authorizedPullRequest===347
+    &&(String(reviewPrNumber)==='347'||(chelfex.authorizedFollowupPullRequest===361&&String(reviewPrNumber)==='361'))
     &&chelfex.recommendationOnly===true&&chelfex.executorActivationAuthorized===false
     &&chelfex.protectedRunOwnerApprovalStillRequired===true&&chelfex.exactFinalSourceCiStillRequired===true
     &&chelfex.canonicalSmokeAndReadbackStillRequired===true

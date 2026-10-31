@@ -312,6 +312,8 @@
     "secretRotationAuthorized": false,
     "laterMainCodeReviewClaimed": false,
     "independentGithubPullRequestReviewClaimed": false,
+    "authorizedFollowupPullRequest": 361,
+    "followupScope": "Repair verified public-video HTTP Range failure blocking the explicitly authorized PR 347 HML deployment; no new operational authority.",
     "recommendationOnly": true,
     "executorActivationAuthorized": false
   },
