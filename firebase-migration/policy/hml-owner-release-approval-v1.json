@@ -422,6 +422,8 @@
     "environment": "firebase-homologation",
     "branch": "main",
     "authorizedPullRequest": 362,
+    "authorizedArtifactRepairPullRequest": 365,
+    "artifactRepairScope": "Correção estrita do diretório do comprovante no artefato de release, necessária à publicação e validação instalada do PR #362; mesma janela e mesmos gates.",
     "protectedRunOwnerApprovalStillRequired": true,
     "exactFinalSourceCiStillRequired": true,
     "canonicalSmokeAndReadbackStillRequired": true,

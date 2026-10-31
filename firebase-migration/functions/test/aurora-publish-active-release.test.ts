@@ -602,7 +602,11 @@ test('writer migration authorization stays bound to PR362, HML, current CI and r
   };
   const valid=prepare();await publishActiveRelease(valid.env,valid.deps);assert.equal(valid.writes(),1);
   assert.equal(valid.approvalProvenance().independentGithubPullRequestReviewClaimed,false);
-  const wrongPr=prepare();(wrongPr.env as any).AURORA_ACTIVE_RELEASE_REVIEW_PR='363';
+  const repair=prepare();(repair.env as any).AURORA_ACTIVE_RELEASE_REVIEW_PR='365';
+  repair.responses.set('/pulls/365',structuredClone(repair.responses.get('/pulls/362')));
+  repair.responses.set('/pulls/365/reviews?per_page=100',[]);
+  await publishActiveRelease(repair.env,repair.deps);assert.equal(repair.writes(),1);
+  const wrongPr=prepare();(wrongPr.env as any).AURORA_ACTIVE_RELEASE_REVIEW_PR='366';
   await assert.rejects(publishActiveRelease(wrongPr.env,wrongPr.deps));assert.equal(wrongPr.writes(),0);
   const expired=prepare();expired.deps.now=()=>Date.parse(ownerDecision.writerGuardianHmlAuthorization.validUntilUtc);
   await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);
