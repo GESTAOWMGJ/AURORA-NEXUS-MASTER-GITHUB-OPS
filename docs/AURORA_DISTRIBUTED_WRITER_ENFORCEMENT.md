@@ -2,8 +2,8 @@
 
 Incremento 1.1.0 do **AURORA-REALTIME-PLATFORM-GUARDIAN-001**, sobre
 `eef855d8ffbfd5ca63d3410bfba1cefd4863a48f`. Estado: implementação parcial candidata.
-Base posterior incorporada: `421611aec2c73c00390c7efb35ada055151127d0`
-(PR #361, mídia pública), com atualização do inventário após revisão do delta.
+Base posterior incorporada: `e3b75f52aaeda25dc70d022f88b10725ae570bf9`
+(PR #364, ordem do tráfego HML), com atualização do inventário após revisão do delta.
 Não constitui implantação, handoff físico, inventário instalado ou enforcement
 universal. `allLegacyWritersEnforced=false` permanece no registro nativo e cockpit.
 
@@ -32,7 +32,14 @@ inclui o mesmo módulo no pacote Functions. Não existem duas implementações d
 | Projeção nativa | `auroraRuntime.ts:refreshProjection` | Fontes, snapshots e auditoria na mesma transação |
 | Comandos internos | `auroraRuntime.ts:auroraNexusAction` | Mesmo comando, idempotência e auditoria |
 
-São **oito fronteiras transacionais**, não oito plataformas instaladas ou todos
+| Memória orgânica | `auroraOrganicRuntime.ts`, POST | Mesmo checkpoint, revisão e recibo; GET permanece somente leitura |
+| Observação orgânica automática | `auroraOrganicAutoObserve.ts` | Transação original, falha isolada preservada |
+| Decisão financeira | `auroraFinancialDecisionRuntime.ts` | Mesmo snapshot/MFA/idempotência; sem movimentação financeira |
+| Relatório societário | `auroraShareholderReportRuntime.ts` | Mesmo evento/versão, sem duplicação no replay |
+| Pré-credenciamento | `auroraMedicalPartnerRuntime.ts`, quatro fronteiras | Convite, submissão, reserva e recibo documental; precondição nativa do Storage permanece fora do callback |
+| Autoteste criptográfico | `auroraCryptoRuntime.ts`, três fronteiras | Reserva, sucesso e erro usam o mesmo guardião e runId; KMS permanece fora do callback |
+
+São **19 fronteiras transacionais**, não 19 plataformas instaladas ou todos
 os writers do repositório. O escritor efetivo dessas entradas é o servidor,
 independentemente de a solicitação vir de Apps Script, Xeon, web ou cliente local.
 As chaves de origem não são reinterpretadas como concessões de lease. Nenhum
@@ -90,7 +97,7 @@ do inventário na CI existente; atualizar o JSON não comprova enforcement.
 
 | Família ainda pendente | Trabalho necessário no mesmo sistema |
 | --- | --- |
-| Outros writers Cloud Functions | Migrar transações e writes diretos de orgânico, finanças, perfis, credenciais, credenciamento, criptografia e vigilância; manter autorização e idempotência próprias |
+| Outros writers Cloud Functions | Revisar os writers restantes de perfis, Auth, credenciais, vigilância e administração; manter autorização e idempotência próprias. As 19 fronteiras acima não cobrem todo Admin SDK |
 | Apps Script `src/` | Revisar cada mutação Spreadsheet/Drive/Properties/Gmail no ponto de efeito; os diretórios legados continuam inventariados, não tratados como fonte publicada |
 | Xeon e clientes | Confirmar binários e configurações carregados; mapear escrita local, sincronização, instalador e atualizador. Upload canônico protegido não equivale a arquivo local protegido |
 | Provedores externos e scripts administrativos | Usar precondição/idempotência nativa ou execução pelo proprietário único com recibo reconciliável. Uma consulta ao lease antes de uma escrita externa não elimina a corrida entre consulta e efeito |
@@ -125,6 +132,24 @@ Referências de comportamento do provedor:
 [transações](https://firebase.google.com/docs/firestore/manage-data/transactions),
 [isolamento e contenção](https://firebase.google.com/docs/firestore/transaction-data-contention),
 [readTime](https://googleapis.dev/nodejs/firestore/latest/DocumentSnapshot.html).
+
+## Prova instalada no fluxo existente
+
+O workflow protegido existente executa `verify-installed-writer-guardian.mjs`
+após autenticação e smoke canônico. O probe confere o SHA e os hashes do manifesto
+implantado antes do efeito; usa a mesma sessão e CSRF para uma chamada ao refresh
+existente, sem abrir endpoint nem criar executor. A leitura Firestore exige epoch
+crescente e igualdade exata de `updateTime` entre lease RELEASED e projeção.
+HTTP 200 sozinho, timeout, epoch antigo ou commits diferentes permanecem
+`PENDING_EFFECT_PROOF`. Nenhuma chave nova de idempotência ou retentativa automática
+é criada. O resultado sanitizado acompanha o artefato do deploy existente.
+
+A prova cobre o commit canônico do servidor usado por esses clientes. Não comprova
+escritas locais, cópias externas de Apps Script nem handoff físico entre máquinas.
+A identidade do cliente original deve ser conservada. Atualização web e atualização
+binária são evidências distintas. A autorização específica do PR #362 preserva
+CI exata, aprovação real do ambiente protegido, assinatura e CAS da release; não
+estende a validade de credenciais ou de exceções de risco anteriores.
 
 ## Rollback e aprendizado
 

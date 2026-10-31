@@ -494,8 +494,6 @@ jobs:
           }
           NODE
           npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:ingestWmgjEvent,functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusUserProfiles,functions:auroraNexusMedicalPartners,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusFinancialPanel,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
-      - name: Verify public CREDMED form, static PDF/MP4 and anonymous management denial
-        run: node firebase-migration/scripts/verify-credmed-public-release.mjs --origin https://wmgj-hml-jfn-20260927.web.app
       - name: Verify actual HML ingest build, boundary and ready traffic after deployment
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -529,6 +527,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git rev-parse refs/remotes/origin/main)" = "$GITHUB_SHA"
           node firebase-migration/scripts/promote-hml-integration-ping-traffic.mjs promote
+      - name: Verify public CREDMED form, static PDF/MP4 and anonymous management denial
+        run: node firebase-migration/scripts/verify-credmed-public-release.mjs --origin https://wmgj-hml-jfn-20260927.web.app
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -919,6 +919,10 @@ jobs:
               serverManifestSha256:.canonicalVersion.runtimeBuild.manifestSha256,
               webManifestSha256:.canonicalVersion.runtimeBuildWeb.manifestSha256}' \
               "$smoke_dir/canonical-bootstrap.json" > "$RUNNER_TEMP/aurora-canonical-runtime-smoke.json"
+            node firebase-migration/scripts/verify-installed-writer-guardian.mjs \
+              --bootstrap "$smoke_dir/canonical-bootstrap.json" \
+              --cookie-jar "$smoke_dir/canonical-cookies.txt" \
+              --output "$RUNNER_TEMP/aurora-writer-installed-proof.json"
           fi
       - name: Verify canonical source-bound runtime
         if: ${{ inputs.publish_active_release }}
@@ -946,6 +950,7 @@ jobs:
             firebase-migration/functions/runtime-release/ia-master-package/
             firebase-migration/functions/runtime-release/windows-integration-package/
             firebase-migration/functions/runtime-release/unified-beta-candidate.zip
+            ${{ runner.temp }}/aurora-writer-installed-proof.json
           if-no-files-found: error
           retention-days: 14
       - name: Restore owned AuthGate traffic when deploy or smoke fails

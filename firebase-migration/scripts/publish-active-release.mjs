@@ -61,7 +61,7 @@ function requireCurrentOwnerDecision(now,reviewPrNumber) {
     &&chelfex.approvalSource==='DIRECT_OWNER_CHAT'&&chelfex.ownerHmlDeploymentApproved===true
     &&chelfex.repo===REPOSITORY&&chelfex.projectId===HML_PROJECT&&chelfex.environment===HML_ENVIRONMENT
     &&chelfex.branch==='main'&&chelfex.authorizedPullRequest===347
-    &&(String(reviewPrNumber)==='347'||(chelfex.authorizedFollowupPullRequest===361&&String(reviewPrNumber)==='361'))
+    &&(String(reviewPrNumber)==='347'||(chelfex.authorizedFollowupPullRequest===361&&String(reviewPrNumber)==='361')||(chelfex.authorizedTrafficOrderRepairPullRequest===364&&String(reviewPrNumber)==='364'))
     &&chelfex.recommendationOnly===true&&chelfex.executorActivationAuthorized===false
     &&chelfex.protectedRunOwnerApprovalStillRequired===true&&chelfex.exactFinalSourceCiStillRequired===true
     &&chelfex.canonicalSmokeAndReadbackStillRequired===true
@@ -72,7 +72,23 @@ function requireCurrentOwnerDecision(now,reviewPrNumber) {
       .every(flag=>chelfex[flag]===false)
     &&Number.isSafeInteger(chelfexStart)&&Number.isSafeInteger(chelfexExpiry)
     &&chelfexExpiry>chelfexStart&&now>=chelfexStart&&now<chelfexExpiry;
-  if(!historicalWindow&&!mediaWindow&&!chelfexWindow) fail('OWNER_APPROVAL_EXPIRED');
+  const guardian=ownerDecision.writerGuardianHmlAuthorization;
+  const guardianStart=Date.parse(`${guardian?.recordedOn}T00:00:00.000Z`);
+  const guardianExpiry=Date.parse(guardian?.validUntilUtc);
+  const guardianWindow=guardian?.decisionId==='AURORA-HML-WRITER-GUARDIAN-20261031'
+    &&guardian.approvalSource==='DIRECT_OWNER_CHAT'&&guardian.ownerHmlDeploymentApproved===true
+    &&guardian.repo===REPOSITORY&&guardian.projectId===HML_PROJECT&&guardian.environment===HML_ENVIRONMENT
+    &&guardian.branch==='main'&&guardian.authorizedPullRequest===362&&String(reviewPrNumber)==='362'
+    &&guardian.sameGuardianRequired===true&&guardian.existingIdempotencyRequired===true
+    &&guardian.protectedRunOwnerApprovalStillRequired===true&&guardian.exactFinalSourceCiStillRequired===true
+    &&guardian.canonicalSmokeAndReadbackStillRequired===true
+    &&['newExecutorAuthorized','riskReviewDeadlineExtended','newResidualRiskAcceptanceClaimed',
+      'productionAuthorized','clinicalSensitiveAuthorized','newSourceEnrollmentAuthorized',
+      'existingCredentialValidityExtended','iamChangeAuthorized','secretRotationAuthorized',
+      'laterMainCodeReviewClaimed','independentGithubPullRequestReviewClaimed'].every(flag=>guardian[flag]===false)
+    &&Number.isSafeInteger(guardianStart)&&Number.isSafeInteger(guardianExpiry)
+    &&guardianExpiry>guardianStart&&now>=guardianStart&&now<guardianExpiry;
+  if(!historicalWindow&&!mediaWindow&&!chelfexWindow&&!guardianWindow) fail('OWNER_APPROVAL_EXPIRED');
 }
 
 async function verifyOwnerDeploymentApproval(input,release,pr,githubJSON) {
