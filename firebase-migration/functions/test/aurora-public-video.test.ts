@@ -46,3 +46,14 @@ test('exact video rewrite defeats static precedence while preserving private rou
   const smoke=readFileSync(new URL('../../scripts/verify-credmed-public-release.mjs',import.meta.url),'utf8');
   assert.match(smoke,/assert.equal\(partial.code,206/);
 });
+
+test('deployed media smoke runs after exact ready traffic promotion and keeps rollback guards',()=>{
+  const workflow=readFileSync(new URL('../../../.github/workflows/deploy-aurora-firebase.yml',import.meta.url),'utf8');
+  const promote=workflow.indexOf('      - name: Promote exact ready AuthGate traffic');
+  const ping=workflow.indexOf('      - name: Promote exact ready IntegrationPing traffic');
+  const smoke=workflow.indexOf('      - name: Verify public CREDMED form');
+  const privateSmoke=workflow.indexOf('      - name: Smoke test private shell');
+  assert.ok(promote>=0&&ping>promote&&smoke>ping&&privateSmoke>smoke);
+  assert.match(workflow,/node firebase-migration\/scripts\/promote-hml-authgate-traffic.mjs rollback/);
+  assert.match(workflow,/node firebase-migration\/scripts\/promote-hml-integration-ping-traffic.mjs rollback/);
+});
