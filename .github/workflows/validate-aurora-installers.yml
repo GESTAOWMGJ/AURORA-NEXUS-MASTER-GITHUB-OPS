@@ -247,25 +247,17 @@ jobs:
         with:
           python-version: '3.12'
       - name: Validate shared kernel and authenticated synthetic readback
-        shell: pwsh
+        shell: bash
         run: |
+          set -euo pipefail
           npm ci --prefix firebase-migration/functions --ignore-scripts --no-audit --no-fund
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run build --prefix firebase-migration/functions
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Push-Location firebase-migration/functions
-          node --import tsx --test test/auroraChelflex.test.ts
-          $testExit=$LASTEXITCODE
-          Pop-Location
-          if ($testExit -ne 0) { exit $testExit }
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python desktop/ia-master/build.py --output "$env:RUNNER_TEMP/chelfex-package"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $env:AURORA_TEST_BUILD="$env:RUNNER_TEMP/chelfex-package"
-          $env:AURORA_STUDIO_TEST_GIT=(Get-Command git.exe).Source
-          $env:AURORA_CHELFEX_READBACK="$env:RUNNER_TEMP/chelfex-readback.json"
+          (cd firebase-migration/functions && node --import tsx --test test/auroraChelflex.test.ts)
+          export AURORA_TEST_BUILD="$(cygpath -m "$RUNNER_TEMP/chelfex-package")"
+          export AURORA_STUDIO_TEST_GIT="$(cygpath -m "$(command -v git)")"
+          export AURORA_CHELFEX_READBACK="$(cygpath -m "$RUNNER_TEMP/chelfex-readback.json")"
+          python desktop/ia-master/build.py --output "$AURORA_TEST_BUILD"
           node --test --test-name-pattern='CHELFEx' desktop/ia-master/server.test.cjs
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: chelfex-windows-readback-${{ github.sha }}
