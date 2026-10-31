@@ -845,7 +845,7 @@ jobs:
             409)
               jq -e '
                 .ok == false and
-                (.code == "FIREBASE_NATIVE_SNAPSHOT_REQUIRED" or .code == "FIREBASE_NATIVE_CONTRACT_REQUIRED")
+                (.code == "FIREBASE_NATIVE_SNAPSHOT_REQUIRED" or .code == "FIREBASE_NATIVE_CONTRACT_REQUIRED" or (.code == "FIREBASE_NATIVE_DATA_NOT_READY" and (.reasonCodes | type == "array" and length > 0)))
               ' "$native_response" >/dev/null
               ;;
             *)
@@ -919,6 +919,9 @@ jobs:
               serverManifestSha256:.canonicalVersion.runtimeBuild.manifestSha256,
               webManifestSha256:.canonicalVersion.runtimeBuildWeb.manifestSha256}' \
               "$smoke_dir/canonical-bootstrap.json" > "$RUNNER_TEMP/aurora-canonical-runtime-smoke.json"
+            node firebase-migration/scripts/verify-chelfex-authenticated-readback.mjs \
+              "$smoke_dir/canonical-bootstrap.json" "$GITHUB_SHA" \
+              > firebase-migration/functions/runtime-release/chelfex-authenticated-readback.json
             node firebase-migration/scripts/verify-installed-writer-guardian.mjs \
               --bootstrap "$smoke_dir/canonical-bootstrap.json" \
               --cookie-jar "$smoke_dir/canonical-cookies.txt" \
@@ -951,6 +954,7 @@ jobs:
             firebase-migration/functions/runtime-release/windows-integration-package/
             firebase-migration/functions/runtime-release/unified-beta-candidate.zip
             firebase-migration/functions/runtime-release/aurora-writer-installed-proof.json
+            firebase-migration/functions/runtime-release/chelfex-authenticated-readback.json
           if-no-files-found: error
           retention-days: 14
       - name: Restore owned AuthGate traffic when deploy or smoke fails
@@ -1195,6 +1199,8 @@ jobs:
               --engineering-version "$expected_product_version" \
               --publish-active-release true --phase POST_PROMOTION \
               --expected-certificate-sha256 "$EXPECTED_FINAL_CERTIFICATE_SHA256"
+            node firebase-migration/scripts/verify-chelfex-authenticated-readback.mjs \
+              "$bootstrap_response" "$GITHUB_SHA"
             jq -nc --arg source "$GITHUB_SHA" --arg certificate "$EXPECTED_FINAL_CERTIFICATE_SHA256" \
               '{code:"POST_PROMOTION_CANONICAL_SMOKE_VERIFIED",sourceSha:$source,certificateSha256:$certificate}'
           } 2>"$smoke_dir/private-errors.log"

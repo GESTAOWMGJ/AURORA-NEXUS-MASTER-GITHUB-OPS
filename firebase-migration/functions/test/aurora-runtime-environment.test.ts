@@ -23,14 +23,20 @@ test("bootstrap, native insight and master label only the authenticated tenant m
     else process.env.AURORA_NEXUS_ALLOWED_EMAILS=previous;});
   t.mock.method(auth,"verifySessionCookie",async()=>({uid:"synthetic-user",email:"synthetic@example.invalid",
     auroraOrgId:"synthetic",firebase:{}}));
-  const stamp=Timestamp.fromDate(new Date("2026-10-08T00:00:00Z"));
+  // Environment-label assertions require an eligible synthetic snapshot, not an
+  // expired/incomplete record rejected by the canonical native data gate.
+  const clock=new Date(), stamp=Timestamp.fromDate(clock);
   t.mock.method(db,"doc",(path:string)=>({get:async()=>{
     const value=path===base?{active:true,environment,projectionCompetence:"2026-10"}
       :path===`${base}/members/synthetic-user`?{active:true,role:"viewer",allFacilities:true,permissions:[]}
-      :path===`${base}/dashboardSnapshots/current`?{orgId:"synthetic",competence:null,
-        environment:"HOMOLOGATION",state:"SHADOW",generatedAt:stamp,
-        nativeDataPlane:{storage:"FIRESTORE",sourceAccessDuringInference:false},
-        dataQuality:{complete:true,sourcePresent:true},operations:{},audit:{},documentIntelligence:{},
+      :path===`${base}/dashboardSnapshots/current`?{orgId:"synthetic",competence:"2026-10",
+        snapshotId:"synthetic-environment-snapshot",sourceHash:"a".repeat(64),schemaVersion:2,
+        policyVersion:"aurora-nexus-2.4.0-firebase-native-v1",asOf:clock.toISOString(),
+        sanitized:true,sensitivity:"INTERNAL",environment:"HOMOLOGATION",state:"SHADOW",generatedAt:stamp,
+        nativeDataPlane:{storage:"FIRESTORE",sourceAccessDuringInference:false,externalAiRequired:false},
+        dataQuality:{complete:true,sourcePresent:true,invalidFinancialRecords:0},
+        operations:{openActions:0,overdueActions:0},audit:{},
+        documentIntelligence:{fragileDocuments:0,sourceDependentDocuments:0,overdueDocumentSla:0},
         coverage:{},financial:{},financialCents:{},sources:[],alerts:[],pipeline:{}}
       :undefined;
     return {readTime:{toMillis:()=>Date.now()},exists:value!==undefined,data:()=>value};

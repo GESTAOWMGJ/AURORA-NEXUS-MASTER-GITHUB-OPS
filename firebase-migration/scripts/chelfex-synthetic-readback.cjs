@@ -22,5 +22,6 @@ const sha=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
 const dirty=!!execFileSync('git',['status','--porcelain','--untracked-files=all'],{encoding:'utf8'}).trim();
 console.log(JSON.stringify({schemaVersion:'aurora.chelfex.synthetic-readback.v1',sourceSha:sha,dirty,
   evidenceMode:'OFFLINE_SYNTHETIC',identity:'SIMULATED_NOT_REAL_SESSION',
+  platform:process.platform,nodeVersion:process.version,evaluatedAt:now.toISOString(),
   liveDataUsed:false,operationalWrites:0,deployExecuted:false,cloudHmlVerified:false,
   independentReviewVerified:false,contractResultSha256:createHash('sha256').update(JSON.stringify(result)).digest('hex'),result},null,2));

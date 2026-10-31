@@ -616,3 +616,17 @@ test('writer migration authorization stays bound to PR362, HML, current CI and r
   assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-27T04:30:00.000Z');
   assert.equal(ownerDecision.riskAcceptance.reviewBy,'2026-10-25');
 });
+
+test('CHELFEx authenticated hardening PR 358 uses the same bounded HML decision and cannot bypass deployment approval',async()=>{
+  assert.equal(ownerDecision.chelfexHmlAuthorization.authorizedReviewHardeningPullRequest,358);
+  const fixture=()=>{const f=ownerFixture();f.env.AURORA_ACTIVE_RELEASE_REVIEW_PR='358';
+    f.responses.set('/pulls/358',structuredClone(f.responses.get('/pulls/42')));
+    f.responses.set('/pulls/358/reviews?per_page=100',[]);
+    f.deps.now=()=>Date.parse('2026-10-31T12:00:00.000Z');return f;};
+  const valid=fixture();await publishActiveRelease(valid.env,valid.deps);assert.equal(valid.writes(),1);
+  const denied=fixture();denied.responses.set(`/actions/runs/${releaseRunId}/approvals`,[]);
+  await assert.rejects(publishActiveRelease(denied.env,denied.deps),/OWNER_DEPLOYMENT_APPROVAL_NOT_VERIFIED/);
+  assert.equal(denied.writes(),0);
+  const expired=fixture();expired.deps.now=()=>Date.parse(ownerDecision.chelfexHmlAuthorization.validUntilUtc);
+  await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(expired.writes(),0);
+});

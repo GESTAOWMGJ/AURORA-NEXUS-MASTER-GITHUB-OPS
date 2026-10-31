@@ -230,3 +230,39 @@ Regressões sintéticas cobrem metadados falsos, bytes divergentes/truncados/mai
 resposta perdida, geração removida, replay e revogação/takeover durante readback.
 O aprendizado abstrato no registro nativo separa prova dos bytes de posse do
 lease; leitura pelo motor instalado e adoção física permanecem pendentes.
+
+### Revisão independente de fonte — AURORA-WRITER-REVIEW-20261031.1
+
+Revisão fixada na candidata `cac3554053ab96d8d48548b97879c3aef046d770`,
+sucessora de `0d0a994c8591fd2dd8918c32559fba4d9821c987`, e reconciliada com
+a main `2743b6f24bdda57a5b5241c8ba8250a5459156b8`. A composição preserva
+os artefatos de prova do guardião e do CHELFEx no mesmo diretório; o inventário
+foi regenerado para os bytes efetivamente combinados. O protocolo do guardião
+continua em 1.1.0: não houve nova concessão de lease, executor ou fronteira.
+
+Foi reproduzida uma falha preexistente na emissão de convite médico: revogar
+o administrador entre a autenticação e a transação ainda permitia criar o convite.
+O incremento relê membership junto da organização dentro do commit, exigindo
+atividade, função administrativa, escopo global e tenant compatível. MFA continua
+derivado da sessão autenticada, nunca do documento de membership. Cinco testes
+falharam antes da correção (HTTP 200 em vez de 403); depois, os mesmos testes
+bloqueiam a escrita sem produzir convite ou epoch. Um controle positivo preserva
+a emissão autorizada. Essa correção não é apresentada como regressão nova do #366.
+
+Limitações adicionais verificadas na fonte, anteriores ao PR:
+
+- O watchdog seleciona até 200 assessments antes de descartar fingerprints já
+  tratados; pode repetir o mesmo prefixo indefinidamente. Acima de 1.000 documentos,
+  o limite de leitura aborta o tenant. A atomicidade por item não resolve paginação
+  nem comprova progresso de todos os documentos. Requer próximo incremento com
+  retomada e teste de conjuntos maiores, sem outro scheduler.
+- CREATE de credencial gera identidade nova a cada requisição; uma resposta perdida
+  pode deixar uma chave ativa sem o segredo entregue ao cliente. O lease serializa
+  commits, mas não cria idempotência HTTP. REGISTER_HASH conflita em repetição e
+  REVOKE conserva seu primeiro recibo. Não repetir CREATE como recuperação implícita.
+
+Build TypeScript e 126 testes direcionados passaram localmente. Na composição
+anterior à correção, 1.364 de 1.367 testes Functions passaram; três não puderam
+validar YAML por ausência do executável Ruby local. CI do novo SHA, revisão humana,
+publicação protegida e prova instalada permanecem evidências separadas. As flags
+de cobertura universal, fencing externo e handoff físico continuam falsas.

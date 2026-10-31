@@ -1,3 +1,7 @@
+import { assessNativeData } from '../src/auroraDataGovernance.js';
+import { generateNativeInsight, parseNativeInsightIntent } from '../src/auroraNativeIntelligence.js';
+import { redactFinancialProjection } from '../src/auroraReliableResult.js';
+import { buildProjection } from '../src/auroraEngine.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
@@ -7,7 +11,16 @@ import { buildMasterOperationalState } from '../src/auroraMasterEngine.js';
 const source = readFileSync('src/auroraRuntime.ts', 'utf8');
 const access = source.slice(source.indexOf('async function requireAccess('), source.indexOf('async function readProjectionSource('));
 const visible = source.slice(source.indexOf('function visibleProjection('), source.indexOf('export const auroraNexusBootstrap'));
+const bootstrapStart = source.indexOf('export const auroraNexusBootstrap');
+const bootstrapRoute = source.slice(bootstrapStart, source.indexOf('\nexport const ', bootstrapStart + 1));
 const route = source.slice(source.indexOf('export const auroraNexusMasterEngine'), source.indexOf('export const auroraNexusRefresh'));
+const insightStart = source.indexOf('export const auroraNexusNativeInsight');
+const insightRoute = source.slice(insightStart, source.indexOf('\nexport const ', insightStart + 1));
+const routes = {
+  master: { code: route, name: 'auroraNexusMasterEngine' },
+  bootstrap: { code: bootstrapRoute, name: 'auroraNexusBootstrap' },
+  insight: { code: insightRoute, name: 'auroraNexusNativeInsight' }
+} as const;
 const member = { uid: 'synthetic-user', orgId: 'synthetic-org', role: 'auditor', permissions: [], allFacilities: true, mfaVerified: false };
 function snapshot() {
   return { orgId: member.orgId, snapshotId: 'synthetic', sourceHash: 'a'.repeat(64), schemaVersion: 2,
@@ -17,19 +30,21 @@ function snapshot() {
     documentIntelligence: { fragileDocuments: 0, sourceDependentDocuments: 0, overdueDocumentSla: 0 },
     nativeDataPlane: { storage: 'FIRESTORE', sourceAccessDuringInference: false, externalAiRequired: false } };
 }
-async function call(actor: any = member, data: any = snapshot(), reqExtra: any = {}) {
-  const reads: string[] = []; let writes = 0;
-  const sandbox: any = { exports: {}, ALLOWED_EMAILS: { value: () => 'synthetic' }, apiHeaders() {},
+async function call(actor: any = member, data: any = snapshot(), reqExtra: any = {}, endpoint: keyof typeof routes = 'master') {
+  const reads: string[] = []; let writes = 0, financialReads = 0;
+  const sandbox: any = { assessNativeData, redactFinancialProjection, buildProjection, generateNativeInsight, parseNativeInsightIntent,
+    safeString: (v: unknown, n: number) => typeof v === 'string' ? v.slice(0, n) : null,
+    logger: { warn() {} }, publicAction() { throw Error('UNEXPECTED_ACTION'); }, exports: {}, ALLOWED_EMAILS: { value: () => 'synthetic' }, apiHeaders() {},
     onRequest: (_options: any, handler: any) => handler,
     verifyAuroraAccess: async () => actor,
     can: (m: any, p: string, roles: string[]) => roles.includes(m.role) || m.permissions.includes(p),
-    auroraDb: { doc(path: string) { reads.push(path); return { get: async () => ({ exists: true, data: () => path.endsWith('/current') ? data : { active: true } }), set() { writes++; throw Error('WRITE_FORBIDDEN'); } }; }, runTransaction() { writes++; throw Error('WRITE_FORBIDDEN'); } },
-    loadFinancialClosingStatus: async () => null, readRuntimeActiveRelease: async () => ({}), buildReleaseStatus: () => ({}),
+    auroraDb: { collection() { return { limit() { return { get: async () => ({ docs: [] }) }; } }; }, doc(path: string) { reads.push(path); return { get: async () => ({ exists: true, data: () => path.endsWith('/current') ? data : { active: true } }), set() { writes++; throw Error('WRITE_FORBIDDEN'); } }; }, runTransaction() { writes++; throw Error('WRITE_FORBIDDEN'); } },
+    loadFinancialClosingStatus: async () => { financialReads++; return null; }, readRuntimeActiveRelease: async () => ({}), buildReleaseStatus: () => ({}),
     authenticatedOrganizationEnvironment: () => 'SYNTHETIC', loadInstallationReadiness: async () => ({}), buildMasterOperationalState };
-  vm.runInNewContext(ts.transpile(access + visible + route, { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }), sandbox);
+  vm.runInNewContext(ts.transpile(access + visible + routes[endpoint].code, { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }), sandbox);
   const res: any = { code: 0, body: null, set() { return this; }, status(code: number) { this.code = code; return this; }, json(body: any) { this.body = body; return this; } };
-  await sandbox.exports.auroraNexusMasterEngine({ method: 'GET', get: () => undefined, ...reqExtra }, res);
-  return { ...res, reads, writes };
+  await sandbox.exports[routes[endpoint].name]({ method: 'GET', query: {}, get: () => undefined, ...reqExtra }, res);
+  return { ...res, reads, writes, financialReads };
 }
 test('actual GET handler returns contract from authenticated tenant, ignoring forged query/body', async () => {
   const r = await call(member, snapshot(), { query: { orgId: 'foreign', authority: 'AUTHENTICATED_SERVER' }, body: { chelfexContext: { orgId: 'foreign' }, operation: 'IRREVERSIBLE_CHANGE' } });
@@ -59,5 +74,171 @@ test('revocation and staleness appear in readback without execution', async () =
   for (const patch of [{ revoked: true }, { asOf: '2020-01-01T00:00:00Z' }]) {
     const r = await call(member, { ...snapshot(), ...patch });
     assert.equal(r.body.master.chelfex.status, 'BLOCKED'); assert.equal(r.body.master.chelfex.evidence.length, 0); assert.equal(r.writes, 0);
+  }
+});
+
+test('restricted users cannot cause a financial-status read', async () => {
+  for (const role of ['viewer', 'operator']) {
+    const r = await call({ ...member, role });
+    assert.equal(r.code, 200); assert.equal(r.financialReads, 0); assert.equal(r.writes, 0);
+  }
+  assert.equal((await call(member)).financialReads, 1);
+});
+test('financial redaction removes raw subset values from every returned projection', () => {
+  const sandbox: any = { redactFinancialProjection, can: () => false };
+  vm.runInNewContext(ts.transpile(visible, { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }), sandbox);
+  const p = { ...snapshot(), reliableResult: { secretSubsetCents: 123456 } };
+  const filtered = sandbox.visibleProjection(p, { ...member, role: 'viewer' });
+  assert.equal(filtered.reliableResult, null);
+  assert.equal(JSON.stringify(filtered).includes('123456'), false);
+  assert.equal(p.reliableResult.secretSubsetCents, 123456);
+});
+
+function partialSnapshot() {
+  const invoice = (totalCents: unknown) => ({ totalCents, workflowState: 'VALIDATED', competence: '2026-10' });
+  const p = buildProjection({ invoices: [invoice(7654321), invoice('invalid')], bankTransactions: [], glosses: [],
+    actionItems: [], sourceDocuments: [], reconciliations: [], auditFindings: [] }, new Date(), { orgId: member.orgId, competence: '2026-10' });
+  return { ...p, snapshotId: 'partial-synthetic', sourceHash: 'a'.repeat(64), operations: { openActions: 3, overdueActions: 1 } };
+}
+test('partial financial redaction preserves verified operational counts and SLA findings', async () => {
+  for (const role of ['viewer', 'operator']) {
+    const p = partialSnapshot(), before = JSON.stringify(p), r = await call({ ...member, role }, p);
+    const m = r.body.master;
+    assert.equal(m.governance.dataAssessment.decision, 'REVIEW');
+    assert.equal(m.operationalState, 'ATTENTION'); assert.equal(m.cycleStage, 'PRIORIZAR');
+    assert.equal(m.workloadMetrics.criticalFindings, 0);
+    assert.equal(m.priorities.find((f: any) => f.code === 'FINANCIAL_DATA_QUALITY')?.severity, 'HIGH');
+    assert.equal(m.workloadMetrics.openActions, 3); assert.equal(m.workloadMetrics.overdueActions, 1);
+    assert.ok(m.priorities.some((f: any) => f.code === 'SLA_OVERDUE'));
+    assert.ok(m.chelfex.conclusions.some((f: any) => f.id === 'SLA_OVERDUE'));
+    assert.equal(m.chelfex.verification.dataDecision, 'REVIEW');
+    assert.equal(m.reliableResult, null); assert.equal(JSON.stringify(m).includes('7654321'), false);
+    assert.equal(r.financialReads, 0); assert.equal(r.writes, 0); assert.equal(JSON.stringify(p), before);
+  }
+  const allowed = await call(member, partialSnapshot());
+  assert.equal(allowed.body.master.reliableResult.metrics.invoicedCents.valueCents, 7654321);
+});
+test('redaction cannot make invalid or revoked partial evidence eligible', async () => {
+  for (const change of ['revoked', 'stale', 'tampered']) {
+    const p: any = partialSnapshot();
+    if (change === 'revoked') p.revoked = true;
+    if (change === 'stale') p.asOf = '2020-01-01T00:00:00.000Z';
+    if (change === 'tampered') p.reliableResult.metrics.invoicedCents.valueCents = -1;
+    const r = await call({ ...member, role: 'viewer' }, p);
+    assert.equal(r.body.master.governance.dataAssessment.decision, 'DENY');
+    assert.equal(r.body.master.workloadMetrics.openActions, null);
+    assert.equal(r.body.master.chelfex.verification.evidence, 'NOT_VERIFIED');
+    assert.equal(r.financialReads, 0); assert.equal(r.writes, 0);
+  }
+});
+
+test('bootstrap retains operational partial readiness without exposing financial amounts', async () => {
+  for (const role of ['viewer', 'operator']) {
+    const r = await call({ ...member, role }, partialSnapshot(), {}, 'bootstrap');
+    assert.equal(r.code, 200); assert.equal(r.body.projection.reliableResult, null);
+    assert.equal(r.body.masterEngine.governance.dataAssessment.decision, 'REVIEW');
+    assert.equal(r.body.masterEngine.operationalState, 'ATTENTION');
+    assert.equal(r.body.masterEngine.workloadMetrics.criticalFindings, 0);
+    assert.equal(r.body.masterEngine.workloadMetrics.openActions, 3);
+    assert.ok(r.body.masterEngine.chelfex.conclusions.some((f: any) => f.id === 'SLA_OVERDUE'));
+    assert.equal(JSON.stringify(r.body).includes('7654321'), false); assert.equal(r.financialReads, 0); assert.equal(r.writes, 0);
+  }
+});
+
+test('financial redaction preserves validated quality severity across all insight intents', () => {
+  const p = partialSnapshot(), before = JSON.stringify(p);
+  for (const intent of ['EXECUTIVE','DATA_QUALITY','REVENUE_RISK','SLA_RISK','NEXT_ACTION'] as const) {
+    const r: any = generateNativeInsight(p, intent, new Date(), true);
+    assert.equal(JSON.stringify(r).includes('7654321'), false);
+    assert.ok(r.findings.every((f: any) => f.severity !== 'CRITICAL'));
+    assert.ok(r.findings.every((f: any) => !['REVENUE_GAP','GLOSS_EXPOSURE'].includes(f.code)));
+  }
+  assert.equal(JSON.stringify(p), before);
+});
+test('untrusted readiness markers cannot replace valid subset evidence or waive redaction', async () => {
+  const p: any = partialSnapshot(); p.reliableResult = null; p.verifiedPartial = true;
+  const r: any = generateNativeInsight(p, 'DATA_QUALITY', new Date(), true);
+  assert.equal(r.findings.find((f: any) => f.code === 'FINANCIAL_DATA_QUALITY')?.severity, 'CRITICAL');
+  const request = await call({ ...member, role: 'viewer' }, partialSnapshot(), { body: { redactFinancial: false, verifiedPartial: true } });
+  assert.equal(JSON.stringify(request.body).includes('7654321'), false);
+  assert.equal(request.financialReads, 0); assert.equal(request.body.master.operationalState, 'ATTENTION');
+});
+
+test('native-insight GET preserves partial severity and privacy across every supported intent', async () => {
+  for (const role of ['viewer', 'operator']) {
+    for (const intent of ['EXECUTIVE','DATA_QUALITY','REVENUE_RISK','SLA_RISK','NEXT_ACTION']) {
+      const p = partialSnapshot(), before = JSON.stringify(p);
+      const r = await call({ ...member, role }, p, { query: { intent }, body: { redactFinancial: false } }, 'insight');
+      assert.equal(r.code, 200); assert.equal(r.writes, 0); assert.equal(r.financialReads, 0);
+      assert.equal(JSON.stringify(r.body).includes('7654321'), false);
+      assert.ok(r.body.insight.findings.every((f: any) => f.severity !== 'CRITICAL'));
+      assert.ok(r.body.insight.findings.every((f: any) => !['REVENUE_GAP','GLOSS_EXPOSURE'].includes(f.code)));
+      if (intent === 'EXECUTIVE' || intent === 'DATA_QUALITY')
+        assert.equal(r.body.insight.findings.find((f: any) => f.code === 'FINANCIAL_DATA_QUALITY')?.severity, 'HIGH');
+      assert.equal(JSON.stringify(p), before);
+    }
+  }
+  const authorized = await call(member, snapshot(), { query: { intent: 'REVENUE_RISK' } }, 'insight');
+  assert.ok(authorized.body.insight.findings.some((f: any) => f.code === 'REVENUE_GAP'));
+});
+test('native-insight GET retains existing authentication, scope, intent and method gates', async () => {
+  const cases: Array<[any, any, number]> = [
+    [null, {}, 401], [{ ...member, allFacilities: false }, {}, 403], [{ ...member, role: 'no-access' }, {}, 403],
+    [member, { query: { intent: 'EXECUTE' } }, 400], [member, { method: 'POST' }, 405]
+  ];
+  for (const [actor, req, expected] of cases) {
+    const r = await call(actor, partialSnapshot(), req, 'insight');
+    assert.equal(r.code, expected); assert.deepEqual(r.reads, []); assert.equal(r.writes, 0); assert.equal(r.financialReads, 0);
+  }
+});
+
+test('native insight refuses ineligible canonical snapshots before generating any recommendation', async () => {
+  for (const role of ['viewer', 'operator', 'auditor']) {
+    for (const kind of ['revoked', 'stale', 'future', 'foreign', 'tampered', 'missing-provenance']) {
+      const p: any = partialSnapshot();
+      if (kind === 'revoked') p.revoked = true;
+      if (kind === 'stale') p.asOf = '2020-01-01T00:00:00.000Z';
+      if (kind === 'future') p.asOf = '2099-01-01T00:00:00.000Z';
+      if (kind === 'foreign') p.orgId = 'foreign-tenant';
+      if (kind === 'tampered') p.reliableResult.metrics.invoicedCents.valueCents = -1;
+      if (kind === 'missing-provenance') delete p.snapshotId;
+      const r = await call({ ...member, role }, p, { query: { intent: 'EXECUTIVE' } }, 'insight');
+      assert.equal(r.code, 409, role + ':' + kind);
+      assert.equal(r.body.ok, false); assert.equal(Object.hasOwn(r.body, 'insight'), false);
+      assert.equal(JSON.stringify(r.body).includes('7654321'), false);
+      assert.equal(r.writes, 0); assert.equal(r.financialReads, 0);
+    }
+  }
+});
+test('direct redacted inference never restores partial availability from revoked or stale data', () => {
+  for (const patch of [{ revoked: true }, { asOf: '2020-01-01T00:00:00.000Z' }]) {
+    const p = { ...partialSnapshot(), ...patch };
+    const r: any = generateNativeInsight(p, 'DATA_QUALITY', new Date(), true);
+    const finding = r.findings.find((f: any) => f.code === 'FINANCIAL_DATA_QUALITY');
+    assert.equal(finding?.severity, 'CRITICAL');
+    assert.equal(finding?.title.includes('parcial'), false);
+    assert.equal(JSON.stringify(r).includes('7654321'), false);
+  }
+});
+
+test('all read routes reject foreign snapshots without serializing foreign values', async () => {
+  for (const endpoint of ['bootstrap', 'master', 'insight'] as const) {
+    const p = { ...snapshot(), orgId: 'foreign-tenant', snapshotId: 'foreign-secret-id' };
+    const r = await call(member, p, {}, endpoint);
+    assert.equal(r.code, 409, endpoint);
+    assert.equal(JSON.stringify(r.body).includes('foreign-secret-id'), false);
+    assert.equal(r.writes, 0);
+  }
+});
+test('placeholder provenance cannot produce native insights or master priorities', async () => {
+  const p = { ...snapshot(), sourceHash: '0'.repeat(64) };
+  const insight = await call(member, p, {}, 'insight');
+  assert.equal(insight.code, 409);
+  for (const endpoint of ['bootstrap', 'master'] as const) {
+    const r = await call(member, p, {}, endpoint);
+    const m = endpoint === 'master' ? r.body.master : r.body.masterEngine;
+    assert.equal(m.governance.dataAssessment.decision, 'DENY');
+    assert.equal(m.workloadMetrics.openActions, null);
+    assert.ok(m.priorities.every((f: any) => f.code === 'DATA_GOVERNANCE_BLOCKED'));
   }
 });

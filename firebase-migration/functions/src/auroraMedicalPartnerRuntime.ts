@@ -82,8 +82,18 @@ async function issueInvitation(actor: AuroraMember) {
   const invitationId = randomUUID();
   const createdAt = nowMs();
   await guardedCanonicalTransaction(auroraDb, ORG, async tx => {
-    const org = await tx.get(auroraDb.doc("organizations/" + ORG));
+    const [org, member] = await Promise.all([
+      tx.get(auroraDb.doc("organizations/" + ORG)),
+      tx.get(auroraDb.doc(basePath + "members/" + actor.uid))
+    ]);
     if (org.data()?.active !== true || org.data()?.medicalPartnersEnabled !== true || org.data()?.medicalPartnersPrivacyApproved !== true) throw new CredentialError("PRE_CREDENTIALING_NOT_ENABLED",503);
+    // Session/MFA remain server-authenticated; mutable authority must be live in
+    // the SAME commit as the invitation, including on a Firestore retry.
+    const current = member.data();
+    if (current?.active !== true || (current.orgId !== undefined && current.orgId !== ORG)
+      || !isAdmin({ ...actor, role: String(current.role ?? ""), allFacilities: current.allFacilities === true })) {
+      throw new CredentialError("WMGJ_ADMIN_MFA_REQUIRED",403);
+    }
     tx.create(auroraDb.doc(basePath + INVITES + "/" + invitationId), {
     schemaVersion: CREDMED_SCHEMA, orgId: ORG, tokenHash: sha256(token),
     state: "INVITED", createdAtIso: iso(createdAt), expiresAtIso: iso(createdAt + CREDMED_INVITATION_TTL_MS),

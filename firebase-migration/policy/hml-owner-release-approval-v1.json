@@ -317,7 +317,10 @@
     "trafficOrderRepairScope": "Run the existing public-media smoke after exact-revision traffic promotion for the authorized CHELFEx HML deployment; preserve rollback and all release gates.",
     "followupScope": "Repair verified public-video HTTP Range failure blocking the explicitly authorized PR 347 HML deployment; no new operational authority.",
     "recommendationOnly": true,
-    "executorActivationAuthorized": false
+    "executorActivationAuthorized": false,
+    "authorizedReviewHardeningPullRequest": 358,
+    "reviewHardeningAuthorizationStatement": "Realiza a homokog auten",
+    "reviewHardeningScope": "Homologação autenticada da candidata CHELFEx revisada no PR #358: integrar, publicar no HML existente e verificar o contrato servido via sessão real; preservar todos os gates, sem executor, novas fontes ou renovação de credenciais."
   },
   "provisionalBetaAcceptance": {
     "decisionId": "AURORA-HML-OWNER-BETA-20261023",

@@ -127,6 +127,31 @@ test('medical invitation issue respects the same guardian before direct document
   assert.equal(result.status,503);assert.equal(result.result.code,'SPLIT_BRAIN_PREVENTED');assert.equal(f.commits(),0);
 });
 
+for (const change of ['inactive','deleted','role','facility','tenant']) {
+  test(`medical invitation rechecks administrator ${change} at the effect transaction`,async t=>{
+    const f=fixture(t),path=`${f.base}/members/${f.member.uid}`;
+    f.beforeTransaction(()=>{
+      const current=f.rows.get(path);
+      if(change==='deleted')f.rows.delete(path);
+      else f.rows.set(path,{...current,...(change==='inactive'?{active:false}:change==='role'?{role:'viewer'}:
+        change==='facility'?{allFacilities:false}:{orgId:'other'})});
+    });
+    const result=await f.call(auroraNexusMedicalPartners,{action:'ISSUE_INVITATION'},CSRF_PURPOSES.medicalPartner,'POST','/api/wmgj/medicos');
+    assert.equal(result.status,403);assert.equal(result.result.code,'WMGJ_ADMIN_MFA_REQUIRED');
+    assert.equal(f.commits(),0);assert.equal(f.rows.has(writerLeasePath('wmgj')),false);
+    assert.equal([...f.rows.keys()].some(key=>key.includes('/medicalPartnerInvitations/')),false);
+  });
+}
+
+test('medical invitation retains an authorized issuer and commits the same guardian epoch',async t=>{
+  const f=fixture(t);
+  const result=await f.call(auroraNexusMedicalPartners,{action:'ISSUE_INVITATION'},CSRF_PURPOSES.medicalPartner,'POST','/api/wmgj/medicos');
+  assert.equal(result.status,200);assert.equal(f.commits(),1);
+  assert.equal(f.rows.get(writerLeasePath('wmgj')).epoch,1);
+  const invitations=[...f.rows.entries()].filter(([key])=>key.includes('/medicalPartnerInvitations/'));
+  assert.equal(invitations.length,1);assert.equal(invitations[0]![1].issuedByUid,f.member.uid);
+});
+
 test('shareholder trigger is fenced, then atomically creates one version and replays without duplication',async t=>{
   const f=fixture(t),event:any={params:{orgId:'wmgj',competence:'2026-10'},data:{after:{exists:true,data:()=>({status:'CLOSED',approvedBy:'synthetic-reviewer',evidenceRefs:['synthetic-evidence']})}}};
   f.lock();await assert.rejects((auroraNexusShareholderReportGenerator as any).run(event),/SPLIT_BRAIN_PREVENTED/);
