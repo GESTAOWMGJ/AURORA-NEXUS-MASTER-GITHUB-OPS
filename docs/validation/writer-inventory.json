@@ -5,7 +5,7 @@
   "method": "CONSERVATIVE_LEXICAL_CANDIDATES",
   "allLegacyWritersEnforced": false,
   "runtimeInventoryVerified": false,
-  "scannedFiles": 248,
+  "scannedFiles": 249,
   "candidateFiles": 169,
   "writeLikeLines": 1314,
   "files": [
@@ -2085,7 +2085,7 @@
     },
     {
       "path": "firebase-migration/scripts/publish-active-release.mjs",
-      "sha256": "8f280e373d1fa6cfd38a3c08a9f3b01cd4e519d0f9f6ca0de6eb3c5b9bef304c",
+      "sha256": "63773f5efb22ca35941082a26b9dc036538d11edcf5a654771f83801f8b721f7",
       "writeLikeLines": [
         19,
         185,
