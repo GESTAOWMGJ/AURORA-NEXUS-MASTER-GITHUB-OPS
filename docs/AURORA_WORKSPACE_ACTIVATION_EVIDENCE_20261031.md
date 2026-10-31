@@ -68,3 +68,19 @@ Concluir a autenticação Notion na conta proprietária; confirmar no momento do
 ### Aprendizado verificável para retomada
 
 Separar quatro estados: ferramenta instalada, sessão CLI autorizada, aplicativo instalado no workspace e ingestão canônica comprovada. Conferir a versão mínima de Python antes do hook de instalação editável. Preservar rollback local e exigir wheels quando o Mac funciona apenas como estação leve. As verificações desta passagem não substituem o aceite de runtime/publicação canônicos.
+
+## Retomada do vínculo canônico — 31/10/2026
+
+### FATO COMPROVADO
+
+- Mac e Windows constavam online no canal remoto na retomada.
+- A página canônica HML apresentou o formulário Entre no Aurora, com e-mail e senha, sem sessão individual autenticada disponível nessa aba. A configuração autenticada da organização não pôde ser conferida por essa sessão.
+- O Notion permaneceu na conta sem acesso ao hub e no formulário de código da conta proprietária. Não se tratou o comando de continuação do titular como conclusão da autenticação.
+- Foi localizada evidência privada histórica do servidor de reserva Mac vinculada a organizations/wmgj no projeto HML existente, com observação de 23/10. Essa prova histórica não foi promovida a configuração atual do agente de ingestão.
+- O caminho LaunchAgent citado nesse recibo histórico não existia na consulta. Isso não prova ausência do aplicativo ou do servidor em outro caminho, nem autoriza recriar uma segunda instância. Nenhum launcher foi criado, removido ou reiniciado.
+- O protocolo de adoção atual e o contrato Notion/Slack foram confrontados: preservam o canal protegido existente, o vínculo por organização e fonte, e recibos separados para instalação, aquisição e processamento. Não conferem automaticamente credencial ao aplicativo.
+- Nenhuma credencial foi revelada, copiada para armazenamento genérico ou usada para contornar o login. Nenhuma alteração cloud, nova instalação, mensagem ou transmissão de documentos ocorreu nesta retomada.
+
+### PENDÊNCIA ABSOLUTA PARA O VÍNCULO SOLICITADO
+
+Concluir a sessão individual autorizada no Aurora HML e a verificação da conta proprietária no Notion, nas abas preparadas. A partir da sessão atual, conferir empresa/fonte e reconciliar a configuração existente antes de cadastrar a credencial no armazenamento protegido e validar o recibo/replay. Autorização do titular permanece registrada; a pendência é autenticação efetiva e prova de vínculo, não novo consentimento genérico. O Slack e a correção do ambiente Mac já comprovados permanecem preservados.
