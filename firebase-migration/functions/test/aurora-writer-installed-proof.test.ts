@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {dirname,resolve,sep} from 'node:path';
-import {verifyInstalledWriterObservation,sessionFromCookieJar} from '../../scripts/verify-installed-writer-guardian.mjs';
+import {verifyInstalledWriterObservation,sessionFromCookieJar,requireVerifiedInstalledCommit,safeRefreshErrorCode} from '../../scripts/verify-installed-writer-guardian.mjs';
 
 function fixture() {
   const sourceSha='a'.repeat(40),manifestBytes=Buffer.from(JSON.stringify({sourceSha,files:{
@@ -67,4 +67,25 @@ test('installed evidence shares the release artifact root expected by the publis
   const output=/--output ([^\s]+aurora-writer-installed-proof.json)/.exec(workflow)?.[1];
   assert.ok(output);assert.equal(dirname(resolve(output)),root);assert.ok(paths.includes(output));
   assert.match(workflow,/path: firebase-migration\/functions\/runtime-release/);
+});
+
+
+test('publication probe fails closed after retaining denied or incomplete evidence',()=>{
+  const valid=verifyInstalledWriterObservation(fixture());
+  assert.doesNotThrow(()=>requireVerifiedInstalledCommit(valid));
+  for(const status of [403,503,null]){
+    const f:any=fixture();f.httpStatus=status;
+    const proof=verifyInstalledWriterObservation(f);
+    assert.equal(proof.canonicalCommitVerified,false);
+    assert.throws(()=>requireVerifiedInstalledCommit(proof),/WRITER_INSTALLED_EFFECT_NOT_VERIFIED/);
+  }
+  for(const change of [{canonicalCommitVerified:false},{installedCodeVerified:false},{leaseAndProjectionSameCommit:false}])
+    assert.throws(()=>requireVerifiedInstalledCommit({...valid,...change}),/WRITER_INSTALLED_EFFECT_NOT_VERIFIED/);
+});
+
+test('refresh diagnostics expose only known non-sensitive error codes',()=>{
+  for(const code of ['PERMISSION_DENIED','CSRF_REJECTED','CROSS_SITE_REJECTED'])
+    assert.equal(safeRefreshErrorCode({code,token:'never-log'}),code);
+  for(const body of [null,{},'secret',{code:'secret-token'},{code:{token:'secret'}}])
+    assert.equal(safeRefreshErrorCode(body),null);
 });
