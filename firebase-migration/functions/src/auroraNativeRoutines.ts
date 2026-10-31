@@ -267,6 +267,10 @@ export function nativeRoutineSummary(): Record<string, unknown> {
       fence: "INSTANCE_AND_EPOCH_IN_EFFECT_TRANSACTION", clock: "SERVER_READ_TIME_AND_MONOTONIC_ELAPSED",
       externalSideEffectsAllowedInTransaction: false, schedulerCreated: false,
       migratedTransactionBoundaries: 31, allLegacyWritersEnforced: false, physicalHandoffVerified: false,
+      localDestinationBarrier: "STUDIO_SIGNED_QUIESCENCE_CANDIDATE",
+      localDestinationStateStore: "EXISTING_SOURCE_CURSOR_AND_LOCK",
+      localDestinationBarrierGrantsLease: false, localDestinationCloudIssuerImplemented: false,
+      localDestinationRuntimeActivated: false, localDestinationOsIsolationVerified: false,
       documentation: "docs/AURORA_DISTRIBUTED_WRITER_ENFORCEMENT.md"
     },
     medicalCredentialingPolicy: {

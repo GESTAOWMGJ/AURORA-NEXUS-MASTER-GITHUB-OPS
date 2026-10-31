@@ -266,3 +266,51 @@ anterior à correção, 1.364 de 1.367 testes Functions passaram; três não pud
 validar YAML por ausência do executável Ruby local. CI do novo SHA, revisão humana,
 publicação protegida e prova instalada permanecem evidências separadas. As flags
 de cobertura universal, fencing externo e handoff físico continuam falsas.
+
+### Destino local: barreira de quiescência do Studio — 31/10/2026
+
+O receptor candidato `createStudio().installWriterFence()` aceita somente uma
+ordem Ed25519 sob chave pública fixada pelo host. O esquema fechado vincula
+`AURORA-REALTIME-PLATFORM-GUARDIAN-001`, organização, `canonical-data`, destino
+(hash da configuração original), epoch positivo, handoff e recibo anterior.
+Não gera epochs, não adquire lease, não tem endpoint HTTP e não é ferramenta do
+modelo. A chave privada não pertence ao cliente. Nenhuma chave real foi criada.
+
+A barreira usa o `source.lock` e o `source-cursor.json` existentes. Um escritor
+em andamento impede a confirmação; não se rouba o lock. O receptor persiste
+`writerFence`, força flush do arquivo e relê os bytes antes de devolver
+`FENCED_READ_ONLY`. O diretório também é sincronizado em POSIX; durabilidade
+contra perda elétrica no Windows não foi comprovada. Todas as mutações POST do
+Studio passam a falhar, inclusive publicação/reconciliação e recuperação;
+leitura de histórico continua disponível. Reiniciar sem a chave não remove o
+bloqueio. Replay idêntico conserva recibo e histórico; epoch anterior, assinatura
+falsa, outro tenant/destino ou cadeia divergente não produzem confirmação.
+
+**Escopo deliberado: parar o writer do Studio, sem habilitar outro.** Não existe
+UNFENCE/ACTIVE local. Isto ainda não é enforcement distribuído instalado:
+
+- O emissor autenticado da ordem na nuvem e a transição canônica que exige o
+  recibo de TODOS os destinos antes de transferir posse ainda não existem.
+- `server.cjs` não configura o receptor nem publica uma rota de controle. A
+  candidata não desliga silenciosamente instalações existentes.
+- Corpus, agente Python, SQLite, instalador, atualizador e gravações fora do
+  Studio não estão abrangidos. A ordem assinada não impede outro processo com
+  permissão de escrita direta de alterar/restaurar arquivos ou apagar o cursor.
+- A conta do executor precisa perder escrita direta nos destinos protegidos em
+  favor do componente autorizado; a migração exige baseline, ACL, rollback e
+  testes físicos. Administradores/SYSTEM continuam uma fronteira privilegiada.
+- Versão antiga que recusa campos desconhecidos do cursor falha fechada; isso
+  deve ser testado para cada binário instalado, nunca extrapolado a toda cópia.
+
+Crash antes do rename deixa o lock/evidência e exige a recuperação existente,
+sem recibo de handoff. Crash depois do ACK conserva a barreira. Não apagar lock,
+epoch, assinatura ou cursor para concluir rollout/rollback. Downgrade que não
+consegue ler o cursor permanece bloqueado; restauração anterior sem reconciliação
+com a autoridade canônica é insegura.
+
+O protocolo de ativação futura deve primeiro colocar o lease canônico em uma
+transição que não conceda escrita concorrente; emitir barreiras vinculadas a essa
+transição; reconciliar recibos de destinos/ACL/versão; só então completar handoff.
+Timeout/rede particionada/ACK ausente permanece PENDING, nunca concessão implícita.
+Este contrato não implementa essa transição cloud. As flags universais e físicas
+permanecem falsas. O registro nativo representa esse limite explicitamente.

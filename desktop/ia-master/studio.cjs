@@ -23,7 +23,7 @@ const LIMITS = Object.freeze({ maxFileBytes: MAX_CONTENT, maxContextBytes: MAX_C
   modelRequestBytes: MAX_MODEL_REQUEST_BYTES, maxEditsPerFile: 20, maxEditBytes: 4000, maxTotalEditBytes: 8000,
   strategy: 'COMPLETE_FILES_WITH_EXPLICIT_BOUNDED_MODEL_VIEWS', modelOutputTruncation: 'REJECTED' });
 const SECRET = /-----BEGIN [A-Z ]*PRIVATE KEY|\bBearer\s+[\w.-]+|\bsk-[a-zA-Z0-9]{12,}|\b(?:password|secret|api[_-]?key|access[_-]?token|private[_-]?key)\s*[:=]\s*['"][^'"\r\n]{8,}['"]|\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/i;
-const SAFE_CODES = new Set('STUDIO_NOT_CONFIGURED STUDIO_CONFIG_INVALID STUDIO_PATH_REJECTED STUDIO_SENSITIVE_CONTENT STUDIO_CONTENT_LIMIT STUDIO_INVALID_FIELDS STUDIO_CONTEXT_REQUIRED STUDIO_RECORD_INVALID STUDIO_NOT_FOUND STUDIO_VERSION_CONFLICT STUDIO_LOCKED STUDIO_BASE_CHANGED STUDIO_SOURCE_CHANGED STUDIO_PROPOSAL_INVALID STUDIO_STATE_CONFLICT STUDIO_GIT_UNAVAILABLE STUDIO_GIT_FAILED STUDIO_GIT_TREE_UNSUPPORTED STUDIO_CHECK_FAILED STUDIO_CHECK_UNSUPPORTED STUDIO_MODEL_UNAVAILABLE STUDIO_MODEL_BUSY STUDIO_MODEL_CONTEXT_LIMIT STUDIO_MODEL_OUTPUT_TRUNCATED STUDIO_EDIT_AMBIGUOUS STUDIO_WORKSPACE_CHANGED STUDIO_OPERATION_BLOCKED STUDIO_SOURCE_REVISION_CONFLICT STUDIO_SOURCE_REFRESH_BLOCKED STUDIO_SOURCE_RECORD_INVALID STUDIO_SOURCE_DIRTY STUDIO_REMOTE_SOURCE_CHANGED STUDIO_SOURCE_DIVERGED'.split(' '));
+const SAFE_CODES = new Set('STUDIO_WRITER_FENCED STUDIO_WRITER_FENCE_INVALID STUDIO_WRITER_FENCE_UNAVAILABLE STUDIO_WRITER_FENCE_CONFLICT STUDIO_NOT_CONFIGURED STUDIO_CONFIG_INVALID STUDIO_PATH_REJECTED STUDIO_SENSITIVE_CONTENT STUDIO_CONTENT_LIMIT STUDIO_INVALID_FIELDS STUDIO_CONTEXT_REQUIRED STUDIO_RECORD_INVALID STUDIO_NOT_FOUND STUDIO_VERSION_CONFLICT STUDIO_LOCKED STUDIO_BASE_CHANGED STUDIO_SOURCE_CHANGED STUDIO_PROPOSAL_INVALID STUDIO_STATE_CONFLICT STUDIO_GIT_UNAVAILABLE STUDIO_GIT_FAILED STUDIO_GIT_TREE_UNSUPPORTED STUDIO_CHECK_FAILED STUDIO_CHECK_UNSUPPORTED STUDIO_MODEL_UNAVAILABLE STUDIO_MODEL_BUSY STUDIO_MODEL_CONTEXT_LIMIT STUDIO_MODEL_OUTPUT_TRUNCATED STUDIO_EDIT_AMBIGUOUS STUDIO_WORKSPACE_CHANGED STUDIO_OPERATION_BLOCKED STUDIO_SOURCE_REVISION_CONFLICT STUDIO_SOURCE_REFRESH_BLOCKED STUDIO_SOURCE_RECORD_INVALID STUDIO_SOURCE_DIRTY STUDIO_REMOTE_SOURCE_CHANGED STUDIO_SOURCE_DIVERGED'.split(' '));
 class StudioError extends Error {
   constructor(code, status = 422) { super(SAFE_CODES.has(code) ? code : 'STUDIO_OPERATION_BLOCKED'); this.code = this.message; this.status = status; }
 }
@@ -77,7 +77,7 @@ function cleanEnv() {
 }
 
 function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, now = () => Date.now(),
-  publisherConfig = null, publisherRunner }) {
+  publisherConfig = null, publisherRunner, writerFenceAuthority = null }) {
   const home = path.join(stateDir, 'studio');
   for (const name of ['', 'contexts', 'tasks', 'workspaces', 'sources', 'empty-hooks']) fs.mkdirSync(path.join(home, name), { recursive: true, mode: 0o700 });
   noSymlinks(home);
@@ -407,6 +407,70 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
   const sourceFile = path.join(home, 'source-cursor.json');
   const sourceBinding = fingerprint({ orgId, repository: originalRepo });
   let sourceState = null, sourceEnvelopeHash = null, sourceProblem = false, activeSourceLock = null;
+  // Destination barrier, not a second lease or a lease-acquisition API. Only a
+  // pinned control-plane signing key may request quiescence. No local UNFENCE
+  // operation exists: cloud grant/activation is deliberately not inferred.
+  let fenceKey = null, fenceKeyId = null;
+  if (writerFenceAuthority !== null) {
+    closed(writerFenceAuthority, ['keyId', 'publicKeyPem']);
+    demand(typeof writerFenceAuthority.keyId === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(writerFenceAuthority.keyId)
+      && typeof writerFenceAuthority.publicKeyPem === 'string' && writerFenceAuthority.publicKeyPem.length <= 4096,
+    'STUDIO_CONFIG_INVALID');
+    try { fenceKey = crypto.createPublicKey(writerFenceAuthority.publicKeyPem); }
+    catch { throw new StudioError('STUDIO_CONFIG_INVALID'); }
+    demand(fenceKey.asymmetricKeyType === 'ed25519', 'STUDIO_CONFIG_INVALID');
+    fenceKeyId = writerFenceAuthority.keyId;
+  }
+  function validateFencePayload(value) {
+    closed(value, ['schemaVersion', 'guardianId', 'keyId', 'orgId', 'resourceKey', 'destinationId',
+      'epoch', 'previousFenceSha256', 'handoffId', 'phase']);
+    demand(value.schemaVersion === 'aurora.local-writer-fence.v1'
+      && value.guardianId === 'AURORA-REALTIME-PLATFORM-GUARDIAN-001'
+      && value.orgId === orgId && value.resourceKey === 'canonical-data'
+      && value.destinationId === sourceBinding && value.phase === 'FENCED'
+      && Number.isSafeInteger(value.epoch) && value.epoch > 0
+      && typeof value.keyId === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(value.keyId)
+      && ID.test(value.handoffId) && (value.previousFenceSha256 === null || DIGEST.test(value.previousFenceSha256)),
+    'STUDIO_WRITER_FENCE_INVALID', 409);
+  }
+  function fenceStatus() {
+    return { schemaVersion: 'aurora.local-writer-fence.v1', destinationId: sourceBinding,
+      state: sourceState?.writerFence ? 'FENCED_READ_ONLY' : 'LEGACY_UNFENCED',
+      epoch: sourceState?.writerFence?.payload.epoch ?? null,
+      fenceSha256: sourceState?.writerFence ? fingerprint(sourceState.writerFence) : null,
+      authorityConfigured: Boolean(fenceKey), cloudHandoffVerified: false,
+      allLocalWritersEnforced: false };
+  }
+  function requireUnfenced() {
+    demand(!sourceState?.writerFence, 'STUDIO_WRITER_FENCED', 409);
+  }
+  async function installWriterFence(envelope) {
+    // Capture caller-owned bytes before awaiting the existing destination lock.
+    demand(fenceKey && originalRepo, 'STUDIO_WRITER_FENCE_UNAVAILABLE', 503);
+    closed(envelope, ['payload', 'signature']);
+    validateFencePayload(envelope.payload);
+    demand(envelope.payload.keyId === fenceKeyId && typeof envelope.signature === 'string'
+      && /^[A-Za-z0-9+/]{86}==$/.test(envelope.signature), 'STUDIO_WRITER_FENCE_INVALID', 409);
+    const accepted = JSON.parse(JSON.stringify(envelope));
+    demand(crypto.verify(null, Buffer.from(canonical(accepted.payload)), fenceKey,
+      Buffer.from(accepted.signature, 'base64')), 'STUDIO_WRITER_FENCE_INVALID', 409);
+    return sourceLocked(async () => {
+      loadSource(true);
+      const previous = sourceState.writerFence;
+      if (previous && fingerprint(previous) === fingerprint(accepted)) return fenceStatus();
+      demand(accepted.payload.previousFenceSha256 === (previous ? fingerprint(previous) : null)
+        && accepted.payload.epoch > (previous?.payload.epoch ?? 0), 'STUDIO_WRITER_FENCE_CONFLICT', 409);
+      // Never acknowledge a half-written source operation. Reconcile it using
+      // the original recovery flow before requesting another handoff.
+      demand(!sourceState.operation, 'STUDIO_SOURCE_REFRESH_BLOCKED', 409);
+      sourceState.writerFence = accepted;
+      sourceEvent('WRITER_FENCED', { fenceSha256: fingerprint(accepted) });
+      saveSource();
+      loadSource(true);
+      demand(fingerprint(sourceState.writerFence) === fingerprint(accepted), 'STUDIO_WRITER_FENCE_INVALID', 409);
+      return fenceStatus();
+    });
+  }
   const publisherOptions = (sourceRepo = repo) => ({ stateDir, orgId, config: publisherConfig, repository: sourceRepo,
     audit, now, ...(publisherRunner ? { runner: publisherRunner } : {}),
     readPreparedTask: async id => {
@@ -431,10 +495,19 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
     const bytes = Buffer.from(canonical({ payload: sourceState, sha256: fingerprint(sourceState) }));
     const temporary = sourceFile + '.' + crypto.randomBytes(8).toString('hex') + '.tmp';
     try {
-      fs.writeFileSync(temporary, bytes, { flag: 'wx', mode: 0o600 });
+      const descriptor = fs.openSync(temporary, 'wx', 0o600);
+      try { fs.writeFileSync(descriptor, bytes); fs.fsyncSync(descriptor); }
+      finally { fs.closeSync(descriptor); }
       demand((fs.existsSync(sourceFile) ? hash(readRegularFile(sourceFile, 2 * 1024 * 1024)) : null) === before,
         'STUDIO_SOURCE_REVISION_CONFLICT', 409);
       fs.renameSync(temporary, sourceFile);
+      // Flush the renamed file before acknowledging destination quiescence.
+      const committed = fs.openSync(sourceFile, 'r+');
+      try { fs.fsyncSync(committed); } finally { fs.closeSync(committed); }
+      if (process.platform !== 'win32') {
+        const directory = fs.openSync(home, 'r');
+        try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+      }
       demand(hash(readRegularFile(sourceFile, 2 * 1024 * 1024)) === hash(bytes), 'STUDIO_SOURCE_RECORD_INVALID', 409);
       sourceEnvelopeHash = hash(bytes);
     } finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
@@ -467,7 +540,14 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
     try {
       const raw = readRegularFile(sourceFile, 2 * 1024 * 1024), record = JSON.parse(raw.toString('utf8'));
       closed(record, ['payload', 'sha256']); const value = record.payload;
-      closed(value, ['schemaVersion', 'orgId', 'bindingSha256', 'originalRevision', 'version', 'active', 'operation', 'history']);
+      closed(value, ['schemaVersion', 'orgId', 'bindingSha256', 'originalRevision', 'version', 'active', 'operation', 'history', 'writerFence']);
+      if (value.writerFence !== undefined) {
+        closed(value.writerFence, ['payload', 'signature']); validateFencePayload(value.writerFence.payload);
+        demand(typeof value.writerFence.signature === 'string' && /^[A-Za-z0-9+/]{86}==$/.test(value.writerFence.signature),
+          'STUDIO_WRITER_FENCE_INVALID', 409);
+        // A missing/rotated key must not make a persisted fence disappear.
+        // Installation verifies authenticity; reading retains the deny state.
+      }
       demand(value.schemaVersion === 'aurora.master.source.v1' && value.orgId === orgId && value.bindingSha256 === sourceBinding &&
         SHA.test(value.originalRevision) && record.sha256 === fingerprint(value) && Number.isSafeInteger(value.version) &&
         value.version >= 0 && Array.isArray(value.history) && value.history.length === value.version && value.version <= 1000,
@@ -475,8 +555,8 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
       let previous = null;
       for (const item of value.history) {
         const { eventHash, ...event } = item;
-        closed(event, ['state', 'at', 'version', 'previousEventHash', 'fromRevision', 'targetRevision', 'observedRevision', 'snapshotId', 'manifestSha256', 'code', 'lockNonce', 'archivedLockSha256']);
-        demand(['REFRESH_INTENT', 'SNAPSHOT_VERIFIED', 'SOURCE_ACTIVATED', 'REMOTE_MOVED', 'REFRESH_BLOCKED', 'ALREADY_CURRENT', 'SOURCE_RECOVERED'].includes(event.state) &&
+        closed(event, ['state', 'at', 'version', 'previousEventHash', 'fromRevision', 'targetRevision', 'observedRevision', 'snapshotId', 'manifestSha256', 'code', 'lockNonce', 'archivedLockSha256', 'fenceSha256']);
+        demand(['REFRESH_INTENT', 'SNAPSHOT_VERIFIED', 'SOURCE_ACTIVATED', 'REMOTE_MOVED', 'REFRESH_BLOCKED', 'ALREADY_CURRENT', 'SOURCE_RECOVERED', 'WRITER_FENCED'].includes(event.state) &&
           event.version === (previous?.version || 0) + 1 && event.previousEventHash === (previous?.eventHash || null) &&
           eventHash === fingerprint(event), 'STUDIO_SOURCE_RECORD_INVALID', 409); previous = item;
       }
@@ -549,6 +629,7 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
     if (!fs.existsSync(file)) return null;
     closed(body, ['expectedLocalSourceRevision', 'expectedSourceReceiptSha256', 'expectedSourceLockSha256']);
     loadSource(true);
+    requireUnfenced();
     demand(SHA.test(body.expectedLocalSourceRevision) && body.expectedLocalSourceRevision === currentRevision() &&
       DIGEST.test(body.expectedSourceReceiptSha256) && body.expectedSourceReceiptSha256 === fingerprint(sourceState),
       'STUDIO_SOURCE_REVISION_CONFLICT', 409);
@@ -662,6 +743,7 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
         sourceRefresh: repo && sourceBroker.capabilities().state === 'CONFIGURED_AUTH_NOT_OBSERVED' ? 'FIXED_MAIN_SNAPSHOT_ONLY' : 'NOT_CONFIGURED',
         sourceRecovery: repo && sourceBroker.capabilities().state === 'CONFIGURED_AUTH_NOT_OBSERVED' ? 'PRESERVE_AND_RESET_BLOCKED_ATTEMPT' : 'NOT_CONFIGURED' },
       publisher: publisher.capabilities(),
+      writerFence: fenceStatus(),
       source: repo ? sourceReceipt() : null,
       externalAiEnabled: false, modelCanExecuteCommands: false, arbitraryCodeExecution: false, authenticatedOrgId: orgId
     } };
@@ -791,11 +873,13 @@ function createStudio({ stateDir, orgId, repository, infer, audit = () => {}, no
     const operation = async () => {
       const publicationReadback = /^\/api\/studio\/tasks\/[a-f0-9]{32}\/(?:read-ci|reconcile-publication)$/.test(url);
       loadSource(method === 'POST' && !publicationReadback || url === '/api/studio/capabilities');
+      if (method === 'POST') requireUnfenced();
       if (method === 'POST' && !publicationReadback && url !== '/api/studio/source-recover') demand(!sourceState?.operation, 'STUDIO_SOURCE_REFRESH_BLOCKED', 409);
       return routeUnlocked(method, url, body, archivedLockSha256);
     };
     return method === 'POST' ? sourceLocked(operation) : operation();
   }
-  return { route, configState, publisherCapabilities: () => publisher.capabilities() };
+  // Host-only method. It is not reachable from model output or an HTTP route.
+  return { route, configState, installWriterFence, publisherCapabilities: () => publisher.capabilities() };
 }
 module.exports = { createStudio, StudioError, relativeFile, SECRET, LIMITS };

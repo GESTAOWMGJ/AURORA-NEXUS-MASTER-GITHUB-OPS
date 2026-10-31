@@ -696,7 +696,7 @@
     },
     {
       "path": "desktop/ia-master/studio.cjs",
-      "sha256": "bcef4eadff4956290d7d8fd6f78bd95a92b6cd6c28c1949619496a9e91552a1a",
+      "sha256": "78534f9b474c6d5537836a9c7b902d8532327d6c01a17a87fdd53bfff9b63ea1",
       "writeLikeLines": [
         10,
         126,
@@ -711,12 +711,12 @@
         348,
         367,
         375,
-        434,
-        437,
-        440,
-        510,
-        567,
-        694
+        499,
+        503,
+        513,
+        590,
+        648,
+        776
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
