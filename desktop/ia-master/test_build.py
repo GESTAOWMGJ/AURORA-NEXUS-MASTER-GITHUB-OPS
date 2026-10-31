@@ -37,7 +37,8 @@ class BuildContract(unittest.TestCase):
             actual = {str(file.relative_to(output)).replace('\\', '/')
                       for file in output.rglob('*') if file.is_file()}
             self.assertEqual(actual, set(manifest['files']) | {'manifest.json'})
-            self.assertEqual(len(manifest['files']), 40)
+            self.assertEqual(len(manifest['files']), 41)
+            self.assertIn('kernel/auroraChelfex.js', manifest['files'])
             self.assertIn('kernel/auroraReliableResult.js', manifest['files'])
             self.assertIn('published-update.cjs', manifest['files'])
             self.assertEqual({name for name in manifest['files'] if name.startswith('client-agent/')},
