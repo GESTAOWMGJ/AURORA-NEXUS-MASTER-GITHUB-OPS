@@ -1,3 +1,4 @@
+import { buildChelfexContract, type ChelfexContext } from "./auroraChelfex.js";
 import { readReliableFinancialResult, RELIABLE_RESULT_POLICY } from "./auroraReliableResult.js";
 import { generateNativeInsight, type NativeInsightFinding } from "./auroraNativeIntelligence.js";
 import { nativeRoutineSummary, buildClientAdoptionPlan, type AdoptionContext } from "./auroraNativeRoutines.js";
@@ -5,8 +6,9 @@ import { iaMasterCapability } from "./auroraIaMaster.js";
 import { buildBetaProductionOrchestrator } from "./auroraProductionOrchestrator.js";
 import { assessNativeData, DATA_GOVERNANCE_POLICY, knownCount, masterCommandSurface } from "./auroraDataGovernance.js";
 
-export const AURORA_MASTER_ENGINE_VERSION = "0.3.0-reliable-results";
+export const AURORA_MASTER_ENGINE_VERSION = "0.4.0-chelfex-recommendation";
 type MasterContext = {
+  chelfexContext?: ChelfexContext;
   actionSummary?: Record<string, unknown>;
   financialStatus?: Record<string, unknown> | null;
   release?: Record<string, unknown>;
@@ -49,6 +51,8 @@ function governanceReviewFinding(reasonCodes: readonly string[]): NativeInsightF
 export function buildMasterOperationalState(
   projection: Record<string, unknown>, context: MasterContext = {}, now = new Date()
 ): Record<string, unknown> {
+  // Never lend an authenticated tenant to a different snapshot.
+  if (context.chelfexContext && context.chelfexContext.orgId !== projection.orgId) projection = {};
   const assessment = assessNativeData(projection, now);
   const denied = assessment.decision === "DENY";
   const reliableResult = denied ? null : readReliableFinancialResult(projection);
@@ -95,6 +99,9 @@ export function buildMasterOperationalState(
     sourceAccessDuringInference: false, explainable: true,
     generatedAt: Number.isFinite(now.getTime()) ? now.toISOString() : null,
     operationalState, cycleStage,
+    chelfex: buildChelfexContract({ schemaVersion: 'aurora.chelfex.task.v1',
+      orgId: projection.orgId, operation: 'PROPOSE', objective: 'REVIEW_NATIVE_OPERATIONAL_STATE' },
+      context.chelfexContext, projection, now),
     reliableResult, resultPolicy: RELIABLE_RESULT_POLICY,
     cycle: ["OBSERVAR", "INGESTAR", "COMPROVAR", "CONFRONTAR", "DETECTAR", "PRIORIZAR", "AGIR", "VALIDAR", "MEDIR", "APRENDER", "REUTILIZAR"],
     headline: nextFinding?.title ?? "Nenhuma exceção detectada neste recorte autorizado; isto não comprova ausência de risco.",

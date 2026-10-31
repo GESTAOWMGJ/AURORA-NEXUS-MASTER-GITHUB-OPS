@@ -96,6 +96,8 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}, p
     iaMaster: { routineId: "AURORA-IA-MASTER-001", version: unifiedBeta.platforms.windows.technicalVersions.iaMaster ?? null,
       versionSource: unifiedBeta.reference ? "VERIFIED_ACTIVE_REFERENCE" : "PENDING_VERIFIED_REFERENCE",
       status: "IMPLEMENTED_PENDING_DEVICE_ATTESTATION", externalAiEnabled: false, cloudSyncVerified: false, autonomousDevelopmentPromoted: false },
+    chelfex: { contract: "AURORA-CHELFEX-001", version: "1.0.0", mode: "RECOMMEND_ONLY",
+      status: "IMPLEMENTED_PENDING_HML_READBACK", executionAllowed: false, productionVerified: false },
     userProfiles: { routineId: "AURORA-USER-PROFILES-001", version: "1.0.0", status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", verifiedEmailRequired: true, mfaRequired: true, tenantOptInRequired: true, productionVerified: false },
     dailyUpdates: { routineId: "AURORA-DAILY-UPDATES-001", webPwaCheckIntervalHours: 24, status: "IMPLEMENTED_PENDING_LIVE_VALIDATION", desktopBinaryUpdateVerified: false, mobileDeviceVerified: false, productionVerified: false },
     releaseConvergence: {

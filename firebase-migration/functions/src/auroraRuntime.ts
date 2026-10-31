@@ -321,6 +321,7 @@ export const auroraNexusBootstrap = onRequest(
       member: { email: member.email, role: member.role, mfaVerified: member.mfaVerified },
       projection: visibleProjection(rawProjection, member),
       masterEngine: buildMasterOperationalState(visibleProjection(rawProjection, member), {
+        chelfexContext: { orgId: member.orgId, authority: "AUTHENTICATED_SERVER" },
         actionSummary,
         financialStatus,
         adoption: { member, installation },
@@ -440,6 +441,7 @@ export const auroraNexusMasterEngine = onRequest(
       externalAiUsed: false,
       canonicalVersion,
       master: buildMasterOperationalState(projection, { financialStatus, release,
+        chelfexContext: { orgId: member.orgId, authority: "AUTHENTICATED_SERVER" },
         adoption: { member, installation: member.allFacilities ? await loadInstallationReadiness(member.orgId) : undefined } })
     });
   }
