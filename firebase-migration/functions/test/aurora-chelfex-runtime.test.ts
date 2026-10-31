@@ -1,4 +1,4 @@
-import { generateNativeInsight } from '../src/auroraNativeIntelligence.js';
+import { generateNativeInsight, parseNativeInsightIntent } from '../src/auroraNativeIntelligence.js';
 import { redactFinancialProjection } from '../src/auroraReliableResult.js';
 import { buildProjection } from '../src/auroraEngine.js';
 import assert from 'node:assert/strict';
@@ -13,6 +13,13 @@ const visible = source.slice(source.indexOf('function visibleProjection('), sour
 const bootstrapStart = source.indexOf('export const auroraNexusBootstrap');
 const bootstrapRoute = source.slice(bootstrapStart, source.indexOf('\nexport const ', bootstrapStart + 1));
 const route = source.slice(source.indexOf('export const auroraNexusMasterEngine'), source.indexOf('export const auroraNexusRefresh'));
+const insightStart = source.indexOf('export const auroraNexusNativeInsight');
+const insightRoute = source.slice(insightStart, source.indexOf('\nexport const ', insightStart + 1));
+const routes = {
+  master: { code: route, name: 'auroraNexusMasterEngine' },
+  bootstrap: { code: bootstrapRoute, name: 'auroraNexusBootstrap' },
+  insight: { code: insightRoute, name: 'auroraNexusNativeInsight' }
+} as const;
 const member = { uid: 'synthetic-user', orgId: 'synthetic-org', role: 'auditor', permissions: [], allFacilities: true, mfaVerified: false };
 function snapshot() {
   return { orgId: member.orgId, snapshotId: 'synthetic', sourceHash: 'a'.repeat(64), schemaVersion: 2,
@@ -22,9 +29,9 @@ function snapshot() {
     documentIntelligence: { fragileDocuments: 0, sourceDependentDocuments: 0, overdueDocumentSla: 0 },
     nativeDataPlane: { storage: 'FIRESTORE', sourceAccessDuringInference: false, externalAiRequired: false } };
 }
-async function call(actor: any = member, data: any = snapshot(), reqExtra: any = {}, endpoint: 'master' | 'bootstrap' = 'master') {
+async function call(actor: any = member, data: any = snapshot(), reqExtra: any = {}, endpoint: keyof typeof routes = 'master') {
   const reads: string[] = []; let writes = 0, financialReads = 0;
-  const sandbox: any = { redactFinancialProjection, buildProjection,
+  const sandbox: any = { redactFinancialProjection, buildProjection, generateNativeInsight, parseNativeInsightIntent,
     safeString: (v: unknown, n: number) => typeof v === 'string' ? v.slice(0, n) : null,
     logger: { warn() {} }, publicAction() { throw Error('UNEXPECTED_ACTION'); }, exports: {}, ALLOWED_EMAILS: { value: () => 'synthetic' }, apiHeaders() {},
     onRequest: (_options: any, handler: any) => handler,
@@ -33,9 +40,9 @@ async function call(actor: any = member, data: any = snapshot(), reqExtra: any =
     auroraDb: { collection() { return { limit() { return { get: async () => ({ docs: [] }) }; } }; }, doc(path: string) { reads.push(path); return { get: async () => ({ exists: true, data: () => path.endsWith('/current') ? data : { active: true } }), set() { writes++; throw Error('WRITE_FORBIDDEN'); } }; }, runTransaction() { writes++; throw Error('WRITE_FORBIDDEN'); } },
     loadFinancialClosingStatus: async () => { financialReads++; return null; }, readRuntimeActiveRelease: async () => ({}), buildReleaseStatus: () => ({}),
     authenticatedOrganizationEnvironment: () => 'SYNTHETIC', loadInstallationReadiness: async () => ({}), buildMasterOperationalState };
-  vm.runInNewContext(ts.transpile(access + visible + (endpoint === 'master' ? route : bootstrapRoute), { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }), sandbox);
+  vm.runInNewContext(ts.transpile(access + visible + routes[endpoint].code, { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }), sandbox);
   const res: any = { code: 0, body: null, set() { return this; }, status(code: number) { this.code = code; return this; }, json(body: any) { this.body = body; return this; } };
-  await sandbox.exports[endpoint === 'master' ? 'auroraNexusMasterEngine' : 'auroraNexusBootstrap']({ method: 'GET', get: () => undefined, ...reqExtra }, res);
+  await sandbox.exports[routes[endpoint].name]({ method: 'GET', query: {}, get: () => undefined, ...reqExtra }, res);
   return { ...res, reads, writes, financialReads };
 }
 test('actual GET handler returns contract from authenticated tenant, ignoring forged query/body', async () => {
@@ -154,4 +161,32 @@ test('untrusted readiness markers cannot replace valid subset evidence or waive 
   const request = await call({ ...member, role: 'viewer' }, partialSnapshot(), { body: { redactFinancial: false, verifiedPartial: true } });
   assert.equal(JSON.stringify(request.body).includes('7654321'), false);
   assert.equal(request.financialReads, 0); assert.equal(request.body.master.operationalState, 'ATTENTION');
+});
+
+test('native-insight GET preserves partial severity and privacy across every supported intent', async () => {
+  for (const role of ['viewer', 'operator']) {
+    for (const intent of ['EXECUTIVE','DATA_QUALITY','REVENUE_RISK','SLA_RISK','NEXT_ACTION']) {
+      const p = partialSnapshot(), before = JSON.stringify(p);
+      const r = await call({ ...member, role }, p, { query: { intent }, body: { redactFinancial: false } }, 'insight');
+      assert.equal(r.code, 200); assert.equal(r.writes, 0); assert.equal(r.financialReads, 0);
+      assert.equal(JSON.stringify(r.body).includes('7654321'), false);
+      assert.ok(r.body.insight.findings.every((f: any) => f.severity !== 'CRITICAL'));
+      assert.ok(r.body.insight.findings.every((f: any) => !['REVENUE_GAP','GLOSS_EXPOSURE'].includes(f.code)));
+      if (intent === 'EXECUTIVE' || intent === 'DATA_QUALITY')
+        assert.equal(r.body.insight.findings.find((f: any) => f.code === 'FINANCIAL_DATA_QUALITY')?.severity, 'HIGH');
+      assert.equal(JSON.stringify(p), before);
+    }
+  }
+  const authorized = await call(member, snapshot(), { query: { intent: 'REVENUE_RISK' } }, 'insight');
+  assert.ok(authorized.body.insight.findings.some((f: any) => f.code === 'REVENUE_GAP'));
+});
+test('native-insight GET retains existing authentication, scope, intent and method gates', async () => {
+  const cases: Array<[any, any, number]> = [
+    [null, {}, 401], [{ ...member, allFacilities: false }, {}, 403], [{ ...member, role: 'no-access' }, {}, 403],
+    [member, { query: { intent: 'EXECUTE' } }, 400], [member, { method: 'POST' }, 405]
+  ];
+  for (const [actor, req, expected] of cases) {
+    const r = await call(actor, partialSnapshot(), req, 'insight');
+    assert.equal(r.code, expected); assert.deepEqual(r.reads, []); assert.equal(r.writes, 0); assert.equal(r.financialReads, 0);
+  }
 });

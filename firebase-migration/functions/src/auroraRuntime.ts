@@ -376,14 +376,14 @@ export const auroraNexusNativeInsight = onRequest(
       res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_CONTRACT_REQUIRED" });
       return;
     }
-    const projection = visibleProjection(rawProjection, member);
+    const mayReadFinance = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
     res.status(200).json({
       ok: true,
       environment: authenticatedOrganizationEnvironment(organization.exists ? organization.data() : undefined),
       mode: "FIREBASE_NATIVE",
       sourceAccessDuringInference: false,
       externalAiUsed: false,
-      insight: generateNativeInsight(projection, intent)
+      insight: generateNativeInsight(rawProjection, intent, new Date(), !mayReadFinance)
     });
   }
 );

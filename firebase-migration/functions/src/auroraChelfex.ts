@@ -5,7 +5,7 @@ import { generateNativeInsight, type NativeInsightFinding } from './auroraNative
 
 /** Code is the executable policy; the JSON mirror is checked by regression tests. */
 export const CHELFEX_POLICY = Object.freeze({
-  id: 'AURORA-CHELFEX-001', version: '1.1.2-rc.3', schema: 'aurora.chelfex.task.v1',
+  id: 'AURORA-CHELFEX-001', version: '1.1.2-rc.4', schema: 'aurora.chelfex.task.v1',
   mode: 'RECOMMEND_ONLY', financialVisibility: 'CANONICAL_READINESS_THEN_REDACTED_INFERENCE', maxConclusions: 12, maxObjectiveBytes: 1024,
   executionAllowed: false, sourceMutation: false, automaticLearning: false,
   riskByOperation: Object.freeze({ READ: 'R0', PROPOSE: 'R1', REVERSIBLE_CHANGE: 'R2',

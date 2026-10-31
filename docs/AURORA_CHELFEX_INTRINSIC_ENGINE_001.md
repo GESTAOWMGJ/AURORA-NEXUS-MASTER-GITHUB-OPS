@@ -82,7 +82,7 @@ Toda resposta operacional do motor deve ser serializável em uma estrutura equiv
 ```json
 {
   "contract": "AURORA-CHELFEX-001",
-  "version": "1.1.2-rc.3",
+  "version": "1.1.2-rc.4",
   "tenantScope": "verified-tenant",
   "task": "short actionable objective",
   "status": "FACT | INFERENCE | PENDING | BLOCKED",
