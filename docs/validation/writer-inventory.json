@@ -2085,16 +2085,16 @@
     },
     {
       "path": "firebase-migration/scripts/publish-active-release.mjs",
-      "sha256": "d3d9bd88c23e17bc85a5c32e910b5cc6a61ffd807b4fe9e9155e044aabcc04db",
+      "sha256": "8f280e373d1fa6cfd38a3c08a9f3b01cd4e519d0f9f6ca0de6eb3c5b9bef304c",
       "writeLikeLines": [
         19,
-        184,
-        198,
-        270,
-        298,
-        311,
-        313,
-        322
+        185,
+        199,
+        271,
+        299,
+        312,
+        314,
+        323
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
