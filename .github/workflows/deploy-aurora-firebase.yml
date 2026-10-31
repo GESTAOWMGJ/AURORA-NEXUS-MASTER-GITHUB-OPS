@@ -494,8 +494,6 @@ jobs:
           }
           NODE
           npx --yes firebase-tools@14.17.0 deploy --project "$PROJECT_ID" --only functions:ingestWmgjEvent,functions:runtimeWatchdog,functions:runtimeHealth,functions:auroraNexusAuthGate,functions:auroraNexusSessionLogin,functions:auroraNexusSessionLogout,functions:auroraNexusBootstrap,functions:auroraNexusNativeInsight,functions:auroraNexusMasterEngine,functions:auroraNexusAction,functions:auroraNexusRefresh,functions:auroraNexusProjectionEngine,functions:auroraNexusOrganic,functions:auroraNexusIntegrationKeys,functions:auroraNexusUserProfiles,functions:auroraNexusMedicalPartners,functions:auroraNexusIntegrationPing,functions:auroraNexusIntegrationDocuments,functions:auroraNexusDocumentWatchdog,functions:auroraNexusShareholderReportGenerator,functions:auroraNexusShareholderReport,functions:auroraNexusFinancialPanel,functions:auroraNexusDistributionDecision,hosting,firestore:rules,firestore:indexes --non-interactive
-      - name: Verify public CREDMED form, static PDF/MP4 and anonymous management denial
-        run: node firebase-migration/scripts/verify-credmed-public-release.mjs --origin https://wmgj-hml-jfn-20260927.web.app
       - name: Verify actual HML ingest build, boundary and ready traffic after deployment
         env:
           PROJECT_ID: ${{ inputs.project_id }}
@@ -529,6 +527,8 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git rev-parse refs/remotes/origin/main)" = "$GITHUB_SHA"
           node firebase-migration/scripts/promote-hml-integration-ping-traffic.mjs promote
+      - name: Verify public CREDMED form, static PDF/MP4 and anonymous management denial
+        run: node firebase-migration/scripts/verify-credmed-public-release.mjs --origin https://wmgj-hml-jfn-20260927.web.app
       - name: Smoke test private shell and deployed functions
         env:
           PROJECT_ID: ${{ inputs.project_id }}
