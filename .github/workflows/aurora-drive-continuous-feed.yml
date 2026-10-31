@@ -58,6 +58,8 @@ jobs:
           fetch-depth: 1
 
       - name: Validate bounded owner authorization and exact action
+        env:
+          AURORA_CONTINUOUS_ACTION: ${{ inputs.action }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
@@ -91,7 +93,15 @@ jobs:
           const fs=require('node:fs');
           const p=JSON.parse(fs.readFileSync('firebase-migration/policy/hml-owner-release-approval-v1.json','utf8'));
           const decision=(p.reaffirmations||[]).find(x=>x.decisionId==='AURORA-HML-CONTINUOUS-DRIVE-20261026');
+          const persistence=(p.reaffirmations||[]).find(x=>x.decisionId==='AURORA-HML-DOCUMENT-COMPATIBILITY-20261027');
           const expected='d3978b0f743ab22021c586b5d85c731beca34a6c03306609f33e64d512ab19fa';
+          const action=process.env.AURORA_CONTINUOUS_ACTION;
+          const statusOnly=action==='STATUS';
+          const persistentRuntime=persistence?.userAuthorizationPersists===true
+            &&persistence.exactPrivateScopeSha256===expected
+            &&persistence.sourceMutationAuthorized===false
+            &&persistence.newSourceEnrollmentAuthorized===false
+            &&persistence.productionAuthorized===false;
           if(!decision||decision.continuousDriveTriggerAuthorized!==true||decision.processExistingAuthorized!==true
             ||decision.queueMetadataRemediationAuthorized!==true||decision.realSourceActivationAuthorized!==true
             ||decision.sourceMutationAuthorized!==false||decision.newSourceEnrollmentAuthorized!==false
@@ -99,7 +109,8 @@ jobs:
             ||decision.exactPrivateScopeSha256!==expected||p.scope?.continuousDriveScopeSha256!==expected
             ||p.scope?.continuousDriveDecisionId!=='AURORA-HML-CONTINUOUS-DRIVE-20261026'
             ||p.scope?.projectId!=='wmgj-hml-jfn-20260927'||p.scope?.environment!=='firebase-homologation'
-            ||Date.now()>=Date.parse(decision.validUntilUtc)) {
+            ||(!statusOnly && Date.now()>=Date.parse(decision.validUntilUtc))
+            ||(statusOnly && !persistentRuntime)) {
             throw Error('CONTINUOUS_DRIVE_OWNER_AUTHORIZATION_INVALID');
           }
           NODE
