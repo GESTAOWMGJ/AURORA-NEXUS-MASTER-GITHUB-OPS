@@ -53,6 +53,13 @@ jobs:
           set -euo pipefail
           mkdir -p ../../organic-evidence
           node --import tsx --test test/aurora-organic-integration.test.ts | tee ../../organic-evidence/organic-tests.tap
+      - name: Validate CHELFEx contract and synthetic readback
+        working-directory: firebase-migration/functions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --import tsx --test test/aurora-chelfex.test.ts test/aurora-chelfex-runtime.test.ts | tee ../../organic-evidence/chelfex-tests.tap
+          node ../scripts/chelfex-synthetic-readback.cjs > ../../organic-evidence/chelfex-readback.json
       - name: Package exact source and build provenance
         shell: bash
         run: |

@@ -245,7 +245,7 @@ function createMaster({ stateDir, orgId, controlToken, port = 38765, infer = loc
       if (req.url === '/api/native') {
         closed(body, ['snapshot', 'classification']);
         if (!['PUBLIC', 'INTERNAL'].includes(body.classification) || body.snapshot?.orgId !== orgId || !['PUBLIC', 'INTERNAL'].includes(body.snapshot?.sensitivity)) return send(403, { code: 'TENANT_OR_CLASSIFICATION_REJECTED' });
-        const result = buildMasterOperationalState(body.snapshot, {}, new Date(now()));
+        const result = buildMasterOperationalState(body.snapshot, { chelfexContext: { orgId, authority: 'LOCAL_UNVERIFIED_PREVIEW' } }, new Date(now()));
         metrics.nativeEvaluations++; audit('NATIVE_PREVIEW', { inputHash: hash(JSON.stringify(body.snapshot)) });
         return send(200, { authority: 'LOCAL_UNVERIFIED_PREVIEW', cloudSyncVerified: false, externalAiCalls: 0, master: { ...result, mode: 'LOCAL_PREVIEW', source: { ...result.source, authenticity: 'NOT_VERIFIED_BY_LOCAL_IMPORT' } } });
       }

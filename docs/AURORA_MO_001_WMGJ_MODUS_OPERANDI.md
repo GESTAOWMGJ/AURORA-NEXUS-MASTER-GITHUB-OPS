@@ -866,3 +866,12 @@ a instalação de um conector e não comprova cobertura integral do Drive. Clien
 offline conservam seu estado pendente. Capacidade e limites são representados na
 rotina `AURORA-PROJECTION-ENGINE`; contrato e provas da entrega constam em
 `docs/AURORA_BETA_DOCUMENT_PROJECTION_20261023.md`.
+
+## CHELFEx — contrato de recomendação compartilhado
+
+`AURORA-CHELFEX-001` normaliza tarefas e referencia evidências no mesmo Motor Mestre.
+Contrato fechado, política/hash, risco da ação e resultado por conclusão não concedem
+permissões. Web recebe contexto do servidor; importação Windows permanece não
+verificada. Execução e aprendizagem automática não são implementadas por esse
+adaptador. Desafio, limites, testes e rollback em
+[AURORA_CHELFEX_INTRINSIC_ENGINE_001.md](AURORA_CHELFEX_INTRINSIC_ENGINE_001.md).

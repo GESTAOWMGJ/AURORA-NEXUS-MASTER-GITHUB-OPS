@@ -21,8 +21,9 @@ const IA_MASTER_FILES=['README.md','app.css','app.js','index.html','knowledge-re
   'publisher.cjs','safe-read.cjs','server.cjs','studio-local.css','studio-local.js','studio.cjs','update.cjs',
   ...WINDOWS_FILES.map(name=>'client-agent/'+name),
   ...['source-serif-4-regular.woff2','source-serif-4-semibold.woff2','atkinson-hyperlegible-next.woff2','Source-Serif-OFL.txt','Atkinson-Hyperlegible-Next-OFL.txt','provenance.json'].map(name=>'assets/fonts/'+name),
-  ...['auroraMasterEngine','auroraNativeIntelligence','auroraNativeRoutines','auroraIaMaster','auroraProductionOrchestrator','auroraDataGovernance','auroraReliableResult'].map(name=>'kernel/'+name+'.js')];
-const PRIOR_IA_MASTER_FILES=IA_MASTER_FILES.filter(name=>name!=='kernel/auroraReliableResult.js');
+  ...['auroraMasterEngine','auroraNativeIntelligence','auroraNativeRoutines','auroraIaMaster','auroraProductionOrchestrator','auroraDataGovernance','auroraReliableResult','auroraChelfex'].map(name=>'kernel/'+name+'.js')];
+const PRIOR_IA_MASTER_FILES=IA_MASTER_FILES.filter(name=>name!=='kernel/auroraChelfex.js');
+const LEGACY_IA_MASTER_FILES=PRIOR_IA_MASTER_FILES.filter(name=>name!=='kernel/auroraReliableResult.js');
 const CHECKPOINT_FIELDS = ['schemaVersion', 'componentVersion', 'targetBinding', 'sampleKey', 'attempt', 'updatedAt',
   'status', 'nextAction', 'connectionVerified', 'receiptVerifiedThisRun', 'processingVerifiedThisRun', 'processingProof',
   'previousReceiptCached', 'receipt', 'fullSynchronizationVerified', 'productionReleased', 'code', 'installationAcceptance'];
@@ -197,7 +198,7 @@ function inspectPackage(candidate, component, directory, manifestBytes) {
   const sameNames=expected=>canonical([...names].sort())===canonical([...expected].sort());
   const profile=component==='windowsIntegration'
     ? manifest.version==='1.0.8'?sameNames(WINDOWS_FILES):/^1\.0\.[0-7]$/.test(manifest.version)&&sameNames(LEGACY_WINDOWS_FILES)
-    : [39,40].includes(names.length)?sameNames(names.length===40?IA_MASTER_FILES:PRIOR_IA_MASTER_FILES)&&manifest.version==='1.1.0'&&manifest.clientAgent?.version==='1.0.5'
+    : [39,40,41].includes(names.length)?sameNames(names.length===41?IA_MASTER_FILES:names.length===40?PRIOR_IA_MASTER_FILES:LEGACY_IA_MASTER_FILES)&&manifest.version==='1.1.0'&&manifest.clientAgent?.version==='1.0.5'
       &&manifest.clientAgent.component==='AURORA_CLIENT_AGENT'&&manifest.clientAgent.configured===false
       &&manifest.clientAgent.sourceAuthorizationRequired===true&&manifest.clientAgent.providerConnectionsVerified===false
       : names.length===34&&[undefined,'1.0.4'].includes(manifest.clientAgent?.version)&&!INTAKE_FILES.some(name=>names.includes('client-agent/'+name));

@@ -19,9 +19,9 @@ function fixture(t:any){
   for(const [name,bytes] of Object.entries(fileBytes)){const file=join(directory,...name.split('/'));mkdirSync(dirname(file),{recursive:true});writeFileSync(file,bytes as Uint8Array);}
   rewrite();return {temporary,directory,manifest,fileBytes,rewrite};
 }
-test('existing package closure yields separate real IA40 and Windows12 manifests without config or acceptance claims',async t=>{
+test('existing package closure yields separate real IA41 and Windows12 manifests without config or acceptance claims',async t=>{
   const f=fixture(t),ia=await readComponentPackage(f.directory,'iaMaster',sourceSha),windows=windowsIntegrationPackage(ia,sourceSha);
-  assert.equal(Object.keys(ia.fileBytes).length,40);assert.equal(Object.keys(windows.fileBytes).length,12);
+  assert.equal(Object.keys(ia.fileBytes).length,41);assert.equal(Object.keys(windows.fileBytes).length,12);
   assert.ok(ia.fileBytes['kernel/auroraReliableResult.js']);
   assert.deepEqual(Object.keys(windows.fileBytes).sort(),[...WINDOWS_INTEGRATION_FILES].sort());
   for(const name of WINDOWS_INTEGRATION_FILES)assert.ok(Buffer.from(windows.fileBytes[name]).equals(Buffer.from(ia.fileBytes['client-agent/'+name])));
