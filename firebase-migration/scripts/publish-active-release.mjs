@@ -53,7 +53,25 @@ function requireCurrentOwnerDecision(now,reviewPrNumber) {
     &&media.laterMainCodeReviewClaimed===false&&media.independentGithubPullRequestReviewClaimed===false
     &&Number.isSafeInteger(mediaStart)&&Number.isSafeInteger(mediaExpiry)
     &&mediaExpiry>mediaStart&&now>=mediaStart&&now<mediaExpiry;
-  if(!historicalWindow&&!mediaWindow) fail('OWNER_APPROVAL_EXPIRED');
+  // Separate current-task authorization; historical operational windows stay closed.
+  const chelfex=ownerDecision.chelfexHmlAuthorization;
+  const chelfexStart=Date.parse(`${chelfex?.recordedOn}T00:00:00.000Z`);
+  const chelfexExpiry=Date.parse(chelfex?.validUntilUtc);
+  const chelfexWindow=chelfex?.decisionId==='AURORA-HML-CHELFEX-20261031'
+    &&chelfex.approvalSource==='DIRECT_OWNER_CHAT'&&chelfex.ownerHmlDeploymentApproved===true
+    &&chelfex.repo===REPOSITORY&&chelfex.projectId===HML_PROJECT&&chelfex.environment===HML_ENVIRONMENT
+    &&chelfex.branch==='main'&&chelfex.authorizedPullRequest===347&&String(reviewPrNumber)==='347'
+    &&chelfex.recommendationOnly===true&&chelfex.executorActivationAuthorized===false
+    &&chelfex.protectedRunOwnerApprovalStillRequired===true&&chelfex.exactFinalSourceCiStillRequired===true
+    &&chelfex.canonicalSmokeAndReadbackStillRequired===true
+    &&['riskReviewDeadlineExtended','newResidualRiskAcceptanceClaimed','productionAuthorized',
+      'clinicalSensitiveAuthorized','realApplicantDataAuthorizedBeforePrivacyReadiness',
+      'newSourceEnrollmentAuthorized','existingCredentialValidityExtended','iamChangeAuthorized',
+      'secretRotationAuthorized','laterMainCodeReviewClaimed','independentGithubPullRequestReviewClaimed']
+      .every(flag=>chelfex[flag]===false)
+    &&Number.isSafeInteger(chelfexStart)&&Number.isSafeInteger(chelfexExpiry)
+    &&chelfexExpiry>chelfexStart&&now>=chelfexStart&&now<chelfexExpiry;
+  if(!historicalWindow&&!mediaWindow&&!chelfexWindow) fail('OWNER_APPROVAL_EXPIRED');
 }
 
 async function verifyOwnerDeploymentApproval(input,release,pr,githubJSON) {

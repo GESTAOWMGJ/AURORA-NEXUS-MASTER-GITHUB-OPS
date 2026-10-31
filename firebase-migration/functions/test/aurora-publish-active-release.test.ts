@@ -538,3 +538,27 @@ test('v2 promotion preserves a verified historical v1 predecessor and its exact 
   assert.equal(rows.get(newHistory).previousCertificateSha256,prior.certificateSha256);
   assert.equal(JSON.stringify(rows.get(oldHistory)),before);
 });
+
+test('CHELFEx owner scope permits only PR 347 HML with actual protected approval and exact CI',async()=>{
+  const decision=ownerDecision.chelfexHmlAuthorization;
+  assert.equal(decision.authorizedPullRequest,347);
+  assert.equal(decision.recommendationOnly,true);
+  assert.equal(decision.executorActivationAuthorized,false);
+  assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-27T04:30:00.000Z');
+  const fixture=()=>{
+    const f=ownerFixture();f.env.AURORA_ACTIVE_RELEASE_REVIEW_PR='347';
+    f.responses.set('/pulls/347',structuredClone(f.responses.get('/pulls/42')));
+    f.responses.set('/pulls/347/reviews?per_page=100',[]);
+    f.deps.now=()=>Date.parse('2026-10-31T12:00:00.000Z');return f;
+  };
+  const approved=fixture();await publishActiveRelease(approved.env,approved.deps);assert.equal(approved.writes(),1);
+  const noApproval=fixture();noApproval.responses.set(`/actions/runs/${releaseRunId}/approvals`,[]);
+  await assert.rejects(publishActiveRelease(noApproval.env,noApproval.deps),/OWNER_DEPLOYMENT_APPROVAL_NOT_VERIFIED/);
+  assert.equal(noApproval.writes(),0);
+  const expired=fixture();expired.deps.now=()=>Date.parse(decision.validUntilUtc);
+  await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(expired.writes(),0);
+  const wrongPr=ownerFixture();wrongPr.deps.now=()=>Date.parse('2026-10-31T12:00:00.000Z');
+  await assert.rejects(publishActiveRelease(wrongPr.env,wrongPr.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(wrongPr.writes(),0);
+  const before=fixture();before.deps.now=()=>Date.parse('2026-10-30T23:59:59.000Z');
+  await assert.rejects(publishActiveRelease(before.env,before.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(before.writes(),0);
+});
