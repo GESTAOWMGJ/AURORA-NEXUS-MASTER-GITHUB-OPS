@@ -922,7 +922,7 @@ jobs:
             node firebase-migration/scripts/verify-installed-writer-guardian.mjs \
               --bootstrap "$smoke_dir/canonical-bootstrap.json" \
               --cookie-jar "$smoke_dir/canonical-cookies.txt" \
-              --output "$RUNNER_TEMP/aurora-writer-installed-proof.json"
+              --output firebase-migration/functions/runtime-release/aurora-writer-installed-proof.json
           fi
       - name: Verify canonical source-bound runtime
         if: ${{ inputs.publish_active_release }}
@@ -950,7 +950,7 @@ jobs:
             firebase-migration/functions/runtime-release/ia-master-package/
             firebase-migration/functions/runtime-release/windows-integration-package/
             firebase-migration/functions/runtime-release/unified-beta-candidate.zip
-            ${{ runner.temp }}/aurora-writer-installed-proof.json
+            firebase-migration/functions/runtime-release/aurora-writer-installed-proof.json
           if-no-files-found: error
           retention-days: 14
       - name: Restore owned AuthGate traffic when deploy or smoke fails
