@@ -606,7 +606,7 @@ test('writer migration authorization stays bound to PR362, HML, current CI and r
   repair.responses.set('/pulls/365',structuredClone(repair.responses.get('/pulls/362')));
   repair.responses.set('/pulls/365/reviews?per_page=100',[]);
   await publishActiveRelease(repair.env,repair.deps);assert.equal(repair.writes(),1);
-  const wrongPr=prepare();(wrongPr.env as any).AURORA_ACTIVE_RELEASE_REVIEW_PR='366';
+  const wrongPr=prepare();(wrongPr.env as any).AURORA_ACTIVE_RELEASE_REVIEW_PR='369';
   await assert.rejects(publishActiveRelease(wrongPr.env,wrongPr.deps));assert.equal(wrongPr.writes(),0);
   const expired=prepare();expired.deps.now=()=>Date.parse(ownerDecision.writerGuardianHmlAuthorization.validUntilUtc);
   await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);
@@ -629,4 +629,24 @@ test('CHELFEx authenticated hardening PR 358 uses the same bounded HML decision 
   assert.equal(denied.writes(),0);
   const expired=fixture();expired.deps.now=()=>Date.parse(ownerDecision.chelfexHmlAuthorization.validUntilUtc);
   await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(expired.writes(),0);
+});
+
+for (const pr of ['366','368']) test(`audited guardian owner approval for PR${pr} preserves exact CI, environment and expiry gates`,async()=>{
+  assert.equal(ownerDecision.writerGuardianHmlAuthorization.authorizedAuditedExtensionPullRequest,366);
+  assert.equal(ownerDecision.writerGuardianHmlAuthorization.authorizedApprovalRecordPullRequest,368);
+  assert.equal(ownerDecision.writerGuardianHmlAuthorization.auditedExtensionReviewedHeadSha,'d1d2426cac77afb372ee23fca9adf9893a328270');
+  const prepare=()=>{const f=ownerFixture();f.env.AURORA_ACTIVE_RELEASE_REVIEW_PR=pr;
+    f.responses.set(`/pulls/${pr}`,structuredClone(f.responses.get('/pulls/42')));
+    f.responses.set(`/pulls/${pr}/reviews?per_page=100`,[]);
+    f.deps.now=()=>Date.parse('2026-10-31T17:00:00Z');return f;};
+  const accepted=prepare();await publishActiveRelease(accepted.env,accepted.deps);assert.equal(accepted.writes(),1);
+  assert.equal(accepted.approvalProvenance().independentGithubPullRequestReviewClaimed,false);
+  const noApproval=prepare();noApproval.responses.set(`/actions/runs/${releaseRunId}/approvals`,[]);
+  await assert.rejects(publishActiveRelease(noApproval.env,noApproval.deps),/OWNER_DEPLOYMENT_APPROVAL_NOT_VERIFIED/);assert.equal(noApproval.writes(),0);
+  const staleCi=prepare();staleCi.responses.get(`/actions/runs/${ciRunId}`).head_sha='f'.repeat(40);
+  await assert.rejects(publishActiveRelease(staleCi.env,staleCi.deps));assert.equal(staleCi.writes(),0);
+  const expired=prepare();expired.deps.now=()=>Date.parse(ownerDecision.writerGuardianHmlAuthorization.validUntilUtc);
+  await assert.rejects(publishActiveRelease(expired.env,expired.deps),/OWNER_APPROVAL_EXPIRED/);assert.equal(expired.writes(),0);
+  assert.equal(ownerDecision.scope.validUntilUtc,'2026-10-27T04:30:00.000Z');
+  assert.equal(ownerDecision.riskAcceptance.reviewBy,'2026-10-25');
 });
