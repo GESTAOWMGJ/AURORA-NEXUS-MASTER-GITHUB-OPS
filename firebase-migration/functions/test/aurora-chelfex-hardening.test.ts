@@ -1,3 +1,4 @@
+import { buildMasterOperationalState } from '../src/auroraMasterEngine.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readdirSync } from 'node:fs';
@@ -104,4 +105,13 @@ test('the stable receipt envelope has exactly the approved fields', () => {
     'status','evidence','conclusions','decision','requirements','blockers','acceptanceCriteria','verification','authorization',
     'executionAllowed','sourceMutation','rollback','lessonRef','decisionTracePersisted'
   ].sort());
+});
+
+test('master and CHELFEx agree that impossible calendar dates cannot support findings', () => {
+  const projection = { ...fixture(), asOf: '2026-02-30T12:00:00.000Z' };
+  const clock = new Date('2026-03-02T12:00:00.000Z');
+  const result = buildMasterOperationalState(projection, { chelfexContext: { orgId: context.orgId, authority: 'AUTHENTICATED_SERVER' } }, clock) as any;
+  assert.equal(result.governance.dataAssessment.decision, 'DENY');
+  assert.equal(result.chelfex.verification.evidence, 'NOT_VERIFIED');
+  assert.equal(result.workloadMetrics.openActions, null);
 });

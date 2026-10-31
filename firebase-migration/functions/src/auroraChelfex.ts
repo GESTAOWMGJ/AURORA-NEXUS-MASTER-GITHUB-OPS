@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { types } from 'node:util';
-import { assessNativeData } from './auroraDataGovernance.js';
+import { assessNativeData, canonicalTimestamp } from './auroraDataGovernance.js';
 import { generateNativeInsight, type NativeInsightFinding } from './auroraNativeIntelligence.js';
 
 /** Code is the executable policy; the JSON mirror is checked by regression tests. */
@@ -46,12 +46,6 @@ function dataRecord(value: unknown): value is Record<string, unknown> {
 }
 function closed(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   return dataRecord(value) && Reflect.ownKeys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
-}
-function canonicalTimestamp(value: unknown): value is string {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)) return false;
-  const milliseconds = Date.parse(value);
-  const expected = value.length === 20 ? value.slice(0, -1) + '.000Z' : value;
-  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === expected;
 }
 export function parseChelfexTask(value: unknown): ChelfexTask {
   if (!closed(value, ['schemaVersion', 'orgId', 'operation', 'objective'])

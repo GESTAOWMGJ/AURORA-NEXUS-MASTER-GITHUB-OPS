@@ -220,3 +220,25 @@ test('direct redacted inference never restores partial availability from revoked
     assert.equal(JSON.stringify(r).includes('7654321'), false);
   }
 });
+
+test('all read routes reject foreign snapshots without serializing foreign values', async () => {
+  for (const endpoint of ['bootstrap', 'master', 'insight'] as const) {
+    const p = { ...snapshot(), orgId: 'foreign-tenant', snapshotId: 'foreign-secret-id' };
+    const r = await call(member, p, {}, endpoint);
+    assert.equal(r.code, 409, endpoint);
+    assert.equal(JSON.stringify(r.body).includes('foreign-secret-id'), false);
+    assert.equal(r.writes, 0);
+  }
+});
+test('placeholder provenance cannot produce native insights or master priorities', async () => {
+  const p = { ...snapshot(), sourceHash: '0'.repeat(64) };
+  const insight = await call(member, p, {}, 'insight');
+  assert.equal(insight.code, 409);
+  for (const endpoint of ['bootstrap', 'master'] as const) {
+    const r = await call(member, p, {}, endpoint);
+    const m = endpoint === 'master' ? r.body.master : r.body.masterEngine;
+    assert.equal(m.governance.dataAssessment.decision, 'DENY');
+    assert.equal(m.workloadMetrics.openActions, null);
+    assert.ok(m.priorities.every((f: any) => f.code === 'DATA_GOVERNANCE_BLOCKED'));
+  }
+});

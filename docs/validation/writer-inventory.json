@@ -1065,10 +1065,10 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraChelfex.ts",
-      "sha256": "3df3d306dabc59b4e292d31b99654b6482861c0f0a4d32afd649e51e61cf25f4",
+      "sha256": "2cf2071a4c88689b2b82d905eadda27caa28f95b71b2ab8b9845921f8a57ade6",
       "writeLikeLines": [
         21,
-        159
+        153
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
@@ -1114,7 +1114,7 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraDataGovernance.ts",
-      "sha256": "c9fa8acff9da4301fd85df7a1498eb6b267ded616774fdba35fcb64c36ada0c6",
+      "sha256": "b464122b8ffb2e637d1ffdaadf0715f90e556eb05776d33288d95113a49b75e4",
       "writeLikeLines": [
         21
       ],
@@ -1659,7 +1659,7 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraRuntime.ts",
-      "sha256": "523e51bca6093bfefd241af19297f19fe9f09b57ca78b12007433f4237c960ea",
+      "sha256": "51e00a8652bfbd1f626d1d35dcf70de5453528ff5f11965f45843a11e9ae3678",
       "writeLikeLines": [
         34,
         62,
@@ -1679,22 +1679,22 @@
         225,
         226,
         253,
-        344,
-        406,
-        465,
-        495,
-        506,
-        507,
-        523,
-        538,
-        578,
-        588,
-        599
+        347,
+        409,
+        471,
+        501,
+        512,
+        513,
+        529,
+        544,
+        584,
+        594,
+        605
       ],
       "guardedCallLines": [
         47,
         177,
-        509
+        515
       ],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
     },
@@ -2085,16 +2085,16 @@
     },
     {
       "path": "firebase-migration/scripts/publish-active-release.mjs",
-      "sha256": "d3d9bd88c23e17bc85a5c32e910b5cc6a61ffd807b4fe9e9155e044aabcc04db",
+      "sha256": "8f280e373d1fa6cfd38a3c08a9f3b01cd4e519d0f9f6ca0de6eb3c5b9bef304c",
       "writeLikeLines": [
         19,
-        184,
-        198,
-        270,
-        298,
-        311,
-        313,
-        322
+        185,
+        199,
+        271,
+        299,
+        312,
+        314,
+        323
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"

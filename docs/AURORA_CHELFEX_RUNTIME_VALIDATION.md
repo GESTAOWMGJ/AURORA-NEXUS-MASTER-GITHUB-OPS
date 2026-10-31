@@ -39,3 +39,43 @@ A second separate review reproduced severity escalation after redaction even whe
 The third review traced the same readiness contract to the separate native-insight GET route. That route now passes the authenticated canonical snapshot and server-derived financial restriction to the shared inference boundary, matching bootstrap and master. Actual-handler tests cover all five intents, restricted and authorized roles, method/authentication/facility/intent failures, forged redaction overrides, zero writes and input immutability. All production call sites of generateNativeInsight and visibleProjection were enumerated; refresh uses redaction only when returning its response, not as an inference input.
 
 The fourth review tested revocation and freshness on the standalone native-insight route. Arithmetic consistency alone was insufficient to restore partial-readiness claims. Partial availability now also requires the canonical governance assessment, and the authenticated native-insight handler rejects mismatched tenants and any DENY assessment before inference, using one shared clock. New cases cover revoked, stale, future, foreign, tampered and provenance-missing snapshots for viewer/operator/auditor roles; all reject without findings, financial lookups or writes. Direct redacted inference likewise cannot advertise partial availability from revoked/stale sources.
+
+## Independent current-main reconciliation — 2026-10-31
+
+Review inputs: candidate `c09cdb4d6771f86396d831a20c7d2835127b8db1` and
+main `8afda9fd28f963ebb663673b9c6c0a3324381a7d`. Their normal merge is
+conflict-free. All #365 release-path, installed-proof and owner-policy changes
+are preserved; only the reproducible writer inventory needs regeneration.
+
+Two additional adversarial reproductions failed before correction:
+
+1. **Tenant response boundary (high, conditional on a wrongly materialized
+   snapshot):** bootstrap serialized a snapshot whose embedded orgId differed
+   from authenticated membership. CHELFEx refused its evidence, but the sibling
+   projection response still disclosed it. Bootstrap and master now return 409
+   before serialization/inference for this mismatch, matching native insight.
+   This does not demonstrate unauthorized Firestore writes or a production leak.
+2. **Inconsistent provenance gates (medium):** native insight accepted an all-zero
+   SHA-256 placeholder even though CHELFEx rejected it. Master could likewise
+   produce priorities next to a blocked CHELFEx receipt. The existing shared
+   data-governance gate now rejects placeholders. Its timestamp check reuses the
+   same canonical UTC/calendar validator as CHELFEx; impossible dates cannot
+   become normalized current evidence. Governance policy is version 1.1.1.
+
+The two failing route regressions pass after correction. An additional
+master/CHELFEx impossible-date regression passes. Build/typecheck and the expanded
+281-case directed suite pass locally (Node 24); Node 22 and exact-source CI are
+separate receipts. Initial broad local run had three YAML-test failures caused
+by absent Ruby, not passing evidence for those tests. No tests were disabled.
+
+The CHELFEx 1.1.2-rc.5 policy table/hash and task.v1 envelope are unchanged. There
+is still one auroraChelfex.ts module; timestamp validation moved into existing
+data governance, not a second kernel. The lexical writer inventory retains 169
+candidate files / 1314 locations, without claiming installed enforcement.
+
+Review limitations: authenticated canonical storage is the trust root; enum
+metadata and a nonzero hash do not cryptographically authenticate arbitrary
+internal objects. Snapshot nested objects are not a JavaScript sandbox. Route
+fixtures substitute identity/storage and are not a real authenticated HML test.
+Native Windows CI and installation/readback remain distinct. This review is not
+human GitHub approval, certification, merge or deployment authorization.

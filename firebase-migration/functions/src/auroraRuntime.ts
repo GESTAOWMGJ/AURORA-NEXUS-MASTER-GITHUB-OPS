@@ -277,9 +277,12 @@ export const auroraNexusBootstrap = onRequest(
         });
       }
     }
-    const rawProjection = snapshot.exists
+    const rawProjection: Record<string, unknown> = snapshot.exists
       ? { ...snapshot.data(), generatedAt: snapshot.data()?.generatedAt?.toDate?.().toISOString?.() ?? null }
       : { ...buildProjection(empty, new Date(), { orgId: member.orgId, competence }), generatedAt: null };
+    if (rawProjection.orgId !== member.orgId) {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_SCOPE_MISMATCH" }); return;
+    }
     const safeActions = actions
       ? actions.docs.map((doc) => publicAction(doc.id, doc.data())).filter((item): item is Record<string, unknown> => item !== null)
         .sort((a, b) => Date.parse(String(b.updatedAt ?? b.createdAt ?? 0)) - Date.parse(String(a.updatedAt ?? a.createdAt ?? 0)))
@@ -434,6 +437,9 @@ export const auroraNexusMasterEngine = onRequest(
     if (nativeDataPlane.storage !== "FIRESTORE" || nativeDataPlane.sourceAccessDuringInference !== false) {
       res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_CONTRACT_REQUIRED" });
       return;
+    }
+    if (rawProjection.orgId !== member.orgId) {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_SCOPE_MISMATCH" }); return;
     }
     const projection = visibleProjection(rawProjection, member);
     const competence = typeof projection.competence === "string" ? projection.competence : null;
