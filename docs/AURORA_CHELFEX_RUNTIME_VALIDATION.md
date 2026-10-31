@@ -1,23 +1,32 @@
-# CHELFEx shared recommendation contract
+# CHELFEx 1.1.2-rc.1 ? consolidated review candidate
 
-Policy: AURORA-CHELFEX-001 / 1.1.1-candidate. Supersedes the unvalidated initial adapter in PR #358, not the operational release pointer.
+## Canonical baseline and compatibility
+PR #347 merged the canonical auroraChelfex.ts API into main at eef855d8ffbfd5ca63d3410bfba1cefd4863a48f. PR #358 now incorporates that main through a normal merge, preserving both histories and the installed product lineage. Its earlier alternate auroraChelflex.ts module and duplicate API were removed, rather than shipping two incompatible policies or kernels. The production source tree and signed package retain exactly one CHELFEx module and the established task.v1 envelope. No dependency, database, executor, collector, IAM rule or deployment authorization is added.
 
-## Trust boundary
-The pure adapter accepts a closed request and a separate server-owned boundary. Request JSON cannot supply identity, scope filtering, source verification, grants or executors. The two canonical cloud callers create the boundary only after requireAccess and visibleProjection. Local imports remain unverified even when their data-readiness checks pass. A scope mismatch blocks the planner and its ancillary projections.
+The canonical contract has fixed native findings; arbitrary supplied conclusions are not accepted. Schema, operation names and output fields from main are preserved. Policy version is 1.1.2-rc.1, explicitly a release candidate, not GA, certification or operational deployment. Exact hashes and CI receipts belong to the corresponding commit, not an earlier green run.
 
-## Evidence and risk
-Each conclusion has a stable ID and exact source/path references. A verified source alone is not a verified arbitrary claim: FACT additionally requires a server-owned binding to the exact statement and references. Revocation, missing expiry, stale/future observations, duplicate IDs and unknown fields fail closed. Unknown values are not zero. Policy metadata is recursively immutable and hashed from the executable policy. Operation-derived risk R0-R4 cannot be downgraded by a request. Every output remains recommendation-only, with executionAuthorized=false and executionState=NOT_RUN. R2-R4 declare execution blockers and required gates; no executor is linked.
+## Changes and reproduced regressions
+1. Data-only boundaries: reject unknown/hidden/symbol properties, getters, proxies and custom prototypes without executing them. Accept ordinary cross-realm and null-prototype records. Parse identity authority as an exact primitive enum, never String coercion. Copy only approved primitive task fields. A server-owned context is still mandatory; passing an internal object is not a new authentication mechanism.
+2. Evidence integrity: reject null/malformed root snapshots, invalid/native-less clocks, all-zero provenance hashes and impossible calendar timestamps. Preserve existing governance freshness windows, tenant isolation, revocation and valid partial results. Context identity and evidence readiness remain different states.
+3. Financial minimization: users without financial.read no longer trigger the financial closing lookup, and visibleProjection also removes reliableResult from the response. Existing authorized finance roles retain access. Tests exercise the actual GET route with synthetic identity/storage and the projection filter used by bootstrap.
+4. Risk requirements: replace nested conditional selection with a frozen per-risk policy table included in the policy hash. R0-R4 classification remains operation-derived. Every outcome is recommendation-only and executionAllowed=false.
 
-## Shared packaging
-Cloud Functions and the Windows package compile the same TypeScript dependency graph. The current IA package contains 41 payload files plus manifest.json; exact historical 40/39-file updater profiles are preserved. The current package requires kernel/auroraChelflex.js. Package tests retain source/hash checks and do not loosen signature, activation or canonical-readback requirements.
+## Boundary and non-goals
+Input task/context are closed data records. Snapshot values originate from the authenticated, filtered canonical data plane; this module is not a JavaScript sandbox, signature verifier or universal authorizer. Internal identity metadata cannot replace requireAccess, membership, facility filtering, MFA or canonical source retrieval. No real tenant/patient data is used by the tests. No generated text is an executor capability. Missing evidence remains pending, never zero. A successful data gate proves only that its checks passed, not that every document is true or that a cloud deployment occurred.
 
-## Reproducible verification
-- Functions: npm ci --ignore-scripts; npm run build; npm test.
-- Directed contract tests: node --import tsx --test test/auroraChelflex.test.ts.
-- Package: python desktop/ia-master/build.py --output a-new-isolated-directory.
-- Actual compiled parity and HTTP boundary: set AURORA_TEST_BUILD to that directory; run node --test --test-name-pattern=CHELFEx desktop/ia-master/server.test.cjs after compiling Functions.
-- AURORA_CHELFEX_READBACK optionally writes a synthetic-only test receipt. It includes exact source revision, dirty flag, platform, policy, evidence, verification, negative authentication/tenant outcomes and executor-call count. It does not prove cloud deployment.
-- Installer CI includes Linux package regressions and a Windows/Node22 synthetic readback job. Existing CodeQL, Functions, emulator security-rules and release checks remain required.
+## Reproducible checks
+From firebase-migration/functions:
+- npm ci --ignore-scripts
+- npm run build && npm run lint
+- node --import tsx --test test/aurora-chelfex*.test.ts test/aurora-master-engine.test.ts test/aurora-reliable-result.test.ts
+- npm test (complete Linux CI also runs Rules, Python/API, updater and installer regressions)
+- node --import tsx --test --experimental-test-coverage '--test-coverage-include=**/auroraChelfex.ts' test/aurora-chelfex*.test.ts
+- node ../scripts/chelfex-synthetic-readback.cjs
 
-## Promotion and limits
-A passing build, synthetic HTTP response, automated review or CI is not deployment or independent human approval. The adapter does not assert either. Release publication must use the existing exact-main, source-bound CI, protected environment, applicable review, signed canonical release and authenticated readback gates. No source or policy in this change authorizes financial movement, clinical decisions or unrestricted code execution. No customer data is needed for these tests.
+The existing organic workflow runs the same contract/runtime suite on Linux and native Windows/Node22, retaining JSON readback. The existing installer workflow verifies the exact 41-file payload, hashes and historical updater profiles. Coverage is diagnostic, not a proof of absence of defects; counts overlap between suites.
+
+## Independent review handoff
+Review the exact final candidate against its recorded main base. Re-run closed-schema adversarial fixtures, identity/scope negative tests, finance-role minimization, risk/receipt invariants, source revocation/freshness and compiled Windows parity. Check that only auroraChelfex.ts is built, that the policy mirror agrees byte-for-byte in meaning with the executable policy, and that changes outside the increment were retained. Report actionable findings with file/line, reproducible case, risk and remediation. Distinguish automated review, independent human approval, CI, synthetic local evaluation, real authenticated HML and production. Do not authorize a merge or deployment from this document alone.
+
+## Rollback and remaining release gates
+A review rejection leaves this branch isolated. After any future authorized merge, revert this increment using reviewed Git history and rebuild the same signed package; no data migration is involved. Operational rollout still needs applicable review, exact-source CI, protected environment approval, predecessor/rollback evidence and authenticated cloud readback. This candidate does not renew any old HML, Drive, credential or risk-acceptance window.

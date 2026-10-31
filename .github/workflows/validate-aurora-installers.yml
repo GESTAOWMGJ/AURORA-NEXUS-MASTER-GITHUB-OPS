@@ -58,7 +58,6 @@ jobs:
       - name: Build and test authenticated local IA Master without model downloads
         run: |
           set -euo pipefail
-          npm run build --prefix firebase-migration/functions
           python3 -m unittest discover -s desktop/ia-master -p test_build.py -v
           python3 desktop/ia-master/build.py --output "${RUNNER_TEMP}/aurora-ia-master"
           python3 - "${RUNNER_TEMP}/aurora-ia-master/manifest.json" "$(git rev-parse HEAD)" "${RUNNER_TEMP}/aurora-ia-master.zip" <<'PY'
@@ -98,8 +97,8 @@ jobs:
           assert manifest['files']['knowledge-registry.cjs'] == 'dc6c99e407faa11adb46e68d798bd49374e54ada820c0f755520fcfec32abbb8', 'Knowledge registry byte hash mismatch'
           files = manifest['files']
           assert isinstance(files, dict) and len(files) == 41 and 'manifest.json' not in files, 'Unexpected local Master file composition'
+          assert 'kernel/auroraChelfex.js' in files, 'CHELFEx kernel missing'
           assert 'kernel/auroraReliableResult.js' in files, 'Reliable-result kernel missing'
-          assert 'kernel/auroraChelflex.js' in files, 'CHELFEx kernel missing'
           assert 'published-update.cjs' in files, 'Missing explicit published release consumer'
           agent_names = {'client-agent/' + name for name in ('client_agent.py', 'provider_connectors.py', 'client_secret_store.py', 'install_client_agent.py', 'aurora_cloud_sync.py', 'aurora_deployment.py', 'published_release.py', 'document_intake.py', 'document_intake.cjs', 'document_intake_core.cjs', 'document_fact_mapping.cjs', 'document-intake-manifest.json')}
           assert {name for name in files if name.startswith('client-agent/')} == agent_names, 'Unexpected client agent composition'
@@ -229,38 +228,3 @@ jobs:
       - name: Record scope of validation
         run: |
           echo 'HML clients built and synthetic tests passed. No Firebase deployment, authenticated event integration, user-device installation, signing, notarization or portal publication performed. No database created.' >> "$GITHUB_STEP_SUMMARY"
-
-  chelfex-windows-parity:
-    runs-on: windows-2025
-    timeout-minutes: 10
-    steps:
-      - name: Preserve source bytes on isolated runner
-        run: git config --global core.autocrlf false
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Validate shared kernel and authenticated synthetic readback
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm ci --prefix firebase-migration/functions --ignore-scripts --no-audit --no-fund
-          npm run build --prefix firebase-migration/functions
-          (cd firebase-migration/functions && node --import tsx --test test/auroraChelflex.test.ts)
-          export AURORA_TEST_BUILD="$(cygpath -m "$RUNNER_TEMP/chelfex-package")"
-          export AURORA_STUDIO_TEST_GIT="$(cygpath -m "$(command -v git)")"
-          export AURORA_CHELFEX_READBACK="$(cygpath -m "$RUNNER_TEMP/chelfex-readback.json")"
-          python desktop/ia-master/build.py --output "$AURORA_TEST_BUILD"
-          node --test --test-name-pattern='CHELFEx' desktop/ia-master/server.test.cjs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: chelfex-windows-readback-${{ github.sha }}
-          path: ${{ runner.temp }}/chelfex-readback.json
-          if-no-files-found: error
-          retention-days: 14

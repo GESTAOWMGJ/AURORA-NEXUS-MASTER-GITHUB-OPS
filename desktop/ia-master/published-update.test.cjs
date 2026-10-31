@@ -204,18 +204,18 @@ test('34-file signed IA and 7-file Windows closures reject extras and changed by
   fs.writeFileSync(path.join(base,'ia','extra.txt'),'public extra');assert.throws(()=>real.inspectPackage(candidate,'iaMaster',path.join(base,'ia'),ia.bytes),/CLOSURE/);
   fs.writeFileSync(path.join(base,'win','client_agent.py'),'changed');assert.throws(()=>real.inspectPackage(candidate,'windowsIntegration',path.join(base,'win'),win.bytes),/FILE_BYTES/);
 });
-test('reliable-result package and prior exact closure remain verifiable without accepting extra files',async t=>{
+test('CHELFEx package and both prior exact closures remain verifiable without accepting extra files',async t=>{
   const {IA_MASTER_FILES}=await import('../../firebase-migration/scripts/release-component-packages.mjs');
   const base=fs.mkdtempSync(path.join(os.tmpdir(),'aurora-reliable-package-'));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
-  for(const names of [IA_MASTER_FILES,IA_MASTER_FILES.filter(name=>name!=='kernel/auroraChelflex.js'),IA_MASTER_FILES.filter(name=>!['kernel/auroraChelflex.js','kernel/auroraReliableResult.js'].includes(name))]){
+  for(const names of [IA_MASTER_FILES,IA_MASTER_FILES.filter(name=>name!=='kernel/auroraChelfex.js'),IA_MASTER_FILES.filter(name=>!['kernel/auroraChelfex.js','kernel/auroraReliableResult.js'].includes(name))]){
     const directory=path.join(base,String(names.length)),pkg=packageFixture(directory,names),pair=keyPair();
     pkg.manifest.clientAgent={component:'AURORA_CLIENT_AGENT',version:'1.0.5',configured:false,sourceAuthorizationRequired:true,providerConnectionsVerified:false};
     const bytes=encode(pkg.manifest);fs.writeFileSync(path.join(directory,'manifest.json'),bytes);
     const candidate=real.verifyCandidate(envelope(pair,{iaMaster:h(bytes)}),pair.trust,NEXT);
     const verified=real.inspectPackage(candidate,'iaMaster',directory,bytes);
     assert.equal(Object.keys(verified.files).length,names.length+1);
-    assert.equal(Boolean(verified.files['kernel/auroraChelflex.js']),names.length===41);
     assert.equal(Boolean(verified.files['kernel/auroraReliableResult.js']),names.length>=40);
+    assert.equal(Boolean(verified.files['kernel/auroraChelfex.js']),names.length===41);
     fs.writeFileSync(path.join(directory,'extra.txt'),'unclaimed');
     assert.throws(()=>real.inspectPackage(candidate,'iaMaster',directory,bytes),/CLOSURE/);
   }

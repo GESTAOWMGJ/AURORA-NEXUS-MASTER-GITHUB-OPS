@@ -60,7 +60,12 @@ console.log('PRIVATE_MANAGEMENT_DENIED');
 for(const f of files){
   const path='/arquivos/wmgj/'+f.name;
   const head=await fetch(path,'HEAD');checkHeaders(head,f);
-  assert.equal(Number(head.headers['content-length']),f.bytes);
+  // HEAD may omit Content-Length (for example through a CDN). If supplied,
+  // it must match; GET below always proves the actual size and SHA-256.
+  if(head.headers['content-length']!==undefined){
+    assert.match(head.headers['content-length'],/^[0-9]+$/);
+    assert.equal(Number(head.headers['content-length']),f.bytes);
+  }
   assert.equal(head.bytes.length,0);
   const get=await fetch(path);
   checkHeaders(get,f);

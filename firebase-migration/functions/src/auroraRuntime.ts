@@ -243,7 +243,8 @@ function visibleProjection(projection: Record<string, unknown>, member: AuroraMe
   return {
     ...projection,
     financial: { billedAmount: null, receivedAmount: null, pendingAmount: null, reconciliationDifference: null, currency: "BRL" },
-    financialCents: { invoicedCents: null, receivedCents: null, glossCents: null, outstandingCents: null }
+    financialCents: { invoicedCents: null, receivedCents: null, glossCents: null, outstandingCents: null },
+    reliableResult: null
   };
 }
 
@@ -321,7 +322,7 @@ export const auroraNexusBootstrap = onRequest(
       member: { email: member.email, role: member.role, mfaVerified: member.mfaVerified },
       projection: visibleProjection(rawProjection, member),
       masterEngine: buildMasterOperationalState(visibleProjection(rawProjection, member), {
-        chelfexAccess: { tenantId: member.orgId, authenticated: true, scopeFiltered: true, canonicalSource: snapshot.exists },
+        chelfexContext: { orgId: member.orgId, authority: "AUTHENTICATED_SERVER" },
         actionSummary,
         financialStatus,
         adoption: { member, installation },
@@ -428,7 +429,8 @@ export const auroraNexusMasterEngine = onRequest(
     }
     const projection = visibleProjection(rawProjection, member);
     const competence = typeof projection.competence === "string" ? projection.competence : null;
-    const financialStatus = competence
+    const mayReadFinance = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
+    const financialStatus = competence && mayReadFinance
       ? await loadFinancialClosingStatus(member.orgId, competence)
       : null;
     const canonicalVersion = await readRuntimeActiveRelease();
@@ -441,7 +443,7 @@ export const auroraNexusMasterEngine = onRequest(
       externalAiUsed: false,
       canonicalVersion,
       master: buildMasterOperationalState(projection, { financialStatus, release,
-        chelfexAccess: { tenantId: member.orgId, authenticated: true, scopeFiltered: true, canonicalSource: true },
+        chelfexContext: { orgId: member.orgId, authority: "AUTHENTICATED_SERVER" },
         adoption: { member, installation: member.allFacilities ? await loadInstallationReadiness(member.orgId) : undefined } })
     });
   }

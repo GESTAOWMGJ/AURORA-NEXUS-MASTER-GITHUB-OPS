@@ -17,7 +17,7 @@ export const IA_MASTER_FILES=Object.freeze([
   'assets/fonts/source-serif-4-regular.woff2','assets/fonts/source-serif-4-semibold.woff2',
   'assets/fonts/atkinson-hyperlegible-next.woff2','assets/fonts/Source-Serif-OFL.txt',
   'assets/fonts/Atkinson-Hyperlegible-Next-OFL.txt','assets/fonts/provenance.json',
-  ...['auroraChelflex','auroraMasterEngine','auroraNativeIntelligence','auroraNativeRoutines','auroraIaMaster','auroraProductionOrchestrator','auroraDataGovernance','auroraReliableResult']
+  ...['auroraMasterEngine','auroraNativeIntelligence','auroraNativeRoutines','auroraIaMaster','auroraProductionOrchestrator','auroraDataGovernance','auroraReliableResult','auroraChelfex']
     .map(name=>'kernel/'+name+'.js')]);
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const demand=(condition,code)=>{if(!condition)throw Error(code);};

@@ -1,4 +1,4 @@
-import { evaluateChelflex, CHELFEX_POLICY, type ChelfexEvidence } from "./auroraChelflex.js";
+import { buildChelfexContract, type ChelfexContext } from "./auroraChelfex.js";
 import { readReliableFinancialResult, RELIABLE_RESULT_POLICY } from "./auroraReliableResult.js";
 import { generateNativeInsight, type NativeInsightFinding } from "./auroraNativeIntelligence.js";
 import { nativeRoutineSummary, buildClientAdoptionPlan, type AdoptionContext } from "./auroraNativeRoutines.js";
@@ -6,10 +6,9 @@ import { iaMasterCapability } from "./auroraIaMaster.js";
 import { buildBetaProductionOrchestrator } from "./auroraProductionOrchestrator.js";
 import { assessNativeData, DATA_GOVERNANCE_POLICY, knownCount, masterCommandSurface } from "./auroraDataGovernance.js";
 
-export const AURORA_MASTER_ENGINE_VERSION = "0.3.0-reliable-results";
+export const AURORA_MASTER_ENGINE_VERSION = "0.4.0-chelfex-recommendation";
 type MasterContext = {
-  /** Constructed only after requireAccess and visibleProjection; absent for local imports. */
-  chelfexAccess?: { tenantId: string; authenticated: boolean; scopeFiltered: boolean; canonicalSource: boolean };
+  chelfexContext?: ChelfexContext;
   actionSummary?: Record<string, unknown>;
   financialStatus?: Record<string, unknown> | null;
   release?: Record<string, unknown>;
@@ -52,10 +51,9 @@ function governanceReviewFinding(reasonCodes: readonly string[]): NativeInsightF
 export function buildMasterOperationalState(
   projection: Record<string, unknown>, context: MasterContext = {}, now = new Date()
 ): Record<string, unknown> {
-  const access = context.chelfexAccess;
-  const scopeMismatch = Boolean(access && access.tenantId !== projection.orgId);
-  const assessment = assessNativeData(scopeMismatch ? {} : projection, now);
-  if (scopeMismatch) { assessment.decision = "DENY"; assessment.reasonCodes.push("GOV_AUTHENTICATED_TENANT_MISMATCH"); }
+  // Never lend an authenticated tenant to a different snapshot.
+  if (context.chelfexContext && context.chelfexContext.orgId !== projection.orgId) projection = {};
+  const assessment = assessNativeData(projection, now);
   const denied = assessment.decision === "DENY";
   const reliableResult = denied ? null : readReliableFinancialResult(projection);
   // The data gate runs BEFORE inference, including the bootstrap's empty fallback.
@@ -94,35 +92,16 @@ export function buildMasterOperationalState(
     : assessment.decision === "REVIEW" || !workloadComplete || findings.length > 0 || (overdueActions ?? 0) > 0 ? "ATTENTION" : "CONTROLLED";
   const cycleStage = operationalState === "BLOCKED" ? "COMPROVAR"
     : operationalState === "ATTENTION" ? "PRIORIZAR" : (openActions ?? 0) > 0 ? "AGIR" : "MEDIR";
-  // Identity and source authenticity are separate from snapshot self-descriptions.
-  const safeTenant = (v: unknown): v is string => typeof v === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(v);
-  const tenantId = safeTenant(access?.tenantId) ? access.tenantId : safeTenant(projection.orgId) ? projection.orgId : "unverified";
-  const sourceHash = assessment.sourceHash?.toLowerCase() ?? null;
-  const observedAt = typeof projection.asOf === "string" ? projection.asOf : null;
-  const observedMs = observedAt === null ? NaN : Date.parse(observedAt);
-  const canonicalTime = observedAt !== null && Number.isFinite(observedMs)
-    && new Date(observedMs).toISOString() === observedAt.replace(/(?<!\.\d{3})Z$/, ".000Z");
-  const evidence: ChelfexEvidence[] = !denied && sourceHash && sourceHash !== "0".repeat(64) && canonicalTime && observedAt ? [{
-    id: "native-snapshot", tenantId, sourceHash, verified: access?.canonicalSource === true,
-    revoked: projection.revoked === true || projection.revokedAt != null,
-    observedAt, validUntil: new Date(observedMs + CHELFEX_POLICY.maxEvidenceAgeMs).toISOString(), verifiedClaimHashes: []
-  }] : [];
-  const chelfex = evaluateChelflex({
-    tenantId, objective: "Review governed master findings; recommendation only", requestedRisk: "R1",
-    conclusions: (denied ? [] : findings.slice(0, 12)).map(f => ({
-      id: f.code, statement: f.title, kind: "INFERENCE",
-      evidenceRefs: [{ id: "native-snapshot", path: f.evidencePath }]
-    }))
-  }, { tenantId, authenticated: access?.authenticated === true, scopeFiltered: access?.scopeFiltered === true,
-    source: access?.canonicalSource === true ? "FIREBASE_CANONICAL" : "UNVERIFIED",
-    governanceDecision: assessment.decision, operation: "PROPOSE", evidence }, now);
   const release = record(context.release);
   return {
     engine: "AURORA_MASTER_OPERATIONAL_ENGINE", version: AURORA_MASTER_ENGINE_VERSION,
     mode: "FIREBASE_NATIVE_GOVERNED", externalProviderUsed: false, externalAiRequired: false,
     sourceAccessDuringInference: false, explainable: true,
     generatedAt: Number.isFinite(now.getTime()) ? now.toISOString() : null,
-    operationalState, cycleStage, chelfex,
+    operationalState, cycleStage,
+    chelfex: buildChelfexContract({ schemaVersion: 'aurora.chelfex.task.v1',
+      orgId: projection.orgId, operation: 'PROPOSE', objective: 'REVIEW_NATIVE_OPERATIONAL_STATE' },
+      context.chelfexContext, projection, now),
     reliableResult, resultPolicy: RELIABLE_RESULT_POLICY,
     cycle: ["OBSERVAR", "INGESTAR", "COMPROVAR", "CONFRONTAR", "DETECTAR", "PRIORIZAR", "AGIR", "VALIDAR", "MEDIR", "APRENDER", "REUTILIZAR"],
     headline: nextFinding?.title ?? "Nenhuma exceção detectada neste recorte autorizado; isto não comprova ausência de risco.",
@@ -138,9 +117,9 @@ export function buildMasterOperationalState(
       criticalFindings: denied ? null : critical, highFindings: denied ? null : high
     },
     routines: nativeRoutineSummary(),
-    clientAdoption: buildClientAdoptionPlan(scopeMismatch ? access?.tenantId : projection.orgId, context.adoption),
+    clientAdoption: buildClientAdoptionPlan(projection.orgId, context.adoption),
     iaMaster: iaMasterCapability(),
-    betaProductionOrchestrator: buildBetaProductionOrchestrator(scopeMismatch ? { orgId: access?.tenantId } : projection, { ...context, release }, now),
+    betaProductionOrchestrator: buildBetaProductionOrchestrator(projection, { ...context, release }, now),
     financialGate: {
       competence: denied ? null : projection.competence ?? null,
       distributionState: "USE_AUTHORIZED_FINANCIAL_ENDPOINT",
