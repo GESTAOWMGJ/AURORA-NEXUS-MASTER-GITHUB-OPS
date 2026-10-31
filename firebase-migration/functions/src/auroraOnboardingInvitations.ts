@@ -75,7 +75,7 @@ export function createOnboardingInvitationEngine(store: ProfileStore, clock = Da
     // Keep the credential only in this call's memory, including transaction retries.
     const registrationPassword = `ANX1-${randomBytes(32).toString("base64url")}`;
     const codeSalt = randomBytes(16).toString("base64url");
-    return store.transaction(async tx => {
+    return store.transaction(actor.orgId, async tx => {
       const org = await tx.read(base);
       const administrator = await tx.read(`${base}/members/${actor.uid}`);
       const member = await tx.read(memberPath);
@@ -136,7 +136,7 @@ export function createOnboardingInvitationEngine(store: ProfileStore, clock = Da
     const authEmail = principal.email.trim().toLowerCase();
     const base = `organizations/${orgId}`;
     const memberPath = `${base}/members/${principal.uid}`;
-    return store.transaction(async tx => {
+    return store.transaction(orgId, async tx => {
       const org = await tx.read(base);
       const member = await tx.read(memberPath);
       if (org?.active !== true || org.userProfilesEnabled !== true) throw new ProfileError("PROFILE_ENGINE_NOT_ENABLED", 403);

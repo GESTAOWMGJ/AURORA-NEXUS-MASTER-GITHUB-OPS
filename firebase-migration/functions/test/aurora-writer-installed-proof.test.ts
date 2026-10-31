@@ -11,7 +11,7 @@ function fixture() {
   return {sourceSha,manifestBytes,httpStatus:200,
     bootstrap:{ok:true,environment:'HOMOLOGATION',organization:{id:'wmgj'},
       canonicalVersion:{runtimeBuild:{sourceSha,manifestSha256:createHash('sha256').update(manifestBytes).digest('hex')}},
-      release:{writerGuardian:{routineId:'AURORA-REALTIME-PLATFORM-GUARDIAN-001',version:'1.1.0',migratedTransactionBoundaries:19,allLegacyWritersEnforced:false}}},
+      release:{writerGuardian:{routineId:'AURORA-REALTIME-PLATFORM-GUARDIAN-001',version:'1.1.0',migratedTransactionBoundaries:31,allLegacyWritersEnforced:false}}},
     before:{fields:fields({epoch:4})},
     after:{updateTime:'2026-10-31T12:00:00.000000Z',fields:fields({epoch:5,guardianId:'AURORA-REALTIME-PLATFORM-GUARDIAN-001',
       orgId:'wmgj',resourceKey:'canonical-data',holder:'CLOUD_CONTROL_PLANE',state:'RELEASED'})},
@@ -36,11 +36,12 @@ test('HTTP success, stale epoch, unrelated commit and unknown HTTP outcome canno
   }
 });
 test('source SHA, manifest and declared coverage must match before any live probe',()=>{
-  for(const change of ['sha','manifest','policy','scope']){
+  for(const change of ['sha','manifest','policy','scope','coverage']){
     const f:any=fixture();
     if(change==='sha')f.sourceSha='e'.repeat(40);
     if(change==='manifest')f.manifestBytes=Buffer.from('{}');
     if(change==='policy')f.bootstrap.release.writerGuardian.allLegacyWritersEnforced=true;
+    if(change==='coverage')f.bootstrap.release.writerGuardian.migratedTransactionBoundaries=19;
     if(change==='scope')f.bootstrap.organization.id='other';
     assert.throws(()=>verifyInstalledWriterObservation(f),/WRITER_INSTALLED_/);
   }

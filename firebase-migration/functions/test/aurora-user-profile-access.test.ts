@@ -126,7 +126,8 @@ test('real onboarding handler consumes the UID-bound code once and only then per
   context.mock.method(auroraDb,'runTransaction',async(body:any)=>{
     const draft=new Map([...rows].map(([path,data])=>[path,structuredClone(data)]));let wrote=false;
     const result=await body({
-      get:async(ref:any)=>{assert.equal(wrote,false,'Firestore reads precede writes');return {data:()=>structuredClone(draft.get(ref.path))};},
+      get:async(ref:any)=>{assert.equal(wrote,false,'Firestore reads precede writes');return {exists:draft.has(ref.path),readTime:{toMillis:()=>Date.now()},data:()=>structuredClone(draft.get(ref.path))};},
+      set:(ref:any,data:any)=>{wrote=true;draft.set(ref.path,structuredClone(data));},
       create:(ref:any,data:any)=>{wrote=true;assert.equal(draft.has(ref.path),false);draft.set(ref.path,structuredClone(data));},
       update:(ref:any,data:any)=>{wrote=true;assert.ok(draft.has(ref.path));draft.set(ref.path,{...draft.get(ref.path),...structuredClone(data)});}
     });

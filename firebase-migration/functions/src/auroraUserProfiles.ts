@@ -3,7 +3,7 @@ import { ProfileError, PROFILE_VERSION, normalizeProfileRequest, profileAdmin, p
 
 type Row = Record<string, any>;
 export type ProfileTx = { read(path: string): Promise<Row | undefined>; create(path: string, data: Row): void; update(path: string, data: Row): void };
-export type ProfileStore = { transaction<T>(body: (tx: ProfileTx) => Promise<T>): Promise<T> };
+export type ProfileStore = { transaction<T>(orgId: string, body: (tx: ProfileTx) => Promise<T>): Promise<T> };
 export type ProfileAuth = {
   getUser(uid: string): Promise<{ uid: string; email?: string; disabled: boolean; customClaims?: Row }>;
   createUser(data: { uid: string; email: string; displayName: string; disabled: boolean; emailVerified: boolean }): Promise<unknown>;
@@ -89,7 +89,7 @@ export function createProfileEngine(store: ProfileStore, auth: ProfileAuth, cloc
       };
     };
     const lease = randomUUID();
-    const ready = await store.transaction(async tx => {
+    const ready = await store.transaction(actor.orgId, async tx => {
       await authorized(tx, actor);
       const op = await tx.read(opPath);
       const member = await tx.read(memberPath);
@@ -133,7 +133,7 @@ export function createProfileEngine(store: ProfileStore, auth: ProfileAuth, cloc
       try { user = await auth.getUser(id.uid); }
       catch (error) {
         if ((error as {code?: string}).code !== "auth/user-not-found" || ready) throw error;
-        await store.transaction(checkLease);
+        await store.transaction(actor.orgId, checkLease);
         // Never adopt an existing account by email or reset anybody's password.
         await auth.createUser({ uid: id.uid, email: request.email, displayName: request.displayName, disabled: true, emailVerified: false });
         user = await auth.getUser(id.uid);
@@ -148,24 +148,24 @@ export function createProfileEngine(store: ProfileStore, auth: ProfileAuth, cloc
       if (Object.keys(claims).length && (claims.auroraOrgId !== actor.orgId || claims.auroraProfileOperation !== id.operationId || claims.auroraProfileVersion !== PROFILE_VERSION
           || (request.onboarding ? claims.auroraOnboardingRequired !== true : claims.auroraOnboardingRequired === true))) throw new ProfileError("PROFILE_IDENTITY_CONFLICT");
       if (!Object.keys(claims).length && !user.disabled) throw new ProfileError("PROFILE_IDENTITY_CONFLICT");
-      await store.transaction(checkLease);
+      await store.transaction(actor.orgId, checkLease);
       await auth.setCustomUserClaims(id.uid, { ...claims, auroraOrgId: actor.orgId,
         auroraProfileVersion: PROFILE_VERSION, auroraProfileOperation: id.operationId,
         ...(request.onboarding ? { auroraOnboardingRequired: true } : {}) });
-      await store.transaction(async tx => {
+      await store.transaction(actor.orgId, async tx => {
         await checkLease(tx);
         const member = await tx.read(memberPath);
         if (member && (!matchesRequest(member) || member.profileState !== "PENDING" || member.active !== false
             || (request.onboarding && member.onboardingState !== "INVITED"))) throw new ProfileError("PROFILE_REQUIRES_REVIEW");
         if (!member) tx.create(memberPath, pendingMember());
       });
-      await store.transaction(checkLease);
+      await store.transaction(actor.orgId, checkLease);
       await auth.updateUser(id.uid, { disabled: false });
       const verified = await auth.getUser(id.uid);
       if (verified.disabled || verified.email?.toLowerCase() !== request.email || verified.customClaims?.auroraOrgId !== actor.orgId
           || verified.customClaims?.auroraProfileOperation !== id.operationId || verified.customClaims?.auroraProfileVersion !== PROFILE_VERSION
           || (request.onboarding ? verified.customClaims?.auroraOnboardingRequired !== true : verified.customClaims?.auroraOnboardingRequired === true)) throw new ProfileError("PROFILE_IDENTITY_NOT_VERIFIED");
-      await store.transaction(async tx => {
+      await store.transaction(actor.orgId, async tx => {
         const op = await checkLease(tx);
         const member = await tx.read(memberPath);
         if (!member || !matchesRequest(member) || member.profileState !== "PENDING" || member.active !== false
@@ -184,7 +184,7 @@ export function createProfileEngine(store: ProfileStore, auth: ProfileAuth, cloc
       return result();
     } catch (error) {
       // Leave incomplete membership closed; a repeat of this request resumes it.
-      if (!ready) await store.transaction(async tx => {
+      if (!ready) await store.transaction(actor.orgId, async tx => {
         const op = await tx.read(opPath);
         if (op?.status === "PENDING" && op.lease === lease) tx.update(opPath, { leaseUntil: 0 });
       }).catch(() => {});
@@ -199,7 +199,7 @@ export function createProfileEngine(store: ProfileStore, auth: ProfileAuth, cloc
     const base = `organizations/${actor.orgId}`;
     const user = await auth.getUser(uid);
     if (user.customClaims?.auroraOrgId !== actor.orgId || user.customClaims?.auroraProfileVersion !== PROFILE_VERSION) throw new ProfileError("PROFILE_REVOCATION_NOT_ALLOWED", 403);
-    await store.transaction(async tx => {
+    await store.transaction(actor.orgId, async tx => {
       await authorized(tx, actor, false);
       const path = `${base}/members/${uid}`;
       const member = await tx.read(path);

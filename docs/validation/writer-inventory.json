@@ -7,7 +7,7 @@
   "runtimeInventoryVerified": false,
   "scannedFiles": 248,
   "candidateFiles": 169,
-  "writeLikeLines": 1314,
+  "writeLikeLines": 1309,
   "files": [
     {
       "path": "apps-script/01_EstruturaAbas.gs",
@@ -1133,16 +1133,16 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraDocumentGovernance.ts",
-      "sha256": "7b95888cdd3d860f4c4e3fac617db807fe48d57ecbea90e8ece7db3f3e910c9a",
+      "sha256": "cf001ac7422a0b8272a7bda107fb9449e22d6c0c5a69d1b7def7fbfd5e0b8046",
       "writeLikeLines": [
-        55,
-        143,
-        180,
-        197,
-        227,
-        249
+        56,
+        144,
+        202,
+        232
       ],
-      "guardedCallLines": [],
+      "guardedCallLines": [
+        183
+      ],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
     },
     {
@@ -1416,41 +1416,42 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraIntegrationRuntime.ts",
-      "sha256": "9bba476d6fb5ee504c3785f8863655dcda34df4d8ab51fee0306801148a6824b",
+      "sha256": "f19843205722c7ba4964b9d065ce3de51af4954292ab2071e558cb9bdd0b1fdb",
       "writeLikeLines": [
         44,
         45,
         46,
         47,
-        157,
-        178,
-        179,
-        201,
-        251,
-        282,
-        324,
-        352,
-        354,
-        390,
-        419,
-        420,
-        447,
-        449,
-        512,
-        521,
+        176,
+        197,
+        198,
+        221,
+        269,
+        299,
+        345,
+        373,
+        375,
+        411,
+        440,
+        441,
+        468,
+        470,
+        533,
         542,
-        545,
-        602,
-        603,
-        611,
-        619,
-        634
+        563,
+        566,
+        623,
+        624,
+        632,
+        640,
+        655
       ],
       "guardedCallLines": [
-        176,
-        348,
-        417,
-        458
+        91,
+        195,
+        369,
+        438,
+        479
       ],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
     },
@@ -1555,7 +1556,7 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraOnboardingInvitations.ts",
-      "sha256": "a839e6c5f063039c53fb9d5e7719540c435b4abc1e3f0f20713d949d2283eb44",
+      "sha256": "432bc502abd5a42a22b740e096ec4b0f9f18c4040a4b90c449818896aade7c15",
       "writeLikeLines": [
         28,
         31,
@@ -1791,18 +1792,19 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraUserProfileRuntime.ts",
-      "sha256": "75439da79036a010041bb48750a332b3cd0c62b0c31aae7536fc92af3a615e5f",
+      "sha256": "b020f50de0f3252cec93ec934d49c3f1a43218d8c92eee1711c3f9c6b1029343",
       "writeLikeLines": [
-        12,
-        14,
         15,
-        24,
+        16,
         25,
         26,
-        59,
-        64
+        27,
+        60,
+        65
       ],
-      "guardedCallLines": [],
+      "guardedCallLines": [
+        13
+      ],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
     },
     {
@@ -1819,7 +1821,7 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraUserProfiles.ts",
-      "sha256": "3718e5a4487e06c750daeb9f88e9f91da3407e5ffd056f93dc55799eb496e3bf",
+      "sha256": "1cfa25d6127583d40ad94416f507200363e85c60a5774625ed005f778a0127ef",
       "writeLikeLines": [
         5,
         25,
@@ -1864,17 +1866,18 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraWriterGuardian.ts",
-      "sha256": "2e8d6c225afc572209ac102ab9807664884c652a991295b4575fc35b24de5cf1",
+      "sha256": "d4146a4273e3800a05544949665d1698e21fca522d6a09548a539c7eafdb1579",
       "writeLikeLines": [
-        43,
-        78
+        50,
+        85,
+        114
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
     },
     {
       "path": "firebase-migration/functions/src/index.ts",
-      "sha256": "d2419668bfc1e12a48b3e3b3a5aa62852d02b611bb66d0e8f01d7c7bcd6abeca",
+      "sha256": "cca3358dc821407dfa9afccaa8773c01f9ade0f43271592e03e8da122967f152",
       "writeLikeLines": [
         71,
         78,
@@ -1886,10 +1889,7 @@
         367,
         388,
         405,
-        424,
-        511,
-        513,
-        519
+        424
       ],
       "guardedCallLines": [
         169
@@ -2175,7 +2175,7 @@
     },
     {
       "path": "firebase-migration/scripts/verify-installed-writer-guardian.mjs",
-      "sha256": "9ea2c257f7700e4fedd29aa0fe89e161d2b9efd5222d97114178fc37de851023",
+      "sha256": "17e131c580cf69c6dda2d1151bbb1bad364f45fe7f186f2feadb1ba86a69f44c",
       "writeLikeLines": [
         7,
         40,

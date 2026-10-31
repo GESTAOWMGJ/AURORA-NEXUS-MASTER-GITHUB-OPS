@@ -266,7 +266,7 @@ export function nativeRoutineSummary(): Record<string, unknown> {
       leaseStore: "EXISTING_RUNTIME_LOCKS", idempotency: "EXISTING_RECEIPTS_UNCHANGED",
       fence: "INSTANCE_AND_EPOCH_IN_EFFECT_TRANSACTION", clock: "SERVER_READ_TIME_AND_MONOTONIC_ELAPSED",
       externalSideEffectsAllowedInTransaction: false, schedulerCreated: false,
-      migratedTransactionBoundaries: 19, allLegacyWritersEnforced: false, physicalHandoffVerified: false,
+      migratedTransactionBoundaries: 31, allLegacyWritersEnforced: false, physicalHandoffVerified: false,
       documentation: "docs/AURORA_DISTRIBUTED_WRITER_ENFORCEMENT.md"
     },
     medicalCredentialingPolicy: {

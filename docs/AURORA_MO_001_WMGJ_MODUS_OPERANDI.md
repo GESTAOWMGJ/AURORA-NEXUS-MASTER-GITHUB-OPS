@@ -1,7 +1,7 @@
 # AURORA-MO-001 — Modus Operandi Mestre WMGJ → AURORA NEXUS
 
 Incremento candidato de 31/10/2026: o mesmo guardião de plataforma ganha identidade
-por instância e fencing transacional em oito fronteiras canônicas, conservando
+por instância e fencing transacional em 31 fronteiras canônicas, conservando
 idempotência e recibos existentes. O registro nativo mantém cobertura parcial;
 inventário de fonte não comprova todos os writers instalados. Writes externos
 exigem prova no destino, sem nova fila/agendamento. Contrato, limites e rollback:

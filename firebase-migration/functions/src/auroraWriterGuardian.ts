@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import type { Firestore, Transaction } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp, type Firestore, type Transaction } from 'firebase-admin/firestore';
 import { arbitrateWriter, DEFAULTS, hashPayload } from './realtimePlatformGuardian.js';
 
 export const WRITER_GUARDIAN_ID = 'AURORA-REALTIME-PLATFORM-GUARDIAN-001';
@@ -34,6 +34,13 @@ function clockFromSnapshot(snapshot: { readTime: { toMillis(): number } }): numb
  */
 export async function guardedCanonicalTransaction<T>(db: Firestore, orgId: string,
   body: (tx: Transaction) => Promise<T>, token?: WriterToken): Promise<T> {
+  return canonicalTransaction(db, orgId, body, token);
+}
+
+// The sole internal exception is the fixed legacy-lock expiry transition below.
+// Business callbacks still cannot mutate any runtimeLocks document.
+async function canonicalTransaction<T>(db: Firestore, orgId: string,
+  body: (tx: Transaction) => Promise<T>, token?: WriterToken, legacyLockPath?: string): Promise<T> {
   const resourceKey = CANONICAL_WRITE_RESOURCE;
   const path = writerLeasePath(orgId, resourceKey), ref = db.doc(path);
   if (token && (token.orgId !== orgId || token.resourceKey !== resourceKey)) {
@@ -57,7 +64,7 @@ export async function guardedCanonicalTransaction<T>(db: Firestore, orgId: strin
           return (...args: any[]) => {
             const destination = args[0]?.path;
             if (typeof destination !== 'string' || !destination.startsWith(`organizations/${orgId}/`)
-              || destination.includes('/runtimeLocks/')) throw new WriterLeaseError('WRITER_SCOPE_VIOLATION');
+              || (destination.includes('/runtimeLocks/') && destination !== legacyLockPath)) throw new WriterLeaseError('WRITER_SCOPE_VIOLATION');
             writes++;
             Reflect.apply(value, target, args);
             return guardedTx;
@@ -88,4 +95,23 @@ export async function guardedCanonicalTransaction<T>(db: Firestore, orgId: strin
     }
     throw error;
   });
+}
+
+/** Expire one legacy lock after re-reading its lease; never delete fencing epochs. */
+export async function expireLegacyRuntimeLock(db: Firestore, orgId: string, lockId: string): Promise<boolean> {
+  writerLeasePath(orgId); // Validate organization before constructing any path.
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(lockId) || lockId.startsWith('platform-guardian-')) {
+    throw new WriterLeaseError('INVALID_LEGACY_LOCK_SCOPE');
+  }
+  const path = `organizations/${orgId}/runtimeLocks/${lockId}`;
+  return canonicalTransaction(db, orgId, async tx => {
+    const ref = db.doc(path), snapshot = await tx.get(ref), data = snapshot.data();
+    if (!snapshot.exists || data?.state !== 'LOCKED') return false;
+    if (data.guardianId !== undefined || data.resourceKey === CANONICAL_WRITE_RESOURCE
+      || (data.orgId !== undefined && data.orgId !== orgId)) throw new WriterLeaseError('INVALID_LEGACY_LOCK_SCOPE');
+    if (!(data.leaseUntil instanceof Timestamp)) throw new WriterLeaseError('INVALID_LEGACY_LOCK_RECORD');
+    if (data.leaseUntil.toMillis() >= clockFromSnapshot(snapshot)) return false;
+    tx.update(ref, {state:'EXPIRED', expiredAt:FieldValue.serverTimestamp(), updatedAt:FieldValue.serverTimestamp()});
+    return true;
+  }, undefined, path);
 }

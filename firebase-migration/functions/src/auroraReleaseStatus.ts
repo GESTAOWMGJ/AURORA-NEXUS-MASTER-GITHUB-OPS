@@ -94,7 +94,7 @@ export function buildReleaseStatus(organization: Record<string, unknown> = {}, p
     releaseTrain: AURORA_RELEASE_TRAIN,
     target: "SELLABLE_GA",
     writerGuardian: { routineId: "AURORA-REALTIME-PLATFORM-GUARDIAN-001", version: "1.1.0",
-      status: "PARTIAL_IMPLEMENTATION_PENDING_RUNTIME_VALIDATION", migratedTransactionBoundaries: 19, allLegacyWritersEnforced: false,
+      status: "PARTIAL_IMPLEMENTATION_PENDING_RUNTIME_VALIDATION", migratedTransactionBoundaries: 31, allLegacyWritersEnforced: false,
       distributedHandoffVerified: false, productionVerified: false,
       detail: "Transações canônicas migradas; writes diretos e efeitos externos exigem migração e prova no destino." },
     iaMaster: { routineId: "AURORA-IA-MASTER-001", version: unifiedBeta.platforms.windows.technicalVersions.iaMaster ?? null,

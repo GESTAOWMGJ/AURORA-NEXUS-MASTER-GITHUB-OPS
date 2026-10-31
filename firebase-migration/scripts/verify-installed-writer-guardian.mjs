@@ -17,7 +17,7 @@ export function verifyInstalledWriterObservation({bootstrap,sourceSha,manifestBy
     ||manifest.sourceSha!==sourceSha||!manifest.files?.['lib/realtimePlatformGuardian.js']
     ||!manifest.files?.['lib/auroraWriterGuardian.js'])fail('WRITER_INSTALLED_SOURCE_CONFLICT');
   const policy=bootstrap.release?.writerGuardian;
-  if(policy?.routineId!==WRITER_GUARDIAN_ID||policy.version!=='1.1.0'||policy.migratedTransactionBoundaries!==19
+  if(policy?.routineId!==WRITER_GUARDIAN_ID||policy.version!=='1.1.0'||policy.migratedTransactionBoundaries!==31
     ||policy.allLegacyWritersEnforced!==false)fail('WRITER_INSTALLED_POLICY_CONFLICT');
   const priorEpoch=before?Number(field(before,'epoch')):0,epoch=Number(field(after,'epoch'));
   const sameCommit=typeof after?.updateTime==='string'&&after.updateTime===projection?.updateTime;
@@ -27,7 +27,7 @@ export function verifyInstalledWriterObservation({bootstrap,sourceSha,manifestBy
     &&field(after,'holder')==='CLOUD_CONTROL_PLANE'&&sameCommit
     &&typeof field(projection,'snapshotId')==='string'&&/^[a-f0-9]{64}$/.test(field(projection,'sourceHash')??'');
   return {schemaVersion:'aurora.writer-installed-proof.v1',status:verified?'INSTALLED_COMMIT_VERIFIED':'PENDING_EFFECT_PROOF',
-    sourceSha,guardianVersion:policy.version,migratedTransactionBoundaries:19,installedCodeVerified:true,
+    sourceSha,guardianVersion:policy.version,migratedTransactionBoundaries:31,installedCodeVerified:true,
     canonicalCommitVerified:verified,leaseAndProjectionSameCommit:sameCommit,
     leaseEpoch:Number.isSafeInteger(epoch)?epoch:null,leaseUpdateTime:after?.updateTime??null,
     snapshotIdHash:verified?sha(field(projection,'snapshotId')):null,

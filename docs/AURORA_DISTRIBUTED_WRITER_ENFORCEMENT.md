@@ -37,9 +37,13 @@ inclui o mesmo módulo no pacote Functions. Não existem duas implementações d
 | Decisão financeira | `auroraFinancialDecisionRuntime.ts` | Mesmo snapshot/MFA/idempotência; sem movimentação financeira |
 | Relatório societário | `auroraShareholderReportRuntime.ts` | Mesmo evento/versão, sem duplicação no replay |
 | Pré-credenciamento | `auroraMedicalPartnerRuntime.ts`, quatro fronteiras | Convite, submissão, reserva e recibo documental; precondição nativa do Storage permanece fora do callback |
+| Credenciais de integração | `auroraIntegrationRuntime.ts`, CREATE/REGISTER_HASH/REVOKE | Mesma identidade/hash, revogação do administrador revalidada no commit; replay de revogação não muda recibo |
+| Perfis e onboarding | `auroraUserProfiles.ts`/`auroraOnboardingInvitations.ts`, sete caminhos de mutação | Reserva, membro pendente, conclusão, recuperação, revogação, convite e consumo recebem orgId explícito no store guardado |
+| Vigilância documental | `auroraDocumentGovernance.ts:syncDocumentGovernance` | Fonte/organização/ação relidas no commit de cada item, sem lote concorrente; falha preserva os outros itens |
+| Expiração de locks legados | `index.ts:runtimeWatchdog` | Mesmo lease; expiração revalidada pelo readTime do destino; sem apagar epoch ou alterar locks do guardião |
 | Autoteste criptográfico | `auroraCryptoRuntime.ts`, três fronteiras | Reserva, sucesso e erro usam o mesmo guardião e runId; KMS permanece fora do callback |
 
-São **19 fronteiras transacionais**, não 19 plataformas instaladas ou todos
+São **31 fronteiras transacionais**, não 31 plataformas instaladas ou todos
 os writers do repositório. O escritor efetivo dessas entradas é o servidor,
 independentemente de a solicitação vir de Apps Script, Xeon, web ou cliente local.
 As chaves de origem não são reinterpretadas como concessões de lease. Nenhum
@@ -61,7 +65,10 @@ conflito; não usar chave de tentativa/idempotência como chave de recurso.
    proprietário e epoch exatos; um token antigo não readquire implicitamente.
 4. Epoch cresce e não é apagado. Lease inválido, escopo divergente, ausência de
    relógio ou epoch esgotado falham fechados. Callbacks não podem escrever em outro
-   tenant nem na coleção de locks por meio do adaptador.
+   tenant nem na coleção de locks por meio do adaptador público. A única exceção interna
+   é `expireLegacyRuntimeLock`: transição fixa de LOCKED para EXPIRED em lock
+   legado vencido; recusa o prefixo reservado, guardianId, resourceKey canônico,
+   tenant divergente e timestamp inválido. Não oferece callback nem escrita livre.
 5. Efeitos e estado RELEASED são persistidos no mesmo commit. Durante o callback,
    a exclusão é a transação do Firestore; não há lease adquirido em um commit
    separado que precise ser liberado em `finally` após crash.
@@ -97,7 +104,7 @@ do inventário na CI existente; atualizar o JSON não comprova enforcement.
 
 | Família ainda pendente | Trabalho necessário no mesmo sistema |
 | --- | --- |
-| Outros writers Cloud Functions | Revisar os writers restantes de perfis, Auth, credenciais, vigilância e administração; manter autorização e idempotência próprias. As 19 fronteiras acima não cobrem todo Admin SDK |
+| Outros writers Cloud Functions | Conferir IAM e efeitos externos de Auth/Storage/KMS, além de scripts administrativos; manter autorização e idempotência próprias. As 31 fronteiras acima não cobrem efeitos externos do Admin SDK |
 | Apps Script `src/` | Revisar cada mutação Spreadsheet/Drive/Properties/Gmail no ponto de efeito; os diretórios legados continuam inventariados, não tratados como fonte publicada |
 | Xeon e clientes | Confirmar binários e configurações carregados; mapear escrita local, sincronização, instalador e atualizador. Upload canônico protegido não equivale a arquivo local protegido |
 | Provedores externos e scripts administrativos | Usar precondição/idempotência nativa ou execução pelo proprietário único com recibo reconciliável. Uma consulta ao lease antes de uma escrita externa não elimina a corrida entre consulta e efeito |
@@ -163,3 +170,36 @@ identidade de instância; validar posse somente antes do efeito é insuficiente;
 idempotência permanece no executor original; falha individual conserva o lote.
 Persistência no corpus privado e adoção do motor instalado permanecem PENDING
 sem recibo próprio. Nenhuma regra privada de cliente foi exportada.
+
+
+## Extensão administrativa — 31/10/2026
+
+Delta sobre a main `7b59861db48185456c30a2d7382e69c08461ab84` (PR #362,
+árvore idêntica à candidata `7f34f75c8e302750f313afb86e9ef8b6905a9e36`): mais 12
+caminhos de efeito, total 31. A contagem inclui sete mutações do engine de perfis
+que convergem no mesmo ProfileStore. As três verificações somente-leitura de
+`checkLease` não contam como novas mutações. A regressão tipada cobre chamadas
+Firestore diretas em `functions/src`; não equivale a análise de chamadas dinâmicas,
+prova de IAM ou garantia de todos os destinos. Restam duas transações sem mutação
+(consulta de instalação e GET orgânico) além do núcleo guardado.
+
+O watchdog documental retorna `changed`, `pending`, `failures` e `partial`.
+Cada falha deixa a fonte intacta para o ciclo existente e não apaga os commits dos
+itens válidos. Fonte corrigida entre varredura e commit é reavaliada. Expiração
+legada reavalia o timestamp no commit; renovação concorrente não é vencida por uma
+foto antiga. Não há nova fila, agenda, tabela de idempotência ou retry interno.
+
+### Limites concretos do enforcement universal
+
+| Efeito remanescente | Limite / próxima prova necessária |
+| --- | --- |
+| Apps Script: Spreadsheet, Properties, Drive e Gmail | LockService/Properties não são o lease Firestore. A fonte ainda contém gravação direta. Inventariar scriptId/deployment e credenciais de todas as cópias; transferir os efeitos ao proprietário existente com precondição no destino. Uma consulta prévia ao lease não serve como fencing |
+| Auth: criar usuário, claims, habilitar/desabilitar e revogar tokens | Reservas e membership agora são guardados; os efeitos Auth continuam fora da transação. Preservar o processo de recuperação existente; não declarar fencing do provedor por checkLease antes da chamada |
+| Storage e KMS | Reservas/recibos guardados, efeitos externos com seus próprios controles. Prova independente por destino; nunca executar chamadas externas no callback repetível |
+| Xeon e clientes: arquivo, SQLite, corpus, instalador e updater | A ingestão no servidor passa pelo mesmo lease. As gravações locais e versões carregadas ainda precisam de migração/paridade e recibo físico. Não copiar o árbitro para criar um lock isolado em cada dispositivo |
+| Scripts administrativos e identidades IAM | O runtime não intercepta Admin SDK de outro processo. Enumerar e retirar escrita direta somente após paridade e rollback; inventário do repositório não enumera credenciais implantadas |
+
+Resultado atual: `PARTIAL_IMPLEMENTATION_PENDING_RUNTIME_VALIDATION`;
+`allLegacyWritersEnforced=false`, `physicalHandoffVerified=false`. Nenhuma flag é
+promovida por existência de fonte, teste ou CI. A autorização do titular permanece;
+o impedimento remanescente é técnico e de prova de implantação/destino.
