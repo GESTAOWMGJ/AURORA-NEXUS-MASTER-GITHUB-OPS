@@ -1,4 +1,6 @@
 import test from 'node:test';
+import {Readable} from 'node:stream';
+import {getStorage} from 'firebase-admin/storage';
 import assert from 'node:assert/strict';
 import {FieldValue, Timestamp} from 'firebase-admin/firestore';
 import {auroraAuth, auroraDb} from '../src/firebase.ts';
@@ -236,4 +238,42 @@ test('runtime watchdog continues after one blocked tenant', async t => {
   t.mock.method(auroraDb,'collectionGroup',()=>query);await (runtimeWatchdog as any).run({});
   assert.equal(f.rows.get(a).state,'LOCKED');assert.equal(f.rows.get(b).state,'EXPIRED');
   assert.equal(f.rows.get(writerLeasePath('wmgj')).epoch,5);assert.equal(f.rows.get(writerLeasePath('other')).epoch,1);
+});
+
+
+test('external upload receipt binds verified generation and preserves the original receipt on replay',async t=>{
+  const f=fixture(t),token=Buffer.alloc(32,7).toString('base64url'),invitationId='synthetic-upload';
+  const applicationId=sha256('aurora-credmed-application-v1:wmgj:'+invitationId),app=f.base+'/medicalPartnerApplications/'+applicationId;
+  f.rows.set(f.base+'/medicalPartnerInvitations/'+invitationId,{tokenHash:sha256(token),state:'SUBMITTED',applicationId,expiresAtIso:'2099-01-01T00:00:00Z'});
+  f.rows.set(app,{invitationId,documentCount:0});
+  const bytes=Buffer.from('%PDF-1.7\nSynthetic content\n%%EOF'); let saves=0;
+  t.mock.method(getStorage(),'bucket',()=>({file:(_key:string,options?:any)=>({
+    save:async(_data:any,opts:any)=>{saves++;assert.equal(opts.preconditionOpts.ifGenerationMatch,0);},
+    getMetadata:async()=>[{generation:'123',size:bytes.length,contentType:'application/pdf'}],
+    createReadStream:()=>{assert.equal(options.generation,'123');return Readable.from([bytes]);}
+  })}) as any);
+  const call=()=>f.call(auroraNexusMedicalPartners,{action:'UPLOAD',token,document:{kind:'CRM_CERTIFICATE',mimeType:'application/pdf',base64:bytes.toString('base64')}},CSRF_PURPOSES.medicalPartner,'POST','/api/wmgj/medicos');
+  const first=await call();assert.equal(first.status,200,JSON.stringify(first.result));
+  const document=f.rows.get(app+'/documents/'+first.result.documentId);
+  assert.equal(document.storageGeneration,'123');assert.equal(document.storageVerification,'GENERATION_BYTES_SHA256_VERIFIED');
+  const again=await call();assert.equal(again.result.replay,true);assert.equal(saves,1);
+  assert.equal(f.rows.get(app).receivedDocumentCount,1);
+});
+
+for(const boundary of ['tenant-disabled','foreign-lease','invitation-revoked'])test('external upload cannot confirm after '+boundary,async t=>{
+  const f=fixture(t),token=Buffer.alloc(32,7).toString('base64url'),invitationId='synthetic-upload';
+  const applicationId=sha256('aurora-credmed-application-v1:wmgj:'+invitationId),app=f.base+'/medicalPartnerApplications/'+applicationId;
+  const invite=f.base+'/medicalPartnerInvitations/'+invitationId;
+  f.rows.set(invite,{tokenHash:sha256(token),state:'SUBMITTED',applicationId,expiresAtIso:'2099-01-01T00:00:00Z'});
+  f.rows.set(app,{invitationId,documentCount:0});const bytes=Buffer.from('%PDF-1.7\nSynthetic content\n%%EOF');
+  t.mock.method(getStorage(),'bucket',()=>({file:()=>({save:async()=>{},
+    getMetadata:async()=>[{generation:'123',size:bytes.length,contentType:'application/pdf'}],
+    createReadStream:()=>{if(boundary==='tenant-disabled')f.rows.get(f.base).active=false;
+      if(boundary==='foreign-lease')f.lock();if(boundary==='invitation-revoked')f.rows.get(invite).state='REVOKED';
+      return Readable.from([bytes]);}
+  })}) as any);
+  const result=await f.call(auroraNexusMedicalPartners,{action:'UPLOAD',token,document:{kind:'CRM_CERTIFICATE',mimeType:'application/pdf',base64:bytes.toString('base64')}},CSRF_PURPOSES.medicalPartner,'POST','/api/wmgj/medicos');
+  assert.equal(result.status,boundary==='invitation-revoked'?403:503,JSON.stringify(result.result));
+  assert.equal(f.rows.get(app).receivedDocumentCount,undefined);
+  assert.equal([...f.rows.entries()].find(([k])=>k.startsWith(app+'/documents/'))?.[1].state,'UPLOAD_PENDING');
 });

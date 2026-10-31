@@ -1490,7 +1490,7 @@
     },
     {
       "path": "firebase-migration/functions/src/auroraMedicalPartnerRuntime.ts",
-      "sha256": "878e9de2ce929456a1731817d4caf95ce162ae8593ad458695700965bc4e4b64",
+      "sha256": "ed3c23c0b32805f5453042b287fb68be25c452b4c4a9104d3bf3b8404800d989",
       "writeLikeLines": [
         28,
         29,
@@ -1504,18 +1504,18 @@
         116,
         124,
         125,
-        159,
-        164,
-        188,
-        189,
-        190,
-        235
+        202,
+        207,
+        227,
+        229,
+        230,
+        276
       ],
       "guardedCallLines": [
         84,
         104,
-        144,
-        183
+        187,
+        212
       ],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
     },

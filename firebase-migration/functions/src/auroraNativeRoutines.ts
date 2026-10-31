@@ -279,6 +279,8 @@ export function nativeRoutineSummary(): Record<string, unknown> {
       specialistTitleRequiresRqeVerification: true, contractExecutedByPreregistration: false,
       status: "IMPLEMENTED_CANDIDATE_PENDING_PRIVATE_BUCKET_AND_HML_READBACK",
       storage: "EXPLICIT_PRIVATE_WMGJ_BUCKET_NO_PUBLIC_LINKS",
+      storageReceiptProof: "CREATE_ONLY_GENERATION_BOUND_BYTES_SHA256",
+      storageLeaseFencingVerified: false, localWriterLeaseFencingVerified: false,
       confidentialDataSharedAcrossTenants: false, externalAiRequired: false,
       publicOpenUploadWithoutInvitation: false, mandatoryTrainingRequiresEvidence: true,
       runtimeActivationRequiresTenantFlag: true, permissionsGranted: false,

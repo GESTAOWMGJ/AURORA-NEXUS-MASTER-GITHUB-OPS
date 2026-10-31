@@ -203,3 +203,30 @@ Resultado atual: `PARTIAL_IMPLEMENTATION_PENDING_RUNTIME_VALIDATION`;
 `allLegacyWritersEnforced=false`, `physicalHandoffVerified=false`. Nenhuma flag é
 promovida por existência de fonte, teste ou CI. A autorização do titular permanece;
 o impedimento remanescente é técnico e de prova de implantação/destino.
+
+
+### Readback externo de Storage — continuação 31/10/2026
+
+O upload de credenciamento mantém a precondição nativa `ifGenerationMatch: 0`.
+Tanto sucesso de transporte quanto resposta perdida/conflito exigem leitura dos
+bytes da geração exata antes do recibo. Metadados SHA-256 não são prova dos bytes.
+A leitura limita o tamanho, recusa gerações sem precisão no SDK, não descomprime
+conteúdo e confronta o SHA-256 calculado com a entrada validada. Geração ausente
+ou removida deixa a operação pendente; não há fallback para o objeto corrente.
+O recibo e a auditoria conservam a geração comprovada. A conclusão revalida
+organização, convite e o mesmo lease; revogação ou outro proprietário impedem a
+confirmação sem apagar o objeto nem desfazer outros itens. Replay conserva o
+recibo original; recibos legados não recebem prova nova por inferência.
+
+Isto comprova integridade de uma geração no destino, **não fencing distribuído
+do efeito GCS**. Um upload iniciado antes de revogação/takeover ainda pode criar
+um objeto pendente: Firestore e GCS não compartilham commit atômico. Não criar
+um check prévio nem copiar o lock para disfarçar essa limitação. IAM, quarentena,
+retenção da geração e recibo instalado continuam dependências de homologação.
+Os writers locais do Xeon e Apps Script permanecem pendentes de migração com
+proteção efetiva no destino; nenhuma versão instalada é promovida por este teste.
+
+Regressões sintéticas cobrem metadados falsos, bytes divergentes/truncados/maiores,
+resposta perdida, geração removida, replay e revogação/takeover durante readback.
+O aprendizado abstrato no registro nativo separa prova dos bytes de posse do
+lease; leitura pelo motor instalado e adoção física permanecem pendentes.
