@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {fork} from 'node:child_process';
 import {once} from 'node:events';
+import {setTimeout as delay} from 'node:timers/promises';
 const require = createRequire(new URL('../functions/package.json',import.meta.url));
 const {initializeApp,deleteApp} = require('firebase-admin/app');
 const {getFirestore} = require('firebase-admin/firestore');
@@ -64,11 +65,25 @@ for(const phase of ['before','after']) test(`SIGKILL ${phase} commit preserves o
     const ready=await Promise.race([once(child,'message'),once(child,'exit').then(()=>{throw Error('CHILD_EXITED_BEFORE_CHECKPOINT');})]);
     assert.equal(ready[0].phase,phase);
     const exited=once(child,'exit');child.kill('SIGKILL');await exited;
-    const result=await guardedCanonicalTransaction(db,org,async tx=>{
-      const receipt=db.doc(`organizations/${org}/apiIdempotency/original-key`),prior=await tx.get(receipt);
-      if(prior.exists)return 'DUPLICATE';
-      tx.create(receipt,{effect:'one'});return 'ACCEPTED';
-    });
+    // Model the existing bridge's bounded caller retry, preserving identity.
+    // Killing the process does NOT immediately release provider transaction locks.
+    let result, attempts=0;
+    for(let attempt=1;attempt<=3;attempt++){
+      attempts=attempt;
+      try {
+        result=await guardedCanonicalTransaction(db,org,async tx=>{
+          const receipt=db.doc(`organizations/${org}/apiIdempotency/original-key`),prior=await tx.get(receipt);
+          if(prior.exists)return 'DUPLICATE';
+          tx.create(receipt,{effect:'one'});return 'ACCEPTED';
+        });
+        break;
+      } catch(error){
+        if(error.code!=='GUARDIAN_CONTENTION_RETRY'||attempt===3)throw error;
+        assert.equal(error.status,503);
+        await delay(attempt*750);
+      }
+    }
+    console.log(JSON.stringify({fixture:'SYNTHETIC_PROCESS_CRASH',phase,attempts,result}));
     assert.equal(result,phase==='before'?'ACCEPTED':'DUPLICATE');
     assert.equal((await db.collection(`organizations/${org}/apiIdempotency`).get()).size,1);
     assert.equal((await db.doc(writerLeasePath(org)).get()).data().epoch,1);

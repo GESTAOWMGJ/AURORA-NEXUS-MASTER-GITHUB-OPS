@@ -63,6 +63,11 @@ conflito; não usar chave de tentativa/idempotência como chave de recurso.
    perdida é reconciliada pelo mesmo recibo. Replays não recebem nova identidade.
 8. Falha aborta somente a transação afetada. A projeção posterior conserva o
    recibo já aceito; loops independentes usam o tratamento de falhas existente.
+9. Após SIGKILL anterior ao commit, locks internos do provedor podem sobreviver
+   ao processo. A primeira retomada pode esgotar as tentativas do SDK com ABORTED.
+   Esse resultado vira HTTP 503 / GUARDIAN_CONTENTION_RETRY; o chamador existente
+   conserva chave, orçamento e backoff. Não há retry adicional no guardião, nem
+   exclusão de lock. Resultado desconhecido não é classificado como ausência de efeito.
 
 Não colocar chamadas HTTP, Gmail, Drive, Auth, Storage, arquivos ou comandos do
 sistema dentro do callback: ele pode executar novamente. O wrapper é uma
@@ -105,6 +110,9 @@ proteção às cópias instaladas depende de publicação e recibos próprios.
   exercitam processo real e recuperação do mesmo recibo no emulador.
 - O emulador é restrito a loopback e ao projeto de testes existente. Não comprova
   handoff no Xeon, rede particionada real ou operação publicada.
+- O primeiro teste SIGKILL antes do commit identificou contenção remanescente
+  (run 41198118769); o caso depois do commit preservou o recibo. A correção conserva
+  a falha transitória e testa retomada pelo orçamento já usado no bridge.
 - CI, revisão, emulador, implantação e recibos de cada plataforma são evidências
   separadas. O estado permanece parcial até migração e validação de cada família.
 

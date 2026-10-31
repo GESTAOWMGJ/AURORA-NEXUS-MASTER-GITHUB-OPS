@@ -158,3 +158,14 @@ test('the original guarded token cannot be replayed after atomic release', async
   },token);
   await assert.rejects(guardedCanonicalTransaction(f.db,'synthetic',async () => {},token),/STALE_WRITER_FENCED/);
 });
+
+test('exhausted provider contention becomes retryable pending without an extra executor loop', async () => {
+  let calls=0;
+  const db:any={doc:()=>({}),runTransaction:async()=>{calls++;throw Object.assign(Error('provider'),{code:10});}};
+  await assert.rejects(guardedCanonicalTransaction(db,'synthetic',async()=>{}),
+    (error:any)=>error.code==='GUARDIAN_CONTENTION_RETRY'&&error.status===503);
+  assert.equal(calls,1);
+  const unknown=Object.assign(Error('unknown outcome'),{code:4});
+  db.runTransaction=async()=>{throw unknown;};
+  await assert.rejects(guardedCanonicalTransaction(db,'synthetic',async()=>{}),error=>error===unknown);
+});

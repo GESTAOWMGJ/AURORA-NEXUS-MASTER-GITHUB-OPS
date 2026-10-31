@@ -79,5 +79,13 @@ export async function guardedCanonicalTransaction<T>(db: Firestore, orgId: strin
         orgId, resourceKey, state: 'RELEASED', expiresAt: end, completedAt: end });
     }
     return result;
+  }).catch((error: unknown) => {
+    // ABORTED after the SDK's own bounded retry budget is a transient pending
+    // item, including a process killed while the provider still owns its locks.
+    // Leave retries/readback to the EXISTING caller; never delete a lock here.
+    if (error && typeof error === 'object' && 'code' in error && error.code === 10) {
+      throw new WriterLeaseError('GUARDIAN_CONTENTION_RETRY');
+    }
+    throw error;
   });
 }
