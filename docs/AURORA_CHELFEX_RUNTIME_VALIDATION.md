@@ -1,9 +1,9 @@
-# CHELFEx 1.1.2-rc.1 ? consolidated review candidate
+# CHELFEx 1.1.2-rc.2 ? consolidated review candidate
 
 ## Canonical baseline and compatibility
 PR #347 merged the canonical auroraChelfex.ts API into main at eef855d8ffbfd5ca63d3410bfba1cefd4863a48f. PR #358 now incorporates that main through a normal merge, preserving both histories and the installed product lineage. Its earlier alternate auroraChelflex.ts module and duplicate API were removed, rather than shipping two incompatible policies or kernels. The production source tree and signed package retain exactly one CHELFEx module and the established task.v1 envelope. No dependency, database, executor, collector, IAM rule or deployment authorization is added.
 
-The canonical contract has fixed native findings; arbitrary supplied conclusions are not accepted. Schema, operation names and output fields from main are preserved. Policy version is 1.1.2-rc.1, explicitly a release candidate, not GA, certification or operational deployment. Exact hashes and CI receipts belong to the corresponding commit, not an earlier green run.
+The canonical contract has fixed native findings; arbitrary supplied conclusions are not accepted. Schema, operation names and output fields from main are preserved. Policy version is 1.1.2-rc.2, explicitly a release candidate, not GA, certification or operational deployment. Exact hashes and CI receipts belong to the corresponding commit, not an earlier green run.
 
 ## Changes and reproduced regressions
 1. Data-only boundaries: reject unknown/hidden/symbol properties, getters, proxies and custom prototypes without executing them. Accept ordinary cross-realm and null-prototype records. Parse identity authority as an exact primitive enum, never String coercion. Copy only approved primitive task fields. A server-owned context is still mandatory; passing an internal object is not a new authentication mechanism.
@@ -30,3 +30,6 @@ Review the exact final candidate against its recorded main base. Re-run closed-s
 
 ## Rollback and remaining release gates
 A review rejection leaves this branch isolated. After any future authorized merge, revert this increment using reviewed Git history and rebuild the same signed package; no data migration is involved. Operational rollout still needs applicable review, exact-source CI, protected environment approval, predecessor/rollback evidence and authenticated cloud readback. This candidate does not renew any old HML, Drive, credential or risk-acceptance window.
+
+## Separate-review correction
+The first automated review reproduced loss of valid action counts/SLA findings when a partial financial snapshot was redacted before readiness validation. This was a regression in the first candidate, not a justification to expose amounts. The corrected pipeline validates the canonical snapshot inside the authenticated tenant path, then uses the same financial-redaction helper before inference and serialization. Both bootstrap and master pass a server-derived restriction; no client-supplied readiness flag is trusted. New positive/negative tests retain operational counts and SLA findings while withholding all financial amounts, and preserve DENY for tampered, stale or revoked subset proofs. Review and CI for a previous SHA are not final approval of this correction.

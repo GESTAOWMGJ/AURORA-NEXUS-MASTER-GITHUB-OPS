@@ -1,7 +1,7 @@
 {
   "id": "AURORA-CHELFEX-001",
   "name": "CHELFEx structured instruction contract for Aurora Nexus intrinsic engine",
-  "version": "1.1.2-rc.1",
+  "version": "1.1.2-rc.2",
   "status": "IMPLEMENTED_RECOMMENDATION_ONLY_PENDING_HML",
   "system": "AURORA_NEXUS",
   "governance": {
@@ -68,9 +68,10 @@
   ],
   "runtimePolicy": {
     "id": "AURORA-CHELFEX-001",
-    "version": "1.1.2-rc.1",
+    "version": "1.1.2-rc.2",
     "schema": "aurora.chelfex.task.v1",
     "mode": "RECOMMEND_ONLY",
+    "financialVisibility": "CANONICAL_READINESS_THEN_REDACTED_INFERENCE",
     "maxConclusions": 12,
     "maxObjectiveBytes": 1024,
     "executionAllowed": false,

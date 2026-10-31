@@ -1,3 +1,4 @@
+import { redactFinancialProjection } from "./auroraReliableResult.js";
 import { createHash, randomUUID } from "node:crypto";
 import { FieldValue, Timestamp, type Transaction } from "firebase-admin/firestore";
 import { defineSecret } from "firebase-functions/params";
@@ -240,12 +241,7 @@ export async function refreshProjection(orgId = DEFAULT_ORG_ID, actor: Projectio
 function visibleProjection(projection: Record<string, unknown>, member: AuroraMember): Record<string, unknown> {
   const mayReadFinance = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
   if (mayReadFinance) return projection;
-  return {
-    ...projection,
-    financial: { billedAmount: null, receivedAmount: null, pendingAmount: null, reconciliationDifference: null, currency: "BRL" },
-    financialCents: { invoicedCents: null, receivedCents: null, glossCents: null, outstandingCents: null },
-    reliableResult: null
-  };
+  return redactFinancialProjection(projection);
 }
 
 export const auroraNexusBootstrap = onRequest(
@@ -321,7 +317,8 @@ export const auroraNexusBootstrap = onRequest(
       organization: { id: member.orgId, name: String(org.data()?.name ?? "WMGJ") },
       member: { email: member.email, role: member.role, mfaVerified: member.mfaVerified },
       projection: visibleProjection(rawProjection, member),
-      masterEngine: buildMasterOperationalState(visibleProjection(rawProjection, member), {
+      masterEngine: buildMasterOperationalState(rawProjection, {
+        redactFinancial: !mayReadFinancialStatus,
         chelfexContext: { orgId: member.orgId, authority: "AUTHENTICATED_SERVER" },
         actionSummary,
         financialStatus,
@@ -442,7 +439,8 @@ export const auroraNexusMasterEngine = onRequest(
       sourceAccessDuringInference: false,
       externalAiUsed: false,
       canonicalVersion,
-      master: buildMasterOperationalState(projection, { financialStatus, release,
+      master: buildMasterOperationalState(rawProjection, { financialStatus, release,
+        redactFinancial: !mayReadFinance,
         chelfexContext: { orgId: member.orgId, authority: "AUTHENTICATED_SERVER" },
         adoption: { member, installation: member.allFacilities ? await loadInstallationReadiness(member.orgId) : undefined } })
     });

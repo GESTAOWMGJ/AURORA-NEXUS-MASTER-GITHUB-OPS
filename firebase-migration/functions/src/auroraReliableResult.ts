@@ -89,3 +89,12 @@ export function reliableResultClient(): string {
     + [buildReliableFinancialResult, resultRecord, resultCount, readReliableFinancialResult]
       .map(helper => helper.toString()).join("\n\n");
 }
+
+/** Response/inference minimization; call readiness validation on canonical data first. */
+export function redactFinancialProjection(projection: Record<string, unknown>): Record<string, unknown> {
+  return { ...projection,
+    financial: { billedAmount: null, receivedAmount: null, pendingAmount: null, reconciliationDifference: null, currency: "BRL" },
+    financialCents: { invoicedCents: null, receivedCents: null, glossCents: null, outstandingCents: null },
+    reliableResult: null
+  };
+}
