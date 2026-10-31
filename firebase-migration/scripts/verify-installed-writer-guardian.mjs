@@ -35,6 +35,19 @@ export function verifyInstalledWriterObservation({bootstrap,sourceSha,manifestBy
     allLegacyWritersEnforced:false,physicalHandoffVerified:false,sourceMutation:false};
 }
 
+export function requireVerifiedInstalledCommit(result) {
+  if(result?.status!=='INSTALLED_COMMIT_VERIFIED'||result?.canonicalCommitVerified!==true
+    ||result?.installedCodeVerified!==true||result?.leaseAndProjectionSameCommit!==true)
+    fail('WRITER_INSTALLED_EFFECT_NOT_VERIFIED');
+}
+
+export function safeRefreshErrorCode(body) {
+  const allowed=new Set(['CROSS_SITE_REJECTED','CSRF_REJECTED','PERMISSION_DENIED','MEMBERSHIP_NOT_PROVISIONED',
+    'COMPANY_ACCESS_DENIED','PROJECTION_DISABLED','PROJECTION_NO_SOURCE','PROJECTION_DATA_QUALITY_BLOCKED',
+    'PROJECTION_COMPETENCE_REQUIRED','FIRST_INGESTION_PENDING','INSTALLATION_INTEGRATION_PENDING','ORGANIZATION_DISABLED']);
+  return allowed.has(body?.code)?body.code:null;
+}
+
 export function sessionFromCookieJar(text) {
   const rows=text.split(/\r?\n/).filter(line=>!line.startsWith('#')||line.startsWith('#HttpOnly_'))
     .map(line=>line.replace(/^#HttpOnly_/, '').split('\t'))
@@ -68,16 +81,20 @@ async function main() {
     const html=await shell.text(),match=/const csrf=(\{[^\r\n]*?\});const capabilities=/.exec(html);
     const csrf=match?JSON.parse(match[1]).refresh:null;
     if(typeof csrf!=='string'||csrf.length>300)fail('WRITER_SMOKE_CSRF_UNAVAILABLE');
-    let httpStatus=null;
+    let httpStatus=null,refreshErrorCode=null;
     try {
       const response=await fetch(origin+'/api/refresh',{method:'POST',headers:{Cookie:cookie,'Content-Type':'application/json',
         Origin:origin,'Sec-Fetch-Site':'same-origin','X-Aurora-CSRF':csrf},body:'{}',redirect:'error',signal:AbortSignal.timeout(45000)});
-      httpStatus=response.status;await response.body?.cancel();
+      httpStatus=response.status;
+      if(response.ok)await response.body?.cancel();
+      else {try {refreshErrorCode=safeRefreshErrorCode(await response.json());} catch {/* Never emit raw provider response. */}}
     } catch {/* Unknown outcome: read back; never retry with another identity. */}
     const after=await getDocument(leasePath),projection=await getDocument('organizations/wmgj/dashboardSnapshots/current');
     const result=verifyInstalledWriterObservation({bootstrap,sourceSha,manifestBytes,before,after,projection,httpStatus});
+    result.refreshErrorCode=refreshErrorCode;
     writeFileSync(values['--output'],JSON.stringify(result,null,2)+'\n',{mode:0o600});
     console.log(JSON.stringify(result));
+    requireVerifiedInstalledCommit(result);
   } catch(error) {console.error(JSON.stringify({status:'PENDING_EFFECT_PROOF',code:/^WRITER_[A-Z_]+$/.test(error?.message)?error.message:'WRITER_SMOKE_FAILED'}));process.exitCode=97;}
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) void main();

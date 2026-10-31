@@ -2175,14 +2175,14 @@
     },
     {
       "path": "firebase-migration/scripts/verify-installed-writer-guardian.mjs",
-      "sha256": "17e131c580cf69c6dda2d1151bbb1bad364f45fe7f186f2feadb1ba86a69f44c",
+      "sha256": "03f0850b1f7e74b33444dea140e2eb789dd1cd072eb807d1ea1cdba8fb156c72",
       "writeLikeLines": [
         7,
-        40,
-        61,
-        66,
-        73,
-        79
+        53,
+        74,
+        79,
+        86,
+        95
       ],
       "guardedCallLines": [],
       "coverage": "REQUIRES_EFFECT_AND_DESTINATION_REVIEW"
