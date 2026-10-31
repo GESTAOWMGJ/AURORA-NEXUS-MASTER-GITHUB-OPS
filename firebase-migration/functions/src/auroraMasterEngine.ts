@@ -1,3 +1,4 @@
+import { evaluateChelflex } from "./auroraChelflex.js";
 import { readReliableFinancialResult, RELIABLE_RESULT_POLICY } from "./auroraReliableResult.js";
 import { generateNativeInsight, type NativeInsightFinding } from "./auroraNativeIntelligence.js";
 import { nativeRoutineSummary, buildClientAdoptionPlan, type AdoptionContext } from "./auroraNativeRoutines.js";
@@ -88,13 +89,27 @@ export function buildMasterOperationalState(
     : assessment.decision === "REVIEW" || !workloadComplete || findings.length > 0 || (overdueActions ?? 0) > 0 ? "ATTENTION" : "CONTROLLED";
   const cycleStage = operationalState === "BLOCKED" ? "COMPROVAR"
     : operationalState === "ATTENTION" ? "PRIORIZAR" : (openActions ?? 0) > 0 ? "AGIR" : "MEDIR";
+  // Server-generated context: evaluation happens after native data governance.
+  const tenantId = typeof projection.orgId === "string" && projection.orgId ? projection.orgId : "unverified";
+  const sourceHash = typeof assessment.sourceHash === "string" && /^[0-9a-f]{64}$/.test(assessment.sourceHash)
+    ? assessment.sourceHash : "0".repeat(64);
+  const trusted = assessment.decision === "ALLOW" && sourceHash !== "0".repeat(64);
+  const chelfex = evaluateChelflex({
+    tenantId, contextVerified: trusted, objective: "Review governed master findings; recommendation only",
+    requestedRisk: "R1",
+    evidence: [{ id: "native-snapshot", tenantId, sourceHash, verified: trusted,
+      revoked: false, validUntil: null, observedAt: now.toISOString() }],
+    conclusions: (denied ? [] : findings.slice(0, 12)).map(f => ({
+      statement: f.title, kind: "INFERENCE", evidenceIds: ["native-snapshot"]
+    }))
+  }, tenantId, now);
   const release = record(context.release);
   return {
     engine: "AURORA_MASTER_OPERATIONAL_ENGINE", version: AURORA_MASTER_ENGINE_VERSION,
     mode: "FIREBASE_NATIVE_GOVERNED", externalProviderUsed: false, externalAiRequired: false,
     sourceAccessDuringInference: false, explainable: true,
     generatedAt: Number.isFinite(now.getTime()) ? now.toISOString() : null,
-    operationalState, cycleStage,
+    operationalState, cycleStage, chelfex,
     reliableResult, resultPolicy: RELIABLE_RESULT_POLICY,
     cycle: ["OBSERVAR", "INGESTAR", "COMPROVAR", "CONFRONTAR", "DETECTAR", "PRIORIZAR", "AGIR", "VALIDAR", "MEDIR", "APRENDER", "REUTILIZAR"],
     headline: nextFinding?.title ?? "Nenhuma exceção detectada neste recorte autorizado; isto não comprova ausência de risco.",
