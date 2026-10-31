@@ -4,7 +4,8 @@
     "ignore": [
       "firebase.json",
       "**/.*",
-      "**/node_modules/**"
+      "**/node_modules/**",
+      "arquivos/wmgj/guia-pre-cadastro-medico.mp4"
     ],
     "headers": [
       {
@@ -72,6 +73,13 @@
       }
     ],
     "rewrites": [
+      {
+        "source": "/arquivos/wmgj/guia-pre-cadastro-medico.mp4",
+        "function": {
+          "functionId": "auroraNexusAuthGate",
+          "region": "southamerica-east1"
+        }
+      },
       {
         "source": "/__sessionLogin",
         "function": {

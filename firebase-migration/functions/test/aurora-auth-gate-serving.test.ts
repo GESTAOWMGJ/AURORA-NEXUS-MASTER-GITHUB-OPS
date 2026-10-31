@@ -3,6 +3,7 @@ import fs from "node:fs";
 import vm from "node:vm";
 import test from "node:test";
 import ts from "typescript";
+import {publicVideoResponse,PUBLIC_VIDEO_PATH} from "../src/auroraPublicVideo.ts";
 import { auroraIdentityMark } from "../src/auroraDesignSystem.js";
 import { fixtureDom } from "./aurora-browser-dom.fixture.js";
 // Preserve the native .mjs import when the functions tsconfig targets CommonJS.
@@ -34,6 +35,7 @@ function fixture(ready?: string, member: any = null) {
     "firebase-functions/v2/https": { onRequest: (_options: unknown, handler: unknown) => handler },
     "firebase-functions/logger": { error: () => {}, warn: () => {} },
     "./auroraAccess.js": access,
+    "./auroraPublicVideo.js": {publicVideoResponse},
     "./auroraFrontend.js": { auroraProtectedShell: () => { state.privateShells++; return "<nav></nav>Centro de gestão WMGJ"; } },
     "./auroraActiveReleaseRuntime.js": { readRuntimeActiveRelease: async () => ({ runtimeBuildWeb: {} }) },
     "./firebase.js": { auroraAuth: {} },
@@ -61,10 +63,12 @@ function fixture(ready?: string, member: any = null) {
       return modules[name];
     }
   }, { filename: "auroraAuthGate.fixture.cjs" });
-  async function request(handler = "auroraNexusAuthGate", path = "/", host = "wmgj-hml-jfn-20260927.web.app", method = "GET") {
+  async function request(handler = "auroraNexusAuthGate", path = "/", host = "wmgj-hml-jfn-20260927.web.app", method = "GET", headers:Record<string,string> = {}) {
     const result = { status: 200, headers: {} as Record<string, string>, body: "", payload: null as any };
     const res: any = {
-      set: (name: string, value: string) => { result.headers[name.toLowerCase()] = value; return res; },
+      set: (name: string | Record<string,string>, value: string) => {
+        for(const [key,val] of Object.entries(typeof name==='string'?{[name]:value}:name))result.headers[key.toLowerCase()]=val;
+        return res; },
       status: (status: number) => { result.status = status; return res; },
       type: (type: string) => { result.headers["content-type"] = type; return res; },
       send: (body: string) => { result.body = body; return res; },
@@ -72,7 +76,7 @@ function fixture(ready?: string, member: any = null) {
       redirect: (status: number, location: string) => { result.status = status; result.headers.location = location; return res; }
     };
     const req: any = { method, path, originalUrl: path, query: {},
-      get: (name: string) => name.toLowerCase() === "host" ? host : undefined };
+      get: (name: string) => name.toLowerCase() === "host" ? host : headers[name.toLowerCase()] };
     await exported[handler](req, res);
     return result;
   }
@@ -194,4 +198,17 @@ test("tenant denial and public account screens never gain the local Master bridg
     assert.equal(response.status, 200);
     assert.doesNotMatch(response.headers["content-security-policy"]!, /127\.0\.0\.1|localhost/);
   }
+});
+
+
+test('real AuthGate serves only the fixed public video with 206 and no private identity reads',async()=>{
+  const current=fixture('true');
+  const response=await current.request('auroraNexusAuthGate',PUBLIC_VIDEO_PATH,'wmgj-hml-jfn-20260927.web.app','GET',{range:'bytes=0-31'});
+  assert.equal(response.status,206);assert.equal(response.headers['content-range'],'bytes 0-31/64299');
+  assert.equal(response.headers['content-length'],'32');assert.equal(response.body.length,32);
+  assert.ok(Buffer.isBuffer(response.body));assert.equal(current.state.sessionReads,0);
+  assert.equal(current.state.memberReads,0);assert.equal(current.state.privateShells,0);
+  assertStandardHeaders(response.headers);
+  const privateRequest=fixture();await privateRequest.request('auroraNexusAuthGate','/downloads','auroranexus.com.br');
+  assert.equal(privateRequest.state.sessionReads,1);assert.equal(privateRequest.state.privateShells,0);
 });

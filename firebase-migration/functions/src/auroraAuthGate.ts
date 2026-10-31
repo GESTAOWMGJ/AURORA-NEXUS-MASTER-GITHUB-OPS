@@ -1,3 +1,4 @@
+import {publicVideoResponse} from './auroraPublicVideo.js';
 import { defineSecret } from "firebase-functions/params";
 import { onRequest } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
@@ -200,6 +201,9 @@ export const auroraNexusAuthGate = onRequest(
       res.status(405).json({ ok: false, code: "METHOD_NOT_ALLOWED" });
       return;
     }
+
+    const publicVideo=publicVideoResponse(req.method,req.path,req.get('range'),req.get('if-range'));
+    if(publicVideo){res.status(publicVideo.status).set(publicVideo.headers).send(publicVideo.body);return;}
 
     // Technical beta access stays usable until the canonical login AND private API
     // have been verified. A public landing page is not proof of private readiness.
