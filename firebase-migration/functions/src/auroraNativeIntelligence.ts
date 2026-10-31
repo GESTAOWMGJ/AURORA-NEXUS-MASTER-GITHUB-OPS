@@ -1,4 +1,4 @@
-import { readReliableFinancialResult } from "./auroraReliableResult.js";
+import { readReliableFinancialResult, redactFinancialProjection } from "./auroraReliableResult.js";
 export const AURORA_NATIVE_INTELLIGENCE_VERSION = "0.3.0-firebase-native-routines";
 
 export type NativeInsightIntent =
@@ -74,8 +74,13 @@ function matchesIntent(item: NativeInsightFinding, intent: NativeInsightIntent):
 export function generateNativeInsight(
   projection: Record<string, unknown>,
   intent: NativeInsightIntent,
-  now = new Date()
+  now = new Date(),
+  redactFinancial = false
 ): Record<string, unknown> {
+  // Derive only non-monetary readiness from the validated canonical proof before
+  // masking amounts. A JSON marker cannot stand in for subset validation.
+  const partialAvailable = readReliableFinancialResult(projection)?.status === "PARTIAL";
+  if (redactFinancial === true) projection = redactFinancialProjection(projection);
   const dataQuality = record(projection.dataQuality);
   const financial = record(projection.financialCents);
   const operations = record(projection.operations);
@@ -132,7 +137,6 @@ export function generateNativeInsight(
     ));
   }
 
-  const partialAvailable = readReliableFinancialResult(projection)?.status === "PARTIAL";
   if (invalidFinancialRecords > 0) {
     findings.push(finding(
       "FINANCIAL_DATA_QUALITY",

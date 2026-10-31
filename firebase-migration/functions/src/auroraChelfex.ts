@@ -1,4 +1,3 @@
-import { redactFinancialProjection } from './auroraReliableResult.js';
 import { createHash } from 'node:crypto';
 import { types } from 'node:util';
 import { assessNativeData } from './auroraDataGovernance.js';
@@ -6,7 +5,7 @@ import { generateNativeInsight, type NativeInsightFinding } from './auroraNative
 
 /** Code is the executable policy; the JSON mirror is checked by regression tests. */
 export const CHELFEX_POLICY = Object.freeze({
-  id: 'AURORA-CHELFEX-001', version: '1.1.2-rc.2', schema: 'aurora.chelfex.task.v1',
+  id: 'AURORA-CHELFEX-001', version: '1.1.2-rc.3', schema: 'aurora.chelfex.task.v1',
   mode: 'RECOMMEND_ONLY', financialVisibility: 'CANONICAL_READINESS_THEN_REDACTED_INFERENCE', maxConclusions: 12, maxObjectiveBytes: 1024,
   executionAllowed: false, sourceMutation: false, automaticLearning: false,
   riskByOperation: Object.freeze({ READ: 'R0', PROPOSE: 'R1', REVERSIBLE_CHANGE: 'R2',
@@ -125,8 +124,7 @@ export function buildChelfexContract(raw: unknown, rawContext: unknown,
     policyVersion: projection.policyVersion as string, validation: 'CURRENT_GOVERNED_SNAPSHOT' as const
   }] : [];
   // Restriction is server-owned and can only remove data; it never grants access.
-  const findings = eligible ? generateNativeInsight(redactFinancial === true
-    ? redactFinancialProjection(projection) : projection, 'EXECUTIVE', clock).findings as NativeInsightFinding[] : [];
+  const findings = eligible ? generateNativeInsight(projection, 'EXECUTIVE', clock, redactFinancial).findings as NativeInsightFinding[] : [];
   // Native rules produce these fields, never narrative documents or the objective.
   const conclusions = findings.slice(0, CHELFEX_POLICY.maxConclusions - 2).map(f => ({
     id: f.code, status: 'INFERENCE' as 'FACT' | 'INFERENCE' | 'PENDING',

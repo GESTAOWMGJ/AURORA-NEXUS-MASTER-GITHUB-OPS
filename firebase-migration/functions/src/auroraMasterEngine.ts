@@ -64,10 +64,10 @@ export function buildMasterOperationalState(
   const reliableResult = denied ? null : readReliableFinancialResult(projection);
   // The data gate runs BEFORE inference, including the bootstrap's empty fallback.
   const nativeFindings = denied ? [] : uniqueFindings([
-    insightFindings(generateNativeInsight(projection, "EXECUTIVE", now)),
-    insightFindings(generateNativeInsight(projection, "REVENUE_RISK", now)),
-    insightFindings(generateNativeInsight(projection, "SLA_RISK", now)),
-    insightFindings(generateNativeInsight(projection, "DATA_QUALITY", now))
+    insightFindings(generateNativeInsight(canonicalProjection, "EXECUTIVE", now, context.redactFinancial === true)),
+    insightFindings(generateNativeInsight(canonicalProjection, "REVENUE_RISK", now, context.redactFinancial === true)),
+    insightFindings(generateNativeInsight(canonicalProjection, "SLA_RISK", now, context.redactFinancial === true)),
+    insightFindings(generateNativeInsight(canonicalProjection, "DATA_QUALITY", now, context.redactFinancial === true))
   ]);
   const reviewFinding = assessment.decision === "REVIEW" ? governanceReviewFinding(assessment.reasonCodes) : null;
   // Surface REVIEW reasons before ordinary findings, without masking a critical finding.

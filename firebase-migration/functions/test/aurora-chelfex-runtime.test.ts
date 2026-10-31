@@ -1,3 +1,4 @@
+import { generateNativeInsight } from '../src/auroraNativeIntelligence.js';
 import { redactFinancialProjection } from '../src/auroraReliableResult.js';
 import { buildProjection } from '../src/auroraEngine.js';
 import assert from 'node:assert/strict';
@@ -96,6 +97,9 @@ test('partial financial redaction preserves verified operational counts and SLA 
     const p = partialSnapshot(), before = JSON.stringify(p), r = await call({ ...member, role }, p);
     const m = r.body.master;
     assert.equal(m.governance.dataAssessment.decision, 'REVIEW');
+    assert.equal(m.operationalState, 'ATTENTION'); assert.equal(m.cycleStage, 'PRIORIZAR');
+    assert.equal(m.workloadMetrics.criticalFindings, 0);
+    assert.equal(m.priorities.find((f: any) => f.code === 'FINANCIAL_DATA_QUALITY')?.severity, 'HIGH');
     assert.equal(m.workloadMetrics.openActions, 3); assert.equal(m.workloadMetrics.overdueActions, 1);
     assert.ok(m.priorities.some((f: any) => f.code === 'SLA_OVERDUE'));
     assert.ok(m.chelfex.conclusions.some((f: any) => f.id === 'SLA_OVERDUE'));
@@ -125,8 +129,29 @@ test('bootstrap retains operational partial readiness without exposing financial
     const r = await call({ ...member, role }, partialSnapshot(), {}, 'bootstrap');
     assert.equal(r.code, 200); assert.equal(r.body.projection.reliableResult, null);
     assert.equal(r.body.masterEngine.governance.dataAssessment.decision, 'REVIEW');
+    assert.equal(r.body.masterEngine.operationalState, 'ATTENTION');
+    assert.equal(r.body.masterEngine.workloadMetrics.criticalFindings, 0);
     assert.equal(r.body.masterEngine.workloadMetrics.openActions, 3);
     assert.ok(r.body.masterEngine.chelfex.conclusions.some((f: any) => f.id === 'SLA_OVERDUE'));
     assert.equal(JSON.stringify(r.body).includes('7654321'), false); assert.equal(r.financialReads, 0); assert.equal(r.writes, 0);
   }
+});
+
+test('financial redaction preserves validated quality severity across all insight intents', () => {
+  const p = partialSnapshot(), before = JSON.stringify(p);
+  for (const intent of ['EXECUTIVE','DATA_QUALITY','REVENUE_RISK','SLA_RISK','NEXT_ACTION'] as const) {
+    const r: any = generateNativeInsight(p, intent, new Date(), true);
+    assert.equal(JSON.stringify(r).includes('7654321'), false);
+    assert.ok(r.findings.every((f: any) => f.severity !== 'CRITICAL'));
+    assert.ok(r.findings.every((f: any) => !['REVENUE_GAP','GLOSS_EXPOSURE'].includes(f.code)));
+  }
+  assert.equal(JSON.stringify(p), before);
+});
+test('untrusted readiness markers cannot replace valid subset evidence or waive redaction', async () => {
+  const p: any = partialSnapshot(); p.reliableResult = null; p.verifiedPartial = true;
+  const r: any = generateNativeInsight(p, 'DATA_QUALITY', new Date(), true);
+  assert.equal(r.findings.find((f: any) => f.code === 'FINANCIAL_DATA_QUALITY')?.severity, 'CRITICAL');
+  const request = await call({ ...member, role: 'viewer' }, partialSnapshot(), { body: { redactFinancial: false, verifiedPartial: true } });
+  assert.equal(JSON.stringify(request.body).includes('7654321'), false);
+  assert.equal(request.financialReads, 0); assert.equal(request.body.master.operationalState, 'ATTENTION');
 });
