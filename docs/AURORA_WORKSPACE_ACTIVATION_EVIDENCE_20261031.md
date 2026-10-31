@@ -29,3 +29,16 @@ Conexão interna Notion criada após confirmação explícita do aceite dos term
 No Slack, o painel passou a apresentar um aplicativo com o nome planejado, associado ao workspace Novo workspace e sem escopos OAuth. A criação desse aplicativo não foi executada pelas ações desta retomada. O workspace DR JOAO localizado pelo conector não está disponível na seleção do painel; não se presume equivalência entre workspaces. Nenhum escopo, instalação, token ou canal Slack foi concedido nesta passagem.
 
 Próxima ação necessária: autenticar a conta proprietária do hub Notion e o workspace Slack correto, ou indicar explicitamente outra fonte empresarial. Manter conexão Notion sem páginas até vínculo exato; não copiar corpus, criar workspace duplicado, ampliar acesso ou enviar solicitações automáticas. A configuração protegida e a prova de ingestão real continuam pendentes.
+
+## Atualização terminal — login Slack confirmado e instalação preparada — 31/10/2026
+
+### FATO COMPROVADO
+
+- O navegador agora acessa o workspace Slack correto, previamente identificado pelo conector. O canal público existente foi localizado pela interface e confirmado pelo conector. Não se presume que o canal contenha exportações canônicas WMGJ.
+- O seletor do painel oficial de desenvolvimento agora inclui o workspace correto. Foi preparado, sem submissão final, o aplicativo AURORA NEXUS WMGJ Leitura nesse workspace, com apenas os bot scopes channels:read e channels:history, zero user scopes e zero eventos. O assistente está na revisão Create and Install. Não houve clique final, instalação, concessão de token ou inclusão do bot em canal nesta passagem.
+- A identidade proprietária do hub Notion foi identificada pelo conector. O navegador ainda apresenta outra conta sem acesso. O fluxo normal de login da conta proprietária foi iniciado e o Notion informa envio do código; a conclusão está entregue ao titular na própria aba. Não houve leitura de caixa de entrada, código ou token.
+- A execução HML 41196593478 terminou em failure. Validate exact main candidate passou; Deploy with protected environment falhou na etapa Verify public CREDMED form, static PDF/MP4 and anonymous management denial. Publish verified canonical active release foi skipped. Isso não comprova ausência de alterações anteriores no ambiente: o estado publicado exige readback próprio. Nenhum novo dispatch ou cancelamento foi feito por esta passagem.
+
+### PENDÊNCIA
+
+Concluir a autenticação Notion na conta proprietária; confirmar no momento do ato a criação/instalação Slack com os dois escopos explicitados; configurar credenciais oficiais pelo armazenamento protegido existente; conferir vínculo de tenant, fonte canônica, recibo e replay. A ingestão real permanece não validada. As observações anteriores deste documento são históricas; esta atualização substitui o status anterior de deploy em execução e de workspace Slack indisponível.
