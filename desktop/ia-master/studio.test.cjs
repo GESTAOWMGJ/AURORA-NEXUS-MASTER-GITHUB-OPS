@@ -755,3 +755,118 @@ test('initialization preserves an incomplete cursor and does not mistake a write
   a.studio = createStudio(a.options); assert.equal(fs.readFileSync(file).length, 0);
   await assert.rejects(task(a), { code: 'STUDIO_SOURCE_RECORD_INVALID' });
 });
+
+function fencedFixture(t) {
+  const a = fixture(t), keys = crypto.generateKeyPairSync('ed25519');
+  const options = { ...a.options, writerFenceAuthority: { keyId: 'synthetic-control-plane',
+    publicKeyPem: keys.publicKey.export({ type: 'spki', format: 'pem' }) } };
+  const receiver = createStudio(options);
+  const sign = (destinationId, overrides = {}) => {
+    const payload = { schemaVersion: 'aurora.local-writer-fence.v1',
+      guardianId: 'AURORA-REALTIME-PLATFORM-GUARDIAN-001', keyId: 'synthetic-control-plane',
+      orgId: a.options.orgId, resourceKey: 'canonical-data', destinationId,
+      epoch: 10, previousFenceSha256: null, handoffId: 'c'.repeat(32), phase: 'FENCED', ...overrides };
+    return { payload, signature: crypto.sign(null, Buffer.from(JSON.stringify(payload)), keys.privateKey).toString('base64') };
+  };
+  return { ...a, receiver, sign, options, keys };
+}
+const fenceCapabilities = async studio => (await studio.route('GET', '/api/studio/capabilities')).value.writerFence;
+const sourceBytes = a => fs.readFileSync(path.join(a.stateDir, 'studio', 'source-cursor.json'));
+
+test('signed destination fence survives restart and blocks already-created and keyless writers', async t => {
+  const a = fencedFixture(t), initial = await task(a);
+  const { destinationId } = await fenceCapabilities(a.receiver), proof = a.sign(destinationId);
+  const receipt = await a.receiver.installWriterFence(proof);
+  assert.equal(receipt.state, 'FENCED_READ_ONLY'); assert.equal(receipt.cloudHandoffVerified, false);
+  assert.equal(receipt.epoch, 10); assert.equal(receipt.allLocalWritersEnforced, false);
+  const before = sourceBytes(a);
+  assert.deepEqual(await a.receiver.installWriterFence(proof), receipt, 'lost acknowledgement reuses the original receipt');
+  assert.deepEqual(sourceBytes(a), before);
+  for (const writer of [a.studio, a.receiver, createStudio(a.options), createStudio(a.options)]) {
+    await assert.rejects(writer.route('POST', '/api/studio/context', { paths: ['app.cjs'], classification: 'INTERNAL' }), { code: 'STUDIO_WRITER_FENCED' });
+    await assert.rejects(proposal({ ...a, studio: writer }, initial.task, initial.context), { code: 'STUDIO_WRITER_FENCED' });
+    const history = (await writer.route('GET', '/api/studio/tasks')).value.tasks;
+    assert.equal(history.length, 1); assert.equal(history[0].version, initial.task.version);
+  }
+  assert.deepEqual(sourceBytes(a), before); assert.equal(a.git(['rev-parse', 'HEAD']), a.base);
+});
+
+test('destination refuses forged authority, wrong scope, unknown fields and rollback epochs without effects', async t => {
+  const a = fencedFixture(t), { destinationId } = await fenceCapabilities(a.receiver), before = sourceBytes(a);
+  const variants = [a.sign(destinationId, { orgId: 'another-tenant' }), a.sign('f'.repeat(64)),
+    a.sign(destinationId, { resourceKey: 'other-resource' }), a.sign(destinationId, { epoch: Number.MAX_SAFE_INTEGER + 1 }),
+    a.sign(destinationId, { phase: 'ACTIVE' }), a.sign(destinationId, { extra: true }),
+    a.sign(destinationId, { keyId: 'unknown-key' }), a.sign(destinationId, { epoch: 0 })];
+  const forged = a.sign(destinationId); forged.payload.epoch++;
+  variants.push(forged);
+  for (const proof of variants) {
+    await assert.rejects(a.receiver.installWriterFence(proof)); assert.deepEqual(sourceBytes(a), before);
+  }
+  await assert.rejects(a.studio.installWriterFence(a.sign(destinationId)), { code: 'STUDIO_WRITER_FENCE_UNAVAILABLE' });
+  const first = await a.receiver.installWriterFence(a.sign(destinationId));
+  const stable = sourceBytes(a);
+  for (const overrides of [{ epoch: 9 }, { epoch: 10, handoffId: 'd'.repeat(32) }, { epoch: 11 }]) {
+    await assert.rejects(a.receiver.installWriterFence(a.sign(destinationId, overrides)), { code: 'STUDIO_WRITER_FENCE_CONFLICT' });
+    assert.deepEqual(sourceBytes(a), stable);
+  }
+  const next = await a.receiver.installWriterFence(a.sign(destinationId, { epoch: 11, previousFenceSha256: first.fenceSha256 }));
+  assert.equal(next.epoch, 11); assert.notEqual(next.fenceSha256, first.fenceSha256);
+  await assert.rejects(a.receiver.installWriterFence(a.sign(destinationId)), { code: 'STUDIO_WRITER_FENCE_CONFLICT' });
+});
+
+test('handoff cannot acknowledge while a writer is awaiting a model under the same destination lock', async t => {
+  const a = fencedFixture(t); let entered, release;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  a.studio = createStudio({ ...a.options, infer: async () => { entered(); return new Promise(resolve => { release = resolve; }); } });
+  const initial = await task(a), { destinationId } = await fenceCapabilities(a.receiver);
+  const pending = a.studio.route('POST', '/api/studio/tasks/' + initial.task.id + '/propose', { expectedVersion: initial.task.version });
+  // Attach a handler before releasing the synthetic inference failure.
+  const completion = pending.catch(error => error);
+  await waiting;
+  await assert.rejects(a.receiver.installWriterFence(a.sign(destinationId)), { code: 'STUDIO_LOCKED' });
+  assert.equal((await fenceCapabilities(a.receiver)).state, 'LEGACY_UNFENCED');
+  release({ invalid: true }); await completion;
+  assert.equal((await a.receiver.installWriterFence(a.sign(destinationId))).state, 'FENCED_READ_ONLY');
+  await assert.rejects(a.studio.route('POST', '/api/studio/context', { paths: ['app.cjs'], classification: 'INTERNAL' }), { code: 'STUDIO_WRITER_FENCED' });
+});
+
+test('fencing is not an HTTP/model capability and cannot be removed through recovery', async t => {
+  const a = fencedFixture(t), { destinationId } = await fenceCapabilities(a.receiver), proof = a.sign(destinationId);
+  await assert.rejects(a.receiver.route('POST', '/api/studio/writer-fence', proof), { code: 'STUDIO_NOT_FOUND' });
+  await a.receiver.installWriterFence(proof);
+  await assert.rejects(a.receiver.route('POST', '/api/studio/source-recover', {}), { code: 'STUDIO_WRITER_FENCED' });
+  assert.equal((await fenceCapabilities(a.receiver)).state, 'FENCED_READ_ONLY');
+});
+
+for (const phase of ['before-commit', 'after-ack']) test('destination barrier SIGKILL ' + phase + ' retains an honest recoverable state', async t => {
+  const a = fencedFixture(t), { destinationId } = await fenceCapabilities(a.receiver);
+  const proof = a.sign(destinationId), { spawn } = require('node:child_process');
+  const script = String.raw`
+    const fs=require('node:fs'), {createStudio}=require(process.argv[1]);
+    const options=JSON.parse(process.argv[2]), proof=JSON.parse(process.argv[3]), phase=process.argv[4];
+    const studio=createStudio(options);
+    if(phase==='before-commit') {
+      const rename=fs.renameSync;
+      fs.renameSync=(from,to)=>{if(to.endsWith('source-cursor.json'))process.kill(process.pid,'SIGKILL');return rename(from,to);};
+    }
+    studio.installWriterFence(proof).then(()=>process.kill(process.pid,'SIGKILL')).catch(()=>process.exit(7));`;
+  const child = spawn(process.execPath, ['-e', script, require.resolve('./studio.cjs'), JSON.stringify(a.options), JSON.stringify(proof), phase],
+    { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: require('./publisher.cjs').environment() });
+  const outcome = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(Error('fence crash fixture timed out')); }, 20000);
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('close', (code, signal) => { clearTimeout(timer); resolve({ code, signal }); });
+  });
+  assert.notEqual(outcome.code, 7, 'child reached the deliberate process termination');
+  const restarted = createStudio(a.options), status = await fenceCapabilities(restarted);
+  if (phase === 'before-commit') {
+    assert.equal(status.state, 'LEGACY_UNFENCED');
+    assert.ok(fs.existsSync(path.join(a.stateDir, 'studio', 'source.lock')));
+    await assert.rejects(restarted.installWriterFence(proof), { code: 'STUDIO_LOCKED' });
+    await assert.rejects(restarted.route('POST', '/api/studio/context', { paths: ['app.cjs'], classification: 'INTERNAL' }), { code: 'STUDIO_LOCKED' });
+  } else {
+    assert.equal(status.state, 'FENCED_READ_ONLY');
+    assert.deepEqual(await restarted.installWriterFence(proof), status);
+    await assert.rejects(restarted.route('POST', '/api/studio/context', { paths: ['app.cjs'], classification: 'INTERNAL' }), { code: 'STUDIO_WRITER_FENCED' });
+  }
+});
