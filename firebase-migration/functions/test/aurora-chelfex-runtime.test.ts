@@ -1,3 +1,4 @@
+import { assessNativeData } from '../src/auroraDataGovernance.js';
 import { generateNativeInsight, parseNativeInsightIntent } from '../src/auroraNativeIntelligence.js';
 import { redactFinancialProjection } from '../src/auroraReliableResult.js';
 import { buildProjection } from '../src/auroraEngine.js';
@@ -31,7 +32,7 @@ function snapshot() {
 }
 async function call(actor: any = member, data: any = snapshot(), reqExtra: any = {}, endpoint: keyof typeof routes = 'master') {
   const reads: string[] = []; let writes = 0, financialReads = 0;
-  const sandbox: any = { redactFinancialProjection, buildProjection, generateNativeInsight, parseNativeInsightIntent,
+  const sandbox: any = { assessNativeData, redactFinancialProjection, buildProjection, generateNativeInsight, parseNativeInsightIntent,
     safeString: (v: unknown, n: number) => typeof v === 'string' ? v.slice(0, n) : null,
     logger: { warn() {} }, publicAction() { throw Error('UNEXPECTED_ACTION'); }, exports: {}, ALLOWED_EMAILS: { value: () => 'synthetic' }, apiHeaders() {},
     onRequest: (_options: any, handler: any) => handler,
@@ -188,5 +189,34 @@ test('native-insight GET retains existing authentication, scope, intent and meth
   for (const [actor, req, expected] of cases) {
     const r = await call(actor, partialSnapshot(), req, 'insight');
     assert.equal(r.code, expected); assert.deepEqual(r.reads, []); assert.equal(r.writes, 0); assert.equal(r.financialReads, 0);
+  }
+});
+
+test('native insight refuses ineligible canonical snapshots before generating any recommendation', async () => {
+  for (const role of ['viewer', 'operator', 'auditor']) {
+    for (const kind of ['revoked', 'stale', 'future', 'foreign', 'tampered', 'missing-provenance']) {
+      const p: any = partialSnapshot();
+      if (kind === 'revoked') p.revoked = true;
+      if (kind === 'stale') p.asOf = '2020-01-01T00:00:00.000Z';
+      if (kind === 'future') p.asOf = '2099-01-01T00:00:00.000Z';
+      if (kind === 'foreign') p.orgId = 'foreign-tenant';
+      if (kind === 'tampered') p.reliableResult.metrics.invoicedCents.valueCents = -1;
+      if (kind === 'missing-provenance') delete p.snapshotId;
+      const r = await call({ ...member, role }, p, { query: { intent: 'EXECUTIVE' } }, 'insight');
+      assert.equal(r.code, 409, role + ':' + kind);
+      assert.equal(r.body.ok, false); assert.equal(Object.hasOwn(r.body, 'insight'), false);
+      assert.equal(JSON.stringify(r.body).includes('7654321'), false);
+      assert.equal(r.writes, 0); assert.equal(r.financialReads, 0);
+    }
+  }
+});
+test('direct redacted inference never restores partial availability from revoked or stale data', () => {
+  for (const patch of [{ revoked: true }, { asOf: '2020-01-01T00:00:00.000Z' }]) {
+    const p = { ...partialSnapshot(), ...patch };
+    const r: any = generateNativeInsight(p, 'DATA_QUALITY', new Date(), true);
+    const finding = r.findings.find((f: any) => f.code === 'FINANCIAL_DATA_QUALITY');
+    assert.equal(finding?.severity, 'CRITICAL');
+    assert.equal(finding?.title.includes('parcial'), false);
+    assert.equal(JSON.stringify(r).includes('7654321'), false);
   }
 });

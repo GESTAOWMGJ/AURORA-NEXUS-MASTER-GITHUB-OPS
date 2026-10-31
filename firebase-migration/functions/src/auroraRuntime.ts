@@ -1,3 +1,4 @@
+import { assessNativeData } from "./auroraDataGovernance.js";
 import { redactFinancialProjection } from "./auroraReliableResult.js";
 import { createHash, randomUUID } from "node:crypto";
 import { FieldValue, Timestamp, type Transaction } from "firebase-admin/firestore";
@@ -376,6 +377,15 @@ export const auroraNexusNativeInsight = onRequest(
       res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_CONTRACT_REQUIRED" });
       return;
     }
+    // Canonical data must remain eligible at the same clock used for inference.
+    if (rawProjection.orgId !== member.orgId) {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_SCOPE_MISMATCH" }); return;
+    }
+    const insightNow = new Date();
+    const dataAssessment = assessNativeData(rawProjection, insightNow);
+    if (dataAssessment.decision === "DENY") {
+      res.status(409).json({ ok: false, code: "FIREBASE_NATIVE_DATA_NOT_READY", reasonCodes: dataAssessment.reasonCodes }); return;
+    }
     const mayReadFinance = can(member, "financial.read", ["platform_admin", "org_admin", "director", "auditor", "finance"]);
     res.status(200).json({
       ok: true,
@@ -383,7 +393,7 @@ export const auroraNexusNativeInsight = onRequest(
       mode: "FIREBASE_NATIVE",
       sourceAccessDuringInference: false,
       externalAiUsed: false,
-      insight: generateNativeInsight(rawProjection, intent, new Date(), !mayReadFinance)
+      insight: generateNativeInsight(rawProjection, intent, insightNow, !mayReadFinance)
     });
   }
 );
