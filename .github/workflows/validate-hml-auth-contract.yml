@@ -21,6 +21,10 @@ on:
       - 'firebase-migration/scripts/hml_cli_access.py'
       - 'firebase-migration/scripts/repair-hml-eventarc-iam.py'
       - 'tools/windows/DIAG_AURORA_HML.cmd'
+      - 'tools/renew-appscript-oauth.py'
+      - 'scripts/tests/test_appscript_oauth_renewal.py'
+      - 'tools/ensure-appscript-execution-deployment.sh'
+      - 'tools/test-ensure-appscript-execution-deployment.cjs'
   push:
     branches: [main]
     paths:
@@ -41,6 +45,10 @@ on:
       - 'firebase-migration/scripts/hml_cli_access.py'
       - 'firebase-migration/scripts/repair-hml-eventarc-iam.py'
       - 'tools/windows/DIAG_AURORA_HML.cmd'
+      - 'tools/renew-appscript-oauth.py'
+      - 'scripts/tests/test_appscript_oauth_renewal.py'
+      - 'tools/ensure-appscript-execution-deployment.sh'
+      - 'tools/test-ensure-appscript-execution-deployment.cjs'
 
 permissions:
   contents: read
@@ -82,6 +90,8 @@ jobs:
           python -m unittest discover -s scripts/tests -p 'test_hml_cli_access.py' -v
           python -m unittest discover -s scripts/tests -p 'test_custom_domain_repair.py' -v
           python -m unittest discover -s scripts/tests -p 'test_hml_dispatch_ci.py' -v
+          python -m unittest discover -s scripts/tests -p 'test_appscript_oauth_renewal.py' -v
+          node --test tools/test-ensure-appscript-execution-deployment.cjs
       - name: Validate anonymous canonical routing preflight offline
         run: node --test scripts/tests/check_canonical_preflight.test.mjs
       - name: Validate AuthGate traffic promotion and rollback offline
